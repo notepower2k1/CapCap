@@ -1,0 +1,5 @@
+/app/__pycache__/*
+/models/*
+/output/*
+/temp/*
+.env
