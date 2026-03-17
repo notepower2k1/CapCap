@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QFileDialog, QCheckBox, QTextEdit, QComboBox,
                              QGroupBox, QSlider, QFrame, QProgressBar, QMessageBox,
                              QScrollArea, QGraphicsScene, QGraphicsView, QGraphicsItem,
-                             QSpinBox, QColorDialog, QDoubleSpinBox)
+                             QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget)
 from PySide6.QtCore import Qt, QSizeF, QRectF, QPointF, QUrl, QThread, Signal, QTimer, QPoint
 from PySide6.QtGui import QPainter, QColor, QFont, QPen
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -549,6 +549,10 @@ class VideoTranslatorGUI(QMainWindow):
         # Keys are stable IDs, values are absolute file paths.
         self.processed_artifacts = {}
 
+        # Simple pipeline runner (Run All)
+        self._pipeline_active = False
+        self._pipeline_step = ""
+
     def parse_srt_to_segments(self, srt_text):
         """Standard SRT parser to convert back to segments list for the timeline."""
         segments = []
@@ -635,6 +639,42 @@ class VideoTranslatorGUI(QMainWindow):
         left_layout.addWidget(QLabel("Target Video:"))
         left_layout.addLayout(file_layout)
 
+        # Primary actions (one-click)
+        primary_actions = QGroupBox("QUICK ACTIONS")
+        primary_layout = QVBoxLayout(primary_actions)
+        self.run_all_btn = QPushButton("Run All (Auto) → Preview")
+        self.run_all_btn.setObjectName("mainActionBtn")
+        self.run_all_btn.clicked.connect(self.run_all_pipeline)
+        primary_layout.addWidget(self.run_all_btn)
+        left_layout.addWidget(primary_actions)
+
+        # Tabs for a cleaner UX
+        tabs = QTabWidget()
+        tabs.setStyleSheet("""
+            QTabWidget::pane { border: 1px solid #2a2a2a; border-radius: 8px; }
+            QTabBar::tab { background: #1a1a1a; padding: 8px 12px; border: 1px solid #2a2a2a; border-bottom: none; }
+            QTabBar::tab:selected { background: #262626; color: #03dac6; }
+        """)
+        left_layout.addWidget(tabs, 1)
+
+        tab_prepare = QWidget()
+        tab_subtitles = QWidget()
+        tab_voice = QWidget()
+        tab_tools = QWidget()
+        tabs.addTab(tab_prepare, "Prepare")
+        tabs.addTab(tab_subtitles, "Subtitles")
+        tabs.addTab(tab_voice, "Voice & Preview")
+        tabs.addTab(tab_tools, "Tools")
+
+        prepare_layout = QVBoxLayout(tab_prepare)
+        prepare_layout.setSpacing(12)
+        subtitles_layout = QVBoxLayout(tab_subtitles)
+        subtitles_layout.setSpacing(12)
+        voice_tab_layout = QVBoxLayout(tab_voice)
+        voice_tab_layout.setSpacing(12)
+        tools_layout = QVBoxLayout(tab_tools)
+        tools_layout.setSpacing(12)
+
         # Section 1: Source & Extraction
         audio_group = QGroupBox("STEP 1: AUDIO EXTRACTION")
         audio_layout = QVBoxLayout(audio_group)
@@ -662,7 +702,7 @@ class VideoTranslatorGUI(QMainWindow):
         audio_layout.addWidget(self.keep_audio_cb)
         audio_layout.addWidget(extract_btn)
         audio_layout.addWidget(vocal_sep_btn)
-        left_layout.addWidget(audio_group)
+        prepare_layout.addWidget(audio_group)
 
         # Section 2: Recognition
         trans_group = QGroupBox("STEP 2: SPEECH RECOGNITION")
@@ -701,7 +741,7 @@ class VideoTranslatorGUI(QMainWindow):
         trans_layout.addWidget(self.lang_whisper_combo)
         trans_layout.addWidget(self.transcript_text)
         trans_layout.addWidget(self.transcribe_btn)
-        left_layout.addWidget(trans_group)
+        subtitles_layout.addWidget(trans_group)
 
         # Section 3: Translation
         translate_group = QGroupBox("STEP 3: TRANSLATION (AI)")
@@ -724,9 +764,7 @@ class VideoTranslatorGUI(QMainWindow):
         translate_layout.addWidget(self.translated_text)
         translate_layout.addWidget(self.translate_btn)
         translate_layout.addWidget(self.apply_translated_btn)
-        left_layout.addWidget(translate_group)
-        
-        left_layout.addStretch()
+        subtitles_layout.addWidget(translate_group)
 
         # Section 4: Voiceover (TTS) + Mix
         voice_group = QGroupBox("STEP 4: VIETNAMESE VOICEOVER (TTS)")
@@ -761,6 +799,12 @@ class VideoTranslatorGUI(QMainWindow):
         voice_out_layout.addWidget(self.voice_output_folder_edit)
         voice_out_layout.addWidget(browse_voice_out_btn)
 
+        # Advanced options (collapsed by default)
+        adv_group = QGroupBox("Advanced")
+        adv_group.setCheckable(True)
+        adv_group.setChecked(False)
+        adv_layout = QVBoxLayout(adv_group)
+
         gains_layout = QHBoxLayout()
         self.voice_gain_spin = QDoubleSpinBox()
         self.voice_gain_spin.setRange(-30.0, 30.0)
@@ -774,6 +818,10 @@ class VideoTranslatorGUI(QMainWindow):
         gains_layout.addWidget(self.voice_gain_spin)
         gains_layout.addWidget(QLabel("BG Gain (dB):"))
         gains_layout.addWidget(self.bg_gain_spin)
+        adv_layout.addLayout(gains_layout)
+
+        adv_layout.addWidget(QLabel("Export Voice/Mix To:"))
+        adv_layout.addLayout(voice_out_layout)
 
         self.voiceover_btn = QPushButton("Generate Vietnamese Voice + Mix")
         self.voiceover_btn.setObjectName("mainActionBtn")
@@ -787,12 +835,10 @@ class VideoTranslatorGUI(QMainWindow):
         voice_layout.addLayout(bg_layout)
         voice_layout.addWidget(QLabel("Existing Mixed Audio (optional):"))
         voice_layout.addLayout(mixed_layout)
-        voice_layout.addWidget(QLabel("Export Voice/Mix To:"))
-        voice_layout.addLayout(voice_out_layout)
-        voice_layout.addLayout(gains_layout)
+        voice_layout.addWidget(adv_group)
         voice_layout.addWidget(self.voiceover_btn)
         voice_layout.addWidget(self.preview_btn)
-        left_layout.addWidget(voice_group)
+        voice_tab_layout.addWidget(voice_group)
 
         # Section: Processed files quick view
         artifacts_group = QGroupBox("PROCESSED FILES")
@@ -810,9 +856,9 @@ class VideoTranslatorGUI(QMainWindow):
         artifacts_layout.addWidget(self.show_artifacts_btn)
         artifacts_layout.addWidget(self.open_temp_btn)
         artifacts_layout.addWidget(self.open_output_btn)
-        left_layout.addWidget(artifacts_group)
+        tools_layout.addWidget(artifacts_group)
 
-        # Section 4: Manual Controls
+        # Manual Controls
         manual_group = QGroupBox("EXTERNAL TOOLS")
         manual_layout = QVBoxLayout(manual_group)
         
@@ -820,9 +866,13 @@ class VideoTranslatorGUI(QMainWindow):
         browse_srt_btn.clicked.connect(self.browse_srt)
         manual_layout.addWidget(browse_srt_btn)
         
-        left_layout.addWidget(manual_group)
-        left_layout.addStretch()
-        left_layout.addWidget(QLabel("Video Information Extractor v2.0"))
+        tools_layout.addWidget(manual_group)
+        tools_layout.addStretch()
+        tools_layout.addWidget(QLabel("Video Information Extractor v2.0"))
+
+        prepare_layout.addStretch()
+        subtitles_layout.addStretch()
+        voice_tab_layout.addStretch()
 
 
         # --- RIGHT PANEL ---
@@ -910,6 +960,10 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.information(self, "Success", "Audio extraction completed!")
         else:
             QMessageBox.critical(self, "Error", f"Extraction failed: {path}")
+            self._pipeline_fail("Extraction failed.")
+            return
+
+        self._pipeline_advance("extraction")
 
     def run_vocal_separation(self):
         audio_src = self.audio_source_edit.text()
@@ -966,6 +1020,9 @@ class VideoTranslatorGUI(QMainWindow):
                     self.bg_music_edit.setText(music)
             QMessageBox.information(self, "Success", 
                 f"Audio stems separated!\n\nVocals: {os.path.basename(vocal)}\nBackground: {os.path.basename(music)}\n\nVocals are now selected for transcription.")
+            self._pipeline_advance("separation")
+        else:
+            self._pipeline_fail("Separation did not produce output.")
 
     def run_transcription(self):
         audio_src = self.audio_source_edit.text()
@@ -988,6 +1045,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.transcribe_btn.setEnabled(True)
         if not segments:
             QMessageBox.warning(self, "Warning", "Transcription failed or returned no results.")
+            self._pipeline_fail("Transcription failed.")
             return
 
         self.current_segments = segments
@@ -1016,6 +1074,8 @@ class VideoTranslatorGUI(QMainWindow):
         else:
             QMessageBox.information(self, "Success", "Transcription completed!")
 
+        self._pipeline_advance("transcription")
+
     def run_translation(self):
         srt_source = self.transcript_text.toPlainText()
         if not srt_source or not srt_source.strip():
@@ -1039,6 +1099,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.translate_btn.setEnabled(True)
         if not translated_srt:
             QMessageBox.warning(self, "Error", "Translation failed.")
+            self._pipeline_fail("Translation failed.")
             return
 
         self.progress_bar.setValue(100)
@@ -1066,6 +1127,8 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.information(self, "Finished", f"Process complete! Subtitle saved and loaded for preview:\n{out_path}")
         else:
             QMessageBox.information(self, "Finished", "Translation complete!")
+
+        self._pipeline_advance("translation")
 
     def apply_edited_translation(self, show_message=True):
         """Re-parse current translated SRT text and apply to timeline/preview."""
@@ -1216,6 +1279,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         if error:
             QMessageBox.critical(self, "Error", f"Voiceover failed:\n\n{error}")
+            self._pipeline_fail("Voiceover failed.")
             return
 
         if voice_track and os.path.exists(voice_track):
@@ -1229,6 +1293,8 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.information(self, "Success", f"Generated Vietnamese voice and mixed audio:\n\nVoice: {voice_track}\nMixed: {mixed}")
         else:
             QMessageBox.information(self, "Success", f"Generated Vietnamese voice track:\n\n{voice_track}\n\n(Background not provided, so no mix was created.)")
+
+        self._pipeline_advance("voiceover")
 
     def preview_video_with_mixed_audio(self):
         video_path = self.video_path_edit.text().strip()
@@ -1258,6 +1324,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         if error:
             QMessageBox.critical(self, "Error", f"Preview failed:\n\n{error}")
+            self._pipeline_fail("Preview failed.")
             return
 
         if preview_path and os.path.exists(preview_path):
@@ -1266,6 +1333,57 @@ class VideoTranslatorGUI(QMainWindow):
             self.media_player.setSource(QUrl.fromLocalFile(preview_path))
             self.play_btn.setText("Play")
             QMessageBox.information(self, "Preview Ready", "Loaded preview video (original video + mixed Vietnamese audio) into the player.\nPress Play to preview.")
+            self._pipeline_done()
+
+    def run_all_pipeline(self):
+        """One-click pipeline: Extract -> Separate -> Transcribe -> Translate -> Voiceover -> Preview."""
+        v_path = self.video_path_edit.text().strip()
+        if not v_path or not os.path.exists(v_path):
+            QMessageBox.warning(self, "Error", "Please select a video first.")
+            return
+        self._pipeline_active = True
+        self._pipeline_step = "start"
+        self.run_all_btn.setEnabled(False)
+        self.run_all_btn.setText("Running... (Auto)")
+        self.run_extraction()
+
+    def _pipeline_advance(self, completed_step: str):
+        if not self._pipeline_active:
+            return
+
+        # Decide next step
+        if completed_step == "extraction":
+            self.run_vocal_separation()
+            return
+        if completed_step == "separation":
+            self.run_transcription()
+            return
+        if completed_step == "transcription":
+            self.run_translation()
+            return
+        if completed_step == "translation":
+            self.run_voiceover()
+            return
+        if completed_step == "voiceover":
+            # If user picked an existing mixed audio, preview uses it; otherwise uses generated mixed
+            self.preview_video_with_mixed_audio()
+            return
+
+    def _pipeline_fail(self, reason: str):
+        if not self._pipeline_active:
+            return
+        self._pipeline_active = False
+        self._pipeline_step = ""
+        self.run_all_btn.setEnabled(True)
+        self.run_all_btn.setText("Run All (Auto) → Preview")
+
+    def _pipeline_done(self):
+        if not self._pipeline_active:
+            return
+        self._pipeline_active = False
+        self._pipeline_step = ""
+        self.run_all_btn.setEnabled(True)
+        self.run_all_btn.setText("Run All (Auto) → Preview")
 
     def open_folder(self, path):
         try:
