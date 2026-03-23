@@ -6,6 +6,45 @@ def _ffmpeg_path():
     return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffmpeg.exe")
 
 
+def trim_video_clip(video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:
+    ffmpeg = _ffmpeg_path()
+    if not os.path.exists(ffmpeg):
+        raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video not found: {video_path}")
+
+    os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
+
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        str(max(0.0, float(start_seconds))),
+        "-t",
+        str(max(0.1, float(duration_seconds))),
+        "-i",
+        video_path,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        output_video_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg trim video clip failed.")
+    return output_video_path
+
+
 def mux_audio_into_video_for_preview(video_path: str, audio_path: str, output_video_path: str) -> str:
     """
     Create a preview video by copying video stream and replacing audio.
@@ -41,4 +80,129 @@ def mux_audio_into_video_for_preview(video_path: str, audio_path: str, output_vi
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux failed.")
     return output_video_path
+
+
+def mux_audio_into_video_clip_for_preview(
+    video_path: str,
+    audio_path: str,
+    output_video_path: str,
+    start_seconds: float,
+    duration_seconds: float,
+) -> str:
+    ffmpeg = _ffmpeg_path()
+    if not os.path.exists(ffmpeg):
+        raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Audio not found: {audio_path}")
+
+    os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
+
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        str(max(0.0, float(start_seconds))),
+        "-t",
+        str(max(0.1, float(duration_seconds))),
+        "-i",
+        video_path,
+        "-ss",
+        str(max(0.0, float(start_seconds))),
+        "-t",
+        str(max(0.1, float(duration_seconds))),
+        "-i",
+        audio_path,
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-shortest",
+        output_video_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux clip failed.")
+    return output_video_path
+
+
+def render_subtitle_frame_preview(
+    video_path: str,
+    srt_path: str,
+    output_image_path: str,
+    timestamp_seconds: float,
+    *,
+    alignment: int = 2,
+    margin_v: int = 30,
+    font_name: str = "Arial",
+    font_size: int = 18,
+    font_color: str = "&H00FFFFFF",
+) -> str:
+    ffmpeg = _ffmpeg_path()
+    if not os.path.exists(ffmpeg):
+        raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    if not os.path.exists(srt_path):
+        raise FileNotFoundError(f"SRT not found: {srt_path}")
+
+    from video_processor import get_video_dimensions, srt_to_ass
+
+    os.makedirs(os.path.dirname(output_image_path) or ".", exist_ok=True)
+    video_w, video_h = get_video_dimensions(video_path)
+    ass_path = srt_to_ass(
+        srt_path,
+        video_w,
+        video_h,
+        alignment=alignment,
+        margin_v=margin_v,
+        font_name=font_name,
+        font_size=font_size,
+        font_color=font_color,
+    )
+
+    escaped_ass = ass_path.replace("\\", "/")
+    if ":" in escaped_ass:
+        drive, rest = escaped_ass.split(":", 1)
+        escaped_ass = f"{drive}\\:{rest}"
+
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        str(max(0.0, float(timestamp_seconds))),
+        "-i",
+        video_path,
+        "-vf",
+        f"ass='{escaped_ass}'",
+        "-frames:v",
+        "1",
+        output_image_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        if os.path.exists(ass_path):
+            os.remove(ass_path)
+    except OSError:
+        pass
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg frame preview render failed.")
+    return output_image_path
 

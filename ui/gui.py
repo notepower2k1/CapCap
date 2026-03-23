@@ -6,31 +6,64 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QFileDialog, QCheckBox, QTextEdit, QComboBox,
                              QGroupBox, QSlider, QFrame, QProgressBar, QMessageBox,
                              QScrollArea, QGraphicsScene, QGraphicsView, QGraphicsItem,
-                             QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget)
+                             QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy)
 from PySide6.QtCore import Qt, QSizeF, QRectF, QPointF, QUrl, QThread, Signal, QTimer, QPoint
-from PySide6.QtGui import QPainter, QColor, QFont, QPen
+from PySide6.QtGui import QPainter, QColor, QFont, QPen, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 
 # --- UI Components ---
 class SubtitleOverlayItem(QGraphicsItem):
     """A draggable subtitle preview item rendered inside the QGraphicsScene."""
-    W, H = 500, 80 # Increased size for real text
-
-    # Fixed Style
-    preview_font_name = "Segoe UI"
-    preview_font_size = 20
-    preview_color = QColor(255, 255, 255)  # white
+    W, H = 640, 96
 
     def __init__(self):
         super().__init__()
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
         self.setZValue(10)
         self.current_text = ""
+        self.font_name = "Segoe UI"
+        self.font_size = 20
+        self.font_color = QColor(255, 255, 255)
+        self.alignment = "Bottom Center"
+        self.x_offset = 0
+        self.bottom_offset = 30
 
     def set_text(self, text):
         if self.current_text != text:
             self.current_text = text
+            self.update()
+
+    def set_style(self, *, font_name=None, font_size=None, font_color=None):
+        changed = False
+        if font_name and font_name != self.font_name:
+            self.font_name = font_name
+            changed = True
+        if font_size and font_size != self.font_size:
+            self.prepareGeometryChange()
+            self.font_size = font_size
+            self.H = max(96, int(font_size * 4))
+            changed = True
+        if font_color and font_color != self.font_color:
+            self.font_color = font_color
+            changed = True
+        if changed:
+            self.update()
+
+    def set_positioning(self, *, x_offset=None, bottom_offset=None):
+        if x_offset is not None:
+            self.x_offset = x_offset
+        if bottom_offset is not None:
+            self.bottom_offset = bottom_offset
+
+    def set_alignment(self, alignment: str):
+        self.alignment = alignment or "Bottom Center"
+
+    def set_layout_width(self, width: int):
+        width = max(160, int(width))
+        if width != self.W:
+            self.prepareGeometryChange()
+            self.W = width
             self.update()
 
     def boundingRect(self):
@@ -44,33 +77,32 @@ class SubtitleOverlayItem(QGraphicsItem):
         painter.setRenderHint(QPainter.Antialiasing)
         
         if self.current_text:
-            # Subtle glassmorphism effect for background
-            painter.setBrush(QColor(0, 0, 0, 180))
-            painter.setPen(Qt.NoPen)
-            painter.drawRoundedRect(rect, 10, 10)
-            
-            # Text styling
-            painter.setPen(SubtitleOverlayItem.preview_color)
-            fnt = QFont(SubtitleOverlayItem.preview_font_name,
-                        SubtitleOverlayItem.preview_font_size,
-                        QFont.Bold)
+            painter.setPen(self.font_color)
+            fnt = QFont(self.font_name)
+            fnt.setPixelSize(max(1, int(self.font_size)))
+            fnt.setBold(True)
             painter.setFont(fnt)
             
-            # Shadow/Outline effect for better readability on different video backgrounds
-            shadow_rect = rect.translated(2, 2)
-            painter.setPen(QColor(0, 0, 0, 100))
-            painter.drawText(shadow_rect, Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
-            
-            painter.setPen(SubtitleOverlayItem.preview_color)
+            # Approximate ASS outline/shadow so preview is closer to exported libass output.
+            outline_offsets = [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)]
+            painter.setPen(QColor(0, 0, 0, 220))
+            for dx, dy in outline_offsets:
+                painter.drawText(rect.translated(dx, dy), Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
+
+            painter.setPen(QColor(0, 0, 0, 120))
+            painter.drawText(rect.translated(2, 2), Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
+
+            painter.setPen(self.font_color)
             painter.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
         else:
             # Design phase placeholder
-            painter.setBrush(QColor(20, 20, 20, 120))
-            painter.setPen(QPen(SubtitleOverlayItem.preview_color, 1, Qt.DashLine))
+            painter.setPen(QPen(self.font_color, 1, Qt.DashLine))
             painter.drawRoundedRect(rect, 10, 10)
             
-            painter.setPen(SubtitleOverlayItem.preview_color)
-            painter.setFont(QFont(SubtitleOverlayItem.preview_font_name, 12))
+            painter.setPen(self.font_color)
+            placeholder_font = QFont(self.font_name)
+            placeholder_font.setPixelSize(12)
+            painter.setFont(placeholder_font)
             painter.drawText(rect, Qt.AlignCenter, "(Subtitle Preview Area)")
 
 
@@ -97,6 +129,8 @@ class VideoView(QGraphicsView):
         self.subtitle_item = SubtitleOverlayItem()
         self._scene.addItem(self.subtitle_item)
         self.subtitle_item.hide()
+        self.video_source_width = 0
+        self.video_source_height = 0
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -105,12 +139,68 @@ class VideoView(QGraphicsView):
         self._scene.setSceneRect(0, 0, w, h)
         self.reposition_subtitle()
 
+    def set_video_dimensions(self, width: int, height: int):
+        self.video_source_width = max(0, int(width or 0))
+        self.video_source_height = max(0, int(height or 0))
+        self.reposition_subtitle()
+
+    def get_video_content_rect(self) -> QRectF:
+        view_w, view_h = float(self.width()), float(self.height())
+        if view_w <= 0 or view_h <= 0:
+            return QRectF(0, 0, 0, 0)
+        if not self.video_source_width or not self.video_source_height:
+            return QRectF(0, 0, view_w, view_h)
+
+        source_ratio = self.video_source_width / self.video_source_height
+        view_ratio = view_w / view_h if view_h else source_ratio
+
+        if source_ratio > view_ratio:
+            content_w = view_w
+            content_h = view_w / source_ratio
+            offset_x = 0
+            offset_y = (view_h - content_h) / 2
+        else:
+            content_h = view_h
+            content_w = view_h * source_ratio
+            offset_x = (view_w - content_w) / 2
+            offset_y = 0
+
+        return QRectF(offset_x, offset_y, content_w, content_h)
+
     def reposition_subtitle(self):
-        """Always snap subtitle to bottom-center."""
+        """Keep subtitle inside the actual video content area, not the letterbox bars."""
         item = self.subtitle_item
-        w, h = self.width(), self.height()
+        rect = self.get_video_content_rect()
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+        source_w = max(1, self.video_source_width or int(rect.width()))
+        source_h = max(1, self.video_source_height or int(rect.height()))
+        scale_x = rect.width() / source_w
+        scale_y = rect.height() / source_h
+        side_margin_px = 60 * scale_x
+
+        desired_width = min(int(rect.width() - 2 * side_margin_px), max(160, int((source_w - 120) * scale_x)))
+        item.set_layout_width(desired_width)
+
         iw, ih = item.W, item.H
-        pos = QPointF((w - iw) / 2, h - ih - 30)
+        left_pad = rect.left() + side_margin_px
+        right_limit = rect.right() - iw - side_margin_px
+        if item.alignment == "Bottom Left":
+            x = left_pad
+        elif item.alignment == "Bottom Right":
+            x = right_limit
+        else:
+            x = rect.left() + (rect.width() - iw) / 2
+
+        x += item.x_offset * scale_x
+        y = rect.bottom() - ih - (item.bottom_offset * scale_y)
+
+        x = max(left_pad, min(x, right_limit))
+        y_min = rect.top() + 12
+        y_max = rect.bottom() - ih - 12
+        y = max(y_min, min(y, y_max))
+
+        pos = QPointF(x, y)
         item.setPos(pos)
 
 class TimelineWidget(QGraphicsView):
@@ -301,21 +391,27 @@ class TranscriptionWorker(QThread):
             self.finished.emit([])
 
 class TranslationWorker(QThread):
-    finished = Signal(str) # Now returns raw SRT text
-    def __init__(self, srt_text, model_path, src_lang):
+    finished = Signal(str, str) # translated_srt, error_msg
+    def __init__(self, srt_text, model_path, src_lang, enable_polish):
         super().__init__()
         self.srt_text = srt_text
         self.model_path = model_path
         self.src_lang = src_lang
+        self.enable_polish = enable_polish
     def run(self):
         try:
             # Import to use the updated translate_segments
             from translator import translate_segments_to_srt
-            translated_srt = translate_segments_to_srt(self.srt_text, self.model_path, src_lang=self.src_lang)
-            self.finished.emit(translated_srt)
+            translated_srt = translate_segments_to_srt(
+                self.srt_text,
+                self.model_path,
+                src_lang=self.src_lang,
+                enable_polish=self.enable_polish,
+            )
+            self.finished.emit(translated_srt, "")
         except Exception as e:
             print(f"Translation Thread Error: {e}")
-            self.finished.emit("")
+            self.finished.emit("", str(e))
 
 # --- TTS Worker ---
 class VoiceOverWorker(QThread):
@@ -406,9 +502,195 @@ class PreviewMuxWorker(QThread):
         except Exception as e:
             self.finished.emit("", str(e))
 
+
+class FinalExportWorker(QThread):
+    # output_video_path, error_msg
+    finished = Signal(str, str)
+
+    def __init__(self, video_path, output_path, mode, srt_path="", audio_path="", subtitle_style=None):
+        super().__init__()
+        self.video_path = video_path
+        self.output_path = output_path
+        self.mode = mode
+        self.srt_path = srt_path
+        self.audio_path = audio_path
+        self.subtitle_style = subtitle_style or {}
+
+    def run(self):
+        tmp_mux_path = ""
+        try:
+            import sys
+            import os
+            import time
+            app_path = os.path.join(os.getcwd(), 'app')
+            if app_path not in sys.path:
+                sys.path.append(app_path)
+
+            from preview_processor import mux_audio_into_video_for_preview
+            from video_processor import embed_subtitles
+
+            mode = self.mode
+            if mode == "subtitle":
+                ok = embed_subtitles(
+                    self.video_path,
+                    self.srt_path,
+                    self.output_path,
+                    alignment=self.subtitle_style.get("alignment", 2),
+                    margin_v=self.subtitle_style.get("margin_v", 30),
+                    font_name=self.subtitle_style.get("font_name", "Arial"),
+                    font_size=self.subtitle_style.get("font_size", 18),
+                    font_color=self.subtitle_style.get("font_color", "&H00FFFFFF"),
+                )
+                if not ok:
+                    raise RuntimeError("Failed to burn subtitles into the output video.")
+            elif mode == "voice":
+                mux_audio_into_video_for_preview(self.video_path, self.audio_path, self.output_path)
+            elif mode == "both":
+                tmp_dir = os.path.join(os.getcwd(), "temp")
+                os.makedirs(tmp_dir, exist_ok=True)
+                tmp_mux_path = os.path.join(tmp_dir, f"final_mux_{int(time.time())}.mp4")
+                mux_audio_into_video_for_preview(self.video_path, self.audio_path, tmp_mux_path)
+                ok = embed_subtitles(
+                    tmp_mux_path,
+                    self.srt_path,
+                    self.output_path,
+                    alignment=self.subtitle_style.get("alignment", 2),
+                    margin_v=self.subtitle_style.get("margin_v", 30),
+                    font_name=self.subtitle_style.get("font_name", "Arial"),
+                    font_size=self.subtitle_style.get("font_size", 18),
+                    font_color=self.subtitle_style.get("font_color", "&H00FFFFFF"),
+                )
+                if not ok:
+                    raise RuntimeError("Failed to create the final video with audio and subtitles.")
+            else:
+                raise ValueError(f"Unsupported export mode: {mode}")
+
+            self.finished.emit(self.output_path, "")
+        except Exception as e:
+            self.finished.emit("", str(e))
+        finally:
+            if tmp_mux_path and os.path.exists(tmp_mux_path):
+                try:
+                    os.remove(tmp_mux_path)
+                except OSError:
+                    pass
+
+
+class QuickPreviewWorker(QThread):
+    finished = Signal(str, str)
+
+    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", audio_path="", subtitle_style=None):
+        super().__init__()
+        self.video_path = video_path
+        self.output_path = output_path
+        self.mode = mode
+        self.start_seconds = start_seconds
+        self.duration_seconds = duration_seconds
+        self.srt_path = srt_path
+        self.audio_path = audio_path
+        self.subtitle_style = subtitle_style or {}
+
+    def run(self):
+        temp_paths = []
+        try:
+            import sys
+            import os
+            import time
+            app_path = os.path.join(os.getcwd(), 'app')
+            if app_path not in sys.path:
+                sys.path.append(app_path)
+
+            from preview_processor import trim_video_clip, mux_audio_into_video_clip_for_preview
+            from video_processor import embed_subtitles
+
+            temp_dir = os.path.join(os.getcwd(), "temp")
+            os.makedirs(temp_dir, exist_ok=True)
+            stamp = int(time.time())
+            base_clip = os.path.join(temp_dir, f"preview_base_{stamp}.mp4")
+            temp_paths.append(base_clip)
+            trim_video_clip(self.video_path, base_clip, self.start_seconds, self.duration_seconds)
+
+            current_video = base_clip
+            if self.mode in ("voice", "both") and self.audio_path and os.path.exists(self.audio_path):
+                voice_clip = os.path.join(temp_dir, f"preview_voice_{stamp}.mp4")
+                temp_paths.append(voice_clip)
+                mux_audio_into_video_clip_for_preview(
+                    self.video_path,
+                    self.audio_path,
+                    voice_clip,
+                    self.start_seconds,
+                    self.duration_seconds,
+                )
+                current_video = voice_clip
+
+            if self.mode in ("subtitle", "both") and self.srt_path and os.path.exists(self.srt_path):
+                ok = embed_subtitles(
+                    current_video,
+                    self.srt_path,
+                    self.output_path,
+                    alignment=self.subtitle_style.get("alignment", 2),
+                    margin_v=self.subtitle_style.get("margin_v", 30),
+                    font_name=self.subtitle_style.get("font_name", "Arial"),
+                    font_size=self.subtitle_style.get("font_size", 18),
+                    font_color=self.subtitle_style.get("font_color", "&H00FFFFFF"),
+                )
+                if not ok:
+                    raise RuntimeError("Failed to render subtitle preview clip.")
+            else:
+                import shutil
+                shutil.copyfile(current_video, self.output_path)
+
+            self.finished.emit(self.output_path, "")
+        except Exception as e:
+            self.finished.emit("", str(e))
+        finally:
+            for path in temp_paths:
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+
+
+class ExactFramePreviewWorker(QThread):
+    finished = Signal(str, str)
+
+    def __init__(self, video_path, output_path, timestamp_seconds, srt_path, subtitle_style=None):
+        super().__init__()
+        self.video_path = video_path
+        self.output_path = output_path
+        self.timestamp_seconds = timestamp_seconds
+        self.srt_path = srt_path
+        self.subtitle_style = subtitle_style or {}
+
+    def run(self):
+        try:
+            import sys
+            import os
+            app_path = os.path.join(os.getcwd(), 'app')
+            if app_path not in sys.path:
+                sys.path.append(app_path)
+
+            from preview_processor import render_subtitle_frame_preview
+
+            out = render_subtitle_frame_preview(
+                self.video_path,
+                self.srt_path,
+                self.output_path,
+                self.timestamp_seconds,
+                alignment=self.subtitle_style.get("alignment", 2),
+                margin_v=self.subtitle_style.get("margin_v", 30),
+                font_name=self.subtitle_style.get("font_name", "Arial"),
+                font_size=self.subtitle_style.get("font_size", 18),
+                font_color=self.subtitle_style.get("font_color", "&H00FFFFFF"),
+            )
+            self.finished.emit(out, "")
+        except Exception as e:
+            self.finished.emit("", str(e))
+
 # Import our backend modules
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'app'))
-from video_processor import extract_audio
+from video_processor import extract_audio, get_video_dimensions
 from whisper_processor import transcribe_audio
 from translator import translate_segments
 from subtitle_builder import generate_srt
@@ -595,6 +877,24 @@ class VideoTranslatorGUI(QMainWindow):
                 continue
         return segments
 
+    def extract_subtitle_text_entries(self, srt_text):
+        entries = []
+        if not srt_text:
+            return entries
+        blocks = [b.strip() for b in srt_text.strip().split("\n\n") if b.strip()]
+        for block in blocks:
+            lines = [line.rstrip() for line in block.splitlines()]
+            if not lines:
+                continue
+            if len(lines) >= 3 and " --> " in lines[1]:
+                text = "\n".join(lines[2:]).strip()
+            elif len(lines) >= 2 and lines[0].strip().isdigit():
+                text = "\n".join(lines[1:]).strip()
+            else:
+                text = "\n".join(lines).strip()
+            entries.append(text)
+        return entries
+
     def format_to_srt(self, segments):
         """Helper to format segments list into a standard SRT string."""
         lines = []
@@ -629,7 +929,7 @@ class VideoTranslatorGUI(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setObjectName("leftPanelArea")
         scroll_area.setWidgetResizable(True)
-        scroll_area.setFixedWidth(420)
+        scroll_area.setFixedWidth(680)
         scroll_area.setFrameShape(QFrame.NoFrame)
         
         left_panel_container = QWidget()
@@ -641,7 +941,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         # File Selection
         self.video_path_edit = QLineEdit()
-        self.video_path_edit.setPlaceholderText("Select video file...")
+        self.video_path_edit.setPlaceholderText("Choose one Chinese video to process...")
         browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self.browse_video)
         
@@ -649,17 +949,98 @@ class VideoTranslatorGUI(QMainWindow):
         file_layout.addWidget(self.video_path_edit)
         file_layout.addWidget(browse_btn)
         
-        left_layout.addWidget(QLabel("Target Video:"))
-        left_layout.addLayout(file_layout)
+        start_group = QGroupBox("START HERE")
+        start_layout = QVBoxLayout(start_group)
+        start_layout.addWidget(QLabel("1. Target Video"))
+        start_layout.addLayout(file_layout)
 
         # Primary actions (one-click)
-        primary_actions = QGroupBox("QUICK ACTIONS")
-        primary_layout = QVBoxLayout(primary_actions)
-        self.run_all_btn = QPushButton("Run All (Auto) → Preview")
+        self.output_mode_combo = QComboBox()
+        self.output_mode_combo.addItems([
+            "Vietnamese subtitles only",
+            "Vietnamese voice only",
+            "Vietnamese subtitles + voice",
+        ])
+        self.output_mode_combo.setCurrentText("Vietnamese subtitles + voice")
+
+        self.lang_whisper_combo = QComboBox()
+        self.lang_whisper_combo.addItems(["zh", "auto", "ko", "ja", "en", "vi"])
+
+        self.enable_ai_polish_cb = QCheckBox("Use AI polish after Microsoft translation")
+        self.enable_ai_polish_cb.setChecked(True)
+
+        self.final_output_folder_edit = QLineEdit(os.path.join(os.getcwd(), "output"))
+        self.final_output_folder_edit.setPlaceholderText("Folder to save final results...")
+        browse_final_out_btn = QPushButton("Save To")
+        browse_final_out_btn.clicked.connect(self.browse_voice_output_folder)
+        final_out_layout = QHBoxLayout()
+        final_out_layout.addWidget(self.final_output_folder_edit)
+        final_out_layout.addWidget(browse_final_out_btn)
+
+        self.workflow_hint_label = QLabel()
+        self.workflow_hint_label.setWordWrap(True)
+        self.workflow_hint_label.setStyleSheet(
+            "background-color: #111827; border: 1px solid #233044; border-radius: 8px; padding: 10px; color: #dbeafe;"
+        )
+        self.run_all_btn = QPushButton("Create Vietnamese Output")
         self.run_all_btn.setObjectName("mainActionBtn")
         self.run_all_btn.clicked.connect(self.run_all_pipeline)
-        primary_layout.addWidget(self.run_all_btn)
-        left_layout.addWidget(primary_actions)
+
+        self.export_btn = QPushButton("Export Final Video")
+        self.export_btn.setObjectName("mainActionBtn")
+        self.export_btn.clicked.connect(self.export_final_video)
+
+        self.preview_5s_btn = QPushButton("Exact Preview 5s")
+        self.preview_5s_btn.clicked.connect(self.preview_five_seconds)
+
+        self.preview_frame_btn = QPushButton("Exact Preview Frame")
+        self.preview_frame_btn.clicked.connect(self.preview_exact_frame)
+
+        self.open_output_btn = QPushButton("Open Results Folder")
+        self.open_output_btn.clicked.connect(lambda: self.open_folder(self.final_output_folder_edit.text()))
+
+        self.stabilize_button(self.run_all_btn, min_width=260)
+        self.stabilize_button(self.preview_frame_btn, min_width=260)
+        self.stabilize_button(self.preview_5s_btn, min_width=260)
+        self.stabilize_button(self.export_btn, min_width=260)
+        self.stabilize_button(self.open_output_btn, min_width=260)
+
+        start_actions_layout = QVBoxLayout()
+        start_actions_row_1 = QHBoxLayout()
+        start_actions_row_1.addWidget(self.run_all_btn)
+        start_actions_row_1.addWidget(self.preview_frame_btn)
+        start_actions_row_2 = QHBoxLayout()
+        start_actions_row_2.addWidget(self.preview_5s_btn)
+        start_actions_row_2.addWidget(self.export_btn)
+        start_actions_layout.addLayout(start_actions_row_1)
+        start_actions_layout.addLayout(start_actions_row_2)
+
+        start_layout.addWidget(QLabel("2. What do you want back?"))
+        start_layout.addWidget(self.output_mode_combo)
+        start_layout.addWidget(QLabel("3. Source speech language"))
+        start_layout.addWidget(self.lang_whisper_combo)
+        start_layout.addWidget(QLabel("4. Translation quality"))
+        start_layout.addWidget(self.enable_ai_polish_cb)
+        start_layout.addWidget(QLabel("5. Save results to"))
+        start_layout.addLayout(final_out_layout)
+        start_layout.addWidget(self.workflow_hint_label)
+        start_layout.addLayout(start_actions_layout)
+        start_layout.addWidget(self.open_output_btn)
+        left_layout.addWidget(start_group)
+
+        workflow_group = QGroupBox("WORKFLOW")
+        workflow_layout = QVBoxLayout(workflow_group)
+        workflow_text = QLabel(
+            "Recommended flow:\n"
+            "1. Choose the video.\n"
+            "2. Pick the output mode.\n"
+            "3. Click 'Create Vietnamese Output'.\n"
+            "4. Use 'Exact Preview Frame' or 'Exact Preview 5s' to review the real subtitle render.\n"
+            "5. Click 'Export Final Video' when you are happy."
+        )
+        workflow_text.setWordWrap(True)
+        workflow_layout.addWidget(workflow_text)
+        left_layout.addWidget(workflow_group)
 
         # Tabs for a cleaner UX
         tabs = QTabWidget()
@@ -674,10 +1055,10 @@ class VideoTranslatorGUI(QMainWindow):
         tab_subtitles = QWidget()
         tab_voice = QWidget()
         tab_tools = QWidget()
-        tabs.addTab(tab_prepare, "Prepare")
-        tabs.addTab(tab_subtitles, "Subtitles")
-        tabs.addTab(tab_voice, "Voice & Preview")
-        tabs.addTab(tab_tools, "Tools")
+        tabs.addTab(tab_prepare, "1. Prepare")
+        tabs.addTab(tab_subtitles, "2. Review Text")
+        tabs.addTab(tab_voice, "3. Voice & Export")
+        tabs.addTab(tab_tools, "Advanced")
 
         prepare_layout = QVBoxLayout(tab_prepare)
         prepare_layout.setSpacing(12)
@@ -689,7 +1070,7 @@ class VideoTranslatorGUI(QMainWindow):
         tools_layout.setSpacing(12)
 
         # Section 1: Source & Extraction
-        audio_group = QGroupBox("STEP 1: AUDIO EXTRACTION")
+        audio_group = QGroupBox("STEP 1: PREPARE AUDIO")
         audio_layout = QVBoxLayout(audio_group)
         
         # Folder selection for extracted audio
@@ -703,14 +1084,14 @@ class VideoTranslatorGUI(QMainWindow):
         self.keep_audio_cb = QCheckBox("Keep audio file after completion")
         self.keep_audio_cb.setChecked(True)
         
-        extract_btn = QPushButton("Extract Audio from Video")
+        extract_btn = QPushButton("Extract Audio")
         extract_btn.setObjectName("mainActionBtn")
         
-        vocal_sep_btn = QPushButton("Separate Vocals & Music (AI)")
+        vocal_sep_btn = QPushButton("Separate Voice and Background")
         vocal_sep_btn.setObjectName("mainActionBtn")
         self.vocal_sep_btn = vocal_sep_btn
         
-        audio_layout.addWidget(QLabel("Extracted Audio Destination:"))
+        audio_layout.addWidget(QLabel("Temporary audio folder"))
         audio_layout.addLayout(folder_layout)
         audio_layout.addWidget(self.keep_audio_cb)
         audio_layout.addWidget(extract_btn)
@@ -718,12 +1099,12 @@ class VideoTranslatorGUI(QMainWindow):
         prepare_layout.addWidget(audio_group)
 
         # Section 2: Recognition
-        trans_group = QGroupBox("STEP 2: SPEECH RECOGNITION")
+        trans_group = QGroupBox("STEP 2: CREATE ORIGINAL SUBTITLES")
         trans_layout = QVBoxLayout(trans_group)
         
         self.audio_source_edit = QLineEdit()
-        self.audio_source_edit.setPlaceholderText("Select extracted audio (.wav)...")
-        browse_audio_src_btn = QPushButton("Select Source")
+        self.audio_source_edit.setPlaceholderText("Optional: choose a custom audio file...")
+        browse_audio_src_btn = QPushButton("Choose Audio")
         browse_audio_src_btn.clicked.connect(self.browse_audio_source)
         
         audio_src_layout = QHBoxLayout()
@@ -737,55 +1118,105 @@ class VideoTranslatorGUI(QMainWindow):
         srt_folder_layout.addWidget(self.srt_output_folder_edit)
         srt_folder_layout.addWidget(browse_srt_folder_btn)
         
-        self.lang_whisper_combo = QComboBox()
-        self.lang_whisper_combo.addItems(["zh", "ko", "ja", "en", "vi", "auto"])
-        
         self.transcript_text = QTextEdit()
-        self.transcript_text.setPlaceholderText("Original SRT transcript will appear here...")
+        self.transcript_text.setPlaceholderText("The original subtitle transcript will appear here...")
         
-        self.transcribe_btn = QPushButton("Generate Original SRT")
+        self.transcribe_btn = QPushButton("Create Original Subtitle")
         self.transcribe_btn.setObjectName("mainActionBtn")
+        self.stabilize_button(self.transcribe_btn, min_width=320)
         
-        trans_layout.addWidget(QLabel("Audio Source:"))
+        trans_layout.addWidget(QLabel("Audio source"))
         trans_layout.addLayout(audio_src_layout)
-        trans_layout.addWidget(QLabel("Export Original SRT To:"))
+        trans_layout.addWidget(QLabel("Where to save the original SRT"))
         trans_layout.addLayout(srt_folder_layout)
-        trans_layout.addWidget(QLabel("Source Language:"))
-        trans_layout.addWidget(self.lang_whisper_combo)
         trans_layout.addWidget(self.transcript_text)
         trans_layout.addWidget(self.transcribe_btn)
         subtitles_layout.addWidget(trans_group)
 
         # Section 3: Translation
-        translate_group = QGroupBox("STEP 3: TRANSLATION (AI)")
+        translate_group = QGroupBox("STEP 3: VIETNAMESE TRANSLATION")
         translate_layout = QVBoxLayout(translate_group)
         
         self.lang_target_combo = QComboBox()
         self.lang_target_combo.addItems(["Vietnamese (vie_Latn)", "English (eng_Latn)"])
+        self.lang_target_combo.setCurrentText("Vietnamese (vie_Latn)")
+        self.lang_target_combo.setEnabled(False)
         
         self.translated_text = QTextEdit()
-        self.translated_text.setPlaceholderText("AI Translated SRT results will appear here...")
+        self.translated_text.setPlaceholderText("Vietnamese subtitle text will appear here. You can edit it before export.")
         
-        self.translate_btn = QPushButton("Run AI Translation")
+        self.translate_btn = QPushButton("Translate to Vietnamese")
         self.translate_btn.setObjectName("mainActionBtn")
+        self.stabilize_button(self.translate_btn, min_width=320)
 
         # Load external SRT directly into the editor (user can edit then apply)
-        self.load_external_srt_btn = QPushButton("Load External SRT into Editor")
+        self.load_external_srt_btn = QPushButton("Load Existing SRT")
         self.load_external_srt_btn.clicked.connect(self.load_external_srt_into_editor)
 
-        self.apply_translated_btn = QPushButton("Apply Edited SRT to Timeline")
+        self.keep_timeline_cb = QCheckBox("Keep the current timeline when editing Vietnamese text")
+        self.keep_timeline_cb.setChecked(True)
+
+        self.apply_translated_btn = QPushButton("Apply Edited Subtitle to Preview")
         self.apply_translated_btn.clicked.connect(self.apply_edited_translation)
+
+        style_group = QGroupBox("SUBTITLE LOOK")
+        style_layout = QVBoxLayout(style_group)
+
+        self.subtitle_font_combo = QComboBox()
+        self.subtitle_font_combo.setEditable(True)
+        self.subtitle_font_combo.addItems(["Arial", "Segoe UI", "Tahoma", "Verdana", "Times New Roman"])
+        self.subtitle_font_combo.setCurrentText("Segoe UI")
+
+        self.subtitle_font_size_spin = QSpinBox()
+        self.subtitle_font_size_spin.setRange(12, 72)
+        self.subtitle_font_size_spin.setValue(20)
+
+        self.subtitle_align_combo = QComboBox()
+        self.subtitle_align_combo.addItems(["Bottom Center", "Bottom Left", "Bottom Right"])
+        self.subtitle_align_combo.setCurrentText("Bottom Center")
+
+        self.subtitle_x_offset_spin = QSpinBox()
+        self.subtitle_x_offset_spin.setRange(-400, 400)
+        self.subtitle_x_offset_spin.setValue(0)
+
+        self.subtitle_bottom_offset_spin = QSpinBox()
+        self.subtitle_bottom_offset_spin.setRange(0, 300)
+        self.subtitle_bottom_offset_spin.setValue(30)
+
+        self.subtitle_color_btn = QPushButton("Text Color: #FFFFFF")
+        self.subtitle_color_btn.clicked.connect(self.choose_subtitle_color)
+        self.subtitle_color_hex = "#FFFFFF"
+
+        style_row_1 = QHBoxLayout()
+        style_row_1.addWidget(QLabel("Font"))
+        style_row_1.addWidget(self.subtitle_font_combo)
+        style_row_1.addWidget(QLabel("Size"))
+        style_row_1.addWidget(self.subtitle_font_size_spin)
+
+        style_row_2 = QHBoxLayout()
+        style_row_2.addWidget(QLabel("Position"))
+        style_row_2.addWidget(self.subtitle_align_combo)
+        style_row_2.addWidget(QLabel("X Offset"))
+        style_row_2.addWidget(self.subtitle_x_offset_spin)
+        style_row_2.addWidget(QLabel("Bottom"))
+        style_row_2.addWidget(self.subtitle_bottom_offset_spin)
+
+        style_layout.addLayout(style_row_1)
+        style_layout.addLayout(style_row_2)
+        style_layout.addWidget(self.subtitle_color_btn)
         
-        translate_layout.addWidget(QLabel("Target Language:"))
+        translate_layout.addWidget(QLabel("Output language"))
         translate_layout.addWidget(self.lang_target_combo)
+        translate_layout.addWidget(style_group)
         translate_layout.addWidget(self.translated_text)
         translate_layout.addWidget(self.translate_btn)
         translate_layout.addWidget(self.load_external_srt_btn)
+        translate_layout.addWidget(self.keep_timeline_cb)
         translate_layout.addWidget(self.apply_translated_btn)
         subtitles_layout.addWidget(translate_group)
 
         # Section 4: Voiceover (TTS) + Mix
-        voice_group = QGroupBox("STEP 4: VIETNAMESE VOICEOVER (TTS)")
+        voice_group = QGroupBox("STEP 4: VIETNAMESE VOICE")
         voice_layout = QVBoxLayout(voice_group)
 
         self.voice_name_combo = QComboBox()
@@ -795,16 +1226,16 @@ class VideoTranslatorGUI(QMainWindow):
         ])
 
         self.bg_music_edit = QLineEdit()
-        self.bg_music_edit.setPlaceholderText("Background music (no_vocals.wav) ...")
-        browse_bg_btn = QPushButton("Select Background")
+        self.bg_music_edit.setPlaceholderText("Optional: background/no_vocals audio...")
+        browse_bg_btn = QPushButton("Choose Background")
         browse_bg_btn.clicked.connect(self.browse_background_audio)
         bg_layout = QHBoxLayout()
         bg_layout.addWidget(self.bg_music_edit)
         bg_layout.addWidget(browse_bg_btn)
 
         self.mixed_audio_edit = QLineEdit()
-        self.mixed_audio_edit.setPlaceholderText("Use an existing mixed audio (optional) ...")
-        browse_mixed_btn = QPushButton("Select Mixed")
+        self.mixed_audio_edit.setPlaceholderText("Optional: use an existing mixed audio file...")
+        browse_mixed_btn = QPushButton("Choose Mixed Audio")
         browse_mixed_btn.clicked.connect(self.browse_existing_mixed_audio)
         mixed_layout = QHBoxLayout()
         mixed_layout.addWidget(self.mixed_audio_edit)
@@ -818,7 +1249,7 @@ class VideoTranslatorGUI(QMainWindow):
         voice_out_layout.addWidget(browse_voice_out_btn)
 
         # Advanced options (collapsed by default)
-        adv_group = QGroupBox("Advanced")
+        adv_group = QGroupBox("Advanced Voice Settings")
         adv_group.setCheckable(True)
         adv_group.setChecked(False)
         adv_layout = QVBoxLayout(adv_group)
@@ -838,20 +1269,22 @@ class VideoTranslatorGUI(QMainWindow):
         gains_layout.addWidget(self.bg_gain_spin)
         adv_layout.addLayout(gains_layout)
 
-        adv_layout.addWidget(QLabel("Export Voice/Mix To:"))
+        adv_layout.addWidget(QLabel("Where to save intermediate voice files"))
         adv_layout.addLayout(voice_out_layout)
 
-        self.voiceover_btn = QPushButton("Generate Vietnamese Voice + Mix")
+        self.voiceover_btn = QPushButton("Create Vietnamese Voice")
         self.voiceover_btn.setObjectName("mainActionBtn")
+        self.stabilize_button(self.voiceover_btn, min_width=320)
 
-        self.preview_btn = QPushButton("Preview Video with Mixed Audio")
+        self.preview_btn = QPushButton("Preview Video with Vietnamese Voice")
         self.preview_btn.clicked.connect(self.preview_video_with_mixed_audio)
+        self.stabilize_button(self.preview_btn, min_width=320)
 
-        voice_layout.addWidget(QLabel("TTS Voice:"))
+        voice_layout.addWidget(QLabel("Voice"))
         voice_layout.addWidget(self.voice_name_combo)
-        voice_layout.addWidget(QLabel("Background Audio (optional):"))
+        voice_layout.addWidget(QLabel("Background audio"))
         voice_layout.addLayout(bg_layout)
-        voice_layout.addWidget(QLabel("Existing Mixed Audio (optional):"))
+        voice_layout.addWidget(QLabel("Existing mixed audio"))
         voice_layout.addLayout(mixed_layout)
         voice_layout.addWidget(adv_group)
         voice_layout.addWidget(self.voiceover_btn)
@@ -859,7 +1292,7 @@ class VideoTranslatorGUI(QMainWindow):
         voice_tab_layout.addWidget(voice_group)
 
         # Section: Processed files quick view
-        artifacts_group = QGroupBox("PROCESSED FILES")
+        artifacts_group = QGroupBox("RESULTS AND FILES")
         artifacts_layout = QVBoxLayout(artifacts_group)
 
         self.show_artifacts_btn = QPushButton("Show Processed Files")
@@ -868,16 +1301,13 @@ class VideoTranslatorGUI(QMainWindow):
         self.open_temp_btn = QPushButton("Open Temp Folder")
         self.open_temp_btn.clicked.connect(lambda: self.open_folder(self.audio_folder_edit.text()))
 
-        self.open_output_btn = QPushButton("Open Output Folder")
-        self.open_output_btn.clicked.connect(lambda: self.open_folder(self.srt_output_folder_edit.text()))
-
         artifacts_layout.addWidget(self.show_artifacts_btn)
         artifacts_layout.addWidget(self.open_temp_btn)
         artifacts_layout.addWidget(self.open_output_btn)
         tools_layout.addWidget(artifacts_group)
 
         # Log / details panel
-        log_group = QGroupBox("LOG (Details)")
+        log_group = QGroupBox("LOG")
         log_layout = QVBoxLayout(log_group)
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
@@ -894,7 +1324,7 @@ class VideoTranslatorGUI(QMainWindow):
         tools_layout.addWidget(log_group)
 
         tools_layout.addStretch()
-        tools_layout.addWidget(QLabel("Video Information Extractor v2.0"))
+        tools_layout.addWidget(QLabel("CapCap guided workflow"))
 
         prepare_layout.addStretch()
         subtitles_layout.addStretch()
@@ -923,7 +1353,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.stop_btn = QPushButton("Stop")
         controls_layout.addWidget(self.play_btn)
         controls_layout.addWidget(self.stop_btn)
-        controls_layout.addWidget(QLabel("Subtitles:"))
+        controls_layout.addWidget(QLabel("Subtitle track:"))
         self.subtitle_source_combo = QComboBox()
         self.subtitle_source_combo.addItems(["None", "Original", "Edited"])
         self.subtitle_source_combo.setCurrentText(self.subtitle_source)
@@ -953,6 +1383,15 @@ class VideoTranslatorGUI(QMainWindow):
         self.transcribe_btn.clicked.connect(self.run_transcription)
         self.translate_btn.clicked.connect(self.run_translation)
         self.voiceover_btn.clicked.connect(self.run_voiceover)
+        self.output_mode_combo.currentTextChanged.connect(self.on_output_mode_changed)
+        self.enable_ai_polish_cb.toggled.connect(lambda _: self.on_output_mode_changed(self.output_mode_combo.currentText()))
+        self.final_output_folder_edit.textChanged.connect(self.voice_output_folder_edit.setText)
+        self.final_output_folder_edit.textChanged.connect(self.srt_output_folder_edit.setText)
+        self.subtitle_font_combo.currentTextChanged.connect(self.update_subtitle_preview_style)
+        self.subtitle_font_size_spin.valueChanged.connect(self.update_subtitle_preview_style)
+        self.subtitle_align_combo.currentTextChanged.connect(self.update_subtitle_preview_style)
+        self.subtitle_x_offset_spin.valueChanged.connect(self.update_subtitle_preview_style)
+        self.subtitle_bottom_offset_spin.valueChanged.connect(self.update_subtitle_preview_style)
         
         # Initial positioning
         QTimer.singleShot(100, self.video_view.reposition_subtitle)
@@ -968,8 +1407,15 @@ class VideoTranslatorGUI(QMainWindow):
         self.last_voice_vi_path = ""
         self.last_mixed_vi_path = ""
         self.last_preview_video_path = ""
+        self.last_exported_video_path = ""
+        self.last_exact_preview_5s_path = ""
+        self.last_exact_preview_frame_path = ""
+        self.subtitle_export_font_scale = 1.3
+        self.use_exact_subtitle_preview = True
 
         # Initial button states
+        self.update_subtitle_preview_style()
+        self.on_output_mode_changed(self.output_mode_combo.currentText())
         self.refresh_ui_state()
 
     # -----------------------------
@@ -997,6 +1443,375 @@ class VideoTranslatorGUI(QMainWindow):
         else:
             QMessageBox.critical(self, title, short_msg)
 
+    def stabilize_button(self, button: QPushButton, min_width: int = 220, min_height: int = 42):
+        button.setMinimumWidth(min_width)
+        button.setMinimumHeight(min_height)
+        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def cleanup_file_if_exists(self, path: str):
+        if not path:
+            return
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
+
+    def get_output_mode_key(self):
+        value = self.output_mode_combo.currentText() if hasattr(self, "output_mode_combo") else "Vietnamese subtitles + voice"
+        mapping = {
+            "Vietnamese subtitles only": "subtitle",
+            "Vietnamese voice only": "voice",
+            "Vietnamese subtitles + voice": "both",
+        }
+        return mapping.get(value, "both")
+
+    def is_ai_polish_enabled(self):
+        return bool(getattr(self, "enable_ai_polish_cb", None) and self.enable_ai_polish_cb.isChecked())
+
+    def on_output_mode_changed(self, value: str):
+        mode = self.get_output_mode_key()
+        hints = {
+            "subtitle": "This mode will create Vietnamese subtitles first. You can review the subtitle text, then export a subtitled video.",
+            "voice": "This mode will create a Vietnamese voice track, keep or reuse background audio, then export a video with new audio.",
+            "both": "This mode will create both Vietnamese subtitles and Vietnamese voice, then combine them into one final video.",
+        }
+        polish_hint = (
+            " AI polish is ON, so Microsoft translation will be refined for wording and context."
+            if self.is_ai_polish_enabled()
+            else " AI polish is OFF, so you can inspect the raw Microsoft translation."
+        )
+        self.workflow_hint_label.setText(hints.get(mode, "Choose an output mode to begin.") + polish_hint)
+
+        show_voice = mode in ("voice", "both")
+        self.voiceover_btn.setVisible(show_voice)
+        self.preview_btn.setVisible(show_voice)
+        self.bg_music_edit.setEnabled(show_voice)
+        self.mixed_audio_edit.setEnabled(show_voice)
+
+        export_labels = {
+            "subtitle": "Export Subtitled Video",
+            "voice": "Export Vietnamese Voice Video",
+            "both": "Export Final Video",
+        }
+        self.export_btn.setText(export_labels.get(mode, "Export Final Video"))
+        self.refresh_ui_state()
+
+    def choose_subtitle_color(self):
+        color = QColorDialog.getColor(QColor(self.subtitle_color_hex), self, "Choose Subtitle Color")
+        if not color.isValid():
+            return
+        self.subtitle_color_hex = color.name().upper()
+        self.subtitle_color_btn.setText(f"Text Color: {self.subtitle_color_hex}")
+        self.update_subtitle_preview_style()
+
+    def update_subtitle_preview_style(self):
+        if not hasattr(self, "video_view"):
+            return
+        item = self.video_view.subtitle_item
+        source_h = max(1, getattr(self.video_view, "video_source_height", 0) or 1080)
+        preview_rect = self.video_view.get_video_content_rect()
+        preview_h = max(1.0, preview_rect.height() or float(self.video_view.height()) or 1.0)
+        export_font_size = int(self.subtitle_font_size_spin.value())
+        preview_font_size = max(10, int(round(export_font_size * (preview_h / source_h))))
+        item.set_style(
+            font_name=self.subtitle_font_combo.currentText().strip() or "Segoe UI",
+            font_size=preview_font_size,
+            font_color=QColor(self.subtitle_color_hex),
+        )
+        item.set_alignment(self.subtitle_align_combo.currentText())
+        item.set_positioning(
+            x_offset=int(self.subtitle_x_offset_spin.value()),
+            bottom_offset=int(self.subtitle_bottom_offset_spin.value()),
+        )
+        self.video_view.reposition_subtitle()
+
+    def get_subtitle_export_style(self):
+        alignment_map = {
+            "Bottom Left": 1,
+            "Bottom Center": 2,
+            "Bottom Right": 3,
+        }
+        export_font_size = max(1, int(round(self.subtitle_font_size_spin.value() * self.subtitle_export_font_scale)))
+        return {
+            "font_name": self.subtitle_font_combo.currentText().strip() or "Arial",
+            "font_size": export_font_size,
+            "font_color": self._hex_to_ass_color(self.subtitle_color_hex),
+            "alignment": alignment_map.get(self.subtitle_align_combo.currentText(), 2),
+            "margin_v": int(self.subtitle_bottom_offset_spin.value()),
+        }
+
+    def refresh_video_dimensions(self, path: str):
+        try:
+            if path and os.path.exists(path):
+                width, height = get_video_dimensions(path)
+                self.video_view.set_video_dimensions(width, height)
+        except Exception:
+            pass
+
+    def _hex_to_ass_color(self, hex_color: str) -> str:
+        color = QColor(hex_color)
+        return f"&H00{color.blue():02X}{color.green():02X}{color.red():02X}"
+
+    def export_final_video(self):
+        video_path = self.video_path_edit.text().strip()
+        if not video_path or not os.path.exists(video_path):
+            QMessageBox.warning(self, "Error", "Please choose a video first.")
+            return
+
+        mode = self.get_output_mode_key()
+        out_dir = os.path.join(os.getcwd(), "temp")
+        os.makedirs(out_dir, exist_ok=True)
+
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        translated_srt_path = self.last_translated_srt_path
+        chosen_audio = (
+            self.mixed_audio_edit.text().strip()
+            or self.processed_artifacts.get("mixed_vi")
+            or self.last_mixed_vi_path
+            or self.last_voice_vi_path
+            or ""
+        ).strip()
+
+        if mode in ("subtitle", "both"):
+            if not translated_srt_path or not os.path.exists(translated_srt_path):
+                QMessageBox.warning(self, "Error", "Vietnamese subtitle file not found. Please run translation first.")
+                return
+
+        if mode in ("voice", "both"):
+            if not chosen_audio or not os.path.exists(chosen_audio):
+                QMessageBox.warning(self, "Error", "Mixed Vietnamese audio not found. Please create or choose a mixed audio file first.")
+                return
+
+        if mode == "subtitle":
+            output_path = os.path.join(out_dir, f"{video_name}_sub_vi.mp4")
+        elif mode == "voice":
+            output_path = os.path.join(out_dir, f"{video_name}_voice_vi.mp4")
+        else:
+            output_path = os.path.join(out_dir, f"{video_name}_final_vi.mp4")
+
+        self.export_btn.setEnabled(False)
+        self.export_btn.setText("Exporting...")
+        self.progress_bar.setValue(96)
+
+        self.export_thread = FinalExportWorker(
+            video_path=video_path,
+            output_path=output_path,
+            mode=mode,
+            srt_path=translated_srt_path,
+            audio_path=chosen_audio,
+            subtitle_style=self.get_subtitle_export_style(),
+        )
+        self.export_thread.finished.connect(self.on_export_finished)
+        self.export_thread.start()
+
+    def preview_five_seconds(self):
+        video_path = self.video_path_edit.text().strip()
+        if not video_path or not os.path.exists(video_path):
+            QMessageBox.warning(self, "Error", "Please choose a video first.")
+            return
+
+        mode = self.get_output_mode_key()
+        out_dir = self.final_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
+        os.makedirs(out_dir, exist_ok=True)
+
+        translated_srt_path = self.last_translated_srt_path
+        chosen_audio = (
+            self.mixed_audio_edit.text().strip()
+            or self.processed_artifacts.get("mixed_vi")
+            or self.last_mixed_vi_path
+            or self.last_voice_vi_path
+            or ""
+        ).strip()
+
+        if mode in ("subtitle", "both"):
+            if not translated_srt_path or not os.path.exists(translated_srt_path):
+                QMessageBox.warning(self, "Error", "Vietnamese subtitle file not found. Please run translation first.")
+                return
+
+        if mode in ("voice", "both") and (not chosen_audio or not os.path.exists(chosen_audio)):
+            QMessageBox.warning(self, "Error", "Vietnamese audio not found. Please create a voice track first.")
+            return
+
+        start_seconds = max(0.0, self.media_player.position() / 1000.0)
+        duration_seconds = 5.0
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        self.cleanup_file_if_exists(self.last_exact_preview_5s_path)
+        preview_output = os.path.join(out_dir, f"{video_name}_preview5s_{int(time.time())}.mp4")
+        preview_srt_path = ""
+
+        if mode in ("subtitle", "both"):
+            preview_srt_path = self.build_subtitle_preview_srt(start_seconds, duration_seconds)
+            if not preview_srt_path:
+                QMessageBox.warning(self, "Error", "Could not build the 5-second subtitle preview clip.")
+                return
+
+        self.preview_5s_btn.setEnabled(False)
+        self.preview_5s_btn.setText("Rendering 5s...")
+        self.progress_bar.setValue(92)
+
+        try:
+            self.media_player.stop()
+            self.media_player.setSource(QUrl())
+        except Exception:
+            pass
+
+        self.quick_preview_thread = QuickPreviewWorker(
+            video_path=video_path,
+            output_path=preview_output,
+            mode=mode,
+            start_seconds=start_seconds,
+            duration_seconds=duration_seconds,
+            srt_path=preview_srt_path,
+            audio_path=chosen_audio,
+            subtitle_style=self.get_subtitle_export_style(),
+        )
+        self.quick_preview_thread.finished.connect(self.on_quick_preview_ready)
+        self.quick_preview_thread.start()
+
+    def preview_exact_frame(self):
+        video_path = self.video_path_edit.text().strip()
+        if not video_path or not os.path.exists(video_path):
+            QMessageBox.warning(self, "Error", "Please choose a video first.")
+            return
+
+        preview_srt_path = self.build_full_active_subtitle_srt()
+        if not preview_srt_path:
+            QMessageBox.warning(self, "Error", "No active subtitle track is available for frame preview.")
+            return
+
+        timestamp_seconds = max(0.0, self.media_player.position() / 1000.0)
+        out_dir = os.path.join(os.getcwd(), "temp")
+        os.makedirs(out_dir, exist_ok=True)
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        self.cleanup_file_if_exists(self.last_exact_preview_frame_path)
+        frame_output = os.path.join(out_dir, f"{video_name}_preview_frame_{int(time.time())}.png")
+
+        self.preview_frame_btn.setEnabled(False)
+        self.preview_frame_btn.setText("Rendering frame...")
+        self.progress_bar.setValue(90)
+
+        self.frame_preview_thread = ExactFramePreviewWorker(
+            video_path=video_path,
+            output_path=frame_output,
+            timestamp_seconds=timestamp_seconds,
+            srt_path=preview_srt_path,
+            subtitle_style=self.get_subtitle_export_style(),
+        )
+        self.frame_preview_thread.finished.connect(self.on_exact_frame_ready)
+        self.frame_preview_thread.start()
+
+    def build_subtitle_preview_srt(self, start_seconds: float, duration_seconds: float):
+        segments = self.get_active_segments()
+        if not segments:
+            return ""
+
+        clipped = []
+        end_seconds = start_seconds + duration_seconds
+        for seg in segments:
+            seg_start = float(seg["start"])
+            seg_end = float(seg["end"])
+            if seg_end < start_seconds or seg_start > end_seconds:
+                continue
+            clipped.append(
+                {
+                    "start": max(0.0, seg_start - start_seconds),
+                    "end": min(duration_seconds, seg_end - start_seconds),
+                    "text": seg.get("text", ""),
+                }
+            )
+
+        if not clipped:
+            return ""
+
+        preview_srt_path = os.path.join(os.getcwd(), "temp", "preview_subtitle_5s.srt")
+        self.cleanup_file_if_exists(preview_srt_path)
+        generate_srt(clipped, preview_srt_path)
+        return preview_srt_path
+
+    def build_full_active_subtitle_srt(self):
+        segments = self.get_active_segments()
+        if not segments:
+            return ""
+        preview_srt_path = os.path.join(os.getcwd(), "temp", "preview_subtitle_full.srt")
+        self.cleanup_file_if_exists(preview_srt_path)
+        generate_srt(segments, preview_srt_path)
+        return preview_srt_path
+
+    def on_export_finished(self, output_path, error):
+        self.export_btn.setEnabled(True)
+        self.on_output_mode_changed(self.output_mode_combo.currentText())
+        self.progress_bar.setValue(100)
+
+        if error:
+            self.show_error("Error", "Final export failed.", error)
+            return
+
+        if output_path and os.path.exists(output_path):
+            self.last_exported_video_path = output_path
+            self.processed_artifacts["final_video"] = output_path
+            QMessageBox.information(self, "Success", f"Final video exported successfully:\n\n{output_path}")
+
+    def on_quick_preview_ready(self, output_path, error):
+        self.preview_5s_btn.setEnabled(True)
+        self.preview_5s_btn.setText("Exact Preview 5s")
+        self.progress_bar.setValue(100)
+
+        if error:
+            self.show_error("Error", "5-second preview failed.", error)
+            return
+
+        if output_path and os.path.exists(output_path):
+            self.last_exact_preview_5s_path = output_path
+            self.last_preview_video_path = output_path
+            self.processed_artifacts["preview_video_5s"] = output_path
+            self.refresh_video_dimensions(output_path)
+            self.media_player.setSource(QUrl.fromLocalFile(output_path))
+            self.media_player.setPosition(0)
+            self.play_btn.setText("Play")
+            QMessageBox.information(
+                self,
+                "Preview Ready",
+                f"Generated a 5-second preview clip with the current export style:\n\n{output_path}",
+            )
+
+    def on_exact_frame_ready(self, output_path, error):
+        self.preview_frame_btn.setEnabled(True)
+        self.preview_frame_btn.setText("Exact Preview Frame")
+        self.progress_bar.setValue(100)
+
+        if error:
+            self.show_error("Error", "Exact frame preview failed.", error)
+            return
+
+        if output_path and os.path.exists(output_path):
+            self.last_exact_preview_frame_path = output_path
+            self.processed_artifacts["preview_frame"] = output_path
+            self.show_frame_preview_dialog(output_path)
+
+    def show_frame_preview_dialog(self, image_path: str):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Exact Preview Frame")
+        dialog.resize(720, 820)
+
+        layout = QVBoxLayout(dialog)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        label = QLabel()
+        label.setAlignment(Qt.AlignCenter)
+        pixmap = QPixmap(image_path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(660, 720, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            label.setPixmap(scaled)
+        scroll.setWidget(label)
+        layout.addWidget(scroll)
+
+        path_label = QLabel(image_path)
+        path_label.setWordWrap(True)
+        layout.addWidget(path_label)
+
+        dialog.exec()
+
     # -----------------------------
     # Subtitle source handling
     # -----------------------------
@@ -1011,10 +1826,7 @@ class VideoTranslatorGUI(QMainWindow):
     def apply_segments_to_timeline(self):
         segs = self.get_active_segments()
         self.timeline.set_segments(segs if segs else [])
-        if segs:
-            self.video_view.subtitle_item.show()
-        else:
-            self.video_view.subtitle_item.hide()
+        self.video_view.subtitle_item.hide()
 
     def on_subtitle_source_changed(self, value: str):
         self.subtitle_source = value
@@ -1025,17 +1837,35 @@ class VideoTranslatorGUI(QMainWindow):
         v_ok = bool(self.video_path_edit.text().strip()) and os.path.exists(self.video_path_edit.text().strip())
         a_ok = bool(self.audio_source_edit.text().strip()) and os.path.exists(self.audio_source_edit.text().strip())
         has_translated_text = bool(self.translated_text.toPlainText().strip())
-        has_mixed = bool((self.mixed_audio_edit.text().strip() and os.path.exists(self.mixed_audio_edit.text().strip()))
-                         or (self.last_mixed_vi_path and os.path.exists(self.last_mixed_vi_path)))
+        has_voice_audio = bool(
+            (self.mixed_audio_edit.text().strip() and os.path.exists(self.mixed_audio_edit.text().strip()))
+            or (self.last_mixed_vi_path and os.path.exists(self.last_mixed_vi_path))
+            or (self.last_voice_vi_path and os.path.exists(self.last_voice_vi_path))
+        )
+        mode = self.get_output_mode_key()
+        can_export = False
+        if mode == "subtitle":
+            can_export = v_ok and bool(self.last_translated_srt_path and os.path.exists(self.last_translated_srt_path))
+        elif mode == "voice":
+            can_export = v_ok and has_voice_audio
+        else:
+            can_export = (
+                v_ok
+                and has_voice_audio
+                and bool(self.last_translated_srt_path and os.path.exists(self.last_translated_srt_path))
+            )
 
         self.extract_btn.setEnabled(v_ok)
         self.vocal_sep_btn.setEnabled(a_ok)
         self.transcribe_btn.setEnabled(a_ok)
         self.translate_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()))
         self.apply_translated_btn.setEnabled(has_translated_text)
-        self.voiceover_btn.setEnabled(has_translated_text)
-        self.preview_btn.setEnabled(v_ok and has_mixed)
+        self.voiceover_btn.setEnabled(has_translated_text and mode in ("voice", "both"))
+        self.preview_btn.setEnabled(v_ok and has_voice_audio and mode in ("voice", "both"))
         self.run_all_btn.setEnabled(v_ok and not self._pipeline_active)
+        self.preview_frame_btn.setEnabled(v_ok and bool(self.get_active_segments()))
+        self.preview_5s_btn.setEnabled(v_ok)
+        self.export_btn.setEnabled(can_export)
 
     def run_extraction(self):
         v_path = self.video_path_edit.text()
@@ -1190,21 +2020,28 @@ class VideoTranslatorGUI(QMainWindow):
         
         # We no longer need the local NLLB model path
         model_path = None
-        # Simpler mapping for Cloudflare Workers AI
         src = self.lang_whisper_combo.currentText()
+        enable_polish = self.is_ai_polish_enabled()
         
-        self.translated_text.setText("Translating via Cloudflare... please wait (Loading...)")
+        if enable_polish:
+            self.translated_text.setText("Translating with Microsoft Translator and AI polish... please wait.")
+        else:
+            self.translated_text.setText("Translating with Microsoft Translator only... please wait.")
         self.translate_btn.setEnabled(False)
         self.progress_bar.setValue(80)
         
-        self.translation_thread = TranslationWorker(srt_source, model_path, src)
+        self.translation_thread = TranslationWorker(srt_source, model_path, src, enable_polish)
         self.translation_thread.finished.connect(self.on_translation_finished)
         self.translation_thread.start()
 
-    def on_translation_finished(self, translated_srt):
+    def on_translation_finished(self, translated_srt, error):
         self.translate_btn.setEnabled(True)
-        if not translated_srt:
-            QMessageBox.warning(self, "Error", "Translation failed.")
+        if error or not translated_srt:
+            self.show_error(
+                "Translation Failed",
+                "Could not complete the Vietnamese translation.",
+                error or "The translator API returned an empty result.",
+            )
             self._pipeline_fail("Translation failed.")
             return
 
@@ -1230,8 +2067,6 @@ class VideoTranslatorGUI(QMainWindow):
             self.last_translated_srt_path = out_path
             self.processed_artifacts["srt_translated"] = out_path
                 
-            self.video_view.subtitle_item.show() # Ensure preview is visible after translation
-            self.video_view.reposition_subtitle()
             QMessageBox.information(self, "Finished", f"Process complete! Subtitle saved and loaded for preview:\n{out_path}")
         else:
             QMessageBox.information(self, "Finished", "Translation complete!")
@@ -1242,7 +2077,21 @@ class VideoTranslatorGUI(QMainWindow):
     def apply_edited_translation(self, show_message=True, force_apply=True):
         """Re-parse STEP 3 SRT text (translated or external). Apply to timeline only when desired."""
         srt_text = self.translated_text.toPlainText()
-        segs = self.parse_srt_to_segments(srt_text)
+        segs = []
+        if self.keep_timeline_cb.isChecked():
+            base_segments = self.current_translated_segments or self.current_segments
+            edited_texts = self.extract_subtitle_text_entries(srt_text)
+            if base_segments and len(edited_texts) == len(base_segments):
+                segs = [
+                    {
+                        'start': base['start'],
+                        'end': base['end'],
+                        'text': edited_texts[idx],
+                    }
+                    for idx, base in enumerate(base_segments)
+                ]
+        if not segs:
+            segs = self.parse_srt_to_segments(srt_text)
         if not segs:
             if show_message:
                 QMessageBox.warning(self, "Error", "Could not parse edited translated SRT.\n\nTip: Keep standard SRT format:\n1\\n00:00:01,000 --> 00:00:02,000\\ntext")
@@ -1251,7 +2100,6 @@ class VideoTranslatorGUI(QMainWindow):
         self.current_translated_segments = segs
         if force_apply:
             self.apply_segments_to_timeline()
-            self.video_view.reposition_subtitle()
 
         if show_message:
             QMessageBox.information(self, "Applied", f"Applied edited translation to timeline.\nSegments: {len(segs)}")
@@ -1277,6 +2125,7 @@ class VideoTranslatorGUI(QMainWindow):
         if file_path:
             self.video_path_edit.setText(file_path)
             self.media_player.setSource(QUrl.fromLocalFile(file_path))
+            self.refresh_video_dimensions(file_path)
             self.play_btn.setText("Play")
             
             # Reset timeline state
@@ -1300,7 +2149,6 @@ class VideoTranslatorGUI(QMainWindow):
                                 # Only auto-apply if user is on Original/None (avoid overwriting External choice)
                                 if self.subtitle_source_combo.currentText() in ("Original", "None"):
                                     self.apply_segments_to_timeline()
-                                    self.video_view.subtitle_item.show() # Auto-show preview
                                 break
                     except: pass
 
@@ -1362,6 +2210,8 @@ class VideoTranslatorGUI(QMainWindow):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Voice Output Folder")
         if dir_path:
             self.voice_output_folder_edit.setText(dir_path)
+            if hasattr(self, "final_output_folder_edit"):
+                self.final_output_folder_edit.setText(dir_path)
 
     def run_voiceover(self):
         translated_srt = self.translated_text.toPlainText().strip()
@@ -1390,7 +2240,7 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_voiceover_finished(self, voice_track, mixed, error):
         self.voiceover_btn.setEnabled(True)
-        self.voiceover_btn.setText("Generate Vietnamese Voice + Mix")
+        self.voiceover_btn.setText("Create Vietnamese Voice")
         self.progress_bar.setValue(100)
 
         if error:
@@ -1416,12 +2266,18 @@ class VideoTranslatorGUI(QMainWindow):
         video_path = self.video_path_edit.text().strip()
         # Prefer explicitly selected mixed audio (if any)
         chosen = self.mixed_audio_edit.text().strip()
-        audio_path = (chosen or self.processed_artifacts.get("mixed_vi") or self.last_mixed_vi_path or "").strip()
+        audio_path = (
+            chosen
+            or self.processed_artifacts.get("mixed_vi")
+            or self.last_mixed_vi_path
+            or self.last_voice_vi_path
+            or ""
+        ).strip()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self, "Error", "Video file not found. Please select a video first.")
             return
         if not audio_path or not os.path.exists(audio_path):
-            QMessageBox.warning(self, "Error", "Mixed audio not found. Please run STEP 4 to generate mixed audio first.")
+            QMessageBox.warning(self, "Error", "Vietnamese audio not found. Please create a voice track first.")
             return
 
         # Use a unique preview filename to avoid file locks/caching in QMediaPlayer.
@@ -1448,7 +2304,7 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_preview_ready(self, preview_path, error):
         self.preview_btn.setEnabled(True)
-        self.preview_btn.setText("Preview Video with Mixed Audio")
+        self.preview_btn.setText("Preview Video with Vietnamese Voice")
         self.progress_bar.setValue(100)
 
         if error:
@@ -1460,16 +2316,21 @@ class VideoTranslatorGUI(QMainWindow):
             self.last_preview_video_path = preview_path
             self.processed_artifacts["preview_video"] = preview_path
             self.log(f"[Preview] ready={preview_path}")
+            self.refresh_video_dimensions(preview_path)
             self.media_player.setSource(QUrl.fromLocalFile(preview_path))
             self.play_btn.setText("Play")
-            QMessageBox.information(self, "Preview Ready", "Loaded preview video (original video + mixed Vietnamese audio) into the player.\nPress Play to preview.")
+            QMessageBox.information(
+                self,
+                "Preview Ready",
+                "Loaded the preview video into the player.\nPress Play to review it, then click 'Export Final Video' when you are satisfied.",
+            )
             self._pipeline_done()
             # Keep subtitles as selected source
             self.apply_segments_to_timeline()
             self.refresh_ui_state()
 
     def run_all_pipeline(self):
-        """One-click pipeline: Extract -> Separate -> Transcribe -> Translate -> Voiceover -> Preview."""
+        """Guided pipeline based on the selected output mode."""
         v_path = self.video_path_edit.text().strip()
         if not v_path or not os.path.exists(v_path):
             QMessageBox.warning(self, "Error", "Please select a video first.")
@@ -1477,7 +2338,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._pipeline_active = True
         self._pipeline_step = "start"
         self.run_all_btn.setEnabled(False)
-        self.run_all_btn.setText("Running... (Auto)")
+        self.run_all_btn.setText("Processing...")
         self.run_extraction()
 
     def _pipeline_advance(self, completed_step: str):
@@ -1485,7 +2346,11 @@ class VideoTranslatorGUI(QMainWindow):
             return
 
         # Decide next step
+        mode = self.get_output_mode_key()
         if completed_step == "extraction":
+            if mode == "subtitle":
+                self.run_transcription()
+                return
             self.run_vocal_separation()
             return
         if completed_step == "separation":
@@ -1495,10 +2360,17 @@ class VideoTranslatorGUI(QMainWindow):
             self.run_translation()
             return
         if completed_step == "translation":
+            if mode == "subtitle":
+                self._pipeline_done()
+                QMessageBox.information(
+                    self,
+                    "Ready",
+                    "Vietnamese subtitles are ready.\n\nReview them if needed, then click 'Export Final Video'.",
+                )
+                return
             self.run_voiceover()
             return
         if completed_step == "voiceover":
-            # If user picked an existing mixed audio, preview uses it; otherwise uses generated mixed
             self.preview_video_with_mixed_audio()
             return
 
@@ -1508,7 +2380,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._pipeline_active = False
         self._pipeline_step = ""
         self.run_all_btn.setEnabled(True)
-        self.run_all_btn.setText("Run All (Auto) → Preview")
+        self.run_all_btn.setText("Create Vietnamese Output")
 
     def _pipeline_done(self):
         if not self._pipeline_active:
@@ -1516,7 +2388,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._pipeline_active = False
         self._pipeline_step = ""
         self.run_all_btn.setEnabled(True)
-        self.run_all_btn.setText("Run All (Auto) → Preview")
+        self.run_all_btn.setText("Create Vietnamese Output")
 
     def open_folder(self, path):
         try:
@@ -1546,8 +2418,25 @@ class VideoTranslatorGUI(QMainWindow):
         lines.append(fmt("Vietnamese Voice (TTS)", self.processed_artifacts.get('voice_vi') or self.last_voice_vi_path))
         lines.append(fmt("Mixed Audio (BG + VI Voice)", self.processed_artifacts.get('mixed_vi') or self.last_mixed_vi_path))
         lines.append(fmt("Preview Video (temp)", self.processed_artifacts.get('preview_video') or self.last_preview_video_path))
+        lines.append(fmt("Final Exported Video", self.processed_artifacts.get('final_video') or self.last_exported_video_path))
 
         QMessageBox.information(self, "Processed Files", "\n\n".join(lines))
+
+    def cleanup_temp_preview_files(self):
+        paths = [
+            self.last_exact_preview_5s_path,
+            self.last_exact_preview_frame_path,
+            os.path.join(os.getcwd(), "temp", "preview_subtitle_5s.srt"),
+            os.path.join(os.getcwd(), "temp", "preview_subtitle_full.srt"),
+        ]
+        for path in paths:
+            self.cleanup_file_if_exists(path)
+
+    def closeEvent(self, event):
+        try:
+            self.cleanup_temp_preview_files()
+        finally:
+            super().closeEvent(event)
 
     def toggle_play(self):
         if self.media_player.playbackState() == QMediaPlayer.PlayingState:
@@ -1567,16 +2456,6 @@ class VideoTranslatorGUI(QMainWindow):
     def position_changed(self, position):
         self.timeline.set_position(position)
         self.update_duration_label(position, self.media_player.duration())
-        
-        # Live Subtitle Preview
-        pos_sec = position / 1000.0
-        active_text = ""
-        segs = self.get_active_segments()
-        for seg in segs:
-            if seg['start'] <= pos_sec <= seg['end']:
-                active_text = seg['text']
-                break
-        self.video_view.subtitle_item.set_text(active_text)
 
     def duration_changed(self, duration):
         self.timeline.set_duration(duration)

@@ -1,5 +1,23 @@
-/app/__pycache__/*
-/models/*
-/output/*
-/temp/*
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# Local environment config
 .env
+
+# Runtime/generated assets
+output/
+temp/
+
+# Local model files
+models/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

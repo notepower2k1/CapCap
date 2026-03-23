@@ -1,0 +1,8 @@
+PySide6
+requests
+python-dotenv
+pydub
+edge-tts
+demucs
+soundfile
+numpy
