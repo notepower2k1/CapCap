@@ -1,5 +1,6 @@
 import sys
 import os
+import time
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit,
                              QFileDialog, QCheckBox, QTextEdit, QComboBox,
@@ -542,9 +543,9 @@ class VideoTranslatorGUI(QMainWindow):
             }
         """)
 
-        self.setup_ui()
-        self.setup_media_player()
-
+        # -----------------------------
+        # State (must exist before setup_ui)
+        # -----------------------------
         # Track generated/selected artifacts for quick inspection.
         # Keys are stable IDs, values are absolute file paths.
         self.processed_artifacts = {}
@@ -552,6 +553,18 @@ class VideoTranslatorGUI(QMainWindow):
         # Simple pipeline runner (Run All)
         self._pipeline_active = False
         self._pipeline_step = ""
+
+        # Subtitle sources
+        # - Original: generated from STEP 2 (or auto-detected from video)
+        # - Edited: current content in STEP 3 textbox (translated or external SRT loaded)
+        self.external_srt_path = ""
+        self.subtitle_source = "Edited"  # None | Original | Edited
+
+        # Log buffer (UI panel)
+        self._log_lines = []
+
+        self.setup_ui()
+        self.setup_media_player()
 
     def parse_srt_to_segments(self, srt_text):
         """Standard SRT parser to convert back to segments list for the timeline."""
@@ -756,6 +769,10 @@ class VideoTranslatorGUI(QMainWindow):
         self.translate_btn = QPushButton("Run AI Translation")
         self.translate_btn.setObjectName("mainActionBtn")
 
+        # Load external SRT directly into the editor (user can edit then apply)
+        self.load_external_srt_btn = QPushButton("Load External SRT into Editor")
+        self.load_external_srt_btn.clicked.connect(self.load_external_srt_into_editor)
+
         self.apply_translated_btn = QPushButton("Apply Edited SRT to Timeline")
         self.apply_translated_btn.clicked.connect(self.apply_edited_translation)
         
@@ -763,6 +780,7 @@ class VideoTranslatorGUI(QMainWindow):
         translate_layout.addWidget(self.lang_target_combo)
         translate_layout.addWidget(self.translated_text)
         translate_layout.addWidget(self.translate_btn)
+        translate_layout.addWidget(self.load_external_srt_btn)
         translate_layout.addWidget(self.apply_translated_btn)
         subtitles_layout.addWidget(translate_group)
 
@@ -858,15 +876,23 @@ class VideoTranslatorGUI(QMainWindow):
         artifacts_layout.addWidget(self.open_output_btn)
         tools_layout.addWidget(artifacts_group)
 
-        # Manual Controls
-        manual_group = QGroupBox("EXTERNAL TOOLS")
-        manual_layout = QVBoxLayout(manual_group)
-        
-        browse_srt_btn = QPushButton("Load External SRT for Preview")
-        browse_srt_btn.clicked.connect(self.browse_srt)
-        manual_layout.addWidget(browse_srt_btn)
-        
-        tools_layout.addWidget(manual_group)
+        # Log / details panel
+        log_group = QGroupBox("LOG (Details)")
+        log_layout = QVBoxLayout(log_group)
+        self.log_view = QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setPlaceholderText("Errors and detailed logs will appear here...")
+        log_btns = QHBoxLayout()
+        self.log_copy_btn = QPushButton("Copy Log")
+        self.log_copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(self.log_view.toPlainText()))
+        self.log_clear_btn = QPushButton("Clear Log")
+        self.log_clear_btn.clicked.connect(self.clear_log)
+        log_btns.addWidget(self.log_copy_btn)
+        log_btns.addWidget(self.log_clear_btn)
+        log_layout.addWidget(self.log_view)
+        log_layout.addLayout(log_btns)
+        tools_layout.addWidget(log_group)
+
         tools_layout.addStretch()
         tools_layout.addWidget(QLabel("Video Information Extractor v2.0"))
 
@@ -897,6 +923,12 @@ class VideoTranslatorGUI(QMainWindow):
         self.stop_btn = QPushButton("Stop")
         controls_layout.addWidget(self.play_btn)
         controls_layout.addWidget(self.stop_btn)
+        controls_layout.addWidget(QLabel("Subtitles:"))
+        self.subtitle_source_combo = QComboBox()
+        self.subtitle_source_combo.addItems(["None", "Original", "Edited"])
+        self.subtitle_source_combo.setCurrentText(self.subtitle_source)
+        self.subtitle_source_combo.currentTextChanged.connect(self.on_subtitle_source_changed)
+        controls_layout.addWidget(self.subtitle_source_combo)
         controls_layout.addStretch()
         controls_layout.addWidget(self.time_label)
         
@@ -937,6 +969,74 @@ class VideoTranslatorGUI(QMainWindow):
         self.last_mixed_vi_path = ""
         self.last_preview_video_path = ""
 
+        # Initial button states
+        self.refresh_ui_state()
+
+    # -----------------------------
+    # Logging + error helpers
+    # -----------------------------
+    def log(self, message: str):
+        if not message:
+            return
+        self._log_lines.append(str(message))
+        # keep last ~500 lines
+        if len(self._log_lines) > 500:
+            self._log_lines = self._log_lines[-500:]
+        self.log_view.setPlainText("\n".join(self._log_lines))
+        self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())
+
+    def clear_log(self):
+        self._log_lines = []
+        if hasattr(self, "log_view"):
+            self.log_view.setPlainText("")
+
+    def show_error(self, title: str, short_msg: str, details: str = ""):
+        if details:
+            self.log(f"[{title}] {details}")
+            QMessageBox.critical(self, title, f"{short_msg}\n\n(See LOG tab for details)")
+        else:
+            QMessageBox.critical(self, title, short_msg)
+
+    # -----------------------------
+    # Subtitle source handling
+    # -----------------------------
+    def get_active_segments(self):
+        src = self.subtitle_source_combo.currentText() if hasattr(self, "subtitle_source_combo") else self.subtitle_source
+        if src == "None":
+            return []
+        if src == "Edited":
+            return self.current_translated_segments or []
+        return self.current_segments or []
+
+    def apply_segments_to_timeline(self):
+        segs = self.get_active_segments()
+        self.timeline.set_segments(segs if segs else [])
+        if segs:
+            self.video_view.subtitle_item.show()
+        else:
+            self.video_view.subtitle_item.hide()
+
+    def on_subtitle_source_changed(self, value: str):
+        self.subtitle_source = value
+        self.apply_segments_to_timeline()
+
+    def refresh_ui_state(self):
+        """Basic enable/disable rules to guide user flow."""
+        v_ok = bool(self.video_path_edit.text().strip()) and os.path.exists(self.video_path_edit.text().strip())
+        a_ok = bool(self.audio_source_edit.text().strip()) and os.path.exists(self.audio_source_edit.text().strip())
+        has_translated_text = bool(self.translated_text.toPlainText().strip())
+        has_mixed = bool((self.mixed_audio_edit.text().strip() and os.path.exists(self.mixed_audio_edit.text().strip()))
+                         or (self.last_mixed_vi_path and os.path.exists(self.last_mixed_vi_path)))
+
+        self.extract_btn.setEnabled(v_ok)
+        self.vocal_sep_btn.setEnabled(a_ok)
+        self.transcribe_btn.setEnabled(a_ok)
+        self.translate_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()))
+        self.apply_translated_btn.setEnabled(has_translated_text)
+        self.voiceover_btn.setEnabled(has_translated_text)
+        self.preview_btn.setEnabled(v_ok and has_mixed)
+        self.run_all_btn.setEnabled(v_ok and not self._pipeline_active)
+
     def run_extraction(self):
         v_path = self.video_path_edit.text()
         if not v_path: return
@@ -959,10 +1059,11 @@ class VideoTranslatorGUI(QMainWindow):
             self.processed_artifacts["audio_extracted"] = path
             QMessageBox.information(self, "Success", "Audio extraction completed!")
         else:
-            QMessageBox.critical(self, "Error", f"Extraction failed: {path}")
+            self.show_error("Error", "Extraction failed.", str(path))
             self._pipeline_fail("Extraction failed.")
             return
 
+        self.refresh_ui_state()
         self._pipeline_advance("extraction")
 
     def run_vocal_separation(self):
@@ -1005,6 +1106,8 @@ class VideoTranslatorGUI(QMainWindow):
                 )
             else:
                 QMessageBox.critical(self, "Error", f"Separation failed:\n\n{error}")
+            self.log(error)
+            self.refresh_ui_state()
             return
         
         if vocal and os.path.exists(vocal):
@@ -1023,6 +1126,7 @@ class VideoTranslatorGUI(QMainWindow):
             self._pipeline_advance("separation")
         else:
             self._pipeline_fail("Separation did not produce output.")
+        self.refresh_ui_state()
 
     def run_transcription(self):
         audio_src = self.audio_source_edit.text()
@@ -1052,8 +1156,9 @@ class VideoTranslatorGUI(QMainWindow):
         self.progress_bar.setValue(60)
         
         # Update Timeline with segments
-        self.timeline.set_segments(segments)
-        self.video_view.subtitle_item.show()
+        # Store but don't override user's subtitle source choice unless it's Original.
+        if self.subtitle_source_combo.currentText() in ("Original", "None"):
+            self.apply_segments_to_timeline()
         
         # Display as SRT
         srt_text = self.format_to_srt(segments)
@@ -1074,6 +1179,7 @@ class VideoTranslatorGUI(QMainWindow):
         else:
             QMessageBox.information(self, "Success", "Transcription completed!")
 
+        self.refresh_ui_state()
         self._pipeline_advance("transcription")
 
     def run_translation(self):
@@ -1106,9 +1212,11 @@ class VideoTranslatorGUI(QMainWindow):
         
         # Display as SRT
         self.translated_text.setText(translated_srt)
+        # Make Edited the active subtitle source by default
+        self.subtitle_source_combo.setCurrentText("Edited")
         
-        # Update Timeline with translated segments
-        self.apply_edited_translation(show_message=False)
+        # Store translated segments; only apply to timeline if user chooses Translated.
+        self.apply_edited_translation(show_message=False, force_apply=(self.subtitle_source_combo.currentText() == "Edited"))
         
         # Auto-save SRT and update Section 4
         v_path = self.video_path_edit.text()
@@ -1128,10 +1236,11 @@ class VideoTranslatorGUI(QMainWindow):
         else:
             QMessageBox.information(self, "Finished", "Translation complete!")
 
+        self.refresh_ui_state()
         self._pipeline_advance("translation")
 
-    def apply_edited_translation(self, show_message=True):
-        """Re-parse current translated SRT text and apply to timeline/preview."""
+    def apply_edited_translation(self, show_message=True, force_apply=True):
+        """Re-parse STEP 3 SRT text (translated or external). Apply to timeline only when desired."""
         srt_text = self.translated_text.toPlainText()
         segs = self.parse_srt_to_segments(srt_text)
         if not segs:
@@ -1140,12 +1249,13 @@ class VideoTranslatorGUI(QMainWindow):
             return False
 
         self.current_translated_segments = segs
-        self.timeline.set_segments(segs)
-        self.video_view.subtitle_item.show()
-        self.video_view.reposition_subtitle()
+        if force_apply:
+            self.apply_segments_to_timeline()
+            self.video_view.reposition_subtitle()
 
         if show_message:
             QMessageBox.information(self, "Applied", f"Applied edited translation to timeline.\nSegments: {len(segs)}")
+        self.refresh_ui_state()
         return True
 
 
@@ -1174,6 +1284,7 @@ class VideoTranslatorGUI(QMainWindow):
             self.timeline.set_playing(False)
             self.current_segments = []
             self.current_translated_segments = []
+            # Do not wipe external; keep it until user clears/changes source.
             
             # Auto-detect matching SRT
             base_no_ext = os.path.splitext(file_path)[0]
@@ -1186,8 +1297,10 @@ class VideoTranslatorGUI(QMainWindow):
                             segs = self.parse_srt_to_segments(f.read())
                             if segs:
                                 self.current_segments = segs # Treat as current
-                                self.timeline.set_segments(segs)
-                                self.video_view.subtitle_item.show() # Auto-show preview
+                                # Only auto-apply if user is on Original/None (avoid overwriting External choice)
+                                if self.subtitle_source_combo.currentText() in ("Original", "None"):
+                                    self.apply_segments_to_timeline()
+                                    self.video_view.subtitle_item.show() # Auto-show preview
                                 break
                     except: pass
 
@@ -1197,6 +1310,7 @@ class VideoTranslatorGUI(QMainWindow):
             
             # Refresh position once video settles
             QTimer.singleShot(500, self.video_view.reposition_subtitle)
+            self.refresh_ui_state()
 
 
 
@@ -1214,20 +1328,22 @@ class VideoTranslatorGUI(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open Audio", "", "Audio Files (*.wav *.mp3 *.flac)")
         if file_path:
             self.audio_source_edit.setText(file_path)
-    def browse_srt(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Subtitle", "", "SRT Files (*.srt)")
-        if file_path:
-            # Load SRT into timeline
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    segs = self.parse_srt_to_segments(content)
-                    if segs:
-                        self.current_segments = segs
-                        self.timeline.set_segments(segs)
-                        self.video_view.subtitle_item.show()
-            except Exception as e:
-                print(f"Error loading SRT to timeline: {e}")
+    def load_external_srt_into_editor(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Load External SRT", "", "SRT Files (*.srt)")
+        if not file_path:
+            return
+        try:
+            with open(file_path, "r", encoding="utf-8-sig") as f:
+                content = f.read()
+            # Populate STEP 3 editor so user can edit then apply.
+            self.external_srt_path = file_path
+            self.translated_text.setText(content)
+            self.processed_artifacts["srt_external_loaded"] = file_path
+            self.subtitle_source_combo.setCurrentText("Edited")
+            QMessageBox.information(self, "Loaded", "External SRT loaded into editor.\nEdit if needed, then click 'Apply Edited SRT to Timeline'.")
+        except Exception as e:
+            self.show_error("Error", "Failed to load external SRT into editor.", str(e))
+        self.refresh_ui_state()
 
     def browse_background_audio(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open Background Audio", "", "Audio Files (*.wav *.mp3 *.flac)")
@@ -1308,7 +1424,20 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.warning(self, "Error", "Mixed audio not found. Please run STEP 4 to generate mixed audio first.")
             return
 
-        preview_out = os.path.join(os.getcwd(), "temp", "preview_vi_voice.mp4")
+        # Use a unique preview filename to avoid file locks/caching in QMediaPlayer.
+        ts = int(time.time())
+        preview_out = os.path.join(os.getcwd(), "temp", f"preview_vi_voice_{ts}.mp4")
+
+        # Stop/clear current source to avoid locking the previous preview file.
+        try:
+            self.media_player.stop()
+            self.media_player.setSource(QUrl())
+        except Exception:
+            pass
+
+        self.log(f"[Preview] video={video_path}")
+        self.log(f"[Preview] audio={audio_path}")
+        self.log(f"[Preview] out={preview_out}")
         self.preview_btn.setEnabled(False)
         self.preview_btn.setText("Preparing preview...")
         self.progress_bar.setValue(95)
@@ -1323,17 +1452,21 @@ class VideoTranslatorGUI(QMainWindow):
         self.progress_bar.setValue(100)
 
         if error:
-            QMessageBox.critical(self, "Error", f"Preview failed:\n\n{error}")
+            self.show_error("Error", "Preview failed.", str(error))
             self._pipeline_fail("Preview failed.")
             return
 
         if preview_path and os.path.exists(preview_path):
             self.last_preview_video_path = preview_path
             self.processed_artifacts["preview_video"] = preview_path
+            self.log(f"[Preview] ready={preview_path}")
             self.media_player.setSource(QUrl.fromLocalFile(preview_path))
             self.play_btn.setText("Play")
             QMessageBox.information(self, "Preview Ready", "Loaded preview video (original video + mixed Vietnamese audio) into the player.\nPress Play to preview.")
             self._pipeline_done()
+            # Keep subtitles as selected source
+            self.apply_segments_to_timeline()
+            self.refresh_ui_state()
 
     def run_all_pipeline(self):
         """One-click pipeline: Extract -> Separate -> Transcribe -> Translate -> Voiceover -> Preview."""
@@ -1438,8 +1571,7 @@ class VideoTranslatorGUI(QMainWindow):
         # Live Subtitle Preview
         pos_sec = position / 1000.0
         active_text = ""
-        # Use translated segments if they exist, otherwise original
-        segs = self.current_translated_segments if self.current_translated_segments else self.current_segments
+        segs = self.get_active_segments()
         for seg in segs:
             if seg['start'] <= pos_sec <= seg['end']:
                 active_text = seg['text']
