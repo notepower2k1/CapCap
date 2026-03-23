@@ -12,11 +12,14 @@ venv/
 .env
 
 # Runtime/generated assets
-output/
-temp/
+output/**
+!output/.gitkeep
+temp/**
+!temp/.gitkeep
 
 # Local model files
-models/
+models/**
+!models/.gitkeep
 
 # OS/editor noise
 .DS_Store
