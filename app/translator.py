@@ -35,4 +35,4 @@ def translate_segments(segments, model_path=None, src_lang="auto", enable_polish
     )
     if not result.success:
         raise TranslationError("; ".join(result.errors) or "Translation failed.")
-    return to_srt(result.segments)
+    return result.segments

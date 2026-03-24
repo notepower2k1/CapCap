@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
@@ -16,10 +17,15 @@ output/**
 !output/.gitkeep
 temp/**
 !temp/.gitkeep
+projects/**
+!projects/.gitkeep
 
 # Local model files
 models/**
 !models/.gitkeep
+
+# Test/cache noise
+.pytest_cache/
 
 # OS/editor noise
 .DS_Store

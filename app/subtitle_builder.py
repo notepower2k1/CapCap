@@ -1,5 +1,7 @@
 import os
 
+from core.models import coerce_segments
+
 def format_timestamp(seconds):
     """
     Converts seconds to SRT timestamp format: HH:MM:SS,mmm
@@ -19,11 +21,12 @@ def generate_srt(segments, output_path):
         output_path (str): Path to save the .srt file.
     """
     try:
+        normalized_segments = coerce_segments(segments)
         with open(output_path, 'w', encoding='utf-8') as f:
-            for i, seg in enumerate(segments, 1):
-                start = format_timestamp(seg['start'])
-                end = format_timestamp(seg['end'])
-                text = seg['text']
+            for i, seg in enumerate(normalized_segments, 1):
+                start = format_timestamp(seg.start)
+                end = format_timestamp(seg.end)
+                text = seg.subtitle_text
                 
                 f.write(f"{i}\n")
                 f.write(f"{start} --> {end}\n")
