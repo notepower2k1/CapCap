@@ -29,6 +29,7 @@ from .media_utils import (
     update_frame_preview_thumbnail,
 )
 from .settings_utils import load_user_settings, save_user_settings
+from .media_backend import create_media_backend
 
 __all__ = [
     "browse_audio_folder",
@@ -41,6 +42,7 @@ __all__ = [
     "cleanup_file_if_exists",
     "cleanup_temp_preview_files",
     "clear_log",
+    "create_media_backend",
     "duration_changed",
     "load_user_settings",
     "log_message",

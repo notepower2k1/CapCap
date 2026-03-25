@@ -56,6 +56,9 @@ class EngineRuntime:
             subtitle_style=subtitle_style,
         )
 
+    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str) -> bool:
+        return self.ffmpeg.embed_ass_subtitles(video_path, ass_path, output_path)
+
     def get_video_dimensions(self, video_path: str):
         return self.ffmpeg.get_video_dimensions(video_path)
 

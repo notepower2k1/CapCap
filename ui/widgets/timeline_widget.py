@@ -45,6 +45,8 @@ class TimelineWidget(QGraphicsView):
         self.playhead = None
         self.is_moving_playhead = False
         self._playing = False
+        self._active_segment_index = -1
+        self._last_position_ms = 0
 
     def set_playing(self, playing):
         self._playing = playing
@@ -56,6 +58,12 @@ class TimelineWidget(QGraphicsView):
     def set_segments(self, segments):
         self.segments = segments
         self.refresh()
+
+    def set_active_segment_index(self, index):
+        index = int(index)
+        if index != self._active_segment_index:
+            self._active_segment_index = index
+            self.refresh()
 
     def refresh(self):
         self._scene.clear()
@@ -78,12 +86,15 @@ class TimelineWidget(QGraphicsView):
 
         row_y = 35
         row_h = 35
-        for seg in self.segments:
+        for idx, seg in enumerate(self.segments):
             start_x = seg["start"] * self.pixels_per_second
             end_x = seg["end"] * self.pixels_per_second
             seg_w = max(2, end_x - start_x)
+            is_active = idx == self._active_segment_index
+            fill_color = QColor(110, 231, 214, 190) if is_active else QColor(41, 121, 255, 120)
+            border_color = QColor(110, 231, 214) if is_active else QColor(60, 60, 60)
 
-            rect = self._scene.addRect(0, 0, seg_w, row_h, QPen(QColor(60, 60, 60), 1), QColor(41, 121, 255, 120))
+            rect = self._scene.addRect(0, 0, seg_w, row_h, QPen(border_color, 1), fill_color)
             rect.setPos(start_x, row_y)
             rect.setToolTip(seg["text"])
 
@@ -91,14 +102,16 @@ class TimelineWidget(QGraphicsView):
             if len(clean_txt) > 25:
                 clean_txt = clean_txt[:22] + "..."
             text_item = self._scene.addText(clean_txt, QFont("Segoe UI", 8))
-            text_item.setDefaultTextColor(Qt.white)
+            text_item.setDefaultTextColor(QColor("#0b1620") if is_active else Qt.white)
             text_item.setPos(start_x + 4, row_y + 4)
 
         self.playhead = self._scene.addLine(0, 0, 0, 110, QPen(QColor(255, 40, 40), 2))
         if self.playhead:
             self.playhead.setZValue(1000)
+            self.set_position(self._last_position_ms)
 
     def set_position(self, ms):
+        self._last_position_ms = int(ms)
         if not self.playhead:
             return
         x_pos = (ms / 1000.0) * self.pixels_per_second

@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import time
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit,
@@ -9,8 +10,8 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy,
                              QRadioButton)
 from PySide6.QtCore import Qt, QUrl, QTimer, QSettings
-from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtGui import QColor, QPixmap, QTextCursor
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
 APP_PATH = os.path.join(os.path.dirname(__file__), '..', 'app')
 if APP_PATH not in sys.path:
@@ -29,6 +30,7 @@ from helpers import (
     get_output_mode_key,
     parse_srt_to_segments,
 )
+from video_processor import srt_to_ass
 from utils.display_utils import (
     cleanup_temp_preview_files as cleanup_temp_preview_files_impl,
     clear_log as clear_log_impl,
@@ -64,6 +66,7 @@ from views import build_main_window_ui
 from widgets import TimelineWidget, VideoView
 from workers import (
     ExtractionWorker,
+    SegmentAudioPreviewWorker,
     VocalSeparationWorker,
     VoiceOverWorker,
 )
@@ -77,6 +80,7 @@ class VideoTranslatorGUI(QMainWindow):
         super().__init__()
         self.setWindowTitle("Video Subtitle Translator - Antigravity")
         self.settings = QSettings("CapCap", "VideoTranslatorGUI")
+        self.setAcceptDrops(True)
         
         # Maximize and prevent resizing
         self.setWindowState(Qt.WindowMaximized)
@@ -303,6 +307,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         self.setup_ui()
         self.setup_media_player()
+        self.setup_audio_preview_player()
         self.load_user_settings()
 
     def parse_srt_to_segments(self, srt_text):
@@ -319,6 +324,13 @@ class VideoTranslatorGUI(QMainWindow):
 
     def setup_ui(self):
         build_main_window_ui(self)
+
+    def setup_audio_preview_player(self):
+        self.audio_preview_player = QMediaPlayer(self)
+        self.audio_preview_output = QAudioOutput(self)
+        self.audio_preview_player.setAudioOutput(self.audio_preview_output)
+        self._last_audio_preview_path = ""
+        self._segment_preview_threads = {}
 
     # -----------------------------
     # Logging + error helpers
@@ -382,6 +394,15 @@ class VideoTranslatorGUI(QMainWindow):
             self.auto_frame_preview_timer.stop()
             self.seek_frame_preview_timer.stop()
 
+    def schedule_live_subtitle_preview_refresh(self):
+        if not hasattr(self, "live_subtitle_preview_timer"):
+            return
+        self.live_subtitle_preview_timer.start()
+
+    def refresh_live_subtitle_preview(self):
+        self.live_preview_segments, self.live_preview_editor_name = self._resolve_live_preview_segments()
+        self.sync_live_subtitle_preview()
+
     def save_user_settings(self):
         save_user_settings_impl(self)
 
@@ -394,8 +415,8 @@ class VideoTranslatorGUI(QMainWindow):
             video_path=video_path,
             mode=self.get_output_mode_key(),
             translator_ai=self.is_ai_polish_enabled(),
-            input_language=self.lang_whisper_combo.currentText().strip() or "auto",
-            target_language="vi",
+            input_language=self.get_source_language_code(),
+            target_language=self.get_target_language_code(),
         )
         if not state:
             return None
@@ -491,7 +512,7 @@ class VideoTranslatorGUI(QMainWindow):
             return
         if getattr(self, "_pipeline_active", False):
             return
-        if self.media_player.playbackState() == QMediaPlayer.PlayingState:
+        if self.media_player.is_playing():
             return
         if not self.video_path_edit.text().strip() or not self.get_active_segments():
             return
@@ -499,7 +520,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.seek_frame_preview_timer.start()
 
     def trigger_seek_frame_preview(self):
-        if self.media_player.playbackState() == QMediaPlayer.PlayingState:
+        if self.media_player.is_playing():
             return
         self.start_exact_frame_preview(show_dialog=False)
 
@@ -513,6 +534,25 @@ class VideoTranslatorGUI(QMainWindow):
         value = self.output_mode_combo.currentText() if hasattr(self, "output_mode_combo") else "Vietnamese subtitles + voice"
         return get_output_mode_key(value)
 
+    def get_source_language_code(self):
+        if not hasattr(self, "lang_whisper_combo"):
+            return "auto"
+        value = self.lang_whisper_combo.currentData()
+        if value:
+            return str(value)
+        return self.lang_whisper_combo.currentText().strip() or "auto"
+
+    def get_target_language_code(self):
+        if not hasattr(self, "lang_target_combo"):
+            return "vi"
+        value = self.lang_target_combo.currentData()
+        if value:
+            return str(value)
+        label = self.lang_target_combo.currentText().strip().lower()
+        if "english" in label:
+            return "en"
+        return "vi"
+
     def is_ai_polish_enabled(self):
         return bool(getattr(self, "enable_ai_polish_cb", None) and self.enable_ai_polish_cb.isChecked())
 
@@ -521,6 +561,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.workflow_hint_label.setText(build_workflow_hint(mode, self.is_ai_polish_enabled()))
 
         show_voice = mode in ("voice", "both")
+        if hasattr(self, "voice_section_card"):
+            self.voice_section_card.setVisible(show_voice)
         self.voiceover_btn.setVisible(show_voice)
         self.preview_btn.setVisible(show_voice)
         self.mixed_audio_edit.setEnabled(show_voice)
@@ -528,6 +570,10 @@ class VideoTranslatorGUI(QMainWindow):
         self.use_existing_audio_radio.setVisible(show_voice)
         self.audio_source_hint_label.setVisible(show_voice)
 
+        if hasattr(self, "output_subtitle_radio"):
+            self.output_subtitle_radio.setChecked(mode == "subtitle")
+            self.output_voice_radio.setChecked(mode == "voice")
+            self.output_both_radio.setChecked(mode == "both")
         self.export_btn.setText(get_export_button_label(mode))
         self.refresh_ui_state()
 
@@ -546,7 +592,56 @@ class VideoTranslatorGUI(QMainWindow):
         self.workflow_status_badge.setText(guidance["badge"])
         self.next_step_label.setText(guidance["headline"])
         self.readiness_label.setText(guidance["readiness"])
+        self.update_progress_checklist()
         self.update_preview_context_label(guidance["has_subtitles"], guidance["has_voice_audio"])
+
+    def update_project_header(self):
+        video_path = self.video_path_edit.text().strip()
+        if video_path:
+            video_name = os.path.basename(video_path)
+            self.project_title_label.setText(f"Project: {video_name}")
+            self.upload_status_label.setText(f"✔ {video_name} uploaded")
+        else:
+            self.project_title_label.setText("Project: No video selected")
+            self.upload_status_label.setText("No video uploaded yet")
+
+    def toggle_controls_panel(self):
+        currently_visible = bool(getattr(self, "left_panel_scroll_area", None) and self.left_panel_scroll_area.isVisible())
+        self.set_controls_panel_visible(not currently_visible)
+
+    def set_controls_panel_visible(self, visible: bool):
+        if hasattr(self, "left_panel_scroll_area"):
+            self.left_panel_scroll_area.setVisible(visible)
+        if hasattr(self, "toggle_controls_btn"):
+            self.toggle_controls_btn.setText("Hide Controls" if visible else "Show Controls")
+
+    def update_progress_checklist(self):
+        steps = getattr(getattr(self, "current_project_state", None), "steps", {}) or {}
+
+        has_audio = bool(
+            (self.last_extracted_audio and os.path.exists(self.last_extracted_audio))
+            or (self.audio_source_edit.text().strip() and os.path.exists(self.audio_source_edit.text().strip()))
+            or steps.get("extract_audio") == "done"
+        )
+        has_subtitle = bool(self.current_segments or self.transcript_text.toPlainText().strip()) or steps.get("transcribe") == "done"
+        has_translation = bool(self.current_translated_segments or self.last_translated_srt_path) or steps.get("translate_raw") == "done"
+        has_voice = bool(self.resolve_selected_audio_path() and os.path.exists(self.resolve_selected_audio_path()))
+        translation_running = steps.get("translate_raw") == "running" or steps.get("refine_translation") == "running"
+        voice_running = steps.get("generate_tts") == "running" or steps.get("mix_audio") == "running"
+
+        self.progress_audio_label.setText(("✔ " if has_audio else "⬜ ") + "Audio analyzed")
+        self.progress_subtitle_label.setText(("✔ " if has_subtitle else "⬜ ") + "Subtitle created")
+        if translation_running:
+            self.progress_translate_label.setText("⏳ Translating...")
+        else:
+            self.progress_translate_label.setText(("✔ " if has_translation else "⬜ ") + "Translating")
+
+        if self.get_output_mode_key() == "subtitle":
+            self.progress_voice_label.setText("⬜ Generating voice (not needed)")
+        elif voice_running:
+            self.progress_voice_label.setText("⏳ Generating voice")
+        else:
+            self.progress_voice_label.setText(("✔ " if has_voice else "⬜ ") + "Generating voice")
 
     def update_preview_context_label(self, has_subtitles: bool, has_voice_audio: bool):
         subtitle_source = "Vietnamese review track" if self.current_translated_segments else ("original subtitle track" if self.current_segments else "no subtitle track yet")
@@ -566,7 +661,7 @@ class VideoTranslatorGUI(QMainWindow):
         if not color.isValid():
             return
         self.subtitle_color_hex = color.name().upper()
-        self.subtitle_color_btn.setText(f"Text Color: {self.subtitle_color_hex}")
+        self.subtitle_color_btn.setText(f"Color: {self.subtitle_color_hex}")
         self.update_subtitle_preview_style()
 
     def update_subtitle_preview_style(self):
@@ -589,6 +684,7 @@ class VideoTranslatorGUI(QMainWindow):
             bottom_offset=int(self.subtitle_bottom_offset_spin.value()),
         )
         self.video_view.reposition_subtitle()
+        self.sync_live_subtitle_preview()
         self.schedule_auto_frame_preview()
 
     def get_subtitle_export_style(self):
@@ -606,6 +702,7 @@ class VideoTranslatorGUI(QMainWindow):
             "font_color": self._hex_to_ass_color(self.subtitle_color_hex),
             "alignment": alignment_map.get(self.subtitle_align_combo.currentText(), 2),
             "margin_v": int(self.subtitle_bottom_offset_spin.value()),
+            "background_box": bool(getattr(self, "subtitle_background_cb", None) and self.subtitle_background_cb.isChecked()),
         }
 
     def refresh_video_dimensions(self, path: str):
@@ -633,6 +730,293 @@ class VideoTranslatorGUI(QMainWindow):
     def build_full_active_subtitle_srt(self):
         return self.preview_controller.build_full_active_subtitle_srt()
 
+    def _format_compact_editor_timestamp(self, seconds: float) -> str:
+        total_seconds = max(0, int(seconds))
+        minutes, sec = divmod(total_seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{sec:02d}"
+        return f"{minutes:02d}:{sec:02d}"
+
+    def _segment_editor_display_rows(self):
+        base_segments = self.current_segments or []
+        translated_segments = self.current_translated_segments or []
+        row_count = max(len(base_segments), len(translated_segments))
+        rows = []
+        for idx in range(row_count):
+            base = base_segments[idx] if idx < len(base_segments) else {}
+            translated = translated_segments[idx] if idx < len(translated_segments) else {}
+            reference = translated or base
+            rows.append(
+                {
+                    "start": float(reference.get("start", 0.0)),
+                    "end": float(reference.get("end", 0.0)),
+                    "original": str(base.get("text", "")),
+                    "translated": str(translated.get("text", "")),
+                }
+            )
+        return rows
+
+    def _clear_segment_editor_rows(self):
+        if not hasattr(self, "segment_editor_layout"):
+            return
+        while self.segment_editor_layout.count():
+            item = self.segment_editor_layout.takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget:
+                widget.deleteLater()
+            elif child_layout:
+                while child_layout.count():
+                    child_item = child_layout.takeAt(0)
+                    child_widget = child_item.widget()
+                    if child_widget:
+                        child_widget.deleteLater()
+
+    def toggle_original_subtitle_visibility(self):
+        show_original = bool(getattr(self, "show_original_subtitle_cb", None) and self.show_original_subtitle_cb.isChecked())
+        for row in getattr(self, "_segment_editor_rows", []):
+            row["original_label"].setVisible(show_original and bool(row["original_label"].text().strip()))
+
+    def sync_segment_editor_rows(self):
+        if not hasattr(self, "segment_editor_layout") or getattr(self, "_syncing_segment_editor", False):
+            return
+
+        self._syncing_segment_editor = True
+        try:
+            self._clear_segment_editor_rows()
+            self._segment_editor_rows = []
+            rows = self._segment_editor_display_rows()
+            if not rows:
+                empty_state = QFrame()
+                empty_state.setObjectName("statusCard")
+                empty_state.setMinimumHeight(180)
+                empty_state.setStyleSheet(
+                    "QFrame#statusCard { background-color: #132132; border: 1px dashed #35506f; border-radius: 16px; }"
+                )
+                empty_layout = QVBoxLayout(empty_state)
+                empty_layout.setContentsMargins(18, 18, 18, 18)
+                empty_layout.setSpacing(8)
+                empty_layout.addStretch()
+                empty_title = QLabel("Subtitle editor is waiting for content")
+                empty_title.setObjectName("statusHeadline")
+                empty_title.setAlignment(Qt.AlignCenter)
+                empty_body = QLabel("Subtitle editor will appear here once transcript or translation is ready.")
+                empty_body.setObjectName("helperLabel")
+                empty_body.setWordWrap(True)
+                empty_body.setAlignment(Qt.AlignCenter)
+                empty_layout.addWidget(empty_title)
+                empty_layout.addWidget(empty_body)
+                empty_layout.addStretch()
+                self.segment_editor_layout.addWidget(empty_state)
+                self.segment_editor_layout.addStretch()
+                return
+
+            show_original = bool(getattr(self, "show_original_subtitle_cb", None) and self.show_original_subtitle_cb.isChecked())
+            for idx, row in enumerate(rows):
+                card = QFrame()
+                card.setObjectName("statusCard")
+                card_layout = QVBoxLayout(card)
+                card_layout.setContentsMargins(12, 12, 12, 12)
+                card_layout.setSpacing(6)
+
+                header_layout = QHBoxLayout()
+                timestamp_label = QLabel(f"[{self._format_compact_editor_timestamp(row['start'])}]")
+                timestamp_label.setObjectName("sectionTitle")
+                preview_btn = QPushButton("🔊")
+                preview_btn.setFixedWidth(44)
+                preview_btn.clicked.connect(lambda _=False, idx=idx: self.preview_segment_audio(idx))
+                header_layout.addWidget(timestamp_label)
+                header_layout.addStretch()
+                header_layout.addWidget(preview_btn)
+                original_label = QLabel(row["original"] or "")
+                original_label.setWordWrap(True)
+                original_label.setObjectName("helperLabel")
+                original_label.setVisible(show_original and bool(row["original"].strip()))
+
+                arrow_label = QLabel("→")
+                arrow_label.setStyleSheet("font-size: 16px; font-weight: 700; color: #8ad7ff;")
+                translated_editor = QTextEdit()
+                translated_editor.setAcceptRichText(False)
+                translated_editor.setPlainText(row["translated"])
+                translated_editor.setMinimumHeight(60)
+                translated_editor.setMaximumHeight(92)
+                translated_editor.textChanged.connect(
+                    lambda idx=idx, editor=translated_editor: self.on_segment_translation_edited(idx, editor)
+                )
+
+                card_layout.addLayout(header_layout)
+                card_layout.addWidget(original_label)
+                card_layout.addWidget(arrow_label)
+                card_layout.addWidget(translated_editor)
+                self.segment_editor_layout.addWidget(card)
+                self._segment_editor_rows.append(
+                    {
+                        "frame": card,
+                        "original_label": original_label,
+                        "translated_editor": translated_editor,
+                        "preview_button": preview_btn,
+                    }
+                )
+
+            self.segment_editor_layout.addStretch()
+            self._set_segment_editor_highlight(self._find_active_segment_index(self.media_player.position(), self.live_preview_segments or self.get_active_segments()))
+        finally:
+            self._syncing_segment_editor = False
+
+    def sync_segment_editor_from_hidden_text(self):
+        if getattr(self, "_syncing_hidden_editor_text", False):
+            return
+
+        transcript_text = self.transcript_text.toPlainText().strip()
+        if transcript_text and not transcript_text.lower().startswith("transcribing..."):
+            parsed_transcript = self.parse_srt_to_segments(transcript_text)
+            if parsed_transcript:
+                self.current_segments = parsed_transcript
+
+        translated_text = self.translated_text.toPlainText().strip()
+        if translated_text and not translated_text.lower().startswith("translating with "):
+            base_segments = self.current_translated_segments or self.current_segments
+            parsed_translated = self._segments_from_editor_text(translated_text, base_segments)
+            if parsed_translated:
+                self.current_translated_segments = parsed_translated
+
+        self.sync_segment_editor_rows()
+
+    def _sync_hidden_translated_text_from_segments(self):
+        if getattr(self, "_syncing_segment_editor", False):
+            return
+        self._syncing_hidden_editor_text = True
+        try:
+            self.translated_text.setText(self.format_to_srt(self.current_translated_segments))
+        finally:
+            self._syncing_hidden_editor_text = False
+
+    def on_segment_translation_edited(self, index: int, editor: QTextEdit):
+        if getattr(self, "_syncing_segment_editor", False):
+            return
+
+        base_segments = self.current_segments or self.current_translated_segments
+        if not base_segments or index >= len(base_segments):
+            return
+
+        if len(self.current_translated_segments) != len(base_segments):
+            self.current_translated_segments = [
+                {
+                    "start": float(base.get("start", 0.0)),
+                    "end": float(base.get("end", 0.0)),
+                    "text": str(self.current_translated_segments[idx].get("text", "")) if idx < len(self.current_translated_segments) else "",
+                }
+                for idx, base in enumerate(base_segments)
+            ]
+
+        self.current_translated_segments[index]["text"] = editor.toPlainText().strip()
+        self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+        self._sync_hidden_translated_text_from_segments()
+        self.schedule_live_subtitle_preview_refresh()
+        self.refresh_ui_state()
+
+    def _set_segment_editor_highlight(self, active_index: int):
+        rows = getattr(self, "_segment_editor_rows", [])
+        for idx, row in enumerate(rows):
+            if idx == active_index:
+                row["frame"].setStyleSheet("QFrame#statusCard { background-color: #153149; border: 1px solid #5fb9ff; border-radius: 14px; }")
+                self.segment_editor_scroll.ensureWidgetVisible(row["frame"], 0, 36)
+            else:
+                row["frame"].setStyleSheet("")
+
+    def play_audio_preview_file(self, audio_path: str):
+        if not audio_path or not os.path.exists(audio_path):
+            raise FileNotFoundError("Audio preview file was not found.")
+        self.audio_preview_player.stop()
+        self.audio_preview_player.setSource(QUrl.fromLocalFile(audio_path))
+        self.audio_preview_player.play()
+        self._last_audio_preview_path = audio_path
+
+    def preview_current_audio_track(self):
+        audio_path = self.resolve_selected_audio_path()
+        if not audio_path or not os.path.exists(audio_path):
+            QMessageBox.warning(self, "Missing Voice", "Please generate voice first before using Preview audio.")
+            return
+        try:
+            self.play_audio_preview_file(audio_path)
+            self.log(f"[Audio Preview] playing {audio_path}")
+        except Exception as exc:
+            self.show_error("Audio Preview Failed", "Could not preview the current audio track.", str(exc))
+
+    def preview_segment_audio(self, index: int):
+        if index < 0 or index >= len(self.current_translated_segments or self.current_segments):
+            QMessageBox.warning(self, "Missing Subtitle", "This subtitle line is not ready yet.")
+            return
+
+        source_segments = self.current_translated_segments or self.current_segments
+        text = str(source_segments[index].get("text", "")).strip()
+        if not text:
+            QMessageBox.warning(self, "Missing Subtitle", "This subtitle line is empty.")
+            return
+
+        voice_name = str(self.voice_name_combo.currentData() or self.voice_name_combo.currentText()).strip() or "vi-VN-HoaiMyNeural"
+        row = self._segment_editor_rows[index] if index < len(self._segment_editor_rows) else None
+        if row:
+            row["preview_button"].setEnabled(False)
+            row["preview_button"].setText("...")
+
+        worker = SegmentAudioPreviewWorker(self.workspace_root, index, text, voice_name)
+        worker.finished.connect(self.on_segment_audio_preview_ready)
+        self._segment_preview_threads[index] = worker
+        worker.start()
+
+    def on_segment_audio_preview_ready(self, index: int, audio_path: str, error: str):
+        row = self._segment_editor_rows[index] if index < len(self._segment_editor_rows) else None
+        if row:
+            row["preview_button"].setEnabled(True)
+            row["preview_button"].setText("🔊")
+        self._segment_preview_threads.pop(index, None)
+
+        if error:
+            self.show_error("Audio Preview Failed", "Could not generate preview audio for this subtitle.", error)
+            return
+
+        try:
+            self.play_audio_preview_file(audio_path)
+        except Exception as exc:
+            self.show_error("Audio Preview Failed", "Could not play the generated preview audio.", str(exc))
+
+    def download_subtitle(self):
+        srt_text = self.translated_text.toPlainText().strip()
+        if not srt_text:
+            QMessageBox.warning(self, "Missing Subtitle", "No translated subtitle is ready yet.")
+            return
+        suggested_name = os.path.splitext(os.path.basename(self.video_path_edit.text().strip() or "subtitle"))[0] + "_vi.srt"
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Subtitle", suggested_name, "Subtitle Files (*.srt)")
+        if not file_path:
+            return
+        with open(file_path, "w", encoding="utf-8") as handle:
+            handle.write(srt_text)
+        QMessageBox.information(self, "Saved", f"Subtitle saved to:\n\n{file_path}")
+
+    def download_original_script(self):
+        script_text = self.transcript_text.toPlainText().strip()
+        if not script_text:
+            QMessageBox.warning(self, "Missing Script", "No original script is ready yet.")
+            return
+        base_name = os.path.splitext(os.path.basename(self.video_path_edit.text().strip() or "original"))[0] + "_original"
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Save Original Script",
+            base_name,
+            "Subtitle Files (*.srt);;Text Files (*.txt)",
+        )
+        if not file_path:
+            return
+        output_text = script_text
+        if "txt" in (selected_filter or "").lower() or file_path.lower().endswith(".txt"):
+            parsed_segments = self.parse_srt_to_segments(script_text)
+            output_text = "\n\n".join(seg.get("text", "").strip() for seg in parsed_segments if seg.get("text", "").strip())
+        with open(file_path, "w", encoding="utf-8") as handle:
+            handle.write(output_text)
+        QMessageBox.information(self, "Saved", f"Original script saved to:\n\n{file_path}")
+
     def on_export_finished(self, output_path, error):
         self.preview_controller.on_export_finished(output_path, error)
 
@@ -655,6 +1039,154 @@ class VideoTranslatorGUI(QMainWindow):
         segs = self.get_active_segments()
         self.timeline.set_segments(segs if segs else [])
         self.video_view.subtitle_item.hide()
+        self.sync_live_subtitle_preview()
+
+    def _segments_from_editor_text(self, srt_text: str, base_segments):
+        srt_text = (srt_text or "").strip()
+        if not srt_text:
+            return []
+
+        if self.keep_timeline_cb.isChecked() and base_segments:
+            edited_texts = self.extract_subtitle_text_entries(srt_text)
+            if edited_texts and len(edited_texts) == len(base_segments):
+                return [
+                    {
+                        "start": float(base["start"]),
+                        "end": float(base["end"]),
+                        "text": edited_texts[idx],
+                    }
+                    for idx, base in enumerate(base_segments)
+                ]
+
+        return self.parse_srt_to_segments(srt_text)
+
+    def _write_live_preview_assets(self, segments):
+        if not segments:
+            self.live_preview_subtitle_path = ""
+            self.live_preview_ass_path = ""
+            return "", ""
+
+        preview_dir = os.path.join(os.getcwd(), "temp")
+        os.makedirs(preview_dir, exist_ok=True)
+        preview_srt_path = os.path.join(preview_dir, "live_preview_subtitle.srt")
+
+        from subtitle_builder import generate_srt
+
+        generate_srt(segments, preview_srt_path)
+        self.live_preview_subtitle_path = preview_srt_path
+        video_path = self.video_path_edit.text().strip()
+        if video_path and os.path.exists(video_path):
+            self.refresh_video_dimensions(video_path)
+        video_width = getattr(self.video_view, "video_source_width", 0) or 1920
+        video_height = getattr(self.video_view, "video_source_height", 0) or 1080
+        self.live_preview_ass_path = srt_to_ass(
+            preview_srt_path,
+            video_width=video_width,
+            video_height=video_height,
+            alignment=self.get_subtitle_export_style().get("alignment", 2),
+            margin_v=self.get_subtitle_export_style().get("margin_v", 30),
+            font_name=self.get_subtitle_export_style().get("font_name", "Arial"),
+            font_size=self.get_subtitle_export_style().get("font_size", 18),
+            font_color=self.get_subtitle_export_style().get("font_color", "&H00FFFFFF"),
+            background_box=self.get_subtitle_export_style().get("background_box", False),
+        )
+        self.processed_artifacts["subtitle_preview_srt"] = self.live_preview_subtitle_path
+        self.processed_artifacts["subtitle_preview_ass"] = self.live_preview_ass_path
+        return self.live_preview_subtitle_path, self.live_preview_ass_path
+
+    def _resolve_live_preview_segments(self):
+        translated_text = self.translated_text.toPlainText().strip()
+        if translated_text and not translated_text.lower().startswith("translating with "):
+            base_segments = self.current_translated_segments or self.current_segments
+            translated_segments = self._segments_from_editor_text(translated_text, base_segments)
+            if translated_segments:
+                return translated_segments, "translated"
+
+        transcript_text = self.transcript_text.toPlainText().strip()
+        if transcript_text and not transcript_text.lower().startswith("transcribing..."):
+            transcript_segments = self._segments_from_editor_text(transcript_text, self.current_segments)
+            if transcript_segments:
+                return transcript_segments, "transcript"
+
+        return [], ""
+
+    def _resolve_live_preview_subtitle_path(self):
+        segments, editor_name = self._resolve_live_preview_segments()
+        self.live_preview_segments = segments
+        self.live_preview_editor_name = editor_name
+        return self._write_live_preview_assets(segments)
+
+    def _find_active_segment_index(self, position_ms: int, segments):
+        position_seconds = max(0.0, float(position_ms) / 1000.0)
+        for idx, seg in enumerate(segments or []):
+            if float(seg["start"]) <= position_seconds <= float(seg["end"]):
+                return idx
+        return -1
+
+    def _set_editor_highlight(self, editor, active_index: int):
+        if not editor:
+            return
+
+        selections = []
+        text = editor.toPlainText()
+        block_pattern = re.compile(
+            r"(^|\n\n)(\d+\n\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}\n.*?)(?=\n\n\d+\n|\Z)",
+            re.DOTALL,
+        )
+        chunks = [(match.start(2), match.end(2)) for match in block_pattern.finditer(text)]
+
+        if 0 <= active_index < len(chunks):
+            start, end = chunks[active_index]
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = editor.textCursor()
+            selection.cursor.setPosition(start)
+            selection.cursor.setPosition(end, QTextCursor.KeepAnchor)
+            selection.format.setBackground(QColor("#183248"))
+            selection.format.setForeground(QColor("#EAF6FF"))
+            selections.append(selection)
+            temp_cursor = editor.textCursor()
+            temp_cursor.setPosition(start)
+            editor.setTextCursor(temp_cursor)
+            editor.ensureCursorVisible()
+
+        editor.setExtraSelections(selections)
+
+    def update_playback_subtitle_highlight(self, position_ms: int):
+        try:
+            segments = self.live_preview_segments or self.get_active_segments()
+            active_index = self._find_active_segment_index(position_ms, segments)
+            self.timeline.set_active_segment_index(active_index)
+
+            target_editor = None
+            if self.live_preview_editor_name == "translated":
+                target_editor = self.translated_text
+            elif self.live_preview_editor_name == "transcript":
+                target_editor = self.transcript_text
+            elif self.current_translated_segments:
+                target_editor = self.translated_text
+            elif self.current_segments:
+                target_editor = self.transcript_text
+
+            self._set_segment_editor_highlight(active_index)
+            self._set_editor_highlight(self.translated_text, active_index if target_editor is self.translated_text else -1)
+            self._set_editor_highlight(self.transcript_text, active_index if target_editor is self.transcript_text else -1)
+        except Exception as exc:
+            self.log(f"[Preview] subtitle highlight skipped: {exc}")
+
+    def sync_live_subtitle_preview(self):
+        if not hasattr(self, "media_player"):
+            return
+        subtitle_srt_path, subtitle_ass_path = self._resolve_live_preview_subtitle_path()
+        subtitle_path = subtitle_ass_path or subtitle_srt_path
+        if not subtitle_path and self.current_translated_segments and self.last_translated_srt_path and os.path.exists(self.last_translated_srt_path):
+            subtitle_path = self.last_translated_srt_path
+        elif not subtitle_path and self.current_segments and self.last_original_srt_path and os.path.exists(self.last_original_srt_path):
+            subtitle_path = self.last_original_srt_path
+
+        if subtitle_path:
+            self.media_player.set_subtitle_file(subtitle_path, self.get_subtitle_export_style())
+        else:
+            self.media_player.clear_subtitle()
 
     def refresh_ui_state(self):
         """Basic enable/disable rules to guide user flow."""
@@ -684,6 +1216,8 @@ class VideoTranslatorGUI(QMainWindow):
         generated_mode = not self.using_existing_audio_source()
         self.voiceover_btn.setEnabled(has_translated_text and generated_mode and mode in ("voice", "both"))
         self.preview_btn.setEnabled(v_ok and has_voice_audio and mode in ("voice", "both"))
+        if hasattr(self, "preview_audio_btn"):
+            self.preview_audio_btn.setEnabled(has_voice_audio)
         if hasattr(self, "voice_name_combo"):
             self.voice_name_combo.setEnabled(generated_mode and mode in ("voice", "both"))
             self.bg_music_edit.setEnabled(generated_mode and mode in ("voice", "both"))
@@ -691,10 +1225,53 @@ class VideoTranslatorGUI(QMainWindow):
         self.preview_frame_btn.setEnabled(v_ok and bool(self.get_active_segments()))
         self.preview_5s_btn.setEnabled(v_ok)
         self.export_btn.setEnabled(can_export)
+        if hasattr(self, "download_subtitle_btn"):
+            self.download_subtitle_btn.setEnabled(bool(self.translated_text.toPlainText().strip()))
+        if hasattr(self, "download_original_btn"):
+            self.download_original_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()))
         if hasattr(self, "tabs"):
             self.tabs.setTabEnabled(1, v_ok)
             self.tabs.setTabEnabled(2, v_ok and mode in ("voice", "both"))
         self.update_guidance_panel()
+
+    def dragEnterEvent(self, event):
+        mime_data = event.mimeData()
+        if mime_data.hasUrls():
+            for url in mime_data.urls():
+                local_path = url.toLocalFile()
+                if local_path and os.path.splitext(local_path)[1].lower() in {".mp4", ".mkv", ".avi", ".mov"}:
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dropEvent(self, event):
+        mime_data = event.mimeData()
+        if not mime_data.hasUrls():
+            event.ignore()
+            return
+        for url in mime_data.urls():
+            local_path = url.toLocalFile()
+            if local_path and os.path.splitext(local_path)[1].lower() in {".mp4", ".mkv", ".avi", ".mov"}:
+                self.video_path_edit.setText(local_path)
+                self.media_player.setSource(QUrl.fromLocalFile(local_path))
+                self.refresh_video_dimensions(local_path)
+                self.play_btn.setText("Play")
+                self.timeline.set_segments([])
+                self.timeline.set_playing(False)
+                self.current_segments = []
+                self.current_translated_segments = []
+                self.current_segment_models = []
+                self.current_translated_segment_models = []
+                self.current_project_state = self.ensure_current_project()
+                self.load_project_context(self.current_project_state)
+                self.media_player.pause()
+                self.media_player.setPosition(0)
+                self.refresh_ui_state()
+                self.sync_live_subtitle_preview()
+                self.schedule_auto_frame_preview()
+                event.acceptProposedAction()
+                return
+        event.ignore()
 
     def run_extraction(self):
         v_path = self.video_path_edit.text()
@@ -810,7 +1387,10 @@ class VideoTranslatorGUI(QMainWindow):
         self.subtitle_controller.on_translation_finished(translated_srt, error)
 
     def apply_edited_translation(self, show_message=True, force_apply=True):
-        return self.subtitle_controller.apply_edited_translation(show_message=show_message, force_apply=force_apply)
+        result = self.subtitle_controller.apply_edited_translation(show_message=show_message, force_apply=force_apply)
+        if result:
+            self.sync_segment_editor_rows()
+        return result
 
 
 
@@ -851,7 +1431,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         out_dir = self.voice_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
         bg_path = self.bg_music_edit.text().strip()
-        voice_name = self.voice_name_combo.currentText().strip()
+        voice_name = str(self.voice_name_combo.currentData() or self.voice_name_combo.currentText()).strip()
         voice_gain = float(self.voice_gain_spin.value())
         bg_gain = float(self.bg_gain_spin.value())
 

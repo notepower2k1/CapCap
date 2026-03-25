@@ -2,14 +2,14 @@ import os
 import time
 
 from PySide6.QtCore import QTimer, QUrl
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+
+from .media_backend import create_media_backend
 
 
 def setup_media_player(gui):
-    gui.media_player = QMediaPlayer()
-    gui.audio_output = QAudioOutput()
-    gui.media_player.setAudioOutput(gui.audio_output)
-    gui.media_player.setVideoOutput(gui.video_view.video_item)
+    gui.media_player = create_media_backend(gui.video_view)
+    if hasattr(gui, "log"):
+        gui.log(f"[Preview] media backend: {gui.media_player.backend_name}")
 
     gui.play_btn.clicked.connect(gui.toggle_play)
     gui.stop_btn.clicked.connect(gui.stop_video)
@@ -28,7 +28,7 @@ def refresh_video_dimensions(gui, path: str, get_video_dimensions):
 
 
 def toggle_play(gui):
-    if gui.media_player.playbackState() == QMediaPlayer.PlayingState:
+    if gui.media_player.is_playing():
         gui.media_player.pause()
         gui.play_btn.setText("Play")
         gui.timeline.set_playing(False)
@@ -50,6 +50,11 @@ def stop_video(gui):
 def position_changed(gui, position):
     gui.timeline.set_position(position)
     update_duration_label(gui, position, gui.media_player.duration())
+    try:
+        gui.update_playback_subtitle_highlight(position)
+    except Exception as exc:
+        if hasattr(gui, "log"):
+            gui.log(f"[Preview] position highlight error: {exc}")
 
 
 def duration_changed(gui, duration):
@@ -60,6 +65,11 @@ def duration_changed(gui, duration):
 def set_position(gui, position):
     gui.media_player.setPosition(position)
     gui.timeline.set_position(position)
+    try:
+        gui.update_playback_subtitle_highlight(position)
+    except Exception as exc:
+        if hasattr(gui, "log"):
+            gui.log(f"[Preview] seek highlight error: {exc}")
     gui.schedule_seek_frame_preview()
 
 
@@ -112,6 +122,7 @@ def browse_video(gui):
     gui.media_player.setPosition(0)
     QTimer.singleShot(500, gui.video_view.reposition_subtitle)
     gui.refresh_ui_state()
+    gui.sync_live_subtitle_preview()
     gui.schedule_auto_frame_preview()
 
 

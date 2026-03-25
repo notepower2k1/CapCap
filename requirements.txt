@@ -6,3 +6,5 @@ edge-tts
 demucs
 soundfile
 numpy
+faster-whisper
+python-mpv

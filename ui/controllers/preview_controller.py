@@ -3,7 +3,7 @@ import time
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from workers import ExactFramePreviewWorker, FinalExportWorker, PreviewMuxWorker, QuickPreviewWorker
 
@@ -19,11 +19,9 @@ class PreviewController:
             return
 
         mode = self.gui.get_output_mode_key()
-        out_dir = os.path.join(os.getcwd(), "temp")
-        os.makedirs(out_dir, exist_ok=True)
-
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         translated_srt_path = self.gui.last_translated_srt_path
+        translated_ass_path = self.gui.live_preview_ass_path
         chosen_audio = self.gui.resolve_selected_audio_path()
 
         if mode in ("subtitle", "both") and (not translated_srt_path or not os.path.exists(translated_srt_path)):
@@ -38,12 +36,30 @@ class PreviewController:
             )
             return
 
+        default_dir = self.gui.final_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
+        os.makedirs(default_dir, exist_ok=True)
         if mode == "subtitle":
-            output_path = os.path.join(out_dir, f"{video_name}_sub_vi.mp4")
+            suggested_name = f"{video_name}_sub_vi.mp4"
         elif mode == "voice":
-            output_path = os.path.join(out_dir, f"{video_name}_voice_vi.mp4")
+            suggested_name = f"{video_name}_voice_vi.mp4"
         else:
-            output_path = os.path.join(out_dir, f"{video_name}_final_vi.mp4")
+            suggested_name = f"{video_name}_final_vi.mp4"
+
+        default_path = os.path.join(default_dir, suggested_name)
+        output_path, _ = QFileDialog.getSaveFileName(
+            self.gui,
+            "Export Final Video",
+            default_path,
+            "Video Files (*.mp4)",
+        )
+        if not output_path:
+            return
+        if not output_path.lower().endswith(".mp4"):
+            output_path += ".mp4"
+
+        chosen_dir = os.path.dirname(output_path)
+        if chosen_dir:
+            self.gui.final_output_folder_edit.setText(chosen_dir)
 
         self.gui.export_btn.setEnabled(False)
         self.gui.export_btn.setText("Exporting...")
@@ -57,6 +73,7 @@ class PreviewController:
             output_path=output_path,
             mode=mode,
             srt_path=translated_srt_path,
+            ass_path=translated_ass_path,
             audio_path=chosen_audio,
             subtitle_style=self.gui.get_subtitle_export_style(),
             project_state_path=project_state_path,
@@ -249,6 +266,7 @@ class PreviewController:
             self.gui.refresh_video_dimensions(output_path)
             self.gui.media_player.setSource(QUrl.fromLocalFile(output_path))
             self.gui.media_player.setPosition(0)
+            self.gui.sync_live_subtitle_preview()
             self.gui.play_btn.setText("Play")
             QMessageBox.information(
                 self.gui,
@@ -332,6 +350,7 @@ class PreviewController:
             self.gui.log(f"[Preview] ready={preview_path}")
             self.gui.refresh_video_dimensions(preview_path)
             self.gui.media_player.setSource(QUrl.fromLocalFile(preview_path))
+            self.gui.sync_live_subtitle_preview()
             self.gui.play_btn.setText("Play")
             QMessageBox.information(
                 self.gui,

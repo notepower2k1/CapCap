@@ -42,13 +42,16 @@ class ExportWorkflow:
         os.makedirs(tmp_dir, exist_ok=True)
         return os.path.join(tmp_dir, f"final_mux_{int(time.time())}.mp4")
 
-    def _export_subtitle_video(self, *, video_path: str, srt_path: str, output_path: str, subtitle_style):
-        ok = self.engine_runtime.embed_subtitles(
-            video_path,
-            srt_path,
-            output_path,
-            subtitle_style=self._subtitle_options(subtitle_style),
-        )
+    def _export_subtitle_video(self, *, video_path: str, srt_path: str, ass_path: str, output_path: str, subtitle_style):
+        if ass_path and os.path.exists(ass_path):
+            ok = self.engine_runtime.embed_ass_subtitles(video_path, ass_path, output_path)
+        else:
+            ok = self.engine_runtime.embed_subtitles(
+                video_path,
+                srt_path,
+                output_path,
+                subtitle_style=self._subtitle_options(subtitle_style),
+            )
         if not ok:
             raise RuntimeError("Failed to burn subtitles into the output video.")
 
@@ -59,6 +62,7 @@ class ExportWorkflow:
         output_path: str,
         mode: str,
         srt_path: str = "",
+        ass_path: str = "",
         audio_path: str = "",
         subtitle_style=None,
         project_state_path: str = "",
@@ -73,6 +77,7 @@ class ExportWorkflow:
                 self._export_subtitle_video(
                     video_path=video_path,
                     srt_path=srt_path,
+                    ass_path=ass_path,
                     output_path=output_path,
                     subtitle_style=subtitle_style,
                 )
@@ -84,6 +89,7 @@ class ExportWorkflow:
                 self._export_subtitle_video(
                     video_path=tmp_mux_path,
                     srt_path=srt_path,
+                    ass_path=ass_path,
                     output_path=output_path,
                     subtitle_style=subtitle_style,
                 )

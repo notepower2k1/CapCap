@@ -24,7 +24,7 @@ class PipelineController:
             self.gui.workspace_root,
             video_path,
             self.gui.get_output_mode_key(),
-            self.gui.lang_whisper_combo.currentText(),
+            self.gui.get_source_language_code(),
             self.gui.is_ai_polish_enabled(),
         )
         self.gui.prepare_workflow_thread.finished.connect(self.gui.on_prepare_workflow_finished)
@@ -104,7 +104,7 @@ class PipelineController:
         self.gui._pipeline_active = False
         self.gui._pipeline_step = ""
         self.gui.run_all_btn.setEnabled(True)
-        self.gui.run_all_btn.setText("Create Vietnamese Output")
+        self.gui.run_all_btn.setText("Generate")
 
     def pipeline_done(self):
         if not self.gui._pipeline_active:
@@ -112,4 +112,4 @@ class PipelineController:
         self.gui._pipeline_active = False
         self.gui._pipeline_step = ""
         self.gui.run_all_btn.setEnabled(True)
-        self.gui.run_all_btn.setText("Create Vietnamese Output")
+        self.gui.run_all_btn.setText("Generate")

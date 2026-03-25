@@ -68,7 +68,7 @@ Neu chon `Custom`, pipeline `Prepare` khong tu chay. User chon tung step rieng l
 
 Spec moi chia he thong thanh 3 lop:
 
-- `Engine layer`: wrap FFmpeg, Whisper, translator, refine, Demucs, TTS, subtitle, preview, export
+- `Engine layer`: wrap FFmpeg, faster-whisper, translator, refine, Demucs, TTS, subtitle, preview, export
 - `Workflow layer`: dieu phoi pipeline, resume, retry, skip step, quan ly state project
 - `UI layer`: hien thi state, nhan input, trigger workflow, hien thi preview va loi
 
@@ -112,8 +112,13 @@ Dieu nay co nghia la README hien tai mo ta huong phat trien chinh, khong khang d
 - Windows 10/11
 - Python 3.9+
 - FFmpeg / FFprobe trong `bin/`
-- Whisper binaries trong `bin/whisper/`
 - model files trong `models/`
+
+Ghi chu ASR:
+
+- CapCap hien dung `faster-whisper` qua Python package
+- model se duoc download va cache o lan dau tien theo model name dang dung
+- khong con can `whisper.cpp` binaries trong `bin/whisper/`
 
 ## Cai dat
 

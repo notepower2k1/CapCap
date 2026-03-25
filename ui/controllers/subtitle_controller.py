@@ -16,7 +16,7 @@ class SubtitleController:
             return
 
         model_path = os.path.join(os.getcwd(), "models", "ggml-medium.bin")
-        lang = self.gui.lang_whisper_combo.currentText()
+        lang = self.gui.get_source_language_code()
 
         self.gui.transcript_text.setText("Transcribing... please wait (Loading...)")
         self.gui.transcribe_btn.setEnabled(False)
@@ -72,7 +72,7 @@ class SubtitleController:
             return
 
         model_path = None
-        src_lang = self.gui.lang_whisper_combo.currentText()
+        src_lang = self.gui.get_source_language_code()
         enable_polish = self.gui.is_ai_polish_enabled()
 
         if enable_polish:

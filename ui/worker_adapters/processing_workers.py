@@ -154,13 +154,14 @@ class VoiceOverWorker(QThread):
 class FinalExportWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", audio_path="", subtitle_style=None, project_state_path=""):
+    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, project_state_path=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.video_path = video_path
         self.output_path = output_path
         self.mode = mode
         self.srt_path = srt_path
+        self.ass_path = ass_path
         self.audio_path = audio_path
         self.subtitle_style = subtitle_style or {}
         self.project_state_path = project_state_path
@@ -173,6 +174,7 @@ class FinalExportWorker(QThread):
                 output_path=self.output_path,
                 mode=self.mode,
                 srt_path=self.srt_path,
+                ass_path=self.ass_path,
                 audio_path=self.audio_path,
                 subtitle_style=self.subtitle_style,
                 project_state_path=self.project_state_path,
@@ -180,3 +182,30 @@ class FinalExportWorker(QThread):
             self.finished.emit(output, "")
         except Exception as exc:
             self.finished.emit("", str(exc))
+
+
+class SegmentAudioPreviewWorker(QThread):
+    finished = Signal(int, str, str)
+
+    def __init__(self, workspace_root, index, text, voice_name):
+        super().__init__()
+        self.workspace_root = workspace_root
+        self.index = index
+        self.text = text
+        self.voice_name = voice_name
+
+    def run(self):
+        try:
+            temp_dir = os.path.join(self.workspace_root, "temp", "segment_audio_preview")
+            os.makedirs(temp_dir, exist_ok=True)
+            wav_path = os.path.join(temp_dir, f"segment_{self.index}_{os.getpid()}.wav")
+            engine = EngineRuntime()
+            output = engine.synthesize_segment(
+                text=self.text,
+                wav_path=wav_path,
+                voice=self.voice_name,
+                tmp_dir=temp_dir,
+            )
+            self.finished.emit(self.index, output, "")
+        except Exception as exc:
+            self.finished.emit(self.index, "", str(exc))

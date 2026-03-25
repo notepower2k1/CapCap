@@ -21,6 +21,9 @@ def save_user_settings(gui):
     s.setValue("subtitle_x_offset", gui.subtitle_x_offset_spin.value())
     s.setValue("subtitle_vertical_offset", gui.subtitle_bottom_offset_spin.value())
     s.setValue("subtitle_color", gui.subtitle_color_hex)
+    s.setValue("subtitle_background", gui.subtitle_background_cb.isChecked())
+    s.setValue("voice_speed", gui.voice_speed_spin.currentText())
+    s.setValue("voice_tone", gui.voice_tone_combo.currentText())
     s.setValue("voice_gain", gui.voice_gain_spin.value())
     s.setValue("bg_gain", gui.bg_gain_spin.value())
     s.setValue("advanced_open", gui.advanced_group.isChecked())
@@ -29,7 +32,12 @@ def save_user_settings(gui):
 def load_user_settings(gui):
     s = gui.settings
     gui.output_mode_combo.setCurrentText(s.value("output_mode", gui.output_mode_combo.currentText()))
-    gui.lang_whisper_combo.setCurrentText(s.value("source_lang", gui.lang_whisper_combo.currentText()))
+    source_lang = s.value("source_lang", gui.lang_whisper_combo.currentText())
+    source_index = gui.lang_whisper_combo.findText(source_lang)
+    if source_index < 0:
+        source_index = gui.lang_whisper_combo.findData(source_lang)
+    if source_index >= 0:
+        gui.lang_whisper_combo.setCurrentIndex(source_index)
     gui.enable_ai_polish_cb.setChecked(str(s.value("ai_polish", gui.enable_ai_polish_cb.isChecked())).lower() == "true")
     gui.final_output_folder_edit.setText(s.value("final_output_folder", gui.final_output_folder_edit.text()))
     gui.audio_folder_edit.setText(s.value("audio_folder", gui.audio_folder_edit.text()))
@@ -48,7 +56,10 @@ def load_user_settings(gui):
     gui.subtitle_x_offset_spin.setValue(int(s.value("subtitle_x_offset", gui.subtitle_x_offset_spin.value())))
     gui.subtitle_bottom_offset_spin.setValue(int(s.value("subtitle_vertical_offset", gui.subtitle_bottom_offset_spin.value())))
     gui.subtitle_color_hex = str(s.value("subtitle_color", gui.subtitle_color_hex)).upper()
-    gui.subtitle_color_btn.setText(f"Text Color: {gui.subtitle_color_hex}")
+    gui.subtitle_color_btn.setText(f"Color: {gui.subtitle_color_hex}")
+    gui.subtitle_background_cb.setChecked(str(s.value("subtitle_background", gui.subtitle_background_cb.isChecked())).lower() == "true")
+    gui.voice_speed_spin.setCurrentText(s.value("voice_speed", gui.voice_speed_spin.currentText()))
+    gui.voice_tone_combo.setCurrentText(s.value("voice_tone", gui.voice_tone_combo.currentText()))
     gui.voice_gain_spin.setValue(float(s.value("voice_gain", gui.voice_gain_spin.value())))
     gui.bg_gain_spin.setValue(float(s.value("bg_gain", gui.bg_gain_spin.value())))
     use_existing = str(s.value("use_existing_audio", "false")).lower() == "true"

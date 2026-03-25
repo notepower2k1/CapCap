@@ -151,6 +151,7 @@ def render_subtitle_frame_preview(
     font_name: str = "Arial",
     font_size: int = 18,
     font_color: str = "&H00FFFFFF",
+    background_box: bool = False,
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -173,6 +174,7 @@ def render_subtitle_frame_preview(
         font_name=font_name,
         font_size=font_size,
         font_color=font_color,
+        background_box=background_box,
     )
 
     escaped_ass = ass_path.replace("\\", "/")
