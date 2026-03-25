@@ -231,6 +231,17 @@ class MpvMediaPlayerBackend(QObject):
                 font_size=subtitle_style.get("font_size", 18),
                 font_color=subtitle_style.get("font_color", "&H00FFFFFF"),
                 background_box=subtitle_style.get("background_box", False),
+                animation_style=subtitle_style.get("animation", "Static"),
+                highlight_color=subtitle_style.get("highlight_color", subtitle_style.get("font_color", "&H00FFFFFF")),
+                outline_color=subtitle_style.get("outline_color", "&H00000000"),
+                outline_width=subtitle_style.get("outline_width", 2.0),
+                shadow_color=subtitle_style.get("shadow_color", "&H80000000"),
+                shadow_depth=subtitle_style.get("shadow_depth", 1.0),
+                background_color=subtitle_style.get("background_color", "&H80000000"),
+                background_alpha=subtitle_style.get("background_alpha", 0.5),
+                bold=subtitle_style.get("bold", False),
+                preset_key=subtitle_style.get("preset_key", ""),
+                manual_highlights=subtitle_style.get("manual_highlights", []),
             )
         if self._subtitle_ass_path and self._subtitle_ass_path != ass_path and os.path.exists(self._subtitle_ass_path):
             try:

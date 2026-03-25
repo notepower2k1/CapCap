@@ -35,6 +35,8 @@ class ExportWorkflow:
             "font_name": subtitle_style.get("font_name", "Arial"),
             "font_size": subtitle_style.get("font_size", 18),
             "font_color": subtitle_style.get("font_color", "&H00FFFFFF"),
+            "background_box": subtitle_style.get("background_box", False),
+            "animation": subtitle_style.get("animation", "Static"),
         }
 
     def _build_temp_mux_path(self) -> str:

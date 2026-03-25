@@ -75,7 +75,7 @@ class PreviewController:
             srt_path=translated_srt_path,
             ass_path=translated_ass_path,
             audio_path=chosen_audio,
-            subtitle_style=self.gui.get_subtitle_export_style(),
+            subtitle_style=self.gui.get_subtitle_export_style(segments=self.gui.get_active_segments()),
             project_state_path=project_state_path,
         )
         self.gui.export_thread.finished.connect(self.gui.on_export_finished)
@@ -116,9 +116,10 @@ class PreviewController:
         self.gui.cleanup_file_if_exists(self.gui.last_exact_preview_5s_path)
         preview_output = os.path.join(out_dir, f"{video_name}_preview5s_{int(time.time())}.mp4")
         preview_srt_path = ""
+        preview_segments = []
 
         if mode in ("subtitle", "both"):
-            preview_srt_path = self.build_subtitle_preview_srt(start_seconds, duration_seconds)
+            preview_srt_path, preview_segments = self.build_subtitle_preview_srt(start_seconds, duration_seconds)
             if not preview_srt_path:
                 QMessageBox.warning(self.gui, "Error", "Could not build the 5-second subtitle preview clip.")
                 return
@@ -141,7 +142,7 @@ class PreviewController:
             duration_seconds=duration_seconds,
             srt_path=preview_srt_path,
             audio_path=chosen_audio,
-            subtitle_style=self.gui.get_subtitle_export_style(),
+            subtitle_style=self.gui.get_subtitle_export_style(segments=preview_segments),
         )
         self.gui.quick_preview_thread.finished.connect(self.gui.on_quick_preview_ready)
         self.gui.quick_preview_thread.start()
@@ -153,7 +154,7 @@ class PreviewController:
                 QMessageBox.warning(self.gui, "Error", "Please choose a video first.")
             return
 
-        preview_srt_path = self.build_full_active_subtitle_srt()
+        preview_srt_path, preview_segments = self.build_full_active_subtitle_srt()
         if not preview_srt_path:
             if show_dialog:
                 QMessageBox.warning(self.gui, "Error", "No active subtitle track is available for frame preview.")
@@ -183,7 +184,7 @@ class PreviewController:
             output_path=frame_output,
             timestamp_seconds=timestamp_seconds,
             srt_path=preview_srt_path,
-            subtitle_style=self.gui.get_subtitle_export_style(),
+            subtitle_style=self.gui.get_subtitle_export_style(segments=preview_segments),
         )
         self.gui.frame_preview_thread.finished.connect(self.gui.on_exact_frame_ready)
         self.gui.frame_preview_thread.start()
@@ -191,7 +192,7 @@ class PreviewController:
     def build_subtitle_preview_srt(self, start_seconds: float, duration_seconds: float):
         segments = self.gui.get_active_segments()
         if not segments:
-            return ""
+            return "", []
 
         clipped = []
         end_seconds = start_seconds + duration_seconds
@@ -205,29 +206,30 @@ class PreviewController:
                     "start": max(0.0, seg_start - start_seconds),
                     "end": min(duration_seconds, seg_end - start_seconds),
                     "text": seg.get("text", ""),
+                    "manual_highlights": list(seg.get("manual_highlights", [])),
                 }
             )
 
         if not clipped:
-            return ""
+            return "", []
 
         preview_srt_path = os.path.join(os.getcwd(), "temp", "preview_subtitle_5s.srt")
         self.gui.cleanup_file_if_exists(preview_srt_path)
         from subtitle_builder import generate_srt
 
         generate_srt(clipped, preview_srt_path)
-        return preview_srt_path
+        return preview_srt_path, clipped
 
     def build_full_active_subtitle_srt(self):
         segments = self.gui.get_active_segments()
         if not segments:
-            return ""
+            return "", []
         preview_srt_path = os.path.join(os.getcwd(), "temp", "preview_subtitle_full.srt")
         self.gui.cleanup_file_if_exists(preview_srt_path)
         from subtitle_builder import generate_srt
 
         generate_srt(segments, preview_srt_path)
-        return preview_srt_path
+        return preview_srt_path, segments
 
     def on_export_finished(self, output_path, error):
         self.gui.export_btn.setEnabled(True)

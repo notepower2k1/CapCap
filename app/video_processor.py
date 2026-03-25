@@ -2,6 +2,8 @@ import subprocess
 import os
 import re
 
+from highlight_selector import find_highlights
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -63,12 +65,113 @@ def _srt_time_to_ass(ts: str) -> str:
     return f"{int(h)}:{m}:{s}.{cs:02d}"
 
 
+def _alignment_anchor_position(video_width: int, video_height: int, alignment: int, margin_v: int):
+    margin_x = 60
+    horizontal = ((alignment - 1) % 3) + 1
+    vertical = (alignment - 1) // 3
+
+    if horizontal == 1:
+        x = margin_x
+    elif horizontal == 2:
+        x = video_width // 2
+    else:
+        x = video_width - margin_x
+
+    if vertical == 0:
+        y = max(margin_v, video_height - margin_v)
+    elif vertical == 1:
+        y = video_height // 2
+    else:
+        y = margin_v
+    return x, y
+
+
+def _apply_animation_tags(text: str, *, animation_style: str, video_width: int, video_height: int, alignment: int, margin_v: int, font_size: int) -> str:
+    safe_text = (text or "").replace("\n", "\\N")
+    style = (animation_style or "Static").strip().lower()
+    if style == "pop in":
+        return r"{\fscx118\fscy118\t(0,180,\fscx100\fscy100)}" + safe_text
+    if style == "fade in":
+        return r"{\fad(140,40)}" + safe_text
+    if style == "slide up":
+        x, y = _alignment_anchor_position(video_width, video_height, alignment, margin_v)
+        start_y = y + max(24, int(font_size * 0.7))
+        return rf"{{\move({x},{start_y},{x},{y},0,220)\fad(70,40)}}{safe_text}"
+    return safe_text
+
+
+def _build_manual_highlight_spans(text: str, manual_highlights) -> list[tuple[int, int]]:
+    source_text = text or ""
+    spans: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+
+    for phrase in manual_highlights or []:
+        needle = str(phrase or "").strip()
+        if not needle:
+            continue
+        start = 0
+        lowered_source = source_text.lower()
+        lowered_needle = needle.lower()
+        while True:
+            idx = lowered_source.find(lowered_needle, start)
+            if idx == -1:
+                break
+            span = (idx, idx + len(needle))
+            if span not in seen:
+                spans.append(span)
+                seen.add(span)
+            start = idx + len(needle)
+
+    return sorted(spans, key=lambda item: item[0])
+
+
+def _apply_keyword_highlight(text: str, *, preset_key: str, highlight_color: str, manual_highlights=None) -> str:
+    source_text = text or ""
+    ordered_spans = _build_manual_highlight_spans(source_text, manual_highlights)
+    if not ordered_spans and (preset_key or "").strip().lower() != "highlight":
+        return source_text
+    if not ordered_spans:
+        candidates = find_highlights(source_text, max_highlights=2)
+        if not candidates:
+            return source_text
+        ordered_spans = [(candidate.start, candidate.end) for candidate in sorted(candidates, key=lambda item: item.start)]
+
+    primary_color = highlight_color or "&H00E5FF"
+    if primary_color.upper() == "&H00FFFFFF":
+        primary_color = "&H00E5FF"
+    alternate_colors = [primary_color, "&H0000D4FF"]
+    highlighted = source_text
+    for idx, (start, end) in reversed(list(enumerate(ordered_spans))):
+        color = alternate_colors[idx % len(alternate_colors)]
+        highlighted = (
+            highlighted[:start]
+            + r"{\c"
+            + color
+            + r"}"
+            + highlighted[start:end]
+            + r"{\c}"
+            + highlighted[end:]
+        )
+    return highlighted
+
+
 def srt_to_ass(srt_path: str,
                video_width: int, video_height: int,
                alignment: int = 2, margin_v: int = 30,
                font_name: str = "Arial", font_size: int = 18,
                font_color: str = "&H00FFFFFF",
-               background_box: bool = False) -> str:
+               background_box: bool = False,
+               animation_style: str = "Static",
+               highlight_color: str = "&H00FFFFFF",
+               outline_color: str = "&H00000000",
+               outline_width: float = 2.0,
+               shadow_color: str = "&H80000000",
+               shadow_depth: float = 1.0,
+               background_color: str = "&H80000000",
+               background_alpha: float = 0.5,
+               bold: bool = False,
+               preset_key: str = "",
+               manual_highlights=None) -> str:
     """Convert an SRT file to a fully-styled ASS file.
 
     Key insight: by setting PlayResX/PlayResY equal to the ACTUAL video
@@ -80,11 +183,17 @@ def srt_to_ass(srt_path: str,
     """
     ass_path = os.path.splitext(srt_path)[0] + "_styled.ass"
 
-    # ASS script / style header
+    def _with_alpha(ass_color: str, alpha_ratio: float) -> str:
+        alpha = max(0, min(255, int(round((1.0 - max(0.0, min(1.0, alpha_ratio))) * 255))))
+        if ass_color.startswith("&H") and len(ass_color) >= 10:
+            return "&H" + f"{alpha:02X}" + ass_color[4:]
+        return ass_color
+
     border_style = 3 if background_box else 1
-    outline = 0 if background_box else 2
-    shadow = 0 if background_box else 1
-    back_color = "&H80000000" if background_box else "&H80000000"
+    outline = 0 if background_box else float(outline_width)
+    shadow = 0 if background_box else float(shadow_depth)
+    back_color = _with_alpha(background_color, background_alpha) if background_box else _with_alpha(shadow_color, 0.7)
+    bold_flag = -1 if bold else 0
 
     header = (
         "[Script Info]\n"
@@ -100,8 +209,8 @@ def srt_to_ass(srt_path: str,
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font_name},{font_size},"
-        f"{font_color},&H000000FF,&H00000000,{back_color},"
-        f"-1,0,0,0,100,100,0,0,{border_style},{outline},{shadow},"
+        f"{font_color},{highlight_color},{outline_color},{back_color},"
+        f"{bold_flag},0,0,0,100,100,0,0,{border_style},{outline},{shadow},"
         f"{alignment},60,60,{margin_v},1\n"
         "\n"
         "[Events]\n"
@@ -120,10 +229,27 @@ def srt_to_ass(srt_path: str,
     )
 
     events = []
-    for m in pattern.finditer(content.strip() + "\n\n"):
+    for event_index, m in enumerate(pattern.finditer(content.strip() + "\n\n")):
         start = _srt_time_to_ass(m.group(1))
         end   = _srt_time_to_ass(m.group(2))
-        text  = m.group(3).strip().replace('\n', '\\N')
+        line_manual_highlights = []
+        if isinstance(manual_highlights, list) and event_index < len(manual_highlights):
+            line_manual_highlights = manual_highlights[event_index] or []
+        text_content = _apply_keyword_highlight(
+            m.group(3).strip(),
+            preset_key=preset_key,
+            highlight_color=highlight_color,
+            manual_highlights=line_manual_highlights,
+        )
+        text  = _apply_animation_tags(
+            text_content,
+            animation_style=animation_style,
+            video_width=video_width,
+            video_height=video_height,
+            alignment=alignment,
+            margin_v=margin_v,
+            font_size=font_size,
+        )
         events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
 
     with open(ass_path, 'w', encoding='utf-8-sig') as f:
@@ -131,7 +257,7 @@ def srt_to_ass(srt_path: str,
         f.write('\n'.join(events) + '\n')
 
     print(f"Generated ASS: {ass_path}  ({len(events)} lines, "
-          f"{video_width}x{video_height}, alignment={alignment}, marginV={margin_v})")
+          f"{video_width}x{video_height}, alignment={alignment}, marginV={margin_v}, animation={animation_style}, preset={preset_key or 'custom'})")
     return ass_path
 
 
@@ -194,6 +320,17 @@ def embed_subtitles(video_path, srt_path, output_path,
                     alignment=2, margin_v=30,
                     font_name="Arial", font_size=18, font_color="&H00FFFFFF",
                     background_box=False,
+                    animation_style="Static",
+                    highlight_color="&H00FFFFFF",
+                    outline_color="&H00000000",
+                    outline_width=2.0,
+                    shadow_color="&H80000000",
+                    shadow_depth=1.0,
+                    background_color="&H80000000",
+                    background_alpha=0.5,
+                    bold=False,
+                    preset_key="",
+                    manual_highlights=None,
                     ffmpeg_path=None):
     """Burn subtitles into video using a properly-styled ASS file.
 
@@ -216,6 +353,17 @@ def embed_subtitles(video_path, srt_path, output_path,
         alignment=alignment, margin_v=margin_v,
         font_name=font_name, font_size=font_size, font_color=font_color,
         background_box=background_box,
+        animation_style=animation_style,
+        highlight_color=highlight_color,
+        outline_color=outline_color,
+        outline_width=outline_width,
+        shadow_color=shadow_color,
+        shadow_depth=shadow_depth,
+        background_color=background_color,
+        background_alpha=background_alpha,
+        bold=bold,
+        preset_key=preset_key,
+        manual_highlights=manual_highlights,
     )
 
     success = embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=ffmpeg)

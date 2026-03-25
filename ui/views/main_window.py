@@ -99,6 +99,13 @@ def _connect_ui_signals(gui):
     gui.show_original_subtitle_cb.toggled.connect(gui.toggle_original_subtitle_visibility)
     gui.subtitle_font_combo.currentTextChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_font_size_spin.valueChanged.connect(gui.update_subtitle_preview_style)
+    gui.subtitle_animation_combo.currentTextChanged.connect(gui.update_subtitle_preview_style)
+    gui.subtitle_bold_cb.toggled.connect(gui.update_subtitle_preview_style)
+    gui.subtitle_preset_tiktok_radio.toggled.connect(gui.on_subtitle_preset_changed)
+    gui.subtitle_preset_youtube_radio.toggled.connect(gui.on_subtitle_preset_changed)
+    gui.subtitle_preset_minimal_radio.toggled.connect(gui.on_subtitle_preset_changed)
+    gui.subtitle_preset_highlight_radio.toggled.connect(gui.on_subtitle_preset_changed)
+    gui.subtitle_preset_custom_radio.toggled.connect(gui.on_subtitle_preset_changed)
     gui.subtitle_align_combo.currentTextChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_x_offset_spin.valueChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_bottom_offset_spin.valueChanged.connect(gui.update_subtitle_preview_style)
@@ -148,6 +155,7 @@ def _initialize_ui_state(gui):
     gui.use_exact_subtitle_preview = True
 
     gui.update_subtitle_preview_style()
+    gui.on_subtitle_preset_changed()
     gui.on_output_mode_changed(gui.output_mode_combo.currentText())
     gui.update_project_header()
     gui.refresh_ui_state()

@@ -120,6 +120,18 @@ class ExactFramePreviewWorker(QThread):
                 font_name=self.subtitle_style.get("font_name", "Arial"),
                 font_size=self.subtitle_style.get("font_size", 18),
                 font_color=self.subtitle_style.get("font_color", "&H00FFFFFF"),
+                background_box=self.subtitle_style.get("background_box", False),
+                animation_style=self.subtitle_style.get("animation", "Static"),
+                highlight_color=self.subtitle_style.get("highlight_color", self.subtitle_style.get("font_color", "&H00FFFFFF")),
+                outline_color=self.subtitle_style.get("outline_color", "&H00000000"),
+                outline_width=self.subtitle_style.get("outline_width", 2.0),
+                shadow_color=self.subtitle_style.get("shadow_color", "&H80000000"),
+                shadow_depth=self.subtitle_style.get("shadow_depth", 1.0),
+                background_color=self.subtitle_style.get("background_color", "&H80000000"),
+                background_alpha=self.subtitle_style.get("background_alpha", 0.5),
+                bold=self.subtitle_style.get("bold", False),
+                preset_key=self.subtitle_style.get("preset_key", ""),
+                manual_highlights=self.subtitle_style.get("manual_highlights", []),
             )
             self.finished.emit(output, "")
         except Exception as exc:

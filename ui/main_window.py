@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import os
 import re
 import time
@@ -310,6 +310,113 @@ class VideoTranslatorGUI(QMainWindow):
         self.setup_audio_preview_player()
         self.load_user_settings()
 
+    def get_selected_subtitle_preset(self) -> str:
+        if getattr(self, "subtitle_preset_custom_radio", None) and self.subtitle_preset_custom_radio.isChecked():
+            return "custom"
+        if getattr(self, "subtitle_preset_youtube_radio", None) and self.subtitle_preset_youtube_radio.isChecked():
+            return "youtube"
+        if getattr(self, "subtitle_preset_minimal_radio", None) and self.subtitle_preset_minimal_radio.isChecked():
+            return "minimal"
+        if getattr(self, "subtitle_preset_highlight_radio", None) and self.subtitle_preset_highlight_radio.isChecked():
+            return "highlight"
+        return "tiktok"
+
+    def get_subtitle_preset_config(self, preset_key: str | None = None) -> dict:
+        preset = (preset_key or self.get_selected_subtitle_preset()).lower()
+        presets = {
+            "tiktok": {
+                "label": "TikTok",
+                "font_name": "Montserrat",
+                "font_size": 64,
+                "font_color": "#FFFFFF",
+                "highlight_color": "#00E5FF",
+                "outline_color": "#000000",
+                "outline_width": 7,
+                "shadow_color": "#000000",
+                "shadow_depth": 2,
+                "shadow_alpha": 0.7,
+                "background_box": False,
+                "background_color": "#000000",
+                "background_alpha": 0.0,
+                "animation": "Pop In",
+                "bold": True,
+                "summary": "Bold, large, white subtitle with heavy black stroke and punchy pop-in. Best for short-form, high-energy captions.",
+            },
+            "youtube": {
+                "label": "YouTube",
+                "font_name": "Roboto",
+                "font_size": 52,
+                "font_color": "#FFFFFF",
+                "highlight_color": "#FFFFFF",
+                "outline_color": "#000000",
+                "outline_width": 3,
+                "shadow_color": "#000000",
+                "shadow_depth": 1,
+                "shadow_alpha": 0.35,
+                "background_box": True,
+                "background_color": "#000000",
+                "background_alpha": 0.4,
+                "animation": "Fade In",
+                "bold": False,
+                "summary": "Clean white subtitle with subtle box background and soft fade. Built for long-form readability.",
+            },
+            "minimal": {
+                "label": "Minimal",
+                "font_name": "Inter",
+                "font_size": 48,
+                "font_color": "#FFFFFF",
+                "highlight_color": "#FFFFFF",
+                "outline_color": "#000000",
+                "outline_width": 0,
+                "shadow_color": "#000000",
+                "shadow_depth": 1,
+                "shadow_alpha": 0.15,
+                "background_box": False,
+                "background_color": "#000000",
+                "background_alpha": 0.0,
+                "animation": "Slide Up",
+                "bold": False,
+                "summary": "Light, modern caption with almost no stroke and a gentle slide/fade entrance.",
+            },
+            "highlight": {
+                "label": "Highlight",
+                "font_name": "Poppins",
+                "font_size": 56,
+                "font_color": "#FFFFFF",
+                "highlight_color": "#FFD400",
+                "outline_color": "#000000",
+                "outline_width": 4,
+                "shadow_color": "#000000",
+                "shadow_depth": 1,
+                "shadow_alpha": 0.3,
+                "background_box": False,
+                "background_color": "#000000",
+                "background_alpha": 0.0,
+                "animation": "Static",
+                "bold": True,
+                "summary": "Punchy colored subtitle for emphasis. This version highlights at line level; true per-word highlight needs word timing.",
+            },
+            "custom": {
+                "label": "Custom",
+                "font_name": self.subtitle_font_combo.currentText().strip() or "Arial",
+                "font_size": int(self.subtitle_font_size_spin.value()),
+                "font_color": self.subtitle_color_hex,
+                "highlight_color": "#00E5FF",
+                "outline_color": "#000000",
+                "outline_width": 3,
+                "shadow_color": "#000000",
+                "shadow_depth": 1,
+                "shadow_alpha": 0.3,
+                "background_box": bool(self.subtitle_background_cb.isChecked()),
+                "background_color": "#000000",
+                "background_alpha": 0.35,
+                "animation": self.subtitle_animation_combo.currentText().strip() or "Static",
+                "bold": bool(self.subtitle_bold_cb.isChecked()),
+                "summary": "Fully manual preset. Font, size, color, animation and background follow your own selections.",
+            },
+        }
+        return presets.get(preset, presets["tiktok"]).copy()
+
     def parse_srt_to_segments(self, srt_text):
         return parse_srt_to_segments(srt_text)
 
@@ -600,7 +707,7 @@ class VideoTranslatorGUI(QMainWindow):
         if video_path:
             video_name = os.path.basename(video_path)
             self.project_title_label.setText(f"Project: {video_name}")
-            self.upload_status_label.setText(f"✔ {video_name} uploaded")
+            self.upload_status_label.setText(f"âœ” {video_name} uploaded")
         else:
             self.project_title_label.setText("Project: No video selected")
             self.upload_status_label.setText("No video uploaded yet")
@@ -629,19 +736,19 @@ class VideoTranslatorGUI(QMainWindow):
         translation_running = steps.get("translate_raw") == "running" or steps.get("refine_translation") == "running"
         voice_running = steps.get("generate_tts") == "running" or steps.get("mix_audio") == "running"
 
-        self.progress_audio_label.setText(("✔ " if has_audio else "⬜ ") + "Audio analyzed")
-        self.progress_subtitle_label.setText(("✔ " if has_subtitle else "⬜ ") + "Subtitle created")
+        self.progress_audio_label.setText(("âœ” " if has_audio else "â¬œ ") + "Audio analyzed")
+        self.progress_subtitle_label.setText(("âœ” " if has_subtitle else "â¬œ ") + "Subtitle created")
         if translation_running:
-            self.progress_translate_label.setText("⏳ Translating...")
+            self.progress_translate_label.setText("â³ Translating...")
         else:
-            self.progress_translate_label.setText(("✔ " if has_translation else "⬜ ") + "Translating")
+            self.progress_translate_label.setText(("âœ” " if has_translation else "â¬œ ") + "Translating")
 
         if self.get_output_mode_key() == "subtitle":
-            self.progress_voice_label.setText("⬜ Generating voice (not needed)")
+            self.progress_voice_label.setText("â¬œ Generating voice (not needed)")
         elif voice_running:
-            self.progress_voice_label.setText("⏳ Generating voice")
+            self.progress_voice_label.setText("â³ Generating voice")
         else:
-            self.progress_voice_label.setText(("✔ " if has_voice else "⬜ ") + "Generating voice")
+            self.progress_voice_label.setText(("âœ” " if has_voice else "â¬œ ") + "Generating voice")
 
     def update_preview_context_label(self, has_subtitles: bool, has_voice_audio: bool):
         subtitle_source = "Vietnamese review track" if self.current_translated_segments else ("original subtitle track" if self.current_segments else "no subtitle track yet")
@@ -671,10 +778,16 @@ class VideoTranslatorGUI(QMainWindow):
         source_h = max(1, getattr(self.video_view, "video_source_height", 0) or 1080)
         preview_rect = self.video_view.get_video_content_rect()
         preview_h = max(1.0, preview_rect.height() or float(self.video_view.height()) or 1.0)
+        preset = self.get_subtitle_preset_config()
         export_font_size = int(self.subtitle_font_size_spin.value())
         preview_font_size = max(10, int(round(export_font_size * (preview_h / source_h))))
+        font_name = (
+            self.subtitle_font_combo.currentText().strip()
+            if self.get_selected_subtitle_preset() == "custom"
+            else preset.get("font_name", "Segoe UI")
+        )
         item.set_style(
-            font_name=self.subtitle_font_combo.currentText().strip() or "Segoe UI",
+            font_name=font_name or preset.get("font_name", "Segoe UI"),
             font_size=preview_font_size,
             font_color=QColor(self.subtitle_color_hex),
         )
@@ -687,7 +800,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.sync_live_subtitle_preview()
         self.schedule_auto_frame_preview()
 
-    def get_subtitle_export_style(self):
+    def get_subtitle_export_style(self, segments=None):
         alignment_map = {
             "Bottom Left": 1,
             "Bottom Center": 2,
@@ -695,15 +808,57 @@ class VideoTranslatorGUI(QMainWindow):
             "Center": 5,
             "Top Center": 8,
         }
-        export_font_size = max(1, int(round(self.subtitle_font_size_spin.value() * self.subtitle_export_font_scale)))
+        preset = self.get_subtitle_preset_config()
+        is_custom = self.get_selected_subtitle_preset() == "custom"
+        export_font_size = max(1, int(round(int(self.subtitle_font_size_spin.value()) * self.subtitle_export_font_scale)))
+        style_segments = segments if segments is not None else self.get_active_segments()
         return {
-            "font_name": self.subtitle_font_combo.currentText().strip() or "Arial",
+            "font_name": (
+                self.subtitle_font_combo.currentText().strip()
+                if is_custom
+                else preset.get("font_name", "Arial")
+            ) or preset.get("font_name", "Arial"),
             "font_size": export_font_size,
             "font_color": self._hex_to_ass_color(self.subtitle_color_hex),
+            "highlight_color": self._hex_to_ass_color(preset.get("highlight_color", "#FFFFFF")),
+            "outline_color": self._hex_to_ass_color(preset.get("outline_color", "#000000")),
+            "outline_width": float(preset.get("outline_width", 2)),
+            "shadow_color": self._hex_to_ass_color(preset.get("shadow_color", "#000000")),
+            "shadow_depth": float(preset.get("shadow_depth", 1)),
+            "shadow_alpha": float(preset.get("shadow_alpha", 0.0)),
+            "background_color": self._hex_to_ass_color(preset.get("background_color", "#000000")),
+            "background_alpha": float(preset.get("background_alpha", 0.0)),
+            "animation": (
+                self.subtitle_animation_combo.currentText().strip()
+                if is_custom
+                else preset.get("animation", "Static")
+            ) or preset.get("animation", "Static"),
             "alignment": alignment_map.get(self.subtitle_align_combo.currentText(), 2),
             "margin_v": int(self.subtitle_bottom_offset_spin.value()),
-            "background_box": bool(getattr(self, "subtitle_background_cb", None) and self.subtitle_background_cb.isChecked()),
+            "background_box": bool(self.subtitle_background_cb.isChecked() if is_custom else preset.get("background_box", False)),
+            "bold": bool(self.subtitle_bold_cb.isChecked() if is_custom else preset.get("bold", False)),
+            "preset_key": self.get_selected_subtitle_preset(),
+            "manual_highlights": [list(seg.get("manual_highlights", [])) for seg in (style_segments or [])],
         }
+
+    def on_subtitle_preset_changed(self):
+        preset = self.get_subtitle_preset_config()
+        is_custom = self.get_selected_subtitle_preset() == "custom"
+        if not is_custom:
+            self.subtitle_font_combo.setCurrentText(preset.get("font_name", "Arial"))
+            self.subtitle_animation_combo.setCurrentText(preset.get("animation", "Static"))
+            self.subtitle_background_cb.setChecked(bool(preset.get("background_box", False)))
+            self.subtitle_bold_cb.setChecked(bool(preset.get("bold", False)))
+        self.subtitle_font_combo.setEnabled(is_custom)
+        self.subtitle_animation_combo.setEnabled(is_custom)
+        self.subtitle_background_cb.setEnabled(is_custom)
+        self.subtitle_bold_cb.setEnabled(is_custom)
+        self.custom_subtitle_controls.setVisible(is_custom)
+        if hasattr(self, "subtitle_preset_summary_label"):
+            self.subtitle_preset_summary_label.setText(
+                f"{preset.get('label', 'Preset')}: {preset.get('summary', '')}"
+            )
+        self.update_subtitle_preview_style()
 
     def refresh_video_dimensions(self, path: str):
         refresh_video_dimensions_impl(self, path, get_video_dimensions)
@@ -753,9 +908,98 @@ class VideoTranslatorGUI(QMainWindow):
                     "end": float(reference.get("end", 0.0)),
                     "original": str(base.get("text", "")),
                     "translated": str(translated.get("text", "")),
+                    "manual_highlights": list(translated.get("manual_highlights", [])),
                 }
             )
         return rows
+
+    def _normalize_manual_highlight(self, text: str) -> str:
+        return re.sub(r"\s+", " ", (text or "").replace("\u2029", " ").replace("\n", " ")).strip()
+
+    def _reconcile_manual_highlights(self, segment: dict):
+        text = str(segment.get("text", ""))
+        cleaned = []
+        seen = set()
+        for phrase in segment.get("manual_highlights", []):
+            normalized = self._normalize_manual_highlight(phrase)
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen or key not in text.lower():
+                continue
+            seen.add(key)
+            cleaned.append(normalized)
+        segment["manual_highlights"] = cleaned
+
+    def _sync_segment_highlight_chip_row(self, index: int):
+        if index < 0 or index >= len(getattr(self, "_segment_editor_rows", [])):
+            return
+        row = self._segment_editor_rows[index]
+        chip_layout = row.get("highlight_chip_layout")
+        placeholder = row.get("highlight_placeholder")
+        if chip_layout is None:
+            return
+
+        while chip_layout.count():
+            item = chip_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        highlights = []
+        if index < len(self.current_translated_segments):
+            highlights = list(self.current_translated_segments[index].get("manual_highlights", []))
+
+        if placeholder:
+            placeholder.setVisible(not highlights)
+
+        for phrase in highlights:
+            chip = QPushButton(f"[ {phrase} ]")
+            chip.setCursor(Qt.PointingHandCursor)
+            chip.setStyleSheet(
+                "QPushButton { background-color: #173049; color: #9fe5ff; border: 1px solid #356081; border-radius: 999px; padding: 4px 10px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #214161; }"
+            )
+            chip.clicked.connect(lambda _=False, idx=index, value=phrase: self.remove_segment_manual_highlight(idx, value))
+            chip_layout.addWidget(chip)
+        chip_layout.addStretch()
+
+    def add_segment_manual_highlight(self, index: int, editor: QTextEdit):
+        if index < 0 or index >= len(self.current_translated_segments):
+            QMessageBox.warning(self, "Highlight", "Please prepare translated subtitles first.")
+            return
+
+        selected_text = self._normalize_manual_highlight(editor.textCursor().selectedText())
+        if not selected_text:
+            QMessageBox.warning(self, "Highlight", "Select the translated text you want to highlight first.")
+            return
+
+        segment = self.current_translated_segments[index]
+        segment.setdefault("manual_highlights", [])
+        existing = {self._normalize_manual_highlight(item).lower() for item in segment.get("manual_highlights", [])}
+        if selected_text.lower() not in existing:
+            segment["manual_highlights"].append(selected_text)
+        self._reconcile_manual_highlights(segment)
+        self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+        self._sync_segment_highlight_chip_row(index)
+        self._sync_hidden_translated_text_from_segments()
+        self.schedule_live_subtitle_preview_refresh()
+        self.refresh_ui_state()
+
+    def remove_segment_manual_highlight(self, index: int, phrase: str):
+        if index < 0 or index >= len(self.current_translated_segments):
+            return
+        target = self._normalize_manual_highlight(phrase).lower()
+        segment = self.current_translated_segments[index]
+        segment["manual_highlights"] = [
+            item for item in segment.get("manual_highlights", [])
+            if self._normalize_manual_highlight(item).lower() != target
+        ]
+        self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+        self._sync_segment_highlight_chip_row(index)
+        self._sync_hidden_translated_text_from_segments()
+        self.schedule_live_subtitle_preview_refresh()
+        self.refresh_ui_state()
 
     def _clear_segment_editor_rows(self):
         if not hasattr(self, "segment_editor_layout"):
@@ -826,8 +1070,11 @@ class VideoTranslatorGUI(QMainWindow):
                 preview_btn = QPushButton("🔊")
                 preview_btn.setFixedWidth(44)
                 preview_btn.clicked.connect(lambda _=False, idx=idx: self.preview_segment_audio(idx))
+                highlight_btn = QPushButton("Highlight")
+                highlight_btn.setFixedWidth(88)
                 header_layout.addWidget(timestamp_label)
                 header_layout.addStretch()
+                header_layout.addWidget(highlight_btn)
                 header_layout.addWidget(preview_btn)
                 original_label = QLabel(row["original"] or "")
                 original_label.setWordWrap(True)
@@ -844,11 +1091,27 @@ class VideoTranslatorGUI(QMainWindow):
                 translated_editor.textChanged.connect(
                     lambda idx=idx, editor=translated_editor: self.on_segment_translation_edited(idx, editor)
                 )
+                highlight_btn.clicked.connect(
+                    lambda _=False, idx=idx, editor=translated_editor: self.add_segment_manual_highlight(idx, editor)
+                )
+
+                highlight_meta_layout = QHBoxLayout()
+                highlight_meta_layout.setContentsMargins(0, 0, 0, 0)
+                highlight_meta_layout.setSpacing(6)
+                highlight_placeholder = QLabel("[ Suggest highlight ]")
+                highlight_placeholder.setObjectName("helperLabel")
+                highlight_chip_container = QWidget()
+                highlight_chip_layout = QHBoxLayout(highlight_chip_container)
+                highlight_chip_layout.setContentsMargins(0, 0, 0, 0)
+                highlight_chip_layout.setSpacing(6)
+                highlight_meta_layout.addWidget(highlight_placeholder)
+                highlight_meta_layout.addWidget(highlight_chip_container, 1)
 
                 card_layout.addLayout(header_layout)
                 card_layout.addWidget(original_label)
                 card_layout.addWidget(arrow_label)
                 card_layout.addWidget(translated_editor)
+                card_layout.addLayout(highlight_meta_layout)
                 self.segment_editor_layout.addWidget(card)
                 self._segment_editor_rows.append(
                     {
@@ -856,8 +1119,12 @@ class VideoTranslatorGUI(QMainWindow):
                         "original_label": original_label,
                         "translated_editor": translated_editor,
                         "preview_button": preview_btn,
+                        "highlight_button": highlight_btn,
+                        "highlight_placeholder": highlight_placeholder,
+                        "highlight_chip_layout": highlight_chip_layout,
                     }
                 )
+                self._sync_segment_highlight_chip_row(idx)
 
             self.segment_editor_layout.addStretch()
             self._set_segment_editor_highlight(self._find_active_segment_index(self.media_player.position(), self.live_preview_segments or self.get_active_segments()))
@@ -911,7 +1178,10 @@ class VideoTranslatorGUI(QMainWindow):
             ]
 
         self.current_translated_segments[index]["text"] = editor.toPlainText().strip()
+        self.current_translated_segments[index].setdefault("manual_highlights", [])
+        self._reconcile_manual_highlights(self.current_translated_segments[index])
         self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+        self._sync_segment_highlight_chip_row(index)
         self._sync_hidden_translated_text_from_segments()
         self.schedule_live_subtitle_preview_refresh()
         self.refresh_ui_state()
@@ -1054,11 +1324,16 @@ class VideoTranslatorGUI(QMainWindow):
                         "start": float(base["start"]),
                         "end": float(base["end"]),
                         "text": edited_texts[idx],
+                        "manual_highlights": list(base.get("manual_highlights", [])),
                     }
                     for idx, base in enumerate(base_segments)
                 ]
 
-        return self.parse_srt_to_segments(srt_text)
+        parsed_segments = self.parse_srt_to_segments(srt_text)
+        if base_segments and len(parsed_segments) == len(base_segments):
+            for idx, segment in enumerate(parsed_segments):
+                segment["manual_highlights"] = list(base_segments[idx].get("manual_highlights", []))
+        return parsed_segments
 
     def _write_live_preview_assets(self, segments):
         if not segments:
@@ -1079,16 +1354,28 @@ class VideoTranslatorGUI(QMainWindow):
             self.refresh_video_dimensions(video_path)
         video_width = getattr(self.video_view, "video_source_width", 0) or 1920
         video_height = getattr(self.video_view, "video_source_height", 0) or 1080
+        subtitle_style = self.get_subtitle_export_style(segments=segments)
         self.live_preview_ass_path = srt_to_ass(
             preview_srt_path,
             video_width=video_width,
             video_height=video_height,
-            alignment=self.get_subtitle_export_style().get("alignment", 2),
-            margin_v=self.get_subtitle_export_style().get("margin_v", 30),
-            font_name=self.get_subtitle_export_style().get("font_name", "Arial"),
-            font_size=self.get_subtitle_export_style().get("font_size", 18),
-            font_color=self.get_subtitle_export_style().get("font_color", "&H00FFFFFF"),
-            background_box=self.get_subtitle_export_style().get("background_box", False),
+            alignment=subtitle_style.get("alignment", 2),
+            margin_v=subtitle_style.get("margin_v", 30),
+            font_name=subtitle_style.get("font_name", "Arial"),
+            font_size=subtitle_style.get("font_size", 18),
+            font_color=subtitle_style.get("font_color", "&H00FFFFFF"),
+            background_box=subtitle_style.get("background_box", False),
+            animation_style=subtitle_style.get("animation", "Static"),
+            highlight_color=subtitle_style.get("highlight_color", "&H00FFFFFF"),
+            outline_color=subtitle_style.get("outline_color", "&H00000000"),
+            outline_width=subtitle_style.get("outline_width", 2.0),
+            shadow_color=subtitle_style.get("shadow_color", "&H80000000"),
+            shadow_depth=subtitle_style.get("shadow_depth", 1.0),
+            background_color=subtitle_style.get("background_color", "&H80000000"),
+            background_alpha=subtitle_style.get("background_alpha", 0.5),
+            bold=subtitle_style.get("bold", False),
+            preset_key=subtitle_style.get("preset_key", ""),
+            manual_highlights=subtitle_style.get("manual_highlights", []),
         )
         self.processed_artifacts["subtitle_preview_srt"] = self.live_preview_subtitle_path
         self.processed_artifacts["subtitle_preview_ass"] = self.live_preview_ass_path

@@ -152,6 +152,17 @@ def render_subtitle_frame_preview(
     font_size: int = 18,
     font_color: str = "&H00FFFFFF",
     background_box: bool = False,
+    animation_style: str = "Static",
+    highlight_color: str = "&H00FFFFFF",
+    outline_color: str = "&H00000000",
+    outline_width: float = 2.0,
+    shadow_color: str = "&H80000000",
+    shadow_depth: float = 1.0,
+    background_color: str = "&H80000000",
+    background_alpha: float = 0.5,
+    bold: bool = False,
+    preset_key: str = "",
+    manual_highlights=None,
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -175,6 +186,17 @@ def render_subtitle_frame_preview(
         font_size=font_size,
         font_color=font_color,
         background_box=background_box,
+        animation_style=animation_style,
+        highlight_color=highlight_color,
+        outline_color=outline_color,
+        outline_width=outline_width,
+        shadow_color=shadow_color,
+        shadow_depth=shadow_depth,
+        background_color=background_color,
+        background_alpha=background_alpha,
+        bold=bold,
+        preset_key=preset_key,
+        manual_highlights=manual_highlights,
     )
 
     escaped_ass = ass_path.replace("\\", "/")
