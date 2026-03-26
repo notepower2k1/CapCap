@@ -162,6 +162,8 @@ def render_subtitle_frame_preview(
     background_alpha: float = 0.5,
     bold: bool = False,
     preset_key: str = "",
+    auto_keyword_highlight: bool = False,
+    animation_duration: float = 0.22,
     manual_highlights=None,
 ) -> str:
     ffmpeg = _ffmpeg_path()
@@ -196,6 +198,8 @@ def render_subtitle_frame_preview(
         background_alpha=background_alpha,
         bold=bold,
         preset_key=preset_key,
+        auto_keyword_highlight=auto_keyword_highlight,
+        animation_duration=animation_duration,
         manual_highlights=manual_highlights,
     )
 

@@ -18,6 +18,7 @@ def save_user_settings(gui):
     s.setValue("subtitle_font", gui.subtitle_font_combo.currentText())
     s.setValue("subtitle_size", gui.subtitle_font_size_spin.value())
     s.setValue("subtitle_animation", gui.subtitle_animation_combo.currentText())
+    s.setValue("subtitle_animation_time", gui.subtitle_animation_time_spin.value())
     s.setValue("subtitle_preset", gui.get_selected_subtitle_preset())
     s.setValue("subtitle_align", gui.subtitle_align_combo.currentText())
     s.setValue("subtitle_x_offset", gui.subtitle_x_offset_spin.value())
@@ -25,6 +26,9 @@ def save_user_settings(gui):
     s.setValue("subtitle_color", gui.subtitle_color_hex)
     s.setValue("subtitle_background", gui.subtitle_background_cb.isChecked())
     s.setValue("subtitle_bold", gui.subtitle_bold_cb.isChecked())
+    s.setValue("subtitle_auto_keyword_highlight", gui.subtitle_keyword_highlight_cb.isChecked())
+    s.setValue("subtitle_highlight_color", gui.subtitle_highlight_color_combo.currentText())
+    s.setValue("subtitle_highlight_mode", gui.subtitle_highlight_mode_combo.currentText())
     s.setValue("voice_speed", gui.voice_speed_spin.currentText())
     s.setValue("voice_tone", gui.voice_tone_combo.currentText())
     s.setValue("voice_gain", gui.voice_gain_spin.value())
@@ -56,13 +60,12 @@ def load_user_settings(gui):
     gui.subtitle_font_combo.setCurrentText(s.value("subtitle_font", gui.subtitle_font_combo.currentText()))
     gui.subtitle_font_size_spin.setValue(int(s.value("subtitle_size", gui.subtitle_font_size_spin.value())))
     gui.subtitle_animation_combo.setCurrentText(s.value("subtitle_animation", gui.subtitle_animation_combo.currentText()))
+    gui.subtitle_animation_time_spin.setValue(float(s.value("subtitle_animation_time", gui.subtitle_animation_time_spin.value())))
     preset_key = str(s.value("subtitle_preset", gui.get_selected_subtitle_preset())).lower()
     if preset_key == "youtube":
         gui.subtitle_preset_youtube_radio.setChecked(True)
     elif preset_key == "minimal":
         gui.subtitle_preset_minimal_radio.setChecked(True)
-    elif preset_key == "highlight":
-        gui.subtitle_preset_highlight_radio.setChecked(True)
     elif preset_key == "custom":
         gui.subtitle_preset_custom_radio.setChecked(True)
     else:
@@ -71,9 +74,12 @@ def load_user_settings(gui):
     gui.subtitle_x_offset_spin.setValue(int(s.value("subtitle_x_offset", gui.subtitle_x_offset_spin.value())))
     gui.subtitle_bottom_offset_spin.setValue(int(s.value("subtitle_vertical_offset", gui.subtitle_bottom_offset_spin.value())))
     gui.subtitle_color_hex = str(s.value("subtitle_color", gui.subtitle_color_hex)).upper()
-    gui.subtitle_color_btn.setText(f"Color: {gui.subtitle_color_hex}")
+    gui.subtitle_color_btn.setText(gui.subtitle_color_hex)
     gui.subtitle_background_cb.setChecked(str(s.value("subtitle_background", gui.subtitle_background_cb.isChecked())).lower() == "true")
     gui.subtitle_bold_cb.setChecked(str(s.value("subtitle_bold", gui.subtitle_bold_cb.isChecked())).lower() == "true")
+    gui.subtitle_keyword_highlight_cb.setChecked(str(s.value("subtitle_auto_keyword_highlight", gui.subtitle_keyword_highlight_cb.isChecked())).lower() == "true")
+    gui.subtitle_highlight_color_combo.setCurrentText(str(s.value("subtitle_highlight_color", gui.subtitle_highlight_color_combo.currentText())))
+    gui.subtitle_highlight_mode_combo.setCurrentText(str(s.value("subtitle_highlight_mode", gui.subtitle_highlight_mode_combo.currentText())))
     gui.voice_speed_spin.setCurrentText(s.value("voice_speed", gui.voice_speed_spin.currentText()))
     gui.voice_tone_combo.setCurrentText(s.value("voice_tone", gui.voice_tone_combo.currentText()))
     gui.voice_gain_spin.setValue(float(s.value("voice_gain", gui.voice_gain_spin.value())))

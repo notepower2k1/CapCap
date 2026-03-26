@@ -65,6 +65,13 @@ def _srt_time_to_ass(ts: str) -> str:
     return f"{int(h)}:{m}:{s}.{cs:02d}"
 
 
+def _srt_time_to_seconds(ts: str) -> float:
+    ts = ts.strip()
+    h, m, rest = ts.split(':')
+    s, ms = rest.split(',')
+    return (int(h) * 3600) + (int(m) * 60) + int(s) + (int(ms) / 1000.0)
+
+
 def _alignment_anchor_position(video_width: int, video_height: int, alignment: int, margin_v: int):
     margin_x = 60
     horizontal = ((alignment - 1) % 3) + 1
@@ -86,17 +93,63 @@ def _alignment_anchor_position(video_width: int, video_height: int, alignment: i
     return x, y
 
 
-def _apply_animation_tags(text: str, *, animation_style: str, video_width: int, video_height: int, alignment: int, margin_v: int, font_size: int) -> str:
+def _build_typewriter_text(text: str, duration_seconds: float) -> str:
+    safe_text = (text or "").replace("\n", "\\N")
+    visible_chars = [char for char in safe_text if char not in "{}"]
+    total_chars = max(1, len(visible_chars))
+    total_cs = max(18, int(round(max(duration_seconds, 0.3) * 100)))
+    step_cs = max(4, total_cs // total_chars)
+
+    current_start = 0
+    rendered = []
+    for char in safe_text:
+        if char in "{}":
+            rendered.append(char)
+            continue
+        current_end = min(total_cs, current_start + step_cs)
+        rendered.append(r"{\alpha&HFF&\t(" + f"{current_start * 10},{current_end * 10}" + r",\alpha&H00&)}" + char)
+        current_start = current_end
+    return "".join(rendered)
+
+
+def _ms(value: float) -> int:
+    return max(1, int(round(value)))
+
+
+def _apply_animation_tags(
+    text: str,
+    *,
+    animation_style: str,
+    video_width: int,
+    video_height: int,
+    alignment: int,
+    margin_v: int,
+    font_size: int,
+    duration_seconds: float,
+    animation_duration: float,
+) -> str:
     safe_text = (text or "").replace("\n", "\\N")
     style = (animation_style or "Static").strip().lower()
+    total_ms = _ms(max(0.05, animation_duration) * 1000.0)
     if style == "pop in":
-        return r"{\fscx118\fscy118\t(0,180,\fscx100\fscy100)}" + safe_text
+        return rf"{{\fscx118\fscy118\t(0,{total_ms},\fscx100\fscy100)}}" + safe_text
     if style == "fade in":
-        return r"{\fad(140,40)}" + safe_text
+        return rf"{{\fad({_ms(total_ms * 0.8)},{_ms(total_ms * 0.2)})}}" + safe_text
+    if style == "fade out":
+        return rf"{{\fad({_ms(total_ms * 0.2)},{_ms(total_ms * 0.8)})}}" + safe_text
+    if style == "pulse":
+        midpoint = _ms(total_ms * 0.5)
+        return rf"{{\t(0,{midpoint},\fscx105\fscy105)\t({midpoint},{total_ms},\fscx100\fscy100)}}" + safe_text
+    if style == "background appear":
+        return rf"{{\fad({_ms(total_ms * 0.85)},{_ms(total_ms * 0.15)})}}" + safe_text
+    if style == "typewriter":
+        return _build_typewriter_text(text or "", min(duration_seconds, max(0.15, animation_duration)))
     if style == "slide up":
         x, y = _alignment_anchor_position(video_width, video_height, alignment, margin_v)
         start_y = y + max(24, int(font_size * 0.7))
-        return rf"{{\move({x},{start_y},{x},{y},0,220)\fad(70,40)}}{safe_text}"
+        fade_in = _ms(total_ms * 0.35)
+        fade_out = _ms(total_ms * 0.2)
+        return rf"{{\move({x},{start_y},{x},{y},0,{total_ms})\fad({fade_in},{fade_out})}}{safe_text}"
     return safe_text
 
 
@@ -171,6 +224,8 @@ def srt_to_ass(srt_path: str,
                background_alpha: float = 0.5,
                bold: bool = False,
                preset_key: str = "",
+               auto_keyword_highlight: bool = False,
+               animation_duration: float = 0.22,
                manual_highlights=None) -> str:
     """Convert an SRT file to a fully-styled ASS file.
 
@@ -230,6 +285,8 @@ def srt_to_ass(srt_path: str,
 
     events = []
     for event_index, m in enumerate(pattern.finditer(content.strip() + "\n\n")):
+        start_seconds = _srt_time_to_seconds(m.group(1))
+        end_seconds = _srt_time_to_seconds(m.group(2))
         start = _srt_time_to_ass(m.group(1))
         end   = _srt_time_to_ass(m.group(2))
         line_manual_highlights = []
@@ -237,7 +294,7 @@ def srt_to_ass(srt_path: str,
             line_manual_highlights = manual_highlights[event_index] or []
         text_content = _apply_keyword_highlight(
             m.group(3).strip(),
-            preset_key=preset_key,
+            preset_key="highlight" if auto_keyword_highlight else preset_key,
             highlight_color=highlight_color,
             manual_highlights=line_manual_highlights,
         )
@@ -249,6 +306,8 @@ def srt_to_ass(srt_path: str,
             alignment=alignment,
             margin_v=margin_v,
             font_size=font_size,
+            duration_seconds=max(0.1, end_seconds - start_seconds),
+            animation_duration=animation_duration,
         )
         events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
 
@@ -330,6 +389,8 @@ def embed_subtitles(video_path, srt_path, output_path,
                     background_alpha=0.5,
                     bold=False,
                     preset_key="",
+                    auto_keyword_highlight=False,
+                    animation_duration=0.22,
                     manual_highlights=None,
                     ffmpeg_path=None):
     """Burn subtitles into video using a properly-styled ASS file.
@@ -363,6 +424,8 @@ def embed_subtitles(video_path, srt_path, output_path,
         background_alpha=background_alpha,
         bold=bold,
         preset_key=preset_key,
+        auto_keyword_highlight=auto_keyword_highlight,
+        animation_duration=animation_duration,
         manual_highlights=manual_highlights,
     )
 

@@ -27,6 +27,8 @@ class FFmpegAdapter:
             background_alpha=subtitle_style.get("background_alpha", 0.5),
             bold=subtitle_style.get("bold", False),
             preset_key=subtitle_style.get("preset_key", ""),
+            auto_keyword_highlight=subtitle_style.get("auto_keyword_highlight", False),
+            animation_duration=subtitle_style.get("animation_duration", 0.22),
             manual_highlights=subtitle_style.get("manual_highlights", []),
         )
 

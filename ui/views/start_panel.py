@@ -5,7 +5,9 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -73,6 +75,33 @@ def _build_hidden_status_widgets(gui):
     gui.next_step_label.hide()
     gui.readiness_label = QLabel()
     gui.readiness_label.hide()
+
+
+def _build_style_preset_card(title: str, line_one: str, line_two: str, radio: QRadioButton):
+    card = QFrame()
+    card.setObjectName("statusCard")
+    card.setStyleSheet(
+        "QFrame#statusCard { background-color: #132132; border: 1px solid #35506f; border-radius: 14px; }"
+        "QFrame#statusCard:hover { border-color: #5aa6d9; }"
+    )
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(10, 10, 10, 10)
+    layout.setSpacing(4)
+    layout.addWidget(radio, 0, Qt.AlignTop)
+
+    title_label = QLabel(title)
+    title_label.setObjectName("sectionTitle")
+    preview_top = QLabel(line_one)
+    preview_top.setStyleSheet("font-size: 14px; font-weight: 800; color: #ffffff;")
+    preview_bottom = QLabel(line_two)
+    preview_bottom.setStyleSheet("font-size: 13px; color: #dbe5f3;")
+    preview_top.setAlignment(Qt.AlignCenter)
+    preview_bottom.setAlignment(Qt.AlignCenter)
+
+    layout.addWidget(title_label, 0, Qt.AlignCenter)
+    layout.addWidget(preview_top)
+    layout.addWidget(preview_bottom)
+    return card
 
 
 def build_start_group(gui, left_layout):
@@ -198,24 +227,83 @@ def build_start_group(gui, left_layout):
     control_layout.addWidget(voice_card)
 
     subtitle_card, subtitle_layout = _build_collapsible_section("Section 5: Subtitle Style")
-    subtitle_layout.addWidget(QLabel("Sample preset"))
+    base_style_label = QLabel("Base style")
+    base_style_label.setObjectName("sectionTitle")
+    subtitle_layout.addWidget(base_style_label)
+
     gui.subtitle_preset_tiktok_radio = QRadioButton("TikTok")
     gui.subtitle_preset_youtube_radio = QRadioButton("YouTube")
-    gui.subtitle_preset_minimal_radio = QRadioButton("Minimal")
-    gui.subtitle_preset_highlight_radio = QRadioButton("Highlight")
+    gui.subtitle_preset_minimal_radio = QRadioButton("Short")
     gui.subtitle_preset_custom_radio = QRadioButton("Custom")
     gui.subtitle_preset_tiktok_radio.setChecked(True)
     gui.subtitle_preset_group = QButtonGroup(gui)
     gui.subtitle_preset_group.addButton(gui.subtitle_preset_tiktok_radio)
     gui.subtitle_preset_group.addButton(gui.subtitle_preset_youtube_radio)
     gui.subtitle_preset_group.addButton(gui.subtitle_preset_minimal_radio)
-    gui.subtitle_preset_group.addButton(gui.subtitle_preset_highlight_radio)
     gui.subtitle_preset_group.addButton(gui.subtitle_preset_custom_radio)
-    subtitle_layout.addWidget(gui.subtitle_preset_tiktok_radio)
-    subtitle_layout.addWidget(gui.subtitle_preset_youtube_radio)
-    subtitle_layout.addWidget(gui.subtitle_preset_minimal_radio)
-    subtitle_layout.addWidget(gui.subtitle_preset_highlight_radio)
-    subtitle_layout.addWidget(gui.subtitle_preset_custom_radio)
+
+    preset_grid = QGridLayout()
+    preset_grid.setHorizontalSpacing(8)
+    preset_grid.setVerticalSpacing(8)
+    preset_grid.addWidget(_build_style_preset_card("TikTok", "HELLO", "WORLD", gui.subtitle_preset_tiktok_radio), 0, 0)
+    preset_grid.addWidget(_build_style_preset_card("YouTube", "Hello", "world", gui.subtitle_preset_youtube_radio), 0, 1)
+    preset_grid.addWidget(_build_style_preset_card("Short", "HELLO", "world", gui.subtitle_preset_minimal_radio), 0, 2)
+    preset_grid.addWidget(_build_style_preset_card("Custom", "Aa Bb", "Your style", gui.subtitle_preset_custom_radio), 1, 0)
+    subtitle_layout.addLayout(preset_grid)
+
+    gui.save_subtitle_style_btn = QPushButton("+ Save Current Style")
+    gui.save_subtitle_style_btn.clicked.connect(gui.save_current_subtitle_style_preset)
+    gui.saved_subtitle_style_combo = QComboBox()
+    gui.saved_subtitle_style_combo.addItem("My Presets")
+    gui.saved_subtitle_style_combo.currentIndexChanged.connect(gui.load_selected_subtitle_style_preset)
+    subtitle_layout.addWidget(gui.save_subtitle_style_btn)
+    subtitle_layout.addWidget(gui.saved_subtitle_style_combo)
+
+    highlight_divider = QFrame()
+    highlight_divider.setFrameShape(QFrame.HLine)
+    highlight_divider.setStyleSheet("color: #30425b;")
+    subtitle_layout.addWidget(highlight_divider)
+
+    highlight_title = QLabel("Highlight")
+    highlight_title.setObjectName("sectionTitle")
+    subtitle_layout.addWidget(highlight_title)
+
+    gui.subtitle_keyword_highlight_cb = QCheckBox("Highlight keyword")
+    gui.subtitle_keyword_highlight_cb.setChecked(False)
+    gui.subtitle_highlight_color_combo = QComboBox()
+    gui.subtitle_highlight_color_combo.addItems(["Yellow", "Cyan", "Green", "Pink"])
+    gui.subtitle_highlight_mode_combo = QComboBox()
+    gui.subtitle_highlight_mode_combo.addItems(["Auto", "Manual", "Auto + Manual"])
+    subtitle_layout.addWidget(gui.subtitle_keyword_highlight_cb)
+
+    highlight_color_row = QHBoxLayout()
+    highlight_color_row.addWidget(QLabel("Color:"))
+    highlight_color_row.addWidget(gui.subtitle_highlight_color_combo, 1)
+    subtitle_layout.addLayout(highlight_color_row)
+
+    highlight_mode_row = QHBoxLayout()
+    highlight_mode_row.addWidget(QLabel("Mode:"))
+    highlight_mode_row.addWidget(gui.subtitle_highlight_mode_combo, 1)
+    subtitle_layout.addLayout(highlight_mode_row)
+
+    custom_wrapper = QFrame()
+    custom_wrapper.setObjectName("statusCard")
+    custom_wrapper_layout = QVBoxLayout(custom_wrapper)
+    custom_wrapper_layout.setContentsMargins(12, 12, 12, 12)
+    custom_wrapper_layout.setSpacing(10)
+    gui.custom_settings_toggle_btn = QToolButton()
+    gui.custom_settings_toggle_btn.setText("▼ Custom Settings")
+    gui.custom_settings_toggle_btn.setCheckable(True)
+    gui.custom_settings_toggle_btn.setChecked(True)
+    gui.custom_settings_toggle_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    gui.custom_settings_toggle_btn.setStyleSheet("QToolButton { text-align: left; font-weight: 700; color: #dbe5f3; border: none; padding: 0; }")
+    custom_wrapper_layout.addWidget(gui.custom_settings_toggle_btn)
+
+    gui.custom_settings_content = QWidget()
+    custom_controls_layout = QGridLayout(gui.custom_settings_content)
+    custom_controls_layout.setContentsMargins(0, 0, 0, 0)
+    custom_controls_layout.setHorizontalSpacing(10)
+    custom_controls_layout.setVerticalSpacing(8)
 
     gui.subtitle_font_combo = QComboBox()
     gui.subtitle_font_combo.setEditable(True)
@@ -224,43 +312,52 @@ def build_start_group(gui, left_layout):
     gui.subtitle_font_size_spin = QSpinBox()
     gui.subtitle_font_size_spin.setRange(12, 72)
     gui.subtitle_font_size_spin.setValue(60)
-    gui.subtitle_color_btn = QPushButton("Color: #FFFFFF")
+    gui.subtitle_color_btn = QPushButton("White")
     gui.subtitle_color_hex = "#FFFFFF"
     gui.subtitle_color_btn.clicked.connect(gui.choose_subtitle_color)
+    gui.subtitle_align_combo = QComboBox()
+    gui.subtitle_align_combo.addItems(["Bottom", "Bottom Left", "Bottom Right", "Center", "Top"])
+    gui.subtitle_align_combo.setCurrentText("Bottom")
     gui.subtitle_background_cb = QCheckBox("Background")
     gui.subtitle_background_cb.setChecked(False)
     gui.subtitle_bold_cb = QCheckBox("Bold")
     gui.subtitle_bold_cb.setChecked(True)
     gui.subtitle_animation_combo = QComboBox()
-    gui.subtitle_animation_combo.addItems(["Static", "Pop In", "Slide Up", "Fade In"])
+    gui.subtitle_animation_combo.addItems(
+        ["Static", "Pop In", "Slide Up", "Fade In", "Fade Out", "Pulse", "Background Appear", "Typewriter"]
+    )
     gui.subtitle_animation_combo.setCurrentText("Pop In")
+    gui.subtitle_animation_time_spin = QDoubleSpinBox()
+    gui.subtitle_animation_time_spin.setRange(0.1, 2.5)
+    gui.subtitle_animation_time_spin.setSingleStep(0.05)
+    gui.subtitle_animation_time_spin.setDecimals(2)
+    gui.subtitle_animation_time_spin.setValue(0.22)
+    gui.subtitle_animation_time_spin.setSuffix(" s")
+    gui.subtitle_animation_time_label = QLabel("Duration")
+
+    custom_controls_layout.addWidget(QLabel("Font:"), 0, 0)
+    custom_controls_layout.addWidget(gui.subtitle_font_combo, 0, 1)
+    custom_controls_layout.addWidget(QLabel("Size:"), 1, 0)
+    custom_controls_layout.addWidget(gui.subtitle_font_size_spin, 1, 1)
+    custom_controls_layout.addWidget(QLabel("Color:"), 2, 0)
+    custom_controls_layout.addWidget(gui.subtitle_color_btn, 2, 1)
+    custom_controls_layout.addWidget(QLabel("Position:"), 3, 0)
+    custom_controls_layout.addWidget(gui.subtitle_align_combo, 3, 1)
+    custom_controls_layout.addWidget(QLabel("Animation:"), 4, 0)
+    custom_controls_layout.addWidget(gui.subtitle_animation_combo, 4, 1)
+    custom_controls_layout.addWidget(gui.subtitle_animation_time_label, 5, 0)
+    custom_controls_layout.addWidget(gui.subtitle_animation_time_spin, 5, 1)
+    custom_controls_layout.addWidget(gui.subtitle_background_cb, 6, 0)
+    custom_controls_layout.addWidget(gui.subtitle_bold_cb, 6, 1)
+
+    custom_wrapper_layout.addWidget(gui.custom_settings_content)
+    subtitle_layout.addWidget(custom_wrapper)
+
     gui.subtitle_preset_summary_label = QLabel()
     gui.subtitle_preset_summary_label.setObjectName("helperLabel")
     gui.subtitle_preset_summary_label.setWordWrap(True)
     subtitle_layout.addWidget(gui.subtitle_preset_summary_label)
-    subtitle_layout.addWidget(QLabel("Size"))
-    subtitle_layout.addWidget(gui.subtitle_font_size_spin)
-    subtitle_layout.addWidget(QLabel("Color"))
-    subtitle_layout.addWidget(gui.subtitle_color_btn)
 
-    gui.custom_subtitle_controls = QWidget()
-    custom_controls_layout = QVBoxLayout(gui.custom_subtitle_controls)
-    custom_controls_layout.setContentsMargins(0, 0, 0, 0)
-    custom_controls_layout.setSpacing(8)
-    gui.custom_font_label = QLabel("Font")
-    gui.custom_animation_label = QLabel("Animation")
-    custom_controls_layout.addWidget(gui.custom_font_label)
-    custom_controls_layout.addWidget(gui.subtitle_font_combo)
-    custom_controls_layout.addWidget(gui.custom_animation_label)
-    custom_controls_layout.addWidget(gui.subtitle_animation_combo)
-    custom_controls_layout.addWidget(gui.subtitle_background_cb)
-    custom_controls_layout.addWidget(gui.subtitle_bold_cb)
-    subtitle_layout.addWidget(gui.custom_subtitle_controls)
-    gui.custom_subtitle_controls.hide()
-    gui.subtitle_align_combo = QComboBox()
-    gui.subtitle_align_combo.addItems(["Bottom Center", "Bottom Left", "Bottom Right", "Center", "Top Center"])
-    gui.subtitle_align_combo.setCurrentText("Bottom Center")
-    gui.subtitle_align_combo.hide()
     gui.subtitle_x_offset_spin = QSpinBox()
     gui.subtitle_x_offset_spin.setRange(-400, 400)
     gui.subtitle_x_offset_spin.setValue(0)
@@ -269,6 +366,12 @@ def build_start_group(gui, left_layout):
     gui.subtitle_bottom_offset_spin.setRange(0, 300)
     gui.subtitle_bottom_offset_spin.setValue(30)
     gui.subtitle_bottom_offset_spin.hide()
+
+    def _toggle_custom_section(checked: bool):
+        gui.custom_settings_toggle_btn.setText(("▼ " if checked else "▶ ") + "Custom Settings")
+        gui.custom_settings_content.setVisible(checked)
+
+    gui.custom_settings_toggle_btn.toggled.connect(_toggle_custom_section)
     control_layout.addWidget(subtitle_card)
 
     action_card, action_layout = _build_collapsible_section("Section 7: Action + Progress")

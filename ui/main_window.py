@@ -2,12 +2,13 @@
 import os
 import re
 import time
+import json
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit,
                              QFileDialog, QCheckBox, QTextEdit, QComboBox,
                              QGroupBox, QSlider, QFrame, QProgressBar, QMessageBox,
                              QScrollArea,
-                             QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy,
+                             QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy, QInputDialog,
                              QRadioButton)
 from PySide6.QtCore import Qt, QUrl, QTimer, QSettings
 from PySide6.QtGui import QColor, QPixmap, QTextCursor
@@ -309,6 +310,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.setup_media_player()
         self.setup_audio_preview_player()
         self.load_user_settings()
+        self.refresh_saved_subtitle_style_presets()
 
     def get_selected_subtitle_preset(self) -> str:
         if getattr(self, "subtitle_preset_custom_radio", None) and self.subtitle_preset_custom_radio.isChecked():
@@ -317,8 +319,6 @@ class VideoTranslatorGUI(QMainWindow):
             return "youtube"
         if getattr(self, "subtitle_preset_minimal_radio", None) and self.subtitle_preset_minimal_radio.isChecked():
             return "minimal"
-        if getattr(self, "subtitle_preset_highlight_radio", None) and self.subtitle_preset_highlight_radio.isChecked():
-            return "highlight"
         return "tiktok"
 
     def get_subtitle_preset_config(self, preset_key: str | None = None) -> dict:
@@ -361,7 +361,7 @@ class VideoTranslatorGUI(QMainWindow):
                 "summary": "Clean white subtitle with subtle box background and soft fade. Built for long-form readability.",
             },
             "minimal": {
-                "label": "Minimal",
+                "label": "Short",
                 "font_name": "Inter",
                 "font_size": 48,
                 "font_color": "#FFFFFF",
@@ -377,24 +377,6 @@ class VideoTranslatorGUI(QMainWindow):
                 "animation": "Slide Up",
                 "bold": False,
                 "summary": "Light, modern caption with almost no stroke and a gentle slide/fade entrance.",
-            },
-            "highlight": {
-                "label": "Highlight",
-                "font_name": "Poppins",
-                "font_size": 56,
-                "font_color": "#FFFFFF",
-                "highlight_color": "#FFD400",
-                "outline_color": "#000000",
-                "outline_width": 4,
-                "shadow_color": "#000000",
-                "shadow_depth": 1,
-                "shadow_alpha": 0.3,
-                "background_box": False,
-                "background_color": "#000000",
-                "background_alpha": 0.0,
-                "animation": "Static",
-                "bold": True,
-                "summary": "Punchy colored subtitle for emphasis. This version highlights at line level; true per-word highlight needs word timing.",
             },
             "custom": {
                 "label": "Custom",
@@ -515,6 +497,97 @@ class VideoTranslatorGUI(QMainWindow):
 
     def load_user_settings(self):
         load_user_settings_impl(self)
+
+    def _highlight_color_hex(self) -> str:
+        mapping = {
+            "Yellow": "#FFD400",
+            "Cyan": "#00E5FF",
+            "Green": "#5CFF95",
+            "Pink": "#FF6BD6",
+        }
+        return mapping.get(self.subtitle_highlight_color_combo.currentText().strip(), "#FFD400")
+
+    def _saved_subtitle_style_payload(self) -> dict:
+        return {
+            "preset": self.get_selected_subtitle_preset(),
+            "font": self.subtitle_font_combo.currentText().strip(),
+            "size": int(self.subtitle_font_size_spin.value()),
+            "color": self.subtitle_color_hex,
+            "position": self.subtitle_align_combo.currentText().strip(),
+            "animation": self.subtitle_animation_combo.currentText().strip(),
+            "animation_time": float(self.subtitle_animation_time_spin.value()),
+            "background": bool(self.subtitle_background_cb.isChecked()),
+            "bold": bool(self.subtitle_bold_cb.isChecked()),
+            "auto_keyword_highlight": bool(self.subtitle_keyword_highlight_cb.isChecked()),
+            "highlight_color": self.subtitle_highlight_color_combo.currentText().strip(),
+            "highlight_mode": self.subtitle_highlight_mode_combo.currentText().strip(),
+        }
+
+    def _read_saved_subtitle_style_presets(self) -> dict:
+        raw_value = self.settings.value("saved_subtitle_styles", "{}")
+        try:
+            parsed = json.loads(raw_value) if isinstance(raw_value, str) else dict(raw_value)
+        except Exception:
+            parsed = {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def refresh_saved_subtitle_style_presets(self):
+        if not hasattr(self, "saved_subtitle_style_combo"):
+            return
+        saved = self._read_saved_subtitle_style_presets()
+        self.saved_subtitle_style_combo.blockSignals(True)
+        self.saved_subtitle_style_combo.clear()
+        self.saved_subtitle_style_combo.addItem("My Presets", "")
+        for name in sorted(saved.keys(), key=str.lower):
+            self.saved_subtitle_style_combo.addItem(name, name)
+        self.saved_subtitle_style_combo.setCurrentIndex(0)
+        self.saved_subtitle_style_combo.blockSignals(False)
+
+    def save_current_subtitle_style_preset(self):
+        name, ok = QInputDialog.getText(self, "Save Style", "Preset name:")
+        if not ok or not (name or "").strip():
+            return
+        preset_name = name.strip()
+        saved = self._read_saved_subtitle_style_presets()
+        saved[preset_name] = self._saved_subtitle_style_payload()
+        self.settings.setValue("saved_subtitle_styles", json.dumps(saved, ensure_ascii=False))
+        self.refresh_saved_subtitle_style_presets()
+        idx = self.saved_subtitle_style_combo.findData(preset_name)
+        if idx >= 0:
+            self.saved_subtitle_style_combo.setCurrentIndex(idx)
+
+    def load_selected_subtitle_style_preset(self, index: int):
+        if index <= 0:
+            return
+        preset_name = self.saved_subtitle_style_combo.itemData(index)
+        saved = self._read_saved_subtitle_style_presets()
+        preset = saved.get(preset_name or "")
+        if not isinstance(preset, dict):
+            return
+
+        key = str(preset.get("preset", "tiktok")).lower()
+        if key == "youtube":
+            self.subtitle_preset_youtube_radio.setChecked(True)
+        elif key == "minimal":
+            self.subtitle_preset_minimal_radio.setChecked(True)
+        elif key == "custom":
+            self.subtitle_preset_custom_radio.setChecked(True)
+        else:
+            self.subtitle_preset_tiktok_radio.setChecked(True)
+
+        self.subtitle_font_combo.setCurrentText(str(preset.get("font", self.subtitle_font_combo.currentText())))
+        self.subtitle_font_size_spin.setValue(int(preset.get("size", self.subtitle_font_size_spin.value())))
+        self.subtitle_color_hex = str(preset.get("color", self.subtitle_color_hex)).upper()
+        self.subtitle_color_btn.setText(self.subtitle_color_hex)
+        self.subtitle_align_combo.setCurrentText(str(preset.get("position", self.subtitle_align_combo.currentText())))
+        self.subtitle_animation_combo.setCurrentText(str(preset.get("animation", self.subtitle_animation_combo.currentText())))
+        self.subtitle_animation_time_spin.setValue(float(preset.get("animation_time", self.subtitle_animation_time_spin.value())))
+        self.subtitle_background_cb.setChecked(bool(preset.get("background", self.subtitle_background_cb.isChecked())))
+        self.subtitle_bold_cb.setChecked(bool(preset.get("bold", self.subtitle_bold_cb.isChecked())))
+        self.subtitle_keyword_highlight_cb.setChecked(bool(preset.get("auto_keyword_highlight", self.subtitle_keyword_highlight_cb.isChecked())))
+        self.subtitle_highlight_color_combo.setCurrentText(str(preset.get("highlight_color", self.subtitle_highlight_color_combo.currentText())))
+        self.subtitle_highlight_mode_combo.setCurrentText(str(preset.get("highlight_mode", self.subtitle_highlight_mode_combo.currentText())))
+        self.on_subtitle_preset_changed()
 
     def ensure_current_project(self):
         video_path = self.video_path_edit.text().strip()
@@ -768,7 +841,7 @@ class VideoTranslatorGUI(QMainWindow):
         if not color.isValid():
             return
         self.subtitle_color_hex = color.name().upper()
-        self.subtitle_color_btn.setText(f"Color: {self.subtitle_color_hex}")
+        self.subtitle_color_btn.setText(self.subtitle_color_hex)
         self.update_subtitle_preview_style()
 
     def update_subtitle_preview_style(self):
@@ -804,9 +877,11 @@ class VideoTranslatorGUI(QMainWindow):
         alignment_map = {
             "Bottom Left": 1,
             "Bottom Center": 2,
+            "Bottom": 2,
             "Bottom Right": 3,
             "Center": 5,
             "Top Center": 8,
+            "Top": 8,
         }
         preset = self.get_subtitle_preset_config()
         is_custom = self.get_selected_subtitle_preset() == "custom"
@@ -820,7 +895,7 @@ class VideoTranslatorGUI(QMainWindow):
             ) or preset.get("font_name", "Arial"),
             "font_size": export_font_size,
             "font_color": self._hex_to_ass_color(self.subtitle_color_hex),
-            "highlight_color": self._hex_to_ass_color(preset.get("highlight_color", "#FFFFFF")),
+            "highlight_color": self._hex_to_ass_color(self._highlight_color_hex()),
             "outline_color": self._hex_to_ass_color(preset.get("outline_color", "#000000")),
             "outline_width": float(preset.get("outline_width", 2)),
             "shadow_color": self._hex_to_ass_color(preset.get("shadow_color", "#000000")),
@@ -833,12 +908,19 @@ class VideoTranslatorGUI(QMainWindow):
                 if is_custom
                 else preset.get("animation", "Static")
             ) or preset.get("animation", "Static"),
+            "animation_duration": float(self.subtitle_animation_time_spin.value()),
             "alignment": alignment_map.get(self.subtitle_align_combo.currentText(), 2),
             "margin_v": int(self.subtitle_bottom_offset_spin.value()),
             "background_box": bool(self.subtitle_background_cb.isChecked() if is_custom else preset.get("background_box", False)),
             "bold": bool(self.subtitle_bold_cb.isChecked() if is_custom else preset.get("bold", False)),
             "preset_key": self.get_selected_subtitle_preset(),
-            "manual_highlights": [list(seg.get("manual_highlights", [])) for seg in (style_segments or [])],
+            "auto_keyword_highlight": bool(self.subtitle_keyword_highlight_cb.isChecked())
+            and self.subtitle_highlight_mode_combo.currentText().strip() in ("Auto", "Auto + Manual"),
+            "manual_highlights": (
+                [list(seg.get("manual_highlights", [])) for seg in (style_segments or [])]
+                if self.subtitle_highlight_mode_combo.currentText().strip() in ("Manual", "Auto + Manual")
+                else [[] for _ in (style_segments or [])]
+            ),
         }
 
     def on_subtitle_preset_changed(self):
@@ -853,11 +935,23 @@ class VideoTranslatorGUI(QMainWindow):
         self.subtitle_animation_combo.setEnabled(is_custom)
         self.subtitle_background_cb.setEnabled(is_custom)
         self.subtitle_bold_cb.setEnabled(is_custom)
-        self.custom_subtitle_controls.setVisible(is_custom)
         if hasattr(self, "subtitle_preset_summary_label"):
             self.subtitle_preset_summary_label.setText(
                 f"{preset.get('label', 'Preset')}: {preset.get('summary', '')}"
             )
+        self._update_animation_time_visibility()
+        self.update_subtitle_preview_style()
+
+    def _update_animation_time_visibility(self):
+        current_animation = self.subtitle_animation_combo.currentText().strip().lower()
+        show_animation_time = current_animation != "static"
+        if hasattr(self, "subtitle_animation_time_label"):
+            self.subtitle_animation_time_label.setVisible(show_animation_time)
+        if hasattr(self, "subtitle_animation_time_spin"):
+            self.subtitle_animation_time_spin.setVisible(show_animation_time)
+
+    def on_subtitle_animation_changed(self):
+        self._update_animation_time_visibility()
         self.update_subtitle_preview_style()
 
     def refresh_video_dimensions(self, path: str):
@@ -1375,6 +1469,8 @@ class VideoTranslatorGUI(QMainWindow):
             background_alpha=subtitle_style.get("background_alpha", 0.5),
             bold=subtitle_style.get("bold", False),
             preset_key=subtitle_style.get("preset_key", ""),
+            auto_keyword_highlight=subtitle_style.get("auto_keyword_highlight", False),
+            animation_duration=subtitle_style.get("animation_duration", 0.22),
             manual_highlights=subtitle_style.get("manual_highlights", []),
         )
         self.processed_artifacts["subtitle_preview_srt"] = self.live_preview_subtitle_path

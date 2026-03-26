@@ -131,6 +131,8 @@ class ExactFramePreviewWorker(QThread):
                 background_alpha=self.subtitle_style.get("background_alpha", 0.5),
                 bold=self.subtitle_style.get("bold", False),
                 preset_key=self.subtitle_style.get("preset_key", ""),
+                auto_keyword_highlight=self.subtitle_style.get("auto_keyword_highlight", False),
+                animation_duration=self.subtitle_style.get("animation_duration", 0.22),
                 manual_highlights=self.subtitle_style.get("manual_highlights", []),
             )
             self.finished.emit(output, "")
