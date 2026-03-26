@@ -1815,6 +1815,7 @@ class VideoTranslatorGUI(QMainWindow):
         out_dir = self.voice_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
         bg_path = self.bg_music_edit.text().strip()
         voice_name = str(self.voice_name_combo.currentData() or self.voice_name_combo.currentText()).strip()
+        timing_sync_mode = str(self.voice_timing_sync_combo.currentText()).strip()
         voice_gain = float(self.voice_gain_spin.value())
         bg_gain = float(self.bg_gain_spin.value())
 
@@ -1832,6 +1833,7 @@ class VideoTranslatorGUI(QMainWindow):
             out_dir,
             bg_path,
             voice_name,
+            timing_sync_mode,
             voice_gain,
             bg_gain,
             project_state_path,

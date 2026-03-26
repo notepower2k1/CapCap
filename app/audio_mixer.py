@@ -1,8 +1,82 @@
 import os
+import subprocess
+import wave
 
 
 def _ffmpeg_path():
     return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffmpeg.exe")
+
+
+def _probe_wav_duration_seconds(wav_path: str) -> float:
+    with wave.open(wav_path, "rb") as wav_file:
+        frame_rate = wav_file.getframerate() or 16000
+        frame_count = wav_file.getnframes()
+    return max(0.0, float(frame_count) / float(frame_rate))
+
+
+def _build_atempo_filter(speed_ratio: float) -> str:
+    ratio = max(0.01, float(speed_ratio))
+    filters = []
+    while ratio < 0.5 or ratio > 2.0:
+        if ratio < 0.5:
+            filters.append("atempo=0.5")
+            ratio /= 0.5
+        else:
+            filters.append("atempo=2.0")
+            ratio /= 2.0
+    filters.append(f"atempo={ratio:.6f}")
+    return ",".join(filters)
+
+
+def fit_wav_to_duration(
+    *,
+    input_wav_path: str,
+    output_wav_path: str,
+    target_duration_seconds: float,
+    mode: str = "off",
+    smart_min_ratio: float = 0.8,
+    smart_max_ratio: float = 1.25,
+) -> str:
+    mode_key = (mode or "off").strip().lower()
+    if mode_key not in {"smart", "force"}:
+        return input_wav_path
+    if not os.path.exists(input_wav_path):
+        raise FileNotFoundError(f"Input wav not found: {input_wav_path}")
+
+    source_duration = _probe_wav_duration_seconds(input_wav_path)
+    target_duration = max(0.0, float(target_duration_seconds))
+    if source_duration <= 0.0 or target_duration <= 0.0:
+        return input_wav_path
+
+    fit_ratio = target_duration / source_duration
+    if abs(fit_ratio - 1.0) < 0.02:
+        return input_wav_path
+    if mode_key == "smart" and not (smart_min_ratio <= fit_ratio <= smart_max_ratio):
+        return input_wav_path
+
+    ffmpeg = _ffmpeg_path()
+    if not os.path.exists(ffmpeg):
+        raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
+
+    os.makedirs(os.path.dirname(output_wav_path) or ".", exist_ok=True)
+    filter_chain = _build_atempo_filter(1.0 / fit_ratio)
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        input_wav_path,
+        "-filter:a",
+        filter_chain,
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        output_wav_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg time-stretch failed:\n{proc.stderr or proc.stdout}")
+    return output_wav_path
 
 
 def _require_pydub():

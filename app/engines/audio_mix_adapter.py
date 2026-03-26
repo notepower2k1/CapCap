@@ -1,7 +1,22 @@
-from audio_mixer import build_voice_track_from_srt_segments, mix_voice_with_background
+from audio_mixer import build_voice_track_from_srt_segments, fit_wav_to_duration, mix_voice_with_background
 
 
 class AudioMixAdapter:
+    def fit_wav_to_duration(
+        self,
+        *,
+        input_wav_path: str,
+        output_wav_path: str,
+        target_duration_seconds: float,
+        mode: str = "off",
+    ) -> str:
+        return fit_wav_to_duration(
+            input_wav_path=input_wav_path,
+            output_wav_path=output_wav_path,
+            target_duration_seconds=target_duration_seconds,
+            mode=mode,
+        )
+
     def build_voice_track(self, *, segments, tts_wav_paths, output_wav_path: str, gain_db: float = 0.0) -> str:
         return build_voice_track_from_srt_segments(
             segments=segments,

@@ -31,6 +31,7 @@ def save_user_settings(gui):
     s.setValue("subtitle_highlight_mode", gui.subtitle_highlight_mode_combo.currentText())
     s.setValue("voice_speed", gui.voice_speed_spin.currentText())
     s.setValue("voice_tone", gui.voice_tone_combo.currentText())
+    s.setValue("voice_timing_sync_mode", gui.voice_timing_sync_combo.currentText())
     s.setValue("voice_gain", gui.voice_gain_spin.value())
     s.setValue("bg_gain", gui.bg_gain_spin.value())
     s.setValue("advanced_open", gui.advanced_group.isChecked())
@@ -82,6 +83,7 @@ def load_user_settings(gui):
     gui.subtitle_highlight_mode_combo.setCurrentText(str(s.value("subtitle_highlight_mode", gui.subtitle_highlight_mode_combo.currentText())))
     gui.voice_speed_spin.setCurrentText(s.value("voice_speed", gui.voice_speed_spin.currentText()))
     gui.voice_tone_combo.setCurrentText(s.value("voice_tone", gui.voice_tone_combo.currentText()))
+    gui.voice_timing_sync_combo.setCurrentText(s.value("voice_timing_sync_mode", gui.voice_timing_sync_combo.currentText()))
     gui.voice_gain_spin.setValue(float(s.value("voice_gain", gui.voice_gain_spin.value())))
     gui.bg_gain_spin.setValue(float(s.value("bg_gain", gui.bg_gain_spin.value())))
     use_existing = str(s.value("use_existing_audio", "false")).lower() == "true"

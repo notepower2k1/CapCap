@@ -123,13 +123,14 @@ class PrepareWorkflowWorker(QThread):
 class VoiceOverWorker(QThread):
     finished = Signal(str, str, str)
 
-    def __init__(self, workspace_root, segments, output_dir, background_path, voice_name, voice_gain_db, bg_gain_db, project_state_path=""):
+    def __init__(self, workspace_root, segments, output_dir, background_path, voice_name, timing_sync_mode, voice_gain_db, bg_gain_db, project_state_path=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.segments = segments
         self.output_dir = output_dir
         self.background_path = background_path
         self.voice_name = voice_name
+        self.timing_sync_mode = timing_sync_mode
         self.voice_gain_db = voice_gain_db
         self.bg_gain_db = bg_gain_db
         self.project_state_path = project_state_path
@@ -142,6 +143,7 @@ class VoiceOverWorker(QThread):
                 output_dir=self.output_dir,
                 background_path=self.background_path,
                 voice_name=self.voice_name,
+                timing_sync_mode=self.timing_sync_mode,
                 voice_gain_db=self.voice_gain_db,
                 bg_gain_db=self.bg_gain_db,
                 project_state_path=self.project_state_path,

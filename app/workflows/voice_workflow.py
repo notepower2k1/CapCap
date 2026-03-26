@@ -32,6 +32,27 @@ class VoiceWorkflow:
             self.project_service.update_step(state, "mix_audio", "skipped", save=False)
         self.project_service.save_project(state)
 
+    def _fit_segment_wavs_to_timeline(self, *, segments, wavs, tmp_dir: str, sync_mode: str):
+        mode_key = (sync_mode or "off").strip().lower()
+        if mode_key != "smart":
+            return wavs
+
+        synced_wavs = []
+        for idx, (seg, wav_path) in enumerate(zip(segments, wavs)):
+            if not wav_path or not os.path.exists(wav_path):
+                synced_wavs.append(wav_path)
+                continue
+            target_duration = max(0.0, float(seg.get("end", 0.0)) - float(seg.get("start", 0.0)))
+            synced_path = os.path.join(tmp_dir, f"seg_{idx:04d}_smartfit.wav")
+            fitted_path = self.engine_runtime.fit_wav_to_duration(
+                input_wav_path=wav_path,
+                output_wav_path=synced_path,
+                target_duration_seconds=target_duration,
+                mode=mode_key,
+            )
+            synced_wavs.append(fitted_path)
+        return synced_wavs
+
     def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str):
         wavs = []
         for idx, seg in enumerate(segments):
@@ -56,6 +77,7 @@ class VoiceWorkflow:
         output_dir: str,
         background_path: str = "",
         voice_name: str = "vi-VN-HoaiMyNeural",
+        timing_sync_mode: str = "off",
         voice_gain_db: float = 0.0,
         bg_gain_db: float = 0.0,
         project_state_path: str = "",
@@ -71,6 +93,12 @@ class VoiceWorkflow:
             segments=segments,
             tmp_dir=tmp_dir,
             voice_name=voice_name,
+        )
+        wavs = self._fit_segment_wavs_to_timeline(
+            segments=segments,
+            wavs=wavs,
+            tmp_dir=tmp_dir,
+            sync_mode=timing_sync_mode,
         )
 
         voice_track = os.path.join(output_dir, "voice_vi.wav")

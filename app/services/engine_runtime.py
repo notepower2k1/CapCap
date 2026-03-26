@@ -76,6 +76,21 @@ class EngineRuntime:
             gain_db=gain_db,
         )
 
+    def fit_wav_to_duration(
+        self,
+        *,
+        input_wav_path: str,
+        output_wav_path: str,
+        target_duration_seconds: float,
+        mode: str = "off",
+    ) -> str:
+        return self.audio_mix.fit_wav_to_duration(
+            input_wav_path=input_wav_path,
+            output_wav_path=output_wav_path,
+            target_duration_seconds=target_duration_seconds,
+            mode=mode,
+        )
+
     def mix_voice_with_background(
         self,
         *,
