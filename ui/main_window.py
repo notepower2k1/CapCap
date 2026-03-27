@@ -668,9 +668,9 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_advanced_toggled(self, checked: bool):
         if hasattr(self, "tabs"):
-            self.tabs.setVisible(checked)
+            self.tabs.setVisible(True)
         if hasattr(self, "advanced_group"):
-            self.advanced_group.setTitle("ADVANCED" if checked else "ADVANCED (click to open)")
+            self.advanced_group.setTitle("Advanced Settings")
 
     def on_auto_preview_toggled(self, checked: bool):
         if checked:
@@ -962,12 +962,17 @@ class VideoTranslatorGUI(QMainWindow):
         show_voice = mode in ("voice", "both")
         if hasattr(self, "voice_section_card"):
             self.voice_section_card.setVisible(show_voice)
-        self.voiceover_btn.setVisible(show_voice)
-        self.preview_btn.setVisible(show_voice)
+        if hasattr(self, "voiceover_btn"):
+            self.voiceover_btn.hide()
+        if hasattr(self, "preview_btn"):
+            self.preview_btn.setVisible(show_voice)
         self.mixed_audio_edit.setEnabled(show_voice)
-        self.use_generated_audio_radio.setVisible(show_voice)
-        self.use_existing_audio_radio.setVisible(show_voice)
-        self.audio_source_hint_label.setVisible(show_voice)
+        if hasattr(self, "use_generated_audio_radio"):
+            self.use_generated_audio_radio.hide()
+        if hasattr(self, "use_existing_audio_radio"):
+            self.use_existing_audio_radio.hide()
+        if hasattr(self, "audio_source_hint_label"):
+            self.audio_source_hint_label.hide()
 
         if hasattr(self, "output_subtitle_radio"):
             self.output_subtitle_radio.setChecked(mode == "subtitle")
@@ -999,7 +1004,7 @@ class VideoTranslatorGUI(QMainWindow):
         if video_path:
             video_name = os.path.basename(video_path)
             self.project_title_label.setText(f"Project: {video_name}")
-            self.upload_status_label.setText(f"âœ” {video_name} uploaded")
+            self.upload_status_label.setText(f"[OK] {video_name} uploaded")
         else:
             self.project_title_label.setText("Project: No video selected")
             self.upload_status_label.setText("No video uploaded yet")
@@ -1028,19 +1033,19 @@ class VideoTranslatorGUI(QMainWindow):
         translation_running = steps.get("translate_raw") == "running" or steps.get("refine_translation") == "running"
         voice_running = steps.get("generate_tts") == "running" or steps.get("mix_audio") == "running"
 
-        self.progress_audio_label.setText(("âœ” " if has_audio else "â¬œ ") + "Audio analyzed")
-        self.progress_subtitle_label.setText(("âœ” " if has_subtitle else "â¬œ ") + "Subtitle created")
+        self.progress_audio_label.setText(("[OK] " if has_audio else "[ ] ") + "Audio analyzed")
+        self.progress_subtitle_label.setText(("[OK] " if has_subtitle else "[ ] ") + "Subtitle created")
         if translation_running:
-            self.progress_translate_label.setText("â³ Translating...")
+            self.progress_translate_label.setText("[...] Translating...")
         else:
-            self.progress_translate_label.setText(("âœ” " if has_translation else "â¬œ ") + "Translating")
+            self.progress_translate_label.setText(("[OK] " if has_translation else "[ ] ") + "Translating")
 
         if self.get_output_mode_key() == "subtitle":
-            self.progress_voice_label.setText("â¬œ Generating voice (not needed)")
+            self.progress_voice_label.setText("[ ] Generating voice (not needed)")
         elif voice_running:
-            self.progress_voice_label.setText("â³ Generating voice")
+            self.progress_voice_label.setText("[...] Generating voice")
         else:
-            self.progress_voice_label.setText(("âœ” " if has_voice else "â¬œ ") + "Generating voice")
+            self.progress_voice_label.setText(("[OK] " if has_voice else "[ ] ") + "Generating voice")
 
     def update_preview_context_label(self, has_subtitles: bool, has_voice_audio: bool):
         subtitle_source = "Vietnamese review track" if self.current_translated_segments else ("original subtitle track" if self.current_segments else "no subtitle track yet")
@@ -1512,6 +1517,12 @@ class VideoTranslatorGUI(QMainWindow):
     def play_audio_preview_file(self, audio_path: str):
         if not audio_path or not os.path.exists(audio_path):
             raise FileNotFoundError("Audio preview file was not found.")
+        if hasattr(self, "media_player") and self.media_player.is_playing():
+            self.media_player.pause()
+            if hasattr(self, "play_btn"):
+                self.play_btn.setText("Play")
+            if hasattr(self, "timeline"):
+                self.timeline.set_playing(False)
         self.audio_preview_player.stop()
         self.audio_preview_player.setSource(QUrl.fromLocalFile(audio_path))
         self.audio_preview_player.play()
@@ -1887,7 +1898,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.apply_translated_btn.setEnabled(has_translated_text)
         generated_mode = not self.using_existing_audio_source()
         self.voiceover_btn.setEnabled(has_translated_text and generated_mode and mode in ("voice", "both"))
-        self.preview_btn.setEnabled(v_ok and has_voice_audio and mode in ("voice", "both"))
+        if hasattr(self, "preview_btn"):
+            self.preview_btn.setEnabled(v_ok and has_voice_audio and mode in ("voice", "both"))
         if hasattr(self, "preview_audio_btn"):
             self.preview_audio_btn.setEnabled(has_voice_audio)
         if hasattr(self, "blur_area_btn"):

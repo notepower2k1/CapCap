@@ -39,7 +39,6 @@ def save_user_settings(gui):
     s.setValue("voice_timing_sync_mode", gui.voice_timing_sync_combo.currentText())
     s.setValue("voice_gain", gui.voice_gain_spin.value())
     s.setValue("bg_gain", gui.bg_gain_spin.value())
-    s.setValue("advanced_open", gui.advanced_group.isChecked())
 
 
 def load_user_settings(gui):
@@ -99,8 +98,7 @@ def load_user_settings(gui):
     use_existing = str(s.value("use_existing_audio", "false")).lower() == "true"
     gui.use_existing_audio_radio.setChecked(use_existing)
     gui.use_generated_audio_radio.setChecked(not use_existing)
-    gui.advanced_group.setChecked(str(s.value("advanced_open", "false")).lower() == "true")
-    gui.on_advanced_toggled(gui.advanced_group.isChecked())
+    gui.on_advanced_toggled(True)
     gui.on_audio_source_mode_changed()
     gui.on_subtitle_preset_changed()
     gui.update_subtitle_preview_style()

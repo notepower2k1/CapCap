@@ -28,6 +28,8 @@ def refresh_video_dimensions(gui, path: str, get_video_dimensions):
 
 
 def toggle_play(gui):
+    if hasattr(gui, "audio_preview_player"):
+        gui.audio_preview_player.stop()
     if gui.media_player.is_playing():
         gui.media_player.pause()
         gui.play_btn.setText("Play")
@@ -41,6 +43,8 @@ def toggle_play(gui):
 
 
 def stop_video(gui):
+    if hasattr(gui, "audio_preview_player"):
+        gui.audio_preview_player.stop()
     gui.media_player.stop()
     gui.play_btn.setText("Play")
     gui.timeline.set_playing(False)

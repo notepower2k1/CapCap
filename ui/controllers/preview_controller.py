@@ -328,8 +328,9 @@ class PreviewController:
         self.gui.log(f"[Preview] video={video_path}")
         self.gui.log(f"[Preview] audio={audio_path}")
         self.gui.log(f"[Preview] out={preview_out}")
-        self.gui.preview_btn.setEnabled(False)
-        self.gui.preview_btn.setText("Preparing preview...")
+        if hasattr(self.gui, "preview_btn"):
+            self.gui.preview_btn.setEnabled(False)
+            self.gui.preview_btn.setText("Preparing preview...")
         self.gui.progress_bar.setValue(95)
 
         self.gui.preview_thread = PreviewMuxWorker(video_path, audio_path, preview_out)
@@ -337,8 +338,9 @@ class PreviewController:
         self.gui.preview_thread.start()
 
     def on_preview_ready(self, preview_path, error):
-        self.gui.preview_btn.setEnabled(True)
-        self.gui.preview_btn.setText("Open Video Preview With Selected Audio")
+        if hasattr(self.gui, "preview_btn"):
+            self.gui.preview_btn.setEnabled(True)
+            self.gui.preview_btn.setText("Open Video Preview With Selected Audio")
         self.gui.progress_bar.setValue(100)
 
         if error:

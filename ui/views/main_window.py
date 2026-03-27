@@ -88,7 +88,6 @@ def _connect_ui_signals(gui):
     gui.mixed_audio_edit.textChanged.connect(gui.refresh_ui_state)
     gui.use_generated_audio_radio.toggled.connect(gui.on_audio_source_mode_changed)
     gui.use_existing_audio_radio.toggled.connect(gui.on_audio_source_mode_changed)
-    gui.advanced_group.toggled.connect(gui.on_advanced_toggled)
     gui.preview_audio_btn.clicked.connect(gui.preview_current_audio_track)
     gui.blur_area_btn.toggled.connect(gui.toggle_blur_area_editing)
     gui.transcript_text.textChanged.connect(gui.refresh_ui_state)
@@ -114,7 +113,7 @@ def _connect_ui_signals(gui):
     gui.subtitle_x_offset_spin.valueChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_bottom_offset_spin.valueChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_background_cb.toggled.connect(gui.update_subtitle_preview_style)
-    gui.on_advanced_toggled(gui.advanced_group.isChecked())
+    gui.on_advanced_toggled(True)
 
 
 def _initialize_ui_state(gui):
