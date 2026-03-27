@@ -56,8 +56,8 @@ class EngineRuntime:
             subtitle_style=subtitle_style,
         )
 
-    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str) -> bool:
-        return self.ffmpeg.embed_ass_subtitles(video_path, ass_path, output_path)
+    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None) -> bool:
+        return self.ffmpeg.embed_ass_subtitles(video_path, ass_path, output_path, blur_region=blur_region)
 
     def get_video_dimensions(self, video_path: str):
         return self.ffmpeg.get_video_dimensions(video_path)
@@ -65,8 +65,16 @@ class EngineRuntime:
     def generate_srt(self, segments, output_path: str) -> str:
         return self.subtitle.generate_srt(segments, output_path)
 
-    def synthesize_segment(self, *, text: str, wav_path: str, voice: str, tmp_dir: str | None = None) -> str:
-        return self.tts.synthesize_segment(text=text, wav_path=wav_path, voice=voice, tmp_dir=tmp_dir)
+    def synthesize_segment(
+        self,
+        *,
+        text: str,
+        wav_path: str,
+        voice: str,
+        speed: float = 1.0,
+        tmp_dir: str | None = None,
+    ) -> str:
+        return self.tts.synthesize_segment(text=text, wav_path=wav_path, voice=voice, speed=speed, tmp_dir=tmp_dir)
 
     def build_voice_track(self, *, segments, tts_wav_paths, output_wav_path: str, gain_db: float = 0.0) -> str:
         return self.audio_mix.build_voice_track(

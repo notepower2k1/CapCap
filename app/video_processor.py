@@ -28,6 +28,31 @@ def _escape_path_for_filter(path):
     return clean
 
 
+def _build_blur_filter_chain(blur_region, video_width, video_height):
+    if not isinstance(blur_region, dict):
+        return ""
+    try:
+        x_norm = float(blur_region.get("x", 0.0))
+        y_norm = float(blur_region.get("y", 0.0))
+        w_norm = float(blur_region.get("width", 0.0))
+        h_norm = float(blur_region.get("height", 0.0))
+    except (TypeError, ValueError):
+        return ""
+
+    if w_norm <= 0 or h_norm <= 0 or video_width <= 0 or video_height <= 0:
+        return ""
+
+    x = max(0, min(video_width - 2, int(round(x_norm * video_width))))
+    y = max(0, min(video_height - 2, int(round(y_norm * video_height))))
+    w = max(16, min(video_width - x, int(round(w_norm * video_width))))
+    h = max(16, min(video_height - y, int(round(h_norm * video_height))))
+    return (
+        f"split[main][tmp];"
+        f"[tmp]crop=w={w}:h={h}:x={x}:y={y},boxblur=20:3[blur];"
+        f"[main][blur]overlay={x}:{y}"
+    )
+
+
 def get_video_dimensions(video_path):
     """Return (width, height) of the first video stream using ffprobe.
     Falls back to (1920, 1080) if ffprobe is unavailable or fails.
@@ -320,7 +345,7 @@ def srt_to_ass(srt_path: str,
     return ass_path
 
 
-def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None):
+def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None):
     """Burn subtitles into video using an already-prepared ASS file."""
     ffmpeg = _ffmpeg_path(ffmpeg_path)
     if not os.path.exists(ffmpeg):
@@ -329,7 +354,9 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None):
         raise FileNotFoundError(f"ASS subtitle file not found at {ass_path}")
 
     escaped_ass = _escape_path_for_filter(ass_path)
-    filter_complex = f"ass='{escaped_ass}'"
+    video_w, video_h = get_video_dimensions(video_path)
+    blur_chain = _build_blur_filter_chain(blur_region, video_w, video_h)
+    filter_complex = f"{blur_chain},ass='{escaped_ass}'" if blur_chain else f"ass='{escaped_ass}'"
 
     command = [
         ffmpeg,
@@ -392,6 +419,7 @@ def embed_subtitles(video_path, srt_path, output_path,
                     auto_keyword_highlight=False,
                     animation_duration=0.22,
                     manual_highlights=None,
+                    blur_region=None,
                     ffmpeg_path=None):
     """Burn subtitles into video using a properly-styled ASS file.
 
@@ -429,7 +457,7 @@ def embed_subtitles(video_path, srt_path, output_path,
         manual_highlights=manual_highlights,
     )
 
-    success = embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=ffmpeg)
+    success = embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=ffmpeg, blur_region=blur_region)
 
     # Step 4: clean up temp ASS
     if os.path.exists(ass_path):

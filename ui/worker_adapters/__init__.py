@@ -7,6 +7,7 @@ from .processing_workers import (
     TranscriptionWorker,
     TranslationWorker,
     VocalSeparationWorker,
+    VoiceSamplePreviewWorker,
     VoiceOverWorker,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "TranscriptionWorker",
     "TranslationWorker",
     "VocalSeparationWorker",
+    "VoiceSamplePreviewWorker",
     "VoiceOverWorker",
 ]

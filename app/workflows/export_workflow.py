@@ -37,6 +37,7 @@ class ExportWorkflow:
             "font_color": subtitle_style.get("font_color", "&H00FFFFFF"),
             "background_box": subtitle_style.get("background_box", False),
             "animation": subtitle_style.get("animation", "Static"),
+            "blur_region": subtitle_style.get("blur_region"),
         }
 
     def _build_temp_mux_path(self) -> str:
@@ -46,7 +47,12 @@ class ExportWorkflow:
 
     def _export_subtitle_video(self, *, video_path: str, srt_path: str, ass_path: str, output_path: str, subtitle_style):
         if ass_path and os.path.exists(ass_path):
-            ok = self.engine_runtime.embed_ass_subtitles(video_path, ass_path, output_path)
+            ok = self.engine_runtime.embed_ass_subtitles(
+                video_path,
+                ass_path,
+                output_path,
+                blur_region=subtitle_style.get("blur_region"),
+            )
         else:
             ok = self.engine_runtime.embed_subtitles(
                 video_path,

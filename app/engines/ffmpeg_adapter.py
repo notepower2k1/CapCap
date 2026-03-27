@@ -30,10 +30,11 @@ class FFmpegAdapter:
             auto_keyword_highlight=subtitle_style.get("auto_keyword_highlight", False),
             animation_duration=subtitle_style.get("animation_duration", 0.22),
             manual_highlights=subtitle_style.get("manual_highlights", []),
+            blur_region=subtitle_style.get("blur_region"),
         )
 
-    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str) -> bool:
-        return embed_ass_subtitles(video_path, ass_path, output_path)
+    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None) -> bool:
+        return embed_ass_subtitles(video_path, ass_path, output_path, blur_region=blur_region)
 
     def get_video_dimensions(self, video_path: str):
         return get_video_dimensions(video_path)

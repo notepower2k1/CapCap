@@ -53,7 +53,7 @@ class VoiceWorkflow:
             synced_wavs.append(fitted_path)
         return synced_wavs
 
-    def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str):
+    def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str, voice_speed: float):
         wavs = []
         for idx, seg in enumerate(segments):
             txt = (seg.get("text") or "").strip()
@@ -65,6 +65,7 @@ class VoiceWorkflow:
                 text=txt,
                 wav_path=seg_wav,
                 voice=voice_name,
+                speed=voice_speed,
                 tmp_dir=tmp_dir,
             )
             wavs.append(seg_wav)
@@ -77,6 +78,7 @@ class VoiceWorkflow:
         output_dir: str,
         background_path: str = "",
         voice_name: str = "vi-VN-HoaiMyNeural",
+        voice_speed: float = 1.0,
         timing_sync_mode: str = "off",
         voice_gain_db: float = 0.0,
         bg_gain_db: float = 0.0,
@@ -93,6 +95,7 @@ class VoiceWorkflow:
             segments=segments,
             tmp_dir=tmp_dir,
             voice_name=voice_name,
+            voice_speed=float(voice_speed),
         )
         wavs = self._fit_segment_wavs_to_timeline(
             segments=segments,

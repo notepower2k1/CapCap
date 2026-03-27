@@ -9,6 +9,7 @@ from worker_adapters import (
     TranscriptionWorker,
     TranslationWorker,
     VocalSeparationWorker,
+    VoiceSamplePreviewWorker,
     VoiceOverWorker,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "TranscriptionWorker",
     "TranslationWorker",
     "VocalSeparationWorker",
+    "VoiceSamplePreviewWorker",
     "VoiceOverWorker",
 ]

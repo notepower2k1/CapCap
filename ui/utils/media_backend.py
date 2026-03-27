@@ -1,4 +1,5 @@
 import os
+import os
 import sys
 from pathlib import Path
 
@@ -59,6 +60,12 @@ class QtMediaPlayerBackend(QObject):
     def clear_subtitle(self):
         return None
 
+    def set_blur_region(self, blur_region=None):
+        return None
+
+    def clear_blur_region(self):
+        return None
+
 
 class MpvMediaPlayerBackend(QObject):
     positionChanged = Signal(int)
@@ -73,12 +80,13 @@ class MpvMediaPlayerBackend(QObject):
         self._state = QMediaPlayer.StoppedState
         self._source_path = ""
         self._subtitle_ass_path = ""
+        self._blur_region = None
 
         prepare_mpv_bundle()
         import mpv
 
         self._player = mpv.MPV(
-            wid=str(int(video_view.winId())),
+            wid=str(int(video_view.get_mpv_target_winid() if hasattr(video_view, "get_mpv_target_winid") else video_view.winId())),
             input_default_bindings=False,
             input_vo_keyboard=False,
             osc=False,
@@ -115,7 +123,7 @@ class MpvMediaPlayerBackend(QObject):
 
     def _normalize_source(self, source):
         if isinstance(source, QUrl):
-            return source.toLocalFile()
+            return source.toLocalFile() or source.toString()
         if isinstance(source, str):
             return source
         return ""
@@ -159,6 +167,7 @@ class MpvMediaPlayerBackend(QObject):
         self._state = QMediaPlayer.PausedState
         self._player.pause = True
         self._player.command("loadfile", source_path, "replace")
+        self._apply_blur_filter()
         self._apply_current_subtitle()
 
     def play(self):
@@ -209,6 +218,48 @@ class MpvMediaPlayerBackend(QObject):
             self._player.sub_visibility = False
         except Exception:
             pass
+
+    def _build_blur_filter(self):
+        blur = self._blur_region or {}
+        if not blur:
+            return ""
+        video_width = int(self.video_view.video_source_width or 0)
+        video_height = int(self.video_view.video_source_height or 0)
+        if video_width <= 0 or video_height <= 0:
+            return ""
+        x = max(0, min(video_width - 2, int(round(float(blur.get("x", 0.0)) * video_width))))
+        y = max(0, min(video_height - 2, int(round(float(blur.get("y", 0.0)) * video_height))))
+        w = max(16, min(video_width - x, int(round(float(blur.get("width", 0.0)) * video_width))))
+        h = max(16, min(video_height - y, int(round(float(blur.get("height", 0.0)) * video_height))))
+        return (
+            "lavfi=[split[main][tmp];"
+            f"[tmp]crop=w={w}:h={h}:x={x}:y={y},boxblur=20:3[blur];"
+            f"[main][blur]overlay={x}:{y}]"
+        )
+
+    def _apply_blur_filter(self):
+        try:
+            self._player.command("vf", "clr", "")
+        except Exception:
+            pass
+        filter_spec = self._build_blur_filter()
+        if not filter_spec:
+            return
+        try:
+            self._player.command("vf", "add", f"@capcap-blur:{filter_spec}")
+        except Exception:
+            try:
+                self._player.vf = filter_spec
+            except Exception:
+                pass
+
+    def set_blur_region(self, blur_region=None):
+        self._blur_region = dict(blur_region or {}) if blur_region else None
+        self._apply_blur_filter()
+
+    def clear_blur_region(self):
+        self._blur_region = None
+        self._apply_blur_filter()
 
     def set_subtitle_file(self, subtitle_path, subtitle_style=None):
         if not subtitle_path or not os.path.exists(subtitle_path):

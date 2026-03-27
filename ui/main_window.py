@@ -18,7 +18,7 @@ APP_PATH = os.path.join(os.path.dirname(__file__), '..', 'app')
 if APP_PATH not in sys.path:
     sys.path.append(APP_PATH)
 
-from services import GUIProjectBridge, ProjectService
+from services import GUIProjectBridge, ProjectService, VoiceCatalogService
 from controllers import PipelineController, PreviewController, SubtitleController
 from helpers import (
     build_guidance_state,
@@ -77,6 +77,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'app'))
 from video_processor import get_video_dimensions
 
 class VideoTranslatorGUI(QMainWindow):
+    VOICE_ENTRY_ID_ROLE = Qt.UserRole + 1
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Video Subtitle Translator - Antigravity")
@@ -292,6 +294,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         self.project_service = ProjectService(self.workspace_root)
         self.project_bridge = GUIProjectBridge(self.project_service)
+        self.voice_catalog_service = VoiceCatalogService(self.workspace_root)
         self.subtitle_controller = SubtitleController(self)
         self.pipeline_controller = PipelineController(self)
         self.preview_controller = PreviewController(self)
@@ -309,6 +312,9 @@ class VideoTranslatorGUI(QMainWindow):
         self.setup_ui()
         self.setup_media_player()
         self.setup_audio_preview_player()
+        if hasattr(self, "video_view") and hasattr(self.video_view, "blurRegionChanged"):
+            self.video_view.blurRegionChanged.connect(self.apply_preview_blur_region)
+        self.load_voice_preview_catalog()
         self.load_user_settings()
         self.refresh_saved_subtitle_style_presets()
 
@@ -420,6 +426,196 @@ class VideoTranslatorGUI(QMainWindow):
         self.audio_preview_player.setAudioOutput(self.audio_preview_output)
         self._last_audio_preview_path = ""
         self._segment_preview_threads = {}
+        self.voice_catalog_entries_all = []
+        self.voice_catalog_entries = []
+        self.voice_catalog_map = {}
+        self._voice_signals_bound = False
+
+    def _voice_catalog_data_value(self, entry: dict) -> str:
+        provider = str(entry.get("provider", "edge")).strip().lower()
+        provider_voice = str(entry.get("provider_voice", "")).strip()
+        voice_id_env = str(entry.get("voice_id_env", "")).strip()
+        voice_id = str(entry.get("voice_id", "")).strip()
+        if provider == "eleven":
+            return f"eleven:{voice_id_env or voice_id}"
+        if provider == "zalo":
+            return f"zalo:{provider_voice or voice_id or '1'}"
+        return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
+
+    def _voice_provider_label(self, provider: str) -> str:
+        mapping = {
+            "edge": "Edge",
+            "zalo": "Zalo",
+            "eleven": "ElevenLabs",
+        }
+        return mapping.get(str(provider or "").strip().lower(), str(provider or "Other").strip().title() or "Other")
+
+    def _selected_voice_gender(self) -> str:
+        if not hasattr(self, "voice_gender_combo"):
+            return "any"
+        return str(self.voice_gender_combo.currentText()).strip().lower()
+
+    def _entry_has_preview_media(self, entry: dict | None) -> bool:
+        if not entry:
+            return False
+        return bool(
+            entry.get("preview_video_path")
+            or entry.get("preview_video_url")
+            or entry.get("preview_audio_path")
+            or entry.get("preview_audio_url")
+        )
+
+    def set_voice_combo_value(self, combo, value):
+        target = str(value or "").strip()
+        if not combo or not target:
+            return
+        for index in range(combo.count()):
+            item_value = str(combo.itemData(index) or "").strip()
+            item_entry_id = str(combo.itemData(index, self.VOICE_ENTRY_ID_ROLE) or "").strip()
+            if item_value == target or item_entry_id == target:
+                combo.setCurrentIndex(index)
+                return
+
+    def _update_voice_preview_meta(self):
+        entry = self.get_selected_premium_voice_catalog_entry()
+        if not hasattr(self, "voice_preview_meta_label"):
+            return
+        using_premium = bool(getattr(self, "use_premium_voice_radio", None) and self.use_premium_voice_radio.isChecked())
+        if not using_premium:
+            self.voice_preview_meta_label.setText("Preview voice is only available for premium voices.")
+            if hasattr(self, "preview_voice_btn"):
+                self.preview_voice_btn.setVisible(False)
+            return
+        if hasattr(self, "preview_voice_btn"):
+            self.preview_voice_btn.setVisible(True)
+        if not entry:
+            self.voice_preview_meta_label.setText("Choose a premium voice to preview its sample clip.")
+            if hasattr(self, "preview_voice_btn"):
+                self.preview_voice_btn.setEnabled(False)
+            return
+        video_hint = ""
+        if entry.get("preview_video_path"):
+            video_hint = "Local preview clip ready."
+        elif entry.get("preview_video_url"):
+            video_hint = "Preview clip link available."
+        elif entry.get("preview_audio_path"):
+            video_hint = "Local preview audio ready."
+        elif entry.get("preview_audio_url"):
+            video_hint = "Preview audio link available."
+        else:
+            video_hint = "No preview media linked yet."
+        provider = str(entry.get("provider", "")).strip().title() or "Voice"
+        self.voice_preview_meta_label.setText(f"{entry.get('name', 'Voice')}: {provider}. {video_hint}")
+        if hasattr(self, "preview_voice_btn"):
+            self.preview_voice_btn.setEnabled(self._entry_has_preview_media(entry))
+
+    def load_voice_preview_catalog(self):
+        self.voice_catalog_entries_all = self.voice_catalog_service.load_catalog()
+        self.refresh_voice_catalog_combos()
+
+    def refresh_voice_catalog_combos(self):
+        self.voice_catalog_entries = list(self.voice_catalog_entries_all or [])
+        self.voice_catalog_map = {entry.get("id", ""): entry for entry in self.voice_catalog_entries if entry.get("id")}
+        if not hasattr(self, "free_voice_combo") or not hasattr(self, "premium_voice_combo"):
+            return
+
+        selected_gender = self._selected_voice_gender()
+        previous_free = str(self.free_voice_combo.currentData() or "")
+        previous_premium = str(self.premium_voice_combo.currentData() or "")
+
+        self.free_voice_combo.clear()
+        self.premium_voice_combo.clear()
+        grouped_entries = {"free": [], "premium": [], "other": []}
+        for entry in self.voice_catalog_entries:
+            entry_gender = str(entry.get("gender", "")).strip().lower()
+            if selected_gender in ("male", "female") and entry_gender != selected_gender:
+                continue
+            tier = str(entry.get("tier", "other")).strip().lower()
+            grouped_entries[tier if tier in grouped_entries else "other"].append(entry)
+
+        self.premium_voice_combo.addItem("None", "")
+        for entry in grouped_entries["free"] + grouped_entries["other"]:
+            self.free_voice_combo.addItem(str(entry.get("name", entry.get("id", "Voice"))), self._voice_catalog_data_value(entry))
+            index = self.free_voice_combo.count() - 1
+            self.free_voice_combo.setItemData(index, entry.get("id", ""), self.VOICE_ENTRY_ID_ROLE)
+
+        premium_by_provider = {}
+        for entry in grouped_entries["premium"]:
+            provider_key = str(entry.get("provider", "other")).strip().lower() or "other"
+            premium_by_provider.setdefault(provider_key, []).append(entry)
+
+        for provider_key in sorted(premium_by_provider.keys(), key=lambda key: self._voice_provider_label(key)):
+            provider_label = self._voice_provider_label(provider_key)
+            self.premium_voice_combo.addItem(f"--- {provider_label} ---", "")
+            header_index = self.premium_voice_combo.count() - 1
+            header_item = self.premium_voice_combo.model().item(header_index)
+            if header_item is not None:
+                header_item.setEnabled(False)
+            for entry in sorted(premium_by_provider[provider_key], key=lambda item: str(item.get("name", ""))):
+                voice_name = str(entry.get("name", entry.get("id", "Voice")))
+                self.premium_voice_combo.addItem(f"{provider_label} | {voice_name}", self._voice_catalog_data_value(entry))
+                index = self.premium_voice_combo.count() - 1
+                self.premium_voice_combo.setItemData(index, entry.get("id", ""), self.VOICE_ENTRY_ID_ROLE)
+
+        if self.free_voice_combo.count() > 0:
+            self.free_voice_combo.setCurrentIndex(0)
+        self.premium_voice_combo.setCurrentIndex(0)
+        if previous_free:
+            self.set_voice_combo_value(self.free_voice_combo, previous_free)
+        if previous_premium:
+            self.set_voice_combo_value(self.premium_voice_combo, previous_premium)
+        if not self._voice_signals_bound:
+            self.premium_voice_combo.currentIndexChanged.connect(self._update_voice_preview_meta)
+            if hasattr(self, "use_free_voice_radio"):
+                self.use_free_voice_radio.toggled.connect(self.on_voice_tier_changed)
+            if hasattr(self, "use_premium_voice_radio"):
+                self.use_premium_voice_radio.toggled.connect(self.on_voice_tier_changed)
+            self._voice_signals_bound = True
+        self.on_voice_tier_changed()
+        self._update_voice_preview_meta()
+
+    def on_voice_gender_changed(self):
+        self.refresh_voice_catalog_combos()
+
+    def get_selected_premium_voice_catalog_entry(self):
+        if not hasattr(self, "premium_voice_combo"):
+            return None
+        if not hasattr(self, "voice_catalog_entries"):
+            return None
+        entry_id = self.premium_voice_combo.currentData(self.VOICE_ENTRY_ID_ROLE)
+        if entry_id and entry_id in self.voice_catalog_map:
+            return self.voice_catalog_map[entry_id]
+        current_value = str(self.premium_voice_combo.currentData() or "")
+        for entry in self.voice_catalog_entries:
+            if self._voice_catalog_data_value(entry) == current_value:
+                return entry
+        return None
+
+    def get_active_voice_name(self) -> str:
+        using_premium = bool(getattr(self, "use_premium_voice_radio", None) and self.use_premium_voice_radio.isChecked())
+        premium_value = str(self.premium_voice_combo.currentData() or "").strip() if hasattr(self, "premium_voice_combo") else ""
+        if using_premium and premium_value:
+            return premium_value
+        free_value = str(self.free_voice_combo.currentData() or "").strip() if hasattr(self, "free_voice_combo") else ""
+        return free_value or "edge:vi-VN-HoaiMyNeural"
+
+    def on_voice_tier_changed(self):
+        using_premium = bool(getattr(self, "use_premium_voice_radio", None) and self.use_premium_voice_radio.isChecked())
+        if hasattr(self, "free_voice_combo"):
+            self.free_voice_combo.setEnabled(not using_premium)
+        if hasattr(self, "premium_voice_combo"):
+            self.premium_voice_combo.setEnabled(using_premium)
+        if hasattr(self, "preview_voice_btn"):
+            self.preview_voice_btn.setVisible(using_premium)
+        self._update_voice_preview_meta()
+
+    def _parse_voice_speed_value(self) -> float:
+        raw = str(getattr(self, "voice_speed_spin", None).currentText() if getattr(self, "voice_speed_spin", None) else "1.0x").strip().lower()
+        raw = raw.replace("x", "")
+        try:
+            return float(raw or "1.0")
+        except ValueError:
+            return 1.0
 
     # -----------------------------
     # Logging + error helpers
@@ -674,6 +870,29 @@ class VideoTranslatorGUI(QMainWindow):
         if self.current_translated_segments or self.current_segments:
             self.apply_segments_to_timeline()
 
+    def resolve_background_audio_path(self) -> str:
+        candidates = [
+            self.bg_music_edit.text().strip() if hasattr(self, "bg_music_edit") else "",
+            getattr(self, "last_music_path", ""),
+            getattr(getattr(self, "current_project_state", None), "artifacts", {}).get("music", "") if getattr(self, "current_project_state", None) else "",
+        ]
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                if hasattr(self, "bg_music_edit") and not self.bg_music_edit.text().strip():
+                    self.bg_music_edit.setText(candidate)
+                self.last_music_path = candidate
+                return candidate
+        return ""
+
+    def has_reusable_voice_inputs(self) -> bool:
+        state = self.ensure_current_project()
+        if state and not self.translated_text.toPlainText().strip():
+            self.load_project_context(state)
+        translated_srt = self.translated_text.toPlainText().strip()
+        if not translated_srt:
+            return False
+        return bool(self.parse_srt_to_segments(translated_srt))
+
     def schedule_auto_frame_preview(self):
         if not hasattr(self, "auto_preview_frame_cb") or not self.auto_preview_frame_cb.isChecked():
             return
@@ -921,6 +1140,7 @@ class VideoTranslatorGUI(QMainWindow):
                 if self.subtitle_highlight_mode_combo.currentText().strip() in ("Manual", "Auto + Manual")
                 else [[] for _ in (style_segments or [])]
             ),
+            "blur_region": self.video_view.get_blur_region_normalized() if hasattr(self, "video_view") else None,
         }
 
     def on_subtitle_preset_changed(self):
@@ -1308,6 +1528,74 @@ class VideoTranslatorGUI(QMainWindow):
         except Exception as exc:
             self.show_error("Audio Preview Failed", "Could not preview the current audio track.", str(exc))
 
+    def toggle_blur_area_editing(self, checked: bool):
+        if not hasattr(self, "video_view") or not hasattr(self, "blur_area_btn"):
+            return
+        has_video = bool(self.video_path_edit.text().strip()) and os.path.exists(self.video_path_edit.text().strip())
+        if checked and not has_video:
+            self.blur_area_btn.blockSignals(True)
+            self.blur_area_btn.setChecked(False)
+            self.blur_area_btn.blockSignals(False)
+            QMessageBox.warning(self, "Blur Area", "Please load a video before adding a blur area.")
+            return
+        self.video_view.set_blur_edit_enabled(checked)
+        self.apply_preview_blur_region()
+        self.blur_area_btn.setText("Blur Editing" if checked else "Blur Area")
+        if checked:
+            self.log("[Blur Area] drag inside the video preview to move or resize the region.")
+
+    def apply_preview_blur_region(self):
+        if not hasattr(self, "media_player") or not hasattr(self, "video_view"):
+            return
+        if hasattr(self, "blur_area_btn") and self.blur_area_btn.isChecked():
+            self.media_player.set_blur_region(self.video_view.get_blur_region_normalized())
+        else:
+            self.media_player.clear_blur_region()
+
+    def preview_selected_voice_sample(self):
+        entry = self.get_selected_premium_voice_catalog_entry()
+        if not entry:
+            QMessageBox.warning(self, "Voice Preview", "Please choose a valid voice first.")
+            return
+        preview_path = str(entry.get("preview_video_path", "")).strip()
+        preview_url = str(entry.get("preview_video_url", "")).strip()
+        preview_audio_path = str(entry.get("preview_audio_path", "")).strip()
+        preview_audio_url = str(entry.get("preview_audio_url", "")).strip()
+
+        source = None
+        if preview_path:
+            if not os.path.isabs(preview_path):
+                preview_path = os.path.join(self.workspace_root, preview_path)
+            if not os.path.exists(preview_path):
+                QMessageBox.warning(self, "Voice Preview", "The configured preview video file was not found.")
+                return
+            source = QUrl.fromLocalFile(preview_path)
+        elif preview_url:
+            source = QUrl(preview_url)
+        elif preview_audio_path:
+            if not os.path.isabs(preview_audio_path):
+                preview_audio_path = os.path.join(self.workspace_root, preview_audio_path)
+            if not os.path.exists(preview_audio_path):
+                QMessageBox.warning(self, "Voice Preview", "The configured preview audio file was not found.")
+                return
+            source = QUrl.fromLocalFile(preview_audio_path)
+        elif preview_audio_url:
+            source = QUrl(preview_audio_url)
+        else:
+            QMessageBox.warning(self, "Voice Preview", "This voice does not have preview media configured yet.")
+            return
+
+        try:
+            self.media_player.clear_subtitle()
+            self.media_player.setSource(source)
+            self.play_btn.setText("Pause")
+            self.timeline.set_segments([])
+            self.timeline.set_playing(True)
+            self.media_player.play()
+            self.log(f"[Voice Preview] playing clip for {entry.get('name', 'voice')}")
+        except Exception as exc:
+            self.show_error("Voice Preview Failed", "Could not play the selected voice preview clip.", str(exc))
+
     def preview_segment_audio(self, index: int):
         if index < 0 or index >= len(self.current_translated_segments or self.current_segments):
             QMessageBox.warning(self, "Missing Subtitle", "This subtitle line is not ready yet.")
@@ -1319,13 +1607,14 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.warning(self, "Missing Subtitle", "This subtitle line is empty.")
             return
 
-        voice_name = str(self.voice_name_combo.currentData() or self.voice_name_combo.currentText()).strip() or "vi-VN-HoaiMyNeural"
+        voice_name = self.get_active_voice_name()
+        voice_speed = self._parse_voice_speed_value()
         row = self._segment_editor_rows[index] if index < len(self._segment_editor_rows) else None
         if row:
             row["preview_button"].setEnabled(False)
             row["preview_button"].setText("...")
 
-        worker = SegmentAudioPreviewWorker(self.workspace_root, index, text, voice_name)
+        worker = SegmentAudioPreviewWorker(self.workspace_root, index, text, voice_name, voice_speed)
         worker.finished.connect(self.on_segment_audio_preview_ready)
         self._segment_preview_threads[index] = worker
         worker.start()
@@ -1601,9 +1890,18 @@ class VideoTranslatorGUI(QMainWindow):
         self.preview_btn.setEnabled(v_ok and has_voice_audio and mode in ("voice", "both"))
         if hasattr(self, "preview_audio_btn"):
             self.preview_audio_btn.setEnabled(has_voice_audio)
-        if hasattr(self, "voice_name_combo"):
-            self.voice_name_combo.setEnabled(generated_mode and mode in ("voice", "both"))
+        if hasattr(self, "blur_area_btn"):
+            self.blur_area_btn.setEnabled(v_ok)
+        if hasattr(self, "free_voice_combo"):
+            self.free_voice_combo.setEnabled(generated_mode and mode in ("voice", "both") and not (hasattr(self, "use_premium_voice_radio") and self.use_premium_voice_radio.isChecked()))
+        if hasattr(self, "premium_voice_combo"):
+            self.premium_voice_combo.setEnabled(generated_mode and mode in ("voice", "both") and bool(hasattr(self, "use_premium_voice_radio") and self.use_premium_voice_radio.isChecked()))
             self.bg_music_edit.setEnabled(generated_mode and mode in ("voice", "both"))
+        if hasattr(self, "preview_voice_btn"):
+            premium_entry = self.get_selected_premium_voice_catalog_entry()
+            using_premium = bool(hasattr(self, "use_premium_voice_radio") and self.use_premium_voice_radio.isChecked())
+            self.preview_voice_btn.setVisible(using_premium)
+            self.preview_voice_btn.setEnabled(bool(using_premium and self._entry_has_preview_media(premium_entry)))
         self.run_all_btn.setEnabled(v_ok and not self._pipeline_active)
         self.preview_frame_btn.setEnabled(v_ok and bool(self.get_active_segments()))
         self.preview_5s_btn.setEnabled(v_ok)
@@ -1802,6 +2100,10 @@ class VideoTranslatorGUI(QMainWindow):
         browse_voice_output_folder_impl(self)
 
     def run_voiceover(self):
+        state = self.ensure_current_project()
+        if state and not self.translated_text.toPlainText().strip():
+            self.load_project_context(state)
+
         translated_srt = self.translated_text.toPlainText().strip()
         if not translated_srt:
             QMessageBox.warning(self, "Error", "No translated SRT available. Please run translation first (STEP 3).")
@@ -1813,8 +2115,9 @@ class VideoTranslatorGUI(QMainWindow):
             return
 
         out_dir = self.voice_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
-        bg_path = self.bg_music_edit.text().strip()
-        voice_name = str(self.voice_name_combo.currentData() or self.voice_name_combo.currentText()).strip()
+        bg_path = self.resolve_background_audio_path()
+        voice_name = self.get_active_voice_name()
+        voice_speed = self._parse_voice_speed_value()
         timing_sync_mode = str(self.voice_timing_sync_combo.currentText()).strip()
         voice_gain = float(self.voice_gain_spin.value())
         bg_gain = float(self.bg_gain_spin.value())
@@ -1833,6 +2136,7 @@ class VideoTranslatorGUI(QMainWindow):
             out_dir,
             bg_path,
             voice_name,
+            voice_speed,
             timing_sync_mode,
             voice_gain,
             bg_gain,
@@ -1906,6 +2210,8 @@ class VideoTranslatorGUI(QMainWindow):
 
     def closeEvent(self, event):
         try:
+            if hasattr(self, "video_view"):
+                self.video_view.clear_blur_region()
             self.save_user_settings()
             self.cleanup_temp_preview_files()
         finally:

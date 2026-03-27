@@ -90,6 +90,7 @@ def _connect_ui_signals(gui):
     gui.use_existing_audio_radio.toggled.connect(gui.on_audio_source_mode_changed)
     gui.advanced_group.toggled.connect(gui.on_advanced_toggled)
     gui.preview_audio_btn.clicked.connect(gui.preview_current_audio_track)
+    gui.blur_area_btn.toggled.connect(gui.toggle_blur_area_editing)
     gui.transcript_text.textChanged.connect(gui.refresh_ui_state)
     gui.transcript_text.textChanged.connect(gui.schedule_live_subtitle_preview_refresh)
     gui.transcript_text.textChanged.connect(gui.sync_segment_editor_from_hidden_text)

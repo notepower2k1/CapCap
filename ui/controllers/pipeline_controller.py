@@ -14,6 +14,22 @@ class PipelineController:
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.gui, "Error", "Please select a video first.")
             return
+
+        state = self.gui.ensure_current_project()
+        if state:
+            self.gui.load_project_context(state)
+
+        mode = self.gui.get_output_mode_key()
+        if mode in ("voice", "both") and self.gui.has_reusable_voice_inputs():
+            self.gui._pipeline_active = True
+            self.gui._pipeline_step = "voiceover"
+            self.gui.run_all_btn.setEnabled(False)
+            self.gui.run_all_btn.setText("Generating voice...")
+            self.gui.progress_bar.setRange(0, 100)
+            self.gui.log("[Voice] Reusing existing transcript, translation, and background assets...")
+            self.gui.run_voiceover()
+            return
+
         self.gui._pipeline_active = True
         self.gui._pipeline_step = "prepare"
         self.gui.run_all_btn.setEnabled(False)

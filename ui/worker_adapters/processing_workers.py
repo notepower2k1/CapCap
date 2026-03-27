@@ -123,13 +123,14 @@ class PrepareWorkflowWorker(QThread):
 class VoiceOverWorker(QThread):
     finished = Signal(str, str, str)
 
-    def __init__(self, workspace_root, segments, output_dir, background_path, voice_name, timing_sync_mode, voice_gain_db, bg_gain_db, project_state_path=""):
+    def __init__(self, workspace_root, segments, output_dir, background_path, voice_name, voice_speed, timing_sync_mode, voice_gain_db, bg_gain_db, project_state_path=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.segments = segments
         self.output_dir = output_dir
         self.background_path = background_path
         self.voice_name = voice_name
+        self.voice_speed = voice_speed
         self.timing_sync_mode = timing_sync_mode
         self.voice_gain_db = voice_gain_db
         self.bg_gain_db = bg_gain_db
@@ -143,6 +144,7 @@ class VoiceOverWorker(QThread):
                 output_dir=self.output_dir,
                 background_path=self.background_path,
                 voice_name=self.voice_name,
+                voice_speed=self.voice_speed,
                 timing_sync_mode=self.timing_sync_mode,
                 voice_gain_db=self.voice_gain_db,
                 bg_gain_db=self.bg_gain_db,
@@ -189,12 +191,13 @@ class FinalExportWorker(QThread):
 class SegmentAudioPreviewWorker(QThread):
     finished = Signal(int, str, str)
 
-    def __init__(self, workspace_root, index, text, voice_name):
+    def __init__(self, workspace_root, index, text, voice_name, voice_speed):
         super().__init__()
         self.workspace_root = workspace_root
         self.index = index
         self.text = text
         self.voice_name = voice_name
+        self.voice_speed = voice_speed
 
     def run(self):
         try:
@@ -206,8 +209,37 @@ class SegmentAudioPreviewWorker(QThread):
                 text=self.text,
                 wav_path=wav_path,
                 voice=self.voice_name,
+                speed=self.voice_speed,
                 tmp_dir=temp_dir,
             )
             self.finished.emit(self.index, output, "")
         except Exception as exc:
             self.finished.emit(self.index, "", str(exc))
+
+
+class VoiceSamplePreviewWorker(QThread):
+    finished = Signal(str, str)
+
+    def __init__(self, workspace_root, text, voice_name, voice_speed):
+        super().__init__()
+        self.workspace_root = workspace_root
+        self.text = text
+        self.voice_name = voice_name
+        self.voice_speed = voice_speed
+
+    def run(self):
+        try:
+            temp_dir = os.path.join(self.workspace_root, "temp", "voice_sample_preview")
+            os.makedirs(temp_dir, exist_ok=True)
+            wav_path = os.path.join(temp_dir, f"voice_sample_{os.getpid()}.wav")
+            engine = EngineRuntime()
+            output = engine.synthesize_segment(
+                text=self.text,
+                wav_path=wav_path,
+                voice=self.voice_name,
+                speed=self.voice_speed,
+                tmp_dir=temp_dir,
+            )
+            self.finished.emit(output, "")
+        except Exception as exc:
+            self.finished.emit("", str(exc))
