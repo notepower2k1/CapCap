@@ -1,23 +1,25 @@
 # CapCap Structure
 
-## 1. Muc tieu
+## 1. Goal
 
-CapCap la desktop tool local cho workflow localize video sang tieng Viet theo huong project-based:
+CapCap is a local desktop tool for Vietnamese video localization with a project-based workflow:
 
-1. import video
+1. import a source video
 2. extract audio
-3. transcribe transcript
-4. translate sang tieng Viet
-5. AI refine ban dich khi can
-6. tao subtitle de preview va chinh sua
-7. tao TTS tieng Viet
-8. mix voice voi background
-9. export video theo mode nguoi dung chon
+3. transcribe speech
+4. translate into Vietnamese
+5. optionally rewrite or refine the translation
+6. build and edit subtitles
+7. generate Vietnamese voice audio
+8. mix voice with background audio
+9. preview the result
+10. export the final video
 
-Pipeline duoc thiet ke theo mo hinh ban tu dong:
+The product is designed around a semi-automated model:
 
-- `Prepare` chay cac buoc nen co the tu dong hoa
-- cac buoc subtitle, TTS, mix, preview, export duoc giu o che do co kiem soat de user review truoc khi xuat file
+- preparation steps can be automated
+- subtitle, TTS, mix, preview, and export remain user-controlled
+- preview should match export as closely as possible
 
 ## 2. Processing Model
 
@@ -28,101 +30,78 @@ Project
        -> Extract audio
        -> Transcribe
        -> Translate raw
-       -> Refine translation (optional)
-       -> Separate vocal/background (neu mode co voice)
+       -> Rewrite / refine translation (optional)
+       -> Separate source audio when needed
   -> Manual workspace
        -> Edit transcript / translation
-       -> Build subtitle
-       -> Generate TTS
+       -> Style subtitles
+       -> Generate voice
        -> Mix audio
        -> Preview
   -> Export
 ```
 
-## 3. Export Modes
+## 3. Architectural Layers
 
-He thong can ho tro 4 mode nghiep vu:
+CapCap is moving toward a three-layer architecture.
 
-- `Vietnamese Voice`
-- `Vietnamese Subtitle`
-- `Vietnamese Voice + Subtitle`
-- `Custom`
+### Engine layer
 
-Rule:
+The engine layer wraps external tools and providers and returns normalized results.
 
-- neu mode khong phai `Custom`, nut `Prepare` se chay pipeline tu dong theo mode
-- neu mode la `Custom`, user tu chon tung step
-- `Translator AI` la tuy chon ON/OFF:
-  - `OFF`: chi dung raw translation provider
-  - `ON`: raw translation xong se refine them bang AI provider
-
-## 4. Kien truc dich
-
-Spec moi chia code thanh 3 lop ro rang.
-
-### Engine Layer
-
-Layer nay wrap tool / API ben ngoai va tra output chuan hoa.
-
-Thanh phan du kien:
+Current examples:
 
 - `FFmpegAdapter`
 - `WhisperAdapter`
-- `MicrosoftTranslatorAdapter`
-- `LLMRefineAdapter`
-- `DemucsAdapter`
+- `TranslatorAdapter`
 - `TTSAdapter`
-- `SubtitleAdapter`
 - `PreviewAdapter`
-- `ExportAdapter`
+- `AudioMixAdapter`
+- `DemucsAdapter`
+- `SubtitleAdapter`
 
-Trach nhiem:
+Responsibilities:
 
-- nhan input chuan hoa
-- goi engine ben ngoai
-- tra ve ket qua chuan hoa
-- khong chua workflow business logic
+- accept normalized inputs
+- call external tools or APIs
+- return normalized outputs
+- avoid workflow-specific business logic
 
-### Workflow Layer
+### Workflow layer
 
-Layer nay dieu phoi pipeline va state cua project.
+The workflow layer coordinates processing steps and project state.
 
-Trach nhiem:
+Responsibilities:
 
-- quyet dinh step nao can chay
-- skip step khong can thiet
-- resume khi da co output hop le
-- retry khi step loi
-- cap nhat `project.json`
+- decide which steps should run
+- reuse valid outputs when possible
+- skip unnecessary work
+- update `project.json`
+- drive export and preview consistency
 
-Workflow chinh:
+Current workflows:
 
-- `prepare_project()`
-- `extract_audio()`
-- `transcribe()`
-- `translate_raw()`
-- `refine_translation()`
-- `separate_audio()`
-- `generate_tts()`
-- `build_subtitle()`
-- `mix_audio()`
-- `export_project()`
+- `prepare_workflow.py`
+- `voice_workflow.py`
+- `export_workflow.py`
 
-### UI Layer
+### UI layer
 
-UI chi nen:
+The UI layer should:
 
-- hien thi trang thai project
-- nhan input user
-- goi workflow
-- hien thi preview
-- hien thi log / loi
+- display project state
+- collect user input
+- trigger workflows
+- preview output
+- display logs and errors
 
-UI khong nen goi truc tiep ffmpeg, demucs, whisper hay API provider.
+The UI should avoid talking directly to raw providers when an adapter or workflow already exists.
 
-## 5. Du lieu trung tam
+## 4. Core Data Model
 
-Don vi du lieu trung tam cua he thong la `segment`.
+The central unit in the system is a subtitle segment.
+
+Example:
 
 ```json
 {
@@ -135,24 +114,28 @@ Don vi du lieu trung tam cua he thong la `segment`.
   "final_text": "Xin chao moi nguoi",
   "tts_text": "Xin chao moi nguoi",
   "voice_file": "audio/tts_segments/seg_0001.wav",
-  "status": "ready"
+  "status": "ready",
+  "metadata": {}
 }
 ```
 
-Y nghia:
+Important fields:
 
-- `original_text`: transcript goc
-- `raw_translation`: ban dich truc tiep
-- `refined_translation`: ban dich sau AI refine
-- `final_text`: text dung cho subtitle
-- `tts_text`: text dung de sinh TTS
-- `voice_file`: file audio cua segment
+- `original_text`: transcript text from ASR
+- `raw_translation`: direct translated text
+- `refined_translation`: AI-rewritten or refined text
+- `final_text`: subtitle text used for rendering
+- `tts_text`: text used for voice synthesis
+- `voice_file`: segment-level generated audio file
+- `metadata`: extra per-segment information such as manual highlights or word timing data
 
-`final_text` va `tts_text` co the khac nhau.
+`final_text` and `tts_text` may intentionally differ.
 
-## 6. Project Data Layout
+## 5. Project Data Layout
 
-Moi video nen duoc quan ly nhu mot project doc lap:
+Each imported video should behave like an isolated project.
+
+Target project layout:
 
 ```text
 project/
@@ -172,8 +155,6 @@ project/
 |   |   |-- vocal.wav
 |   |   `-- background.wav
 |   |-- tts_segments/
-|   |   |-- seg_0001.wav
-|   |   `-- ...
 |   |-- voice_merged.wav
 |   `-- mixed.wav
 |-- subtitle/
@@ -181,15 +162,16 @@ project/
 |   |-- subtitle.ass
 |   `-- style.json
 |-- preview/
-|   `-- cache/
 |-- export/
 |   `-- final_output.mp4
 `-- project.json
 ```
 
-## 7. Project State
+## 6. Project State
 
-Moi project can mot state trung tam de resume / retry:
+Each project keeps a resumable processing state.
+
+Example:
 
 ```json
 {
@@ -197,7 +179,7 @@ Moi project can mot state trung tam de resume / retry:
   "input_video": "source/input_video.mp4",
   "input_language": "en",
   "target_language": "vi",
-  "mode": "voice_subtitle",
+  "mode": "subtitle_voice",
   "translator_ai": true,
   "steps": {
     "extract_audio": "done",
@@ -206,14 +188,13 @@ Moi project can mot state trung tam de resume / retry:
     "refine_translation": "done",
     "separate_audio": "done",
     "generate_tts": "pending",
-    "build_subtitle": "pending",
     "mix_audio": "pending",
     "export": "pending"
   }
 }
 ```
 
-Status chuan cho moi step:
+Standard step values:
 
 - `pending`
 - `running`
@@ -221,110 +202,17 @@ Status chuan cho moi step:
 - `failed`
 - `skipped`
 
-## 8. Preview / Export Consistency
+## 7. Preview and Export Consistency
 
-Day la rule bat buoc:
+This is a hard rule for the product:
 
-- audio preview the nao thi export phai ra dung nhu vay
-- subtitle preview the nao thi export phai dung cung style do
-- subtitle style, audio source, mix params va export mode phai duoc luu vao project state
+- subtitle preview and final export should use the same style configuration
+- audio preview and final export should use the same selected audio source
+- subtitle timing, mix settings, and output mode should be persisted in project state whenever practical
 
-## 9. Provider Abstraction
+## 8. Current Code Layout
 
-Spec moi uu tien abstraction de thay engine de dang hon:
-
-```python
-class ASRProvider:
-    def transcribe(self, audio_path: str) -> dict:
-        raise NotImplementedError
-
-
-class TranslationProvider:
-    def translate(self, segments: list[dict]) -> list[dict]:
-        raise NotImplementedError
-
-
-class RefinementProvider:
-    def refine(self, segments: list[dict]) -> list[dict]:
-        raise NotImplementedError
-
-
-class TTSProvider:
-    def synthesize(self, text: str, output_path: str, **kwargs) -> str:
-        raise NotImplementedError
-
-
-class SeparationProvider:
-    def separate(self, audio_path: str, output_dir: str) -> dict:
-        raise NotImplementedError
-```
-
-Mapping du kien:
-
-- `WhisperProvider` -> `ASRProvider`
-- `MicrosoftTranslatorProvider` -> `TranslationProvider`
-- `OpenAIRefineProvider` -> `RefinementProvider`
-- `LocalTTSProvider` / `ApiTTSProvider` -> `TTSProvider`
-- `DemucsProvider` -> `SeparationProvider`
-
-## 10. Target Code Layout
-
-Day la cau truc dich sau khi refactor:
-
-```text
-CapCap/
-|-- app/
-|   |-- core/
-|   |   |-- models/
-|   |   |-- enums/
-|   |   |-- state/
-|   |   `-- utils/
-|   |-- engines/
-|   |   |-- ffmpeg_adapter.py
-|   |   |-- whisper_adapter.py
-|   |   |-- translator_adapter.py
-|   |   |-- llm_adapter.py
-|   |   |-- demucs_adapter.py
-|   |   |-- tts_adapter.py
-|   |   |-- subtitle_adapter.py
-|   |   |-- preview_adapter.py
-|   |   `-- export_adapter.py
-|   |-- providers/
-|   |   |-- asr/
-|   |   |-- translator/
-|   |   |-- refine/
-|   |   |-- tts/
-|   |   `-- separation/
-|   |-- workflows/
-|   |   |-- prepare_workflow.py
-|   |   |-- tts_workflow.py
-|   |   |-- subtitle_workflow.py
-|   |   |-- mix_workflow.py
-|   |   `-- export_workflow.py
-|   |-- services/
-|   |   |-- project_service.py
-|   |   |-- segment_service.py
-|   |   |-- preview_service.py
-|   |   `-- cache_service.py
-|   `-- main.py
-|-- ui/
-|   |-- views/
-|   |-- controllers/
-|   `-- widgets/
-|-- bin/
-|-- models/
-|-- output/
-|-- temp/
-|-- README.md
-|-- newSpec.md
-`-- structure.md
-```
-
-## 11. Trang thai hien tai cua repo
-
-Repo hien tai DA refactor mot phan lon theo target layout tren, nhung CHUA hoan tat toan bo.
-
-Cau truc dang ton tai trong code:
+This is the current real repository structure, not the ideal future target.
 
 ```text
 CapCap/
@@ -332,24 +220,23 @@ CapCap/
 |   |-- core/
 |   |   |-- models/
 |   |   `-- state/
+|   |-- engines/
 |   |-- services/
-|   |   |-- engine_runtime.py
-|   |   |-- gui_project_bridge.py
-|   |   |-- project_service.py
-|   |   |-- segment_service.py
-|   |   `-- workflow_runtime.py
+|   |-- translation/
+|   |   `-- providers/
 |   |-- workflows/
-|   |   |-- prepare_workflow.py
-|   |   |-- voice_workflow.py
-|   |   `-- export_workflow.py
-|   `-- translation/
-|       |-- errors.py
-|       |-- models.py
-|       |-- orchestrator.py
-|       |-- srt_utils.py
-|       `-- providers/
-|           |-- ai_polisher.py
-|           `-- microsoft_translator.py
+|   |-- audio_mixer.py
+|   |-- highlight_selector.py
+|   |-- local_vie_neu_tts.py
+|   |-- main.py
+|   |-- preview_processor.py
+|   |-- subtitle_builder.py
+|   |-- translator.py
+|   |-- tts_processor.py
+|   |-- video_processor.py
+|   |-- vocal_processor.py
+|   |-- voice_preview_catalog.json
+|   `-- whisper_processor.py
 |-- ui/
 |   |-- controllers/
 |   |-- helpers/
@@ -360,27 +247,40 @@ CapCap/
 |   |-- gui.py
 |   |-- main_window.py
 |   `-- workers.py
+|-- assets/
 |-- bin/
 |-- models/
 |-- output/
+|-- projects/
 |-- temp/
 |-- README.md
+|-- requirements.txt
 |-- newSpec.md
 `-- structure.md
 ```
 
-Dieu nay co nghia:
+## 9. Current Status
 
-- `structure.md` mo ta target architecture de team refactor theo
-- implementation hien tai da co `project.json`, `segment model`, workflow layer, runtime facade va UI modules tach nho
-- engine layer van chua tach het thanh package `engines/` rieng; mot so adapter van dang o cac module processor cu
-- UI da gan target structure nhung van con mot so shim compatibility nhu `ui/gui.py`, `ui/workers.py`
-- khi refactor tiep, uu tien tach engine/provider abstraction va workflow phu con thieu truoc
+The repository has already moved significantly toward the target structure, but the transition is not complete.
 
-## 12. Uu tien refactor de xuat
+What is already in place:
 
-1. Tach `engine` layer thanh package ro rang thay cho viec goi truc tiep `video_processor`, `whisper_processor`, `vocal_processor`, `tts_processor`.
-2. Chuan hoa provider interface cho ASR, translation, refine, TTS va separation.
-3. Bo sung cac workflow phu con thieu neu can, vi du subtitle/mix workflow rieng neu team muon chia sau hon.
-4. Chuyen preview/export sang mo hinh config-driven sau hon de dam bao preview = export tuyet doi.
-5. Giam bot cac shim compatibility khi toan bo import path moi da on dinh.
+- core models and project state
+- service layer for project and segment persistence
+- workflow layer for prepare, voice, and export
+- adapter layer for major engines
+- split UI modules for views, controllers, widgets, and worker adapters
+
+What is still transitional:
+
+- several legacy processor modules still exist beside the adapter layer
+- some UI compatibility shims still exist
+- not every provider abstraction is fully isolated yet
+
+## 10. Recommended Next Refactor Steps
+
+1. Continue moving legacy processing modules fully behind the `engines` layer.
+2. Keep translation, rewrite, TTS, and separation providers consistent behind service and adapter boundaries.
+3. Reduce compatibility shims in the UI entry points.
+4. Continue consolidating preview and export around one configuration source.
+5. Keep documentation aligned with the real repository structure instead of the old target-only structure.

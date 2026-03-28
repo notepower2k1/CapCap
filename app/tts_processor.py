@@ -7,6 +7,8 @@ import time
 import requests
 from dotenv import load_dotenv
 
+from local_vie_neu_tts import synthesize_text_to_wav_16k_mono as vieneu_tts_to_wav_16k_mono
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(os.path.dirname(BASE_DIR), ".env")
@@ -461,6 +463,13 @@ def synthesize_text_to_wav_16k_mono(
             wav_path=wav_path,
             voice=voice_id or "banmai",
             speed=speed_value,
+            tmp_dir=tmp_dir,
+        )
+    if provider == "vieneu":
+        return vieneu_tts_to_wav_16k_mono(
+            text=text,
+            wav_path=wav_path,
+            voice_id=voice_id,
             tmp_dir=tmp_dir,
         )
 

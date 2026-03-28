@@ -302,6 +302,120 @@
                 "south",
                 "male"
             ]
+        },
+        {
+            "id": "vieneu_vinh",
+            "name": "VieNeu Vinh (nam mien Nam)",
+            "provider": "vieneu",
+            "provider_voice": "Vinh",
+            "language": "vi",
+            "gender": "male",
+            "tier": "free",
+            "preview_video_url": "",
+            "preview_video_path": "",
+            "preview_audio_url": "",
+            "preview_audio_path": "",
+            "enabled": true,
+            "tags": [
+                "local",
+                "south",
+                "male"
+            ]
+        },
+        {
+            "id": "vieneu_binh",
+            "name": "VieNeu Binh (nam mien Bac)",
+            "provider": "vieneu",
+            "provider_voice": "Binh",
+            "language": "vi",
+            "gender": "male",
+            "tier": "free",
+            "preview_video_url": "",
+            "preview_video_path": "",
+            "preview_audio_url": "",
+            "preview_audio_path": "",
+            "enabled": true,
+            "tags": [
+                "local",
+                "north",
+                "male"
+            ]
+        },
+        {
+            "id": "vieneu_tuyen",
+            "name": "VieNeu Tuyen (nam mien Bac)",
+            "provider": "vieneu",
+            "provider_voice": "Tuyen",
+            "language": "vi",
+            "gender": "male",
+            "tier": "free",
+            "preview_video_url": "",
+            "preview_video_path": "",
+            "preview_audio_url": "",
+            "preview_audio_path": "",
+            "enabled": true,
+            "tags": [
+                "local",
+                "north",
+                "male"
+            ]
+        },
+        {
+            "id": "vieneu_doan",
+            "name": "VieNeu Doan (nu mien Nam)",
+            "provider": "vieneu",
+            "provider_voice": "Doan",
+            "language": "vi",
+            "gender": "female",
+            "tier": "free",
+            "preview_video_url": "",
+            "preview_video_path": "",
+            "preview_audio_url": "",
+            "preview_audio_path": "",
+            "enabled": true,
+            "tags": [
+                "local",
+                "south",
+                "female"
+            ]
+        },
+        {
+            "id": "vieneu_ly",
+            "name": "VieNeu Ly (nu mien Bac)",
+            "provider": "vieneu",
+            "provider_voice": "Ly",
+            "language": "vi",
+            "gender": "female",
+            "tier": "free",
+            "preview_video_url": "",
+            "preview_video_path": "",
+            "preview_audio_url": "",
+            "preview_audio_path": "",
+            "enabled": true,
+            "tags": [
+                "local",
+                "north",
+                "female"
+            ]
+        },
+        {
+            "id": "vieneu_ngoc",
+            "name": "VieNeu Ngoc (nu mien Bac)",
+            "provider": "vieneu",
+            "provider_voice": "Ngoc",
+            "language": "vi",
+            "gender": "female",
+            "tier": "free",
+            "preview_video_url": "",
+            "preview_video_path": "",
+            "preview_audio_url": "",
+            "preview_audio_path": "",
+            "enabled": true,
+            "tags": [
+                "local",
+                "north",
+                "female"
+            ]
         }
     ]
 }

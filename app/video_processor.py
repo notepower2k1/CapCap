@@ -126,22 +126,67 @@ def _alignment_anchor_position(video_width: int, video_height: int, alignment: i
     return x, y
 
 
-def _build_typewriter_text(text: str, duration_seconds: float) -> str:
+def _build_typewriter_text(text: str, duration_seconds: float, mapped_words=None) -> str:
     safe_text = (text or "").replace("\n", "\\N")
-    visible_chars = [char for char in safe_text if char not in "{}"]
-    total_chars = max(1, len(visible_chars))
-    total_cs = max(18, int(round(max(duration_seconds, 0.3) * 100)))
-    step_cs = max(4, total_cs // total_chars)
+    if not mapped_words:
+        visible_chars = [char for char in safe_text if char not in "{}"]
+        total_chars = max(1, len(visible_chars))
+        total_cs = max(18, int(round(max(duration_seconds, 0.3) * 100)))
+        step_cs = max(4, total_cs // total_chars)
 
-    current_start = 0
+        current_start = 0
+        rendered = []
+        for char in safe_text:
+            if char in "{}":
+                rendered.append(char)
+                continue
+            current_end = min(total_cs, current_start + step_cs)
+            rendered.append(r"{\alpha&HFF&\t(" + f"{current_start * 10},{current_end * 10}" + r",\alpha&H00&)}" + char)
+            current_start = current_end
+        return "".join(rendered)
+
+    reveal_windows = [None] * len(text or "")
+    for mapped in mapped_words:
+        start_idx, end_idx = mapped["span"]
+        visible_indices = [idx for idx in range(start_idx, min(end_idx, len(text or ""))) if not (text or "")[idx].isspace()]
+        if not visible_indices:
+            continue
+        word_start_cs = int(round(float(mapped["start_rel"]) * 100.0))
+        word_end_cs = int(round(float(mapped["end_rel"]) * 100.0))
+        word_duration_cs = max(len(visible_indices), word_end_cs - word_start_cs)
+        step_cs = max(1, word_duration_cs // len(visible_indices))
+        cursor = word_start_cs
+        for pos, idx in enumerate(visible_indices):
+            char_start_cs = cursor
+            if pos == len(visible_indices) - 1:
+                char_end_cs = max(char_start_cs + 1, word_end_cs)
+            else:
+                char_end_cs = min(word_end_cs, max(char_start_cs + 1, cursor + step_cs))
+            reveal_windows[idx] = (char_start_cs, char_end_cs)
+            cursor = char_end_cs
+
+    fallback_total_cs = max(18, int(round(max(duration_seconds, 0.3) * 100)))
+    fallback_visible = [idx for idx, char in enumerate(text or "") if not char.isspace()]
+    fallback_step_cs = max(4, fallback_total_cs // max(1, len(fallback_visible)))
+    fallback_cursor = 0
     rendered = []
-    for char in safe_text:
-        if char in "{}":
+    for idx, char in enumerate(safe_text):
+        if idx >= len(reveal_windows) or char in "{}":
             rendered.append(char)
             continue
-        current_end = min(total_cs, current_start + step_cs)
-        rendered.append(r"{\alpha&HFF&\t(" + f"{current_start * 10},{current_end * 10}" + r",\alpha&H00&)}" + char)
-        current_start = current_end
+        if char.isspace():
+            rendered.append(char)
+            continue
+        window = reveal_windows[idx]
+        if window is None:
+            char_start_cs = fallback_cursor
+            char_end_cs = min(fallback_total_cs, char_start_cs + fallback_step_cs)
+            fallback_cursor = char_end_cs
+        else:
+            char_start_cs, char_end_cs = window
+        rendered.append(
+            r"{\alpha&HFF&\t(" + f"{char_start_cs * 10},{char_end_cs * 10}" + r",\alpha&H00&)}" + char
+        )
     return "".join(rendered)
 
 
@@ -160,6 +205,8 @@ def _apply_animation_tags(
     font_size: int,
     duration_seconds: float,
     animation_duration: float,
+    word_timing_entries=None,
+    timing_mode: str = "vietnamese",
 ) -> str:
     safe_text = (text or "").replace("\n", "\\N")
     style = (animation_style or "Static").strip().lower()
@@ -176,7 +223,13 @@ def _apply_animation_tags(
     if style == "background appear":
         return rf"{{\fad({_ms(total_ms * 0.85)},{_ms(total_ms * 0.15)})}}" + safe_text
     if style == "typewriter":
-        return _build_typewriter_text(text or "", min(duration_seconds, max(0.15, animation_duration)))
+        source_words = (
+            _normalize_word_timings(word_timing_entries, 0.0, duration_seconds)
+            if str(timing_mode or "vietnamese").strip().lower() == "source"
+            else []
+        )
+        mapped_words = _map_target_word_timings(text or "", source_words, duration_seconds)
+        return _build_typewriter_text(text or "", min(duration_seconds, max(0.15, animation_duration)), mapped_words=mapped_words)
     if style == "slide up":
         x, y = _alignment_anchor_position(video_width, video_height, alignment, margin_v)
         start_y = y + max(24, int(font_size * 0.7))
@@ -532,6 +585,8 @@ def srt_to_ass(srt_path: str,
             font_size=font_size,
             duration_seconds=max(0.1, end_seconds - start_seconds),
             animation_duration=animation_duration,
+            word_timing_entries=line_word_timings,
+            timing_mode=karaoke_timing_mode,
         )
         events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
 

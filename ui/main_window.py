@@ -442,6 +442,8 @@ class VideoTranslatorGUI(QMainWindow):
             return f"fpt:{provider_voice or voice_id or 'banmai'}"
         if provider == "zalo":
             return f"zalo:{provider_voice or voice_id or '1'}"
+        if provider == "vieneu":
+            return f"vieneu:{provider_voice or voice_id}"
         return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
 
     def _voice_provider_label(self, provider: str) -> str:
@@ -449,6 +451,7 @@ class VideoTranslatorGUI(QMainWindow):
             "edge": "Edge",
             "zalo": "Zalo",
             "fpt": "FPT.AI",
+            "vieneu": "VieNeu",
         }
         return mapping.get(str(provider or "").strip().lower(), str(provider or "Other").strip().title() or "Other")
 
@@ -530,7 +533,7 @@ class VideoTranslatorGUI(QMainWindow):
         grouped_entries = {"free": [], "premium": [], "other": []}
         for entry in self.voice_catalog_entries:
             entry_gender = str(entry.get("gender", "")).strip().lower()
-            if selected_gender in ("male", "female") and entry_gender != selected_gender:
+            if selected_gender in ("male", "female") and entry_gender not in (selected_gender, "any", ""):
                 continue
             tier = str(entry.get("tier", "other")).strip().lower()
             grouped_entries[tier if tier in grouped_entries else "other"].append(entry)
@@ -1216,7 +1219,7 @@ class VideoTranslatorGUI(QMainWindow):
     def _update_animation_time_visibility(self):
         current_animation = self.subtitle_animation_combo.currentText().strip().lower()
         show_animation_time = current_animation != "static"
-        show_karaoke_timing = current_animation == "word highlight karaoke"
+        show_karaoke_timing = current_animation in ("word highlight karaoke", "typewriter")
         if hasattr(self, "subtitle_animation_time_label"):
             self.subtitle_animation_time_label.setVisible(show_animation_time)
         if hasattr(self, "subtitle_animation_time_spin"):

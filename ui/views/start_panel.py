@@ -355,7 +355,7 @@ def build_start_group(gui, left_layout):
     gui.subtitle_animation_time_spin.setValue(0.22)
     gui.subtitle_animation_time_spin.setSuffix(" s")
     gui.subtitle_animation_time_label = QLabel("Duration")
-    gui.subtitle_karaoke_timing_label = QLabel("Karaoke Timing")
+    gui.subtitle_karaoke_timing_label = QLabel("Text Timing")
     gui.subtitle_karaoke_timing_combo = QComboBox()
     gui.subtitle_karaoke_timing_combo.addItem("Vietnamese pacing", "vietnamese")
     gui.subtitle_karaoke_timing_combo.addItem("Source speech timing", "source")
