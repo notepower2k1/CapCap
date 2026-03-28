@@ -107,6 +107,19 @@ class EngineRuntime:
             mode=mode,
         )
 
+    def change_wav_speed(
+        self,
+        *,
+        input_wav_path: str,
+        output_wav_path: str,
+        speed_ratio: float,
+    ) -> str:
+        return self.audio_mix.change_wav_speed(
+            input_wav_path=input_wav_path,
+            output_wav_path=output_wav_path,
+            speed_ratio=speed_ratio,
+        )
+
     def mix_voice_with_background(
         self,
         *,

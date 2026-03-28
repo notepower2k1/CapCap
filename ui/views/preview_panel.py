@@ -77,9 +77,11 @@ def build_preview_panel(gui):
     gui.show_original_subtitle_cb = QCheckBox("Show original script")
     gui.show_original_subtitle_cb.setChecked(True)
     gui.rewrite_translation_btn = QPushButton("Rewrite with AI")
+    gui.import_translation_btn = QPushButton("Import SRT")
     editor_top.addWidget(editor_title)
     editor_top.addStretch()
     editor_top.addWidget(gui.rewrite_translation_btn)
+    editor_top.addWidget(gui.import_translation_btn)
     editor_top.addWidget(gui.keep_timeline_cb)
     editor_top.addWidget(gui.show_original_subtitle_cb)
 

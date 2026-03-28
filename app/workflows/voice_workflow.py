@@ -56,9 +56,29 @@ class VoiceWorkflow:
         with open(manifest_path, "w", encoding="utf-8") as handle:
             json.dump(manifest, handle, ensure_ascii=False, indent=2)
 
-    def _segment_cache_key(self, *, text: str, voice_name: str, voice_speed: float) -> str:
-        payload = f"{voice_name}|{float(voice_speed):.3f}|{text.strip()}"
+    def _segment_cache_key(self, *, text: str, voice_name: str) -> str:
+        payload = f"{voice_name}|{text.strip()}"
         return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+    def _apply_segment_speed(self, *, wavs, tmp_dir: str, voice_speed: float):
+        speed_value = float(voice_speed)
+        if abs(speed_value - 1.0) < 0.02:
+            return wavs
+
+        adjusted_wavs = []
+        for idx, wav_path in enumerate(wavs):
+            if not wav_path or not os.path.exists(wav_path):
+                adjusted_wavs.append(wav_path)
+                continue
+            adjusted_path = os.path.join(tmp_dir, f"seg_{idx:04d}_speed_{int(round(speed_value * 100)):03d}.wav")
+            adjusted_wavs.append(
+                self.engine_runtime.change_wav_speed(
+                    input_wav_path=wav_path,
+                    output_wav_path=adjusted_path,
+                    speed_ratio=speed_value,
+                )
+            )
+        return adjusted_wavs
 
     def _fit_segment_wavs_to_timeline(self, *, segments, wavs, tmp_dir: str, sync_mode: str):
         mode_key = (sync_mode or "off").strip().lower()
@@ -81,7 +101,7 @@ class VoiceWorkflow:
             synced_wavs.append(fitted_path)
         return synced_wavs
 
-    def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str, voice_speed: float):
+    def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str):
         manifest = self._load_manifest(tmp_dir)
         manifest_segments = dict(manifest.get("segments", {}) or {})
         wavs = []
@@ -90,8 +110,8 @@ class VoiceWorkflow:
             if not txt:
                 wavs.append("")
                 continue
-            seg_wav = os.path.join(tmp_dir, f"seg_{idx:04d}.wav")
-            cache_key = self._segment_cache_key(text=txt, voice_name=voice_name, voice_speed=voice_speed)
+            seg_wav = os.path.join(tmp_dir, f"seg_{idx:04d}_base.wav")
+            cache_key = self._segment_cache_key(text=txt, voice_name=voice_name)
             cache_entry = manifest_segments.get(str(idx), {})
             cached_wav = str(cache_entry.get("wav_path", "")).strip()
             cached_key = str(cache_entry.get("cache_key", "")).strip()
@@ -106,7 +126,7 @@ class VoiceWorkflow:
                 text=txt,
                 wav_path=seg_wav,
                 voice=voice_name,
-                speed=voice_speed,
+                speed=1.0,
                 tmp_dir=tmp_dir,
             )
             manifest_segments[str(idx)] = {
@@ -114,7 +134,6 @@ class VoiceWorkflow:
                 "wav_path": seg_wav,
                 "text": txt,
                 "voice_name": voice_name,
-                "voice_speed": float(voice_speed),
             }
             wavs.append(seg_wav)
         manifest["segments"] = manifest_segments
@@ -145,6 +164,10 @@ class VoiceWorkflow:
             segments=segments,
             tmp_dir=tmp_dir,
             voice_name=voice_name,
+        )
+        wavs = self._apply_segment_speed(
+            wavs=wavs,
+            tmp_dir=tmp_dir,
             voice_speed=float(voice_speed),
         )
         wavs = self._fit_segment_wavs_to_timeline(

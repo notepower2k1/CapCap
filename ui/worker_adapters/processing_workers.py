@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
@@ -118,16 +119,65 @@ class RewriteTranslationWorker(QThread):
             self.finished.emit("", str(exc))
 
 
+class RuntimeAssetsWorker(QThread):
+    finished = Signal(str, str)
+
+    def __init__(self, workspace_root, whisper_model_name="base", demucs_model_name="htdemucs"):
+        super().__init__()
+        self.workspace_root = workspace_root
+        self.whisper_model_name = whisper_model_name
+        self.demucs_model_name = demucs_model_name
+
+    def run(self):
+        try:
+            details = []
+
+            ffmpeg_path = Path(self.workspace_root) / "bin" / "ffmpeg" / "ffmpeg.exe"
+            if not ffmpeg_path.exists():
+                raise FileNotFoundError(f"Bundled FFmpeg is missing: {ffmpeg_path}")
+            details.append(f"FFmpeg ready: {ffmpeg_path}")
+
+            mpv_path = Path(self.workspace_root) / "bin" / "mpv" / "libmpv-2.dll"
+            if not mpv_path.exists():
+                alt_mpv_path = Path(self.workspace_root) / "bin" / "mpv" / "mpv-2.dll"
+                if not alt_mpv_path.exists():
+                    raise FileNotFoundError(f"Bundled libmpv is missing: {mpv_path}")
+                mpv_path = alt_mpv_path
+            details.append(f"libmpv ready: {mpv_path}")
+
+            from faster_whisper import WhisperModel
+
+            whisper_cache_dir = Path(self.workspace_root) / "models" / "faster_whisper"
+            whisper_cache_dir.mkdir(parents=True, exist_ok=True)
+            WhisperModel(
+                self.whisper_model_name,
+                device="cpu",
+                compute_type="int8",
+                download_root=str(whisper_cache_dir),
+            )
+            details.append(f"Whisper model ready: {self.whisper_model_name}")
+
+            from demucs.pretrained import get_model
+
+            get_model(self.demucs_model_name)
+            details.append(f"Demucs model ready: {self.demucs_model_name}")
+
+            self.finished.emit("\n".join(details), "")
+        except Exception as exc:
+            self.finished.emit("", str(exc))
+
+
 class PrepareWorkflowWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, workspace_root, video_path, mode, source_language, translator_ai):
+    def __init__(self, workspace_root, video_path, mode, source_language, translator_ai, whisper_model_name):
         super().__init__()
         self.workspace_root = workspace_root
         self.video_path = video_path
         self.mode = mode
         self.source_language = source_language
         self.translator_ai = translator_ai
+        self.whisper_model_name = whisper_model_name
 
     def run(self):
         try:
@@ -138,7 +188,7 @@ class PrepareWorkflowWorker(QThread):
                 target_language="vi",
                 mode=self.mode,
                 translator_ai=self.translator_ai,
-                whisper_model_name="ggml-medium.bin",
+                whisper_model_name=self.whisper_model_name,
             )
             self.finished.emit(runtime.project_state_path(state), "")
         except Exception as exc:

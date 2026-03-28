@@ -1,7 +1,20 @@
-from audio_mixer import build_voice_track_from_srt_segments, fit_wav_to_duration, mix_voice_with_background
+from audio_mixer import build_voice_track_from_srt_segments, change_wav_speed, fit_wav_to_duration, mix_voice_with_background
 
 
 class AudioMixAdapter:
+    def change_wav_speed(
+        self,
+        *,
+        input_wav_path: str,
+        output_wav_path: str,
+        speed_ratio: float,
+    ) -> str:
+        return change_wav_speed(
+            input_wav_path=input_wav_path,
+            output_wav_path=output_wav_path,
+            speed_ratio=speed_ratio,
+        )
+
     def fit_wav_to_duration(
         self,
         *,

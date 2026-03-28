@@ -86,6 +86,44 @@ def fit_wav_to_duration(
     return output_wav_path
 
 
+def change_wav_speed(
+    *,
+    input_wav_path: str,
+    output_wav_path: str,
+    speed_ratio: float,
+) -> str:
+    if not os.path.exists(input_wav_path):
+        raise FileNotFoundError(f"Input wav not found: {input_wav_path}")
+
+    ratio = max(0.01, float(speed_ratio))
+    if abs(ratio - 1.0) < 0.02:
+        return input_wav_path
+
+    ffmpeg = _ffmpeg_path()
+    if not os.path.exists(ffmpeg):
+        raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
+
+    os.makedirs(os.path.dirname(output_wav_path) or ".", exist_ok=True)
+    filter_chain = _build_atempo_filter(ratio)
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        input_wav_path,
+        "-filter:a",
+        filter_chain,
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        output_wav_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg speed adjustment failed:\n{proc.stderr or proc.stdout}")
+    return output_wav_path
+
+
 def _require_pydub():
     try:
         from pydub import AudioSegment

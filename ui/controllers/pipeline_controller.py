@@ -42,6 +42,7 @@ class PipelineController:
             self.gui.get_output_mode_key(),
             self.gui.get_source_language_code(),
             self.gui.is_ai_polish_enabled(),
+            self.gui.get_whisper_model_path(),
         )
         self.gui.prepare_workflow_thread.finished.connect(self.gui.on_prepare_workflow_finished)
         self.gui.prepare_workflow_thread.start()

@@ -1,9 +1,11 @@
 import os
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QDoubleSpinBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -11,17 +13,103 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
+    QWidget,
 )
 
 
 def build_advanced_group(gui, left_layout):
-    gui.advanced_group = QGroupBox("Advanced Settings")
-    advanced_layout = QVBoxLayout(gui.advanced_group)
+    gui.advanced_section = QFrame()
+    gui.advanced_section.setObjectName("statusCard")
+    section_layout = QVBoxLayout(gui.advanced_section)
+    section_layout.setContentsMargins(12, 12, 12, 12)
+    section_layout.setSpacing(10)
+
+    gui.toggle_advanced_btn = QToolButton()
+    gui.toggle_advanced_btn.setCheckable(True)
+    gui.toggle_advanced_btn.setChecked(False)
+    gui.toggle_advanced_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    gui.toggle_advanced_btn.setStyleSheet(
+        "QToolButton { text-align: left; font-weight: 700; color: #8ad7ff; border: none; padding: 0; }"
+    )
+    gui.toggle_advanced_btn.toggled.connect(gui.on_advanced_toggled)
+    section_layout.addWidget(gui.toggle_advanced_btn)
+
+    gui.advanced_section_content = QWidget()
+    gui.advanced_section_content.setVisible(False)
+    section_layout.addWidget(gui.advanced_section_content)
+
+    gui.advanced_group = QGroupBox("")
+    advanced_layout = QVBoxLayout(gui.advanced_section_content)
     advanced_layout.setSpacing(12)
+    advanced_layout.setContentsMargins(0, 0, 0, 0)
+    advanced_layout.addWidget(gui.advanced_group)
+
+    group_layout = QVBoxLayout(gui.advanced_group)
+    group_layout.setSpacing(12)
 
     _build_hidden_runtime_widgets(gui)
-    left_layout.addWidget(gui.advanced_group, 1)
+    _build_audio_mix_controls(gui, group_layout)
+    left_layout.addWidget(gui.advanced_section, 1)
+
+
+def _build_audio_mix_controls(gui, advanced_layout):
+    source_title = QLabel("Audio Source")
+    advanced_layout.addWidget(source_title)
+
+    source_mode_row = QHBoxLayout()
+    source_mode_row.addWidget(gui.use_generated_audio_radio)
+    source_mode_row.addWidget(gui.use_existing_audio_radio)
+    advanced_layout.addLayout(source_mode_row)
+    advanced_layout.addWidget(gui.audio_source_hint_label)
+
+    gui.generated_audio_section_label = QLabel("Generate voice and mix with background")
+    advanced_layout.addWidget(gui.generated_audio_section_label)
+    gui.generated_audio_section_hint = gui.make_helper_label(
+        "Use this when you want CapCap to generate Vietnamese voice and optionally mix it with your own background audio."
+    )
+    gui.generated_audio_section_hint.setParent(gui)
+    advanced_layout.addWidget(gui.generated_audio_section_hint)
+
+    bg_label = QLabel("Background audio for mixing")
+    gui.bg_music_label = bg_label
+    advanced_layout.addWidget(gui.bg_music_label)
+    bg_row = QHBoxLayout()
+    bg_row.addWidget(gui.bg_music_edit, 1)
+    gui.browse_bg_music_btn = QPushButton("Browse")
+    gui.browse_bg_music_btn.clicked.connect(gui.browse_background_audio)
+    bg_row.addWidget(gui.browse_bg_music_btn)
+    advanced_layout.addLayout(bg_row)
+
+    gui.existing_audio_section_label = QLabel("Use an existing mixed audio file")
+    advanced_layout.addWidget(gui.existing_audio_section_label)
+    gui.existing_audio_section_hint = gui.make_helper_label(
+        "Use this when you already have a final mixed track and only want preview/export to use that file."
+    )
+    gui.existing_audio_section_hint.setParent(gui)
+    advanced_layout.addWidget(gui.existing_audio_section_hint)
+
+    existing_label = QLabel("Existing mixed audio")
+    gui.mixed_audio_label = existing_label
+    advanced_layout.addWidget(gui.mixed_audio_label)
+    existing_row = QHBoxLayout()
+    existing_row.addWidget(gui.mixed_audio_edit, 1)
+    gui.browse_mixed_audio_btn = QPushButton("Browse")
+    gui.browse_mixed_audio_btn.clicked.connect(gui.browse_existing_mixed_audio)
+    existing_row.addWidget(gui.browse_mixed_audio_btn)
+    advanced_layout.addLayout(existing_row)
+
+    gain_row = QHBoxLayout()
+    gui.voice_gain_label = QLabel("Voice gain")
+    gain_row.addWidget(gui.voice_gain_label)
+    gain_row.addWidget(gui.voice_gain_spin)
+    gui.bg_gain_label = QLabel("BG gain")
+    gain_row.addWidget(gui.bg_gain_label)
+    gain_row.addWidget(gui.bg_gain_spin)
+    advanced_layout.addLayout(gain_row)
+
+    advanced_layout.addWidget(gui.voiceover_btn)
 
 
 def _build_hidden_runtime_widgets(gui):
@@ -88,15 +176,7 @@ def _build_hidden_runtime_widgets(gui):
         gui.vocal_sep_btn,
         gui.transcribe_btn,
         gui.translate_btn,
-        gui.bg_music_edit,
-        gui.mixed_audio_edit,
-        gui.use_generated_audio_radio,
-        gui.use_existing_audio_radio,
-        gui.audio_source_hint_label,
         gui.voice_output_folder_edit,
-        gui.voice_gain_spin,
-        gui.bg_gain_spin,
-        gui.voiceover_btn,
         gui.apply_translated_btn,
         gui.auto_preview_frame_cb,
         gui.show_artifacts_btn,

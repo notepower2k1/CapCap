@@ -15,7 +15,7 @@ class SubtitleController:
             QMessageBox.warning(self.gui, "Error", "Audio source file not found! Please extract audio first.")
             return
 
-        model_path = os.path.join(os.getcwd(), "models", "ggml-medium.bin")
+        model_path = self.gui.get_whisper_model_path()
         lang = self.gui.get_source_language_code()
 
         self.gui.transcript_text.setText("Transcribing... please wait (Loading...)")
