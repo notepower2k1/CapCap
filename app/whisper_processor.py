@@ -122,6 +122,7 @@ def transcribe_audio(audio_path, model_path, whisper_path=None, language="auto",
         task=task,
         vad_filter=True,
         beam_size=5,
+        word_timestamps=True,
     )
 
     return [
@@ -129,6 +130,17 @@ def transcribe_audio(audio_path, model_path, whisper_path=None, language="auto",
             "start": float(segment.start),
             "end": float(segment.end),
             "text": segment.text.strip(),
+            "words": [
+                {
+                    "start": float(word.start),
+                    "end": float(word.end),
+                    "text": str(word.word or "").strip(),
+                }
+                for word in (segment.words or [])
+                if getattr(word, "start", None) is not None
+                and getattr(word, "end", None) is not None
+                and str(getattr(word, "word", "") or "").strip()
+            ],
         }
         for segment in segments
         if segment.text and segment.text.strip()

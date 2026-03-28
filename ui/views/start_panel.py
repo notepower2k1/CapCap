@@ -344,9 +344,10 @@ def build_start_group(gui, left_layout):
     gui.subtitle_bold_cb.setChecked(True)
     gui.subtitle_animation_combo = QComboBox()
     gui.subtitle_animation_combo.addItems(
-        ["Static", "Pop In", "Slide Up", "Fade In", "Fade Out", "Pulse", "Background Appear", "Typewriter"]
+        ["Static", "Pop In", "Slide Up", "Fade In", "Fade Out", "Pulse", "Background Appear", "Typewriter", "Word Highlight Karaoke"]
     )
     gui.subtitle_animation_combo.setCurrentText("Pop In")
+    gui.subtitle_animation_combo.currentTextChanged.connect(lambda _value: gui.on_subtitle_animation_changed())
     gui.subtitle_animation_time_spin = QDoubleSpinBox()
     gui.subtitle_animation_time_spin.setRange(0.1, 2.5)
     gui.subtitle_animation_time_spin.setSingleStep(0.05)
@@ -354,6 +355,12 @@ def build_start_group(gui, left_layout):
     gui.subtitle_animation_time_spin.setValue(0.22)
     gui.subtitle_animation_time_spin.setSuffix(" s")
     gui.subtitle_animation_time_label = QLabel("Duration")
+    gui.subtitle_karaoke_timing_label = QLabel("Karaoke Timing")
+    gui.subtitle_karaoke_timing_combo = QComboBox()
+    gui.subtitle_karaoke_timing_combo.addItem("Vietnamese pacing", "vietnamese")
+    gui.subtitle_karaoke_timing_combo.addItem("Source speech timing", "source")
+    gui.subtitle_karaoke_timing_combo.setCurrentIndex(0)
+    gui.subtitle_karaoke_timing_combo.currentTextChanged.connect(lambda _value: gui.update_subtitle_preview_style())
 
     custom_controls_layout.addWidget(QLabel("Font:"), 0, 0)
     custom_controls_layout.addWidget(gui.subtitle_font_combo, 0, 1)
@@ -367,8 +374,10 @@ def build_start_group(gui, left_layout):
     custom_controls_layout.addWidget(gui.subtitle_animation_combo, 4, 1)
     custom_controls_layout.addWidget(gui.subtitle_animation_time_label, 5, 0)
     custom_controls_layout.addWidget(gui.subtitle_animation_time_spin, 5, 1)
-    custom_controls_layout.addWidget(gui.subtitle_background_cb, 6, 0)
-    custom_controls_layout.addWidget(gui.subtitle_bold_cb, 6, 1)
+    custom_controls_layout.addWidget(gui.subtitle_karaoke_timing_label, 6, 0)
+    custom_controls_layout.addWidget(gui.subtitle_karaoke_timing_combo, 6, 1)
+    custom_controls_layout.addWidget(gui.subtitle_background_cb, 7, 0)
+    custom_controls_layout.addWidget(gui.subtitle_bold_cb, 7, 1)
 
     custom_wrapper_layout.addWidget(gui.custom_settings_content)
     subtitle_layout.addWidget(custom_wrapper)

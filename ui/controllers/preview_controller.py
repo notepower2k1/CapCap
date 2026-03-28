@@ -201,11 +201,28 @@ class PreviewController:
             seg_end = float(seg["end"])
             if seg_end < start_seconds or seg_start > end_seconds:
                 continue
+            clipped_words = []
+            for word in seg.get("words", []) or []:
+                try:
+                    word_start = float(word.get("start", 0.0))
+                    word_end = float(word.get("end", 0.0))
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                if word_end < start_seconds or word_start > end_seconds:
+                    continue
+                clipped_words.append(
+                    {
+                        "start": max(0.0, word_start - start_seconds),
+                        "end": min(duration_seconds, word_end - start_seconds),
+                        "text": str(word.get("text", "") or "").strip(),
+                    }
+                )
             clipped.append(
                 {
                     "start": max(0.0, seg_start - start_seconds),
                     "end": min(duration_seconds, seg_end - start_seconds),
                     "text": seg.get("text", ""),
+                    "words": clipped_words,
                     "manual_highlights": list(seg.get("manual_highlights", [])),
                 }
             )

@@ -165,6 +165,8 @@ def render_subtitle_frame_preview(
     auto_keyword_highlight: bool = False,
     animation_duration: float = 0.22,
     manual_highlights=None,
+    word_timings=None,
+    karaoke_timing_mode: str = "vietnamese",
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -201,6 +203,8 @@ def render_subtitle_frame_preview(
         auto_keyword_highlight=auto_keyword_highlight,
         animation_duration=animation_duration,
         manual_highlights=manual_highlights,
+        word_timings=word_timings,
+        karaoke_timing_mode=karaoke_timing_mode,
     )
 
     escaped_ass = ass_path.replace("\\", "/")

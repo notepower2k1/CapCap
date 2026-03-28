@@ -189,7 +189,13 @@ class SubtitleController:
             edited_texts = self.gui.extract_subtitle_text_entries(srt_text)
             if base_segments and len(edited_texts) == len(base_segments):
                 segments = [
-                    {"start": base["start"], "end": base["end"], "text": edited_texts[idx]}
+                    {
+                        "start": base["start"],
+                        "end": base["end"],
+                        "text": edited_texts[idx],
+                        "words": list(base.get("words", [])),
+                        "manual_highlights": list(base.get("manual_highlights", [])),
+                    }
                     for idx, base in enumerate(base_segments)
                 ]
         if not segments:

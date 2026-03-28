@@ -134,6 +134,8 @@ class ExactFramePreviewWorker(QThread):
                 auto_keyword_highlight=self.subtitle_style.get("auto_keyword_highlight", False),
                 animation_duration=self.subtitle_style.get("animation_duration", 0.22),
                 manual_highlights=self.subtitle_style.get("manual_highlights", []),
+                word_timings=self.subtitle_style.get("word_timings", []),
+                karaoke_timing_mode=self.subtitle_style.get("karaoke_timing_mode", "vietnamese"),
             )
             self.finished.emit(output, "")
         except Exception as exc:

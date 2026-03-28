@@ -63,4 +63,6 @@ class PreviewAdapter:
             auto_keyword_highlight=subtitle_style.get("auto_keyword_highlight", False),
             animation_duration=subtitle_style.get("animation_duration", 0.22),
             manual_highlights=subtitle_style.get("manual_highlights", []),
+            word_timings=subtitle_style.get("word_timings", []),
+            karaoke_timing_mode=subtitle_style.get("karaoke_timing_mode", "vietnamese"),
         )

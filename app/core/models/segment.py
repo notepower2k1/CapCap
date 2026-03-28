@@ -26,6 +26,11 @@ class Segment:
         refined_translation = str(data.get("refined_translation", "") or "")
         final_text = str(data.get("final_text", data.get("text", "")) or "")
         tts_text = str(data.get("tts_text", "") or "")
+        metadata = dict(data.get("metadata", {}) or {})
+        if "words" in data and "words" not in metadata:
+            metadata["words"] = list(data.get("words") or [])
+        if "manual_highlights" in data and "manual_highlights" not in metadata:
+            metadata["manual_highlights"] = list(data.get("manual_highlights") or [])
         return cls(
             id=int(segment_id or 0),
             start=float(data.get("start", 0.0) or 0.0),
@@ -37,7 +42,7 @@ class Segment:
             tts_text=tts_text,
             voice_file=str(data.get("voice_file", "") or ""),
             status=str(data.get("status", "pending") or "pending"),
-            metadata=dict(data.get("metadata", {}) or {}),
+            metadata=metadata,
         )
 
     @classmethod
@@ -49,6 +54,9 @@ class Segment:
             end=float(data.get("end", 0.0) or 0.0),
             original_text=text,
             status="transcribed",
+            metadata={
+                "words": list(data.get("words") or []),
+            },
         )
 
     def apply_translation(self, translated_text: str, *, refined: bool = False) -> None:
@@ -92,20 +100,28 @@ class Segment:
         }
 
     def to_subtitle_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "id": self.id,
             "start": self.start,
             "end": self.end,
             "text": self.subtitle_text,
         }
+        if self.metadata.get("words"):
+            payload["words"] = list(self.metadata.get("words") or [])
+        if self.metadata.get("manual_highlights"):
+            payload["manual_highlights"] = list(self.metadata.get("manual_highlights") or [])
+        return payload
 
     def to_original_subtitle_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "id": self.id,
             "start": self.start,
             "end": self.end,
             "text": self.original_text,
         }
+        if self.metadata.get("words"):
+            payload["words"] = list(self.metadata.get("words") or [])
+        return payload
 
 
 def coerce_segments(segments: list[Any]) -> list[Segment]:
@@ -122,4 +138,3 @@ def coerce_segments(segments: list[Any]) -> list[Segment]:
 
 def segments_to_dicts(segments: list[Any]) -> list[dict[str, Any]]:
     return [segment.to_dict() for segment in coerce_segments(segments)]
-

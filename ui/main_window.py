@@ -746,6 +746,7 @@ class VideoTranslatorGUI(QMainWindow):
             "position": self.subtitle_align_combo.currentText().strip(),
             "animation": self.subtitle_animation_combo.currentText().strip(),
             "animation_time": float(self.subtitle_animation_time_spin.value()),
+            "karaoke_timing_mode": str(self.subtitle_karaoke_timing_combo.currentData() or "vietnamese"),
             "background": bool(self.subtitle_background_cb.isChecked()),
             "bold": bool(self.subtitle_bold_cb.isChecked()),
             "auto_keyword_highlight": bool(self.subtitle_keyword_highlight_cb.isChecked()),
@@ -812,6 +813,10 @@ class VideoTranslatorGUI(QMainWindow):
         self.subtitle_align_combo.setCurrentText(str(preset.get("position", self.subtitle_align_combo.currentText())))
         self.subtitle_animation_combo.setCurrentText(str(preset.get("animation", self.subtitle_animation_combo.currentText())))
         self.subtitle_animation_time_spin.setValue(float(preset.get("animation_time", self.subtitle_animation_time_spin.value())))
+        karaoke_mode = str(preset.get("karaoke_timing_mode", self.subtitle_karaoke_timing_combo.currentData() or "vietnamese"))
+        karaoke_index = self.subtitle_karaoke_timing_combo.findData(karaoke_mode)
+        if karaoke_index >= 0:
+            self.subtitle_karaoke_timing_combo.setCurrentIndex(karaoke_index)
         self.subtitle_background_cb.setChecked(bool(preset.get("background", self.subtitle_background_cb.isChecked())))
         self.subtitle_bold_cb.setChecked(bool(preset.get("bold", self.subtitle_bold_cb.isChecked())))
         self.subtitle_keyword_highlight_cb.setChecked(bool(preset.get("auto_keyword_highlight", self.subtitle_keyword_highlight_cb.isChecked())))
@@ -1171,6 +1176,7 @@ class VideoTranslatorGUI(QMainWindow):
                 else preset.get("animation", "Static")
             ) or preset.get("animation", "Static"),
             "animation_duration": float(self.subtitle_animation_time_spin.value()),
+            "karaoke_timing_mode": str(self.subtitle_karaoke_timing_combo.currentData() or "vietnamese"),
             "alignment": alignment_map.get(self.subtitle_align_combo.currentText(), 2),
             "margin_v": int(self.subtitle_bottom_offset_spin.value()),
             "background_box": bool(self.subtitle_background_cb.isChecked() if is_custom else preset.get("background_box", False)),
@@ -1183,6 +1189,7 @@ class VideoTranslatorGUI(QMainWindow):
                 if self.subtitle_highlight_mode_combo.currentText().strip() in ("Manual", "Auto + Manual")
                 else [[] for _ in (style_segments or [])]
             ),
+            "word_timings": [list(seg.get("words", [])) for seg in (style_segments or [])],
             "blur_region": self.video_view.get_blur_region_normalized() if hasattr(self, "video_view") else None,
         }
 
@@ -1196,6 +1203,7 @@ class VideoTranslatorGUI(QMainWindow):
             self.subtitle_bold_cb.setChecked(bool(preset.get("bold", False)))
         self.subtitle_font_combo.setEnabled(is_custom)
         self.subtitle_animation_combo.setEnabled(is_custom)
+        self.subtitle_karaoke_timing_combo.setEnabled(is_custom)
         self.subtitle_background_cb.setEnabled(is_custom)
         self.subtitle_bold_cb.setEnabled(is_custom)
         if hasattr(self, "subtitle_preset_summary_label"):
@@ -1208,10 +1216,15 @@ class VideoTranslatorGUI(QMainWindow):
     def _update_animation_time_visibility(self):
         current_animation = self.subtitle_animation_combo.currentText().strip().lower()
         show_animation_time = current_animation != "static"
+        show_karaoke_timing = current_animation == "word highlight karaoke"
         if hasattr(self, "subtitle_animation_time_label"):
             self.subtitle_animation_time_label.setVisible(show_animation_time)
         if hasattr(self, "subtitle_animation_time_spin"):
             self.subtitle_animation_time_spin.setVisible(show_animation_time)
+        if hasattr(self, "subtitle_karaoke_timing_label"):
+            self.subtitle_karaoke_timing_label.setVisible(show_karaoke_timing)
+        if hasattr(self, "subtitle_karaoke_timing_combo"):
+            self.subtitle_karaoke_timing_combo.setVisible(show_karaoke_timing)
 
     def on_subtitle_animation_changed(self):
         self._update_animation_time_visibility()
@@ -1530,6 +1543,8 @@ class VideoTranslatorGUI(QMainWindow):
                     "start": float(base.get("start", 0.0)),
                     "end": float(base.get("end", 0.0)),
                     "text": str(self.current_translated_segments[idx].get("text", "")) if idx < len(self.current_translated_segments) else "",
+                    "words": list(base.get("words", [])),
+                    "manual_highlights": list(base.get("manual_highlights", [])),
                 }
                 for idx, base in enumerate(base_segments)
             ]
@@ -1730,8 +1745,11 @@ class VideoTranslatorGUI(QMainWindow):
                 merged = dict(imported_segments[idx])
                 merged["start"] = float(base.get("start", 0.0))
                 merged["end"] = float(base.get("end", 0.0))
+                merged["words"] = list(base.get("words", []))
                 if "manual_highlights" in imported_segments[idx]:
                     merged["manual_highlights"] = imported_segments[idx]["manual_highlights"]
+                elif base.get("manual_highlights"):
+                    merged["manual_highlights"] = list(base.get("manual_highlights", []))
                 merged_segments.append(merged)
             imported_segments = merged_segments
             srt_text = self.format_to_srt(imported_segments)
@@ -1803,6 +1821,7 @@ class VideoTranslatorGUI(QMainWindow):
                         "start": float(base["start"]),
                         "end": float(base["end"]),
                         "text": edited_texts[idx],
+                        "words": list(base.get("words", [])),
                         "manual_highlights": list(base.get("manual_highlights", [])),
                     }
                     for idx, base in enumerate(base_segments)
@@ -1811,6 +1830,7 @@ class VideoTranslatorGUI(QMainWindow):
         parsed_segments = self.parse_srt_to_segments(srt_text)
         if base_segments and len(parsed_segments) == len(base_segments):
             for idx, segment in enumerate(parsed_segments):
+                segment["words"] = list(base_segments[idx].get("words", []))
                 segment["manual_highlights"] = list(base_segments[idx].get("manual_highlights", []))
         return parsed_segments
 
@@ -1857,6 +1877,7 @@ class VideoTranslatorGUI(QMainWindow):
             auto_keyword_highlight=subtitle_style.get("auto_keyword_highlight", False),
             animation_duration=subtitle_style.get("animation_duration", 0.22),
             manual_highlights=subtitle_style.get("manual_highlights", []),
+            word_timings=subtitle_style.get("word_timings", []),
         )
         self.processed_artifacts["subtitle_preview_srt"] = self.live_preview_subtitle_path
         self.processed_artifacts["subtitle_preview_ass"] = self.live_preview_ass_path

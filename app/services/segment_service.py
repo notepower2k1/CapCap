@@ -17,6 +17,10 @@ class SegmentService:
             if translated:
                 translated_text = seg.get("text", "")
                 model.apply_translation(translated_text, refined=bool(seg.get("polished")))
+                if "words" in seg:
+                    model.metadata["words"] = list(seg.get("words") or [])
+                if "manual_highlights" in seg:
+                    model.metadata["manual_highlights"] = list(seg.get("manual_highlights") or [])
             elif not model.original_text:
                 model.original_text = str(seg.get("text", "") or "")
                 model.status = "transcribed"
@@ -35,5 +39,9 @@ class SegmentService:
             model.apply_translation(translated_text, refined=bool(seg.get("polished")))
             model.metadata["translation_provider"] = seg.get("provider", "")
             model.metadata["source_text"] = seg.get("source_text", "")
+            if "words" in seg:
+                model.metadata["words"] = list(seg.get("words") or [])
+            if "manual_highlights" in seg:
+                model.metadata["manual_highlights"] = list(seg.get("manual_highlights") or [])
             models.append(model)
         return models

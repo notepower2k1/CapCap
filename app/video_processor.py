@@ -97,6 +97,14 @@ def _srt_time_to_seconds(ts: str) -> float:
     return (int(h) * 3600) + (int(m) * 60) + int(s) + (int(ms) / 1000.0)
 
 
+def _seconds_to_ass(seconds: float) -> str:
+    total_cs = max(0, int(round(float(seconds) * 100.0)))
+    hrs, remainder = divmod(total_cs, 360000)
+    mins, remainder = divmod(remainder, 6000)
+    secs, cs = divmod(remainder, 100)
+    return f"{hrs}:{mins:02d}:{secs:02d}.{cs:02d}"
+
+
 def _alignment_anchor_position(video_width: int, video_height: int, alignment: int, margin_v: int):
     margin_x = 60
     horizontal = ((alignment - 1) % 3) + 1
@@ -178,6 +186,175 @@ def _apply_animation_tags(
     return safe_text
 
 
+def _ass_escape_text(text: str) -> str:
+    return (text or "").replace("\n", "\\N")
+
+
+def _weighted_word_spans(text: str) -> list[tuple[int, int]]:
+    source_text = text or ""
+    return [(match.start(), match.end()) for match in re.finditer(r"\S+", source_text)]
+
+
+def _word_weight(text: str) -> int:
+    cleaned = re.sub(r"[^\w]+", "", str(text or ""), flags=re.UNICODE)
+    return max(1, len(cleaned) or len(str(text or "").strip()) or 1)
+
+
+def _normalize_word_timings(word_entries, segment_start: float, segment_end: float) -> list[dict]:
+    normalized = []
+    max_duration = max(0.0, segment_end - segment_start)
+    for entry in word_entries or []:
+        try:
+            start = float(entry.get("start", 0.0))
+            end = float(entry.get("end", 0.0))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if end <= start:
+            continue
+        text = str(entry.get("text", "") or "").strip()
+        if not text:
+            continue
+        rel_start = max(0.0, start - segment_start)
+        rel_end = min(max_duration, end - segment_start)
+        if rel_end <= rel_start:
+            continue
+        normalized.append(
+            {
+                "text": text,
+                "start_rel": rel_start,
+                "end_rel": rel_end,
+                "weight": _word_weight(text),
+            }
+        )
+    return normalized
+
+
+def _interpolate_progress_time(progress: float, checkpoints: list[float], times: list[float]) -> float:
+    if not checkpoints or not times or len(checkpoints) != len(times):
+        return 0.0
+    if progress <= checkpoints[0]:
+        return times[0]
+    if progress >= checkpoints[-1]:
+        return times[-1]
+    for idx in range(1, len(checkpoints)):
+        left_progress = checkpoints[idx - 1]
+        right_progress = checkpoints[idx]
+        if progress > right_progress:
+            continue
+        left_time = times[idx - 1]
+        right_time = times[idx]
+        span = max(1e-6, right_progress - left_progress)
+        ratio = (progress - left_progress) / span
+        return left_time + ((right_time - left_time) * ratio)
+    return times[-1]
+
+
+def _map_target_word_timings(text: str, source_words, segment_duration: float) -> list[dict]:
+    target_spans = _weighted_word_spans(text)
+    if not target_spans:
+        return []
+
+    if not source_words:
+        total_weight = sum(_word_weight(text[start:end]) for start, end in target_spans) or len(target_spans)
+        cursor = 0.0
+        mapped = []
+        for idx, span in enumerate(target_spans):
+            weight = _word_weight(text[span[0]:span[1]])
+            if idx == len(target_spans) - 1:
+                next_time = max(cursor, segment_duration)
+            else:
+                next_time = min(segment_duration, cursor + (segment_duration * (weight / total_weight)))
+            mapped.append({"span": span, "start_rel": cursor, "end_rel": max(cursor, next_time)})
+            cursor = next_time
+        return mapped
+
+    if len(source_words) == len(target_spans):
+        return [
+            {
+                "span": span,
+                "start_rel": source_words[idx]["start_rel"],
+                "end_rel": source_words[idx]["end_rel"],
+            }
+            for idx, span in enumerate(target_spans)
+        ]
+
+    source_checkpoints = [0.0]
+    source_times = [max(0.0, min(segment_duration, source_words[0]["start_rel"]))]
+    cumulative_source = 0.0
+    for word in source_words:
+        cumulative_source += word["weight"]
+        source_checkpoints.append(cumulative_source)
+        source_times.append(max(0.0, min(segment_duration, word["end_rel"])))
+
+    total_target_weight = sum(_word_weight(text[start:end]) for start, end in target_spans) or len(target_spans)
+    cursor = source_times[0]
+    cumulative_target = 0.0
+    mapped = []
+    for idx, span in enumerate(target_spans):
+        cumulative_target += _word_weight(text[span[0]:span[1]])
+        progress = source_checkpoints[-1] * (cumulative_target / total_target_weight)
+        mapped_end = _interpolate_progress_time(progress, source_checkpoints, source_times)
+        if idx == len(target_spans) - 1:
+            mapped_end = max(mapped_end, source_times[-1])
+        mapped_end = max(cursor, min(segment_duration, mapped_end))
+        mapped.append({"span": span, "start_rel": cursor, "end_rel": mapped_end})
+        cursor = mapped_end
+    return mapped
+
+
+def _build_karaoke_overlay_text(text: str, active_span: tuple[int, int], highlight_color: str) -> str:
+    source_text = text or ""
+    start, end = active_span
+    before = _ass_escape_text(source_text[:start])
+    active = _ass_escape_text(source_text[start:end])
+    after = _ass_escape_text(source_text[end:])
+    return (
+        r"{\alpha&HFF&}" + before
+        + r"{\alpha&H00&\c" + (highlight_color or "&H00E5FF") + r"}" + active
+        + r"{\alpha&HFF&\c}" + after
+    )
+
+
+def _build_karaoke_dialogue_events(
+    *,
+    start_seconds: float,
+    end_seconds: float,
+    start_ass: str,
+    end_ass: str,
+    text: str,
+    highlight_color: str,
+    word_timing_entries=None,
+    timing_mode: str = "vietnamese",
+) -> list[str]:
+    source_text = text or ""
+    segment_duration = max(0.1, float(end_seconds) - float(start_seconds))
+    timing_key = str(timing_mode or "vietnamese").strip().lower()
+    source_words = (
+        _normalize_word_timings(word_timing_entries, start_seconds, end_seconds)
+        if timing_key == "source"
+        else []
+    )
+    mapped_words = _map_target_word_timings(source_text, source_words, segment_duration)
+    base_text = _ass_escape_text(source_text)
+    events = [f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{base_text}"]
+    if not mapped_words:
+        return events
+
+    for mapped in mapped_words:
+        word_start = float(start_seconds) + float(mapped["start_rel"])
+        word_end = float(start_seconds) + float(mapped["end_rel"])
+        if word_end <= word_start:
+            continue
+        overlay_text = _build_karaoke_overlay_text(source_text, mapped["span"], highlight_color)
+        events.append(
+            "Dialogue: 1,"
+            + f"{_seconds_to_ass(word_start)},{_seconds_to_ass(word_end)},Default,,0,0,0,,"
+            + overlay_text
+        )
+
+    return events
+
+
 def _build_manual_highlight_spans(text: str, manual_highlights) -> list[tuple[int, int]]:
     source_text = text or ""
     spans: list[tuple[int, int]] = []
@@ -251,7 +428,9 @@ def srt_to_ass(srt_path: str,
                preset_key: str = "",
                auto_keyword_highlight: bool = False,
                animation_duration: float = 0.22,
-               manual_highlights=None) -> str:
+               manual_highlights=None,
+               word_timings=None,
+               karaoke_timing_mode: str = "vietnamese") -> str:
     """Convert an SRT file to a fully-styled ASS file.
 
     Key insight: by setting PlayResX/PlayResY equal to the ACTUAL video
@@ -317,13 +496,33 @@ def srt_to_ass(srt_path: str,
         line_manual_highlights = []
         if isinstance(manual_highlights, list) and event_index < len(manual_highlights):
             line_manual_highlights = manual_highlights[event_index] or []
+        line_word_timings = []
+        if isinstance(word_timings, list) and event_index < len(word_timings):
+            line_word_timings = word_timings[event_index] or []
+        raw_text = m.group(3).strip()
+        style_key = (animation_style or "Static").strip().lower()
+        if style_key == "word highlight karaoke":
+            events.extend(
+                _build_karaoke_dialogue_events(
+                    start_seconds=start_seconds,
+                    end_seconds=end_seconds,
+                    start_ass=start,
+                    end_ass=end,
+                    text=raw_text,
+                    highlight_color=highlight_color,
+                    word_timing_entries=line_word_timings,
+                    timing_mode=karaoke_timing_mode,
+                )
+            )
+            continue
+
         text_content = _apply_keyword_highlight(
-            m.group(3).strip(),
+            raw_text,
             preset_key="highlight" if auto_keyword_highlight else preset_key,
             highlight_color=highlight_color,
             manual_highlights=line_manual_highlights,
         )
-        text  = _apply_animation_tags(
+        text = _apply_animation_tags(
             text_content,
             animation_style=animation_style,
             video_width=video_width,
@@ -419,6 +618,8 @@ def embed_subtitles(video_path, srt_path, output_path,
                     auto_keyword_highlight=False,
                     animation_duration=0.22,
                     manual_highlights=None,
+                    word_timings=None,
+                    karaoke_timing_mode="vietnamese",
                     blur_region=None,
                     ffmpeg_path=None):
     """Burn subtitles into video using a properly-styled ASS file.
@@ -455,6 +656,8 @@ def embed_subtitles(video_path, srt_path, output_path,
         auto_keyword_highlight=auto_keyword_highlight,
         animation_duration=animation_duration,
         manual_highlights=manual_highlights,
+        word_timings=word_timings,
+        karaoke_timing_mode=karaoke_timing_mode,
     )
 
     success = embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=ffmpeg, blur_region=blur_region)
