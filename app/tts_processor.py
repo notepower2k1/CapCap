@@ -82,6 +82,26 @@ def _humanize_elevenlabs_error(*, status_code: int | None = None, payload: dict 
     return error_message or fallback or "ElevenLabs request failed."
 
 
+def _humanize_fpt_error(*, status_code: int | None = None, payload: dict | None = None, fallback: str = "") -> str:
+    payload = payload or {}
+    error_raw = str(payload.get("error", "")).strip()
+    error_code = int(error_raw) if error_raw.lstrip("-").isdigit() else -1
+    error_message = str(payload.get("message", "")).strip()
+    combined = f"{status_code or ''} {error_code} {error_message} {fallback}".lower()
+
+    if status_code == 401 or "api key" in combined or "unauthorized" in combined:
+        return "FPT.AI rejected the API key. Please check FPT_API_KEY."
+    if status_code == 429 or "quota" in combined or "limit" in combined:
+        return "FPT.AI usage limit has been reached. Please check your quota or billing."
+    if "at least 3 characters" in combined:
+        return "FPT.AI requires at least 3 characters per request."
+    if "5000" in combined or "too long" in combined:
+        return "FPT.AI supports up to 5,000 characters per request. Please shorten the text."
+    if status_code == 500:
+        return "FPT.AI returned an internal server error. Please try again in a moment."
+    return error_message or fallback or "FPT.AI request failed."
+
+
 def _resolve_env_or_literal(value: str) -> str:
     candidate = (value or "").strip()
     if not candidate:
@@ -115,7 +135,15 @@ def _download_with_retry(url: str, output_path: str, *, timeout: int = 120, atte
         if attempt < attempts:
             time.sleep(min(4.0, 0.6 * attempt))
 
-    raise RuntimeError(f"Failed to download generated Zalo audio after {attempts} attempts: {last_error}")
+    raise RuntimeError(f"Failed to download generated audio after {attempts} attempts: {last_error}")
+
+
+def _speed_to_fpt_value(speed) -> str:
+    speed_value = _speed_to_float(speed)
+    delta = speed_value - 1.0
+    step = int(round(delta * 10))
+    step = max(-3, min(3, step))
+    return f"{step:+d}" if step else "0"
 
 
 async def _edge_tts_to_mp3_async(text: str, mp3_path: str, voice: str, rate: str, volume: str):
@@ -326,6 +354,89 @@ def elevenlabs_tts_to_wav_16k_mono(
     return wav_path
 
 
+def fpt_tts_to_wav_16k_mono(
+    *,
+    text: str,
+    wav_path: str,
+    voice: str = "banmai",
+    speed: float = 1.0,
+    tmp_dir: str | None = None,
+    output_format: str = "mp3",
+) -> str:
+    api_key = os.getenv("FPT_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Missing FPT API key. Please set FPT_API_KEY in your environment or .env file.")
+
+    if tmp_dir is None:
+        tmp_dir = os.path.join(os.getcwd(), "temp")
+    os.makedirs(os.path.dirname(wav_path) or ".", exist_ok=True)
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    ffmpeg = _ffmpeg_path()
+    if not os.path.exists(ffmpeg):
+        raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
+
+    base = _sanitize_filename(os.path.splitext(os.path.basename(wav_path))[0] or "tts")
+    download_audio_path = os.path.join(tmp_dir, f"{base}_fpt.{output_format}")
+    response = requests.post(
+        "https://api.fpt.ai/hmi/tts/v5",
+        headers={
+            "api_key": api_key,
+            "api-key": api_key,
+            "voice": (voice or "banmai").strip(),
+            "speed": _speed_to_fpt_value(speed),
+            "format": output_format,
+            "Cache-Control": "no-cache",
+        },
+        data=(text or "").strip().encode("utf-8"),
+        timeout=120,
+    )
+
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+
+    if response.status_code >= 400:
+        raise RuntimeError(_humanize_fpt_error(status_code=response.status_code, payload=payload, fallback=response.text[:200]))
+
+    error_raw = str(payload.get("error", "")).strip()
+    if not error_raw.lstrip("-").isdigit() or int(error_raw) != 0:
+        raise RuntimeError(_humanize_fpt_error(status_code=response.status_code, payload=payload, fallback=response.text[:200]))
+
+    audio_url = str(payload.get("async", "") or "").strip()
+    if not audio_url.startswith("http"):
+        raise RuntimeError(
+            _humanize_fpt_error(
+                status_code=response.status_code,
+                payload=payload,
+                fallback="FPT.AI did not return a valid async audio URL.",
+            )
+        )
+
+    try:
+        _download_with_retry(audio_url, download_audio_path, attempts=30)
+    except Exception as exc:
+        raise RuntimeError(_humanize_fpt_error(fallback=str(exc))) from exc
+
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        download_audio_path,
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        wav_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg conversion failed:\n{proc.stderr or proc.stdout}")
+
+    return wav_path
+
+
 def synthesize_text_to_wav_16k_mono(
     *,
     text: str,
@@ -344,11 +455,11 @@ def synthesize_text_to_wav_16k_mono(
             speed=speed_value,
             tmp_dir=tmp_dir,
         )
-    if provider == "eleven":
-        return elevenlabs_tts_to_wav_16k_mono(
+    if provider == "fpt":
+        return fpt_tts_to_wav_16k_mono(
             text=text,
             wav_path=wav_path,
-            voice_id=voice_id,
+            voice=voice_id or "banmai",
             speed=speed_value,
             tmp_dir=tmp_dir,
         )

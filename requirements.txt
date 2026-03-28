@@ -7,4 +7,5 @@ demucs
 soundfile
 numpy
 faster-whisper
+silero-vad
 python-mpv

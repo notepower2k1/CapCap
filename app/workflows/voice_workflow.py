@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 
 from services import EngineRuntime, ProjectService
@@ -32,6 +34,32 @@ class VoiceWorkflow:
             self.project_service.update_step(state, "mix_audio", "skipped", save=False)
         self.project_service.save_project(state)
 
+    def _manifest_path(self, tmp_dir: str) -> str:
+        return os.path.join(tmp_dir, "tts_cache_manifest.json")
+
+    def _load_manifest(self, tmp_dir: str) -> dict:
+        manifest_path = self._manifest_path(tmp_dir)
+        if not os.path.exists(manifest_path):
+            return {"segments": {}}
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if isinstance(payload, dict):
+                payload.setdefault("segments", {})
+                return payload
+        except Exception:
+            pass
+        return {"segments": {}}
+
+    def _save_manifest(self, tmp_dir: str, manifest: dict) -> None:
+        manifest_path = self._manifest_path(tmp_dir)
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, ensure_ascii=False, indent=2)
+
+    def _segment_cache_key(self, *, text: str, voice_name: str, voice_speed: float) -> str:
+        payload = f"{voice_name}|{float(voice_speed):.3f}|{text.strip()}"
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
     def _fit_segment_wavs_to_timeline(self, *, segments, wavs, tmp_dir: str, sync_mode: str):
         mode_key = (sync_mode or "off").strip().lower()
         if mode_key != "smart":
@@ -54,6 +82,8 @@ class VoiceWorkflow:
         return synced_wavs
 
     def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str, voice_speed: float):
+        manifest = self._load_manifest(tmp_dir)
+        manifest_segments = dict(manifest.get("segments", {}) or {})
         wavs = []
         for idx, seg in enumerate(segments):
             txt = (seg.get("text") or "").strip()
@@ -61,6 +91,17 @@ class VoiceWorkflow:
                 wavs.append("")
                 continue
             seg_wav = os.path.join(tmp_dir, f"seg_{idx:04d}.wav")
+            cache_key = self._segment_cache_key(text=txt, voice_name=voice_name, voice_speed=voice_speed)
+            cache_entry = manifest_segments.get(str(idx), {})
+            cached_wav = str(cache_entry.get("wav_path", "")).strip()
+            cached_key = str(cache_entry.get("cache_key", "")).strip()
+            if cached_key == cache_key and cached_wav and os.path.exists(cached_wav):
+                if os.path.abspath(cached_wav) != os.path.abspath(seg_wav):
+                    wavs.append(cached_wav)
+                else:
+                    wavs.append(seg_wav)
+                continue
+
             self.engine_runtime.synthesize_segment(
                 text=txt,
                 wav_path=seg_wav,
@@ -68,7 +109,16 @@ class VoiceWorkflow:
                 speed=voice_speed,
                 tmp_dir=tmp_dir,
             )
+            manifest_segments[str(idx)] = {
+                "cache_key": cache_key,
+                "wav_path": seg_wav,
+                "text": txt,
+                "voice_name": voice_name,
+                "voice_speed": float(voice_speed),
+            }
             wavs.append(seg_wav)
+        manifest["segments"] = manifest_segments
+        self._save_manifest(tmp_dir, manifest)
         return wavs
 
     def run(

@@ -436,8 +436,8 @@ class VideoTranslatorGUI(QMainWindow):
         provider_voice = str(entry.get("provider_voice", "")).strip()
         voice_id_env = str(entry.get("voice_id_env", "")).strip()
         voice_id = str(entry.get("voice_id", "")).strip()
-        if provider == "eleven":
-            return f"eleven:{voice_id_env or voice_id}"
+        if provider == "fpt":
+            return f"fpt:{provider_voice or voice_id or 'banmai'}"
         if provider == "zalo":
             return f"zalo:{provider_voice or voice_id or '1'}"
         return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
@@ -446,7 +446,7 @@ class VideoTranslatorGUI(QMainWindow):
         mapping = {
             "edge": "Edge",
             "zalo": "Zalo",
-            "eleven": "ElevenLabs",
+            "fpt": "FPT.AI",
         }
         return mapping.get(str(provider or "").strip().lower(), str(provider or "Other").strip().title() or "Other")
 
@@ -641,7 +641,8 @@ class VideoTranslatorGUI(QMainWindow):
         return label
 
     def using_existing_audio_source(self) -> bool:
-        return hasattr(self, "use_existing_audio_radio") and self.use_existing_audio_radio.isChecked()
+        mixed_path = self.mixed_audio_edit.text().strip() if hasattr(self, "mixed_audio_edit") else ""
+        return bool(mixed_path and os.path.exists(mixed_path))
 
     def resolve_selected_audio_path(self) -> str:
         if self.using_existing_audio_source():

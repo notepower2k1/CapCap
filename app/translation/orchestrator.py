@@ -44,18 +44,21 @@ class TranslationOrchestrator:
         if enable_polish and self.ai_polisher.is_configured():
             try:
                 polished_texts = []
+                polish_providers_used = []
                 for src_batch, draft_batch in zip(
                     split_text_batches(source_texts, polish_batch_size),
                     split_text_batches(translated_texts, polish_batch_size),
                 ):
-                    polished_texts.extend(
-                        self.ai_polisher.polish_batch(
-                            source_texts=src_batch,
-                            translated_texts=draft_batch,
-                            src_lang=normalized_src,
-                            target_lang=target_lang,
-                        )
+                    polished_batch = self.ai_polisher.polish_batch(
+                        source_texts=src_batch,
+                        translated_texts=draft_batch,
+                        src_lang=normalized_src,
+                        target_lang=target_lang,
                     )
+                    polished_texts.extend(polished_batch)
+                    warnings.extend(self.ai_polisher.last_warnings)
+                    if self.ai_polisher.last_provider and self.ai_polisher.last_provider not in polish_providers_used:
+                        polish_providers_used.append(self.ai_polisher.last_provider)
 
                 if not validate_texts(polished_texts, len(segments)):
                     raise TranslationValidationError("AI polisher returned an invalid number of polished segments.")
@@ -67,8 +70,8 @@ class TranslationOrchestrator:
                     warnings=warnings,
                     stage="polish",
                     primary_provider="microsoft",
-                    polish_provider="ai_polisher",
-                    used_fallback=False,
+                    polish_provider=" -> ".join(polish_providers_used),
+                    used_fallback=bool(warnings),
                 )
             except TranslationError as e:
                 warnings.append(f"AI polish failed, using Microsoft translation: {e}")
@@ -79,7 +82,7 @@ class TranslationOrchestrator:
             warnings=warnings,
             stage="translation",
             primary_provider="microsoft",
-            polish_provider="ai_polisher" if self.ai_polisher.is_configured() else "",
+            polish_provider="openrouter -> translator-api.thach-nv" if self.ai_polisher.is_configured() else "",
             used_fallback=bool(warnings),
         )
 

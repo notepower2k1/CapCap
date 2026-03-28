@@ -9,6 +9,115 @@ class VoiceCatalogService:
         self.workspace_root = workspace_root
         self.catalog_path = os.path.join(workspace_root, "app", "voice_preview_catalog.json")
 
+    def _fpt_catalog(self) -> list[dict]:
+        return [
+            {
+                "id": "fpt_banmai",
+                "name": "FPT Ban Mai",
+                "provider": "fpt",
+                "provider_voice": "banmai",
+                "language": "vi",
+                "gender": "female",
+                "tier": "premium",
+                "preview_video_url": "",
+                "preview_video_path": "",
+                "preview_audio_url": "",
+                "preview_audio_path": "",
+                "enabled": True,
+                "tags": ["north", "female"],
+            },
+            {
+                "id": "fpt_lannhi",
+                "name": "FPT Lan Nhi",
+                "provider": "fpt",
+                "provider_voice": "lannhi",
+                "language": "vi",
+                "gender": "female",
+                "tier": "premium",
+                "preview_video_url": "",
+                "preview_video_path": "",
+                "preview_audio_url": "",
+                "preview_audio_path": "",
+                "enabled": True,
+                "tags": ["south", "female"],
+            },
+            {
+                "id": "fpt_leminh",
+                "name": "FPT Le Minh",
+                "provider": "fpt",
+                "provider_voice": "leminh",
+                "language": "vi",
+                "gender": "male",
+                "tier": "premium",
+                "preview_video_url": "",
+                "preview_video_path": "",
+                "preview_audio_url": "",
+                "preview_audio_path": "",
+                "enabled": True,
+                "tags": ["north", "male"],
+            },
+            {
+                "id": "fpt_myan",
+                "name": "FPT My An",
+                "provider": "fpt",
+                "provider_voice": "myan",
+                "language": "vi",
+                "gender": "female",
+                "tier": "premium",
+                "preview_video_url": "",
+                "preview_video_path": "",
+                "preview_audio_url": "",
+                "preview_audio_path": "",
+                "enabled": True,
+                "tags": ["central", "female"],
+            },
+            {
+                "id": "fpt_thuminh",
+                "name": "FPT Thu Minh",
+                "provider": "fpt",
+                "provider_voice": "thuminh",
+                "language": "vi",
+                "gender": "female",
+                "tier": "premium",
+                "preview_video_url": "",
+                "preview_video_path": "",
+                "preview_audio_url": "",
+                "preview_audio_path": "",
+                "enabled": True,
+                "tags": ["north", "female"],
+            },
+            {
+                "id": "fpt_giahuy",
+                "name": "FPT Gia Huy",
+                "provider": "fpt",
+                "provider_voice": "giahuy",
+                "language": "vi",
+                "gender": "male",
+                "tier": "premium",
+                "preview_video_url": "",
+                "preview_video_path": "",
+                "preview_audio_url": "",
+                "preview_audio_path": "",
+                "enabled": True,
+                "tags": ["central", "male"],
+            },
+            {
+                "id": "fpt_linhsan",
+                "name": "FPT Linh San",
+                "provider": "fpt",
+                "provider_voice": "linhsan",
+                "language": "vi",
+                "gender": "female",
+                "tier": "premium",
+                "preview_video_url": "",
+                "preview_video_path": "",
+                "preview_audio_url": "",
+                "preview_audio_path": "",
+                "enabled": True,
+                "tags": ["south", "female"],
+            },
+        ]
+
     def _fallback_catalog(self) -> list[dict]:
         return [
             {
@@ -35,7 +144,7 @@ class VoiceCatalogService:
                 "preview_video_path": "",
                 "enabled": True,
             },
-        ]
+        ] + self._fpt_catalog()
 
     def load_catalog(self) -> list[dict]:
         if not os.path.exists(self.catalog_path):
@@ -48,12 +157,18 @@ class VoiceCatalogService:
             for voice in voices:
                 if not voice.get("enabled", True):
                     continue
+                if str(voice.get("provider", "")).strip().lower() == "eleven":
+                    continue
                 normalized = dict(voice)
                 for key in ("preview_video_path", "preview_audio_path"):
                     raw_path = str(normalized.get(key, "") or "").strip()
                     if raw_path and not os.path.isabs(raw_path):
                         normalized[key] = os.path.join(self.workspace_root, raw_path.replace("/", os.sep))
                 normalized_voices.append(normalized)
+            existing_ids = {str(item.get("id", "")).strip() for item in normalized_voices}
+            for voice in self._fpt_catalog():
+                if voice["id"] not in existing_ids:
+                    normalized_voices.append(dict(voice))
             return normalized_voices or self._fallback_catalog()
         except Exception:
             return self._fallback_catalog()
