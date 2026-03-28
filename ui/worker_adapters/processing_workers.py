@@ -93,6 +93,31 @@ class TranslationWorker(QThread):
             self.finished.emit("", str(exc))
 
 
+class RewriteTranslationWorker(QThread):
+    finished = Signal(str, str)
+
+    def __init__(self, source_segments, translated_segments, src_lang):
+        super().__init__()
+        self.source_segments = source_segments
+        self.translated_segments = translated_segments
+        self.src_lang = src_lang
+
+    def run(self):
+        try:
+            engine = EngineRuntime()
+            rewritten_segments = engine.rewrite_translation_segments(
+                self.source_segments,
+                self.translated_segments,
+                src_lang=self.src_lang,
+            )
+            from translation.srt_utils import to_srt
+
+            self.finished.emit(to_srt(rewritten_segments), "")
+        except Exception as exc:
+            print(f"Rewrite Thread Error: {exc}")
+            self.finished.emit("", str(exc))
+
+
 class PrepareWorkflowWorker(QThread):
     finished = Signal(str, str)
 

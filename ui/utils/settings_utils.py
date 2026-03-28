@@ -2,7 +2,6 @@ def save_user_settings(gui):
     s = gui.settings
     s.setValue("output_mode", gui.output_mode_combo.currentText())
     s.setValue("source_lang", gui.lang_whisper_combo.currentText())
-    s.setValue("ai_polish", gui.enable_ai_polish_cb.isChecked())
     s.setValue("final_output_folder", gui.final_output_folder_edit.text())
     s.setValue("audio_folder", gui.audio_folder_edit.text())
     s.setValue("srt_output_folder", gui.srt_output_folder_edit.text())
@@ -50,7 +49,6 @@ def load_user_settings(gui):
         source_index = gui.lang_whisper_combo.findData(source_lang)
     if source_index >= 0:
         gui.lang_whisper_combo.setCurrentIndex(source_index)
-    gui.enable_ai_polish_cb.setChecked(str(s.value("ai_polish", gui.enable_ai_polish_cb.isChecked())).lower() == "true")
     gui.final_output_folder_edit.setText(s.value("final_output_folder", gui.final_output_folder_edit.text()))
     gui.audio_folder_edit.setText(s.value("audio_folder", gui.audio_folder_edit.text()))
     gui.srt_output_folder_edit.setText(s.value("srt_output_folder", gui.srt_output_folder_edit.text()))

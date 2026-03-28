@@ -2,7 +2,7 @@ import os
 
 from PySide6.QtWidgets import QMessageBox
 
-from workers import TranscriptionWorker, TranslationWorker
+from workers import RewriteTranslationWorker, TranscriptionWorker, TranslationWorker
 
 
 class SubtitleController:
@@ -73,12 +73,8 @@ class SubtitleController:
 
         model_path = None
         src_lang = self.gui.get_source_language_code()
-        enable_polish = self.gui.is_ai_polish_enabled()
-
-        if enable_polish:
-            self.gui.translated_text.setText("Translating with Microsoft Translator and AI polish... please wait.")
-        else:
-            self.gui.translated_text.setText("Translating with Microsoft Translator only... please wait.")
+        enable_polish = False
+        self.gui.translated_text.setText("Translating with Microsoft Translator... please wait.")
         self.gui.translate_btn.setEnabled(False)
         self.gui.progress_bar.setValue(80)
         self.gui.update_project_step("translate_raw", "running")
@@ -91,8 +87,6 @@ class SubtitleController:
         self.gui.translate_btn.setEnabled(True)
         if error or not translated_srt:
             self.gui.update_project_step("translate_raw", "failed")
-            if self.gui.is_ai_polish_enabled():
-                self.gui.update_project_step("refine_translation", "failed")
             self.gui.show_error(
                 "Translation Failed",
                 "Could not complete the Vietnamese translation.",
@@ -123,6 +117,69 @@ class SubtitleController:
 
         self.gui.refresh_ui_state()
         self.gui._pipeline_advance("translation")
+
+    def run_rewrite_translation(self):
+        source_segments = list(self.gui.current_segments or [])
+        translated_segments = list(self.gui.current_translated_segments or [])
+        if not source_segments:
+            QMessageBox.warning(self.gui, "Rewrite Unavailable", "Original subtitles are missing. Please create or load the original subtitle track first.")
+            return
+        if not translated_segments:
+            QMessageBox.warning(self.gui, "Rewrite Unavailable", "Vietnamese subtitles are missing. Please translate or load them first.")
+            return
+        if len(source_segments) != len(translated_segments):
+            QMessageBox.warning(self.gui, "Rewrite Unavailable", "Original and Vietnamese subtitle counts do not match, so rewrite cannot run safely.")
+            return
+
+        self.gui.rewrite_translation_btn.setEnabled(False)
+        self.gui.rewrite_translation_btn.setText("Rewriting...")
+        self.gui.progress_bar.setValue(90)
+        self.gui.update_project_step("refine_translation", "running")
+
+        self.gui.rewrite_translation_thread = RewriteTranslationWorker(
+            source_segments,
+            translated_segments,
+            self.gui.get_source_language_code(),
+        )
+        self.gui.rewrite_translation_thread.finished.connect(self.gui.on_rewrite_translation_finished)
+        self.gui.rewrite_translation_thread.start()
+
+    def on_rewrite_translation_finished(self, translated_srt, error):
+        self.gui.rewrite_translation_btn.setEnabled(True)
+        self.gui.rewrite_translation_btn.setText("Rewrite with AI")
+        if error or not translated_srt:
+            self.gui.update_project_step("refine_translation", "failed")
+            self.gui.show_error(
+                "Rewrite Failed",
+                "Could not rewrite the Vietnamese subtitles with AI.",
+                error or "The AI rewrite service returned an empty result.",
+            )
+            self.gui.refresh_ui_state()
+            return
+
+        self.gui.translated_text.setText(translated_srt)
+        self.gui.apply_edited_translation(show_message=False, force_apply=True)
+        self.gui.update_project_step("refine_translation", "done")
+
+        out_path = self.gui.last_translated_srt_path
+        if not out_path:
+            video_path = self.gui.video_path_edit.text().strip()
+            if video_path:
+                file_basename = os.path.splitext(os.path.basename(video_path))[0]
+                out_folder = self.gui.srt_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
+                os.makedirs(out_folder, exist_ok=True)
+                out_path = os.path.join(out_folder, file_basename + "_vi.srt")
+        if out_path:
+            with open(out_path, "w", encoding="utf-8") as handle:
+                handle.write(translated_srt)
+            self.gui.last_translated_srt_path = out_path
+            self.gui.processed_artifacts["srt_translated"] = out_path
+            self.gui.persist_translation_project_data(self.gui.current_translated_segments, out_path)
+        else:
+            self.gui.persist_translation_project_data(self.gui.current_translated_segments)
+
+        QMessageBox.information(self.gui, "Rewrite Complete", "Vietnamese subtitles were rewritten and updated in the subtitle editor.")
+        self.gui.refresh_ui_state()
 
     def apply_edited_translation(self, show_message=True, force_apply=True):
         srt_text = self.gui.translated_text.toPlainText()

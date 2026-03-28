@@ -954,7 +954,7 @@ class VideoTranslatorGUI(QMainWindow):
         return "vi"
 
     def is_ai_polish_enabled(self):
-        return bool(getattr(self, "enable_ai_polish_cb", None) and self.enable_ai_polish_cb.isChecked())
+        return False
 
     def on_output_mode_changed(self, value: str):
         mode = self.get_output_mode_key()
@@ -1897,6 +1897,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.transcribe_btn.setEnabled(a_ok)
         self.translate_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()))
         self.apply_translated_btn.setEnabled(has_translated_text)
+        if hasattr(self, "rewrite_translation_btn"):
+            self.rewrite_translation_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()) and has_translated_text)
         generated_mode = not self.using_existing_audio_source()
         self.voiceover_btn.setEnabled(has_translated_text and generated_mode and mode in ("voice", "both"))
         if hasattr(self, "preview_btn"):
@@ -2079,6 +2081,12 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_translation_finished(self, translated_srt, error):
         self.subtitle_controller.on_translation_finished(translated_srt, error)
+
+    def run_rewrite_translation(self):
+        self.subtitle_controller.run_rewrite_translation()
+
+    def on_rewrite_translation_finished(self, translated_srt, error):
+        self.subtitle_controller.on_rewrite_translation_finished(translated_srt, error)
 
     def apply_edited_translation(self, show_message=True, force_apply=True):
         result = self.subtitle_controller.apply_edited_translation(show_message=show_message, force_apply=force_apply)

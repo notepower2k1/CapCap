@@ -18,11 +18,7 @@ def build_workflow_hint(mode: str, ai_polish_enabled: bool):
         "voice": "This mode will create a Vietnamese voice track, keep or reuse background audio, then export a video with new audio.",
         "both": "This mode will create both Vietnamese subtitles and Vietnamese voice, then combine them into one final video.",
     }
-    polish_hint = (
-        " AI polish is ON, so Microsoft translation will be refined for wording and context."
-        if ai_polish_enabled
-        else " AI polish is OFF, so you can inspect the raw Microsoft translation."
-    )
+    polish_hint = " Use 'Rewrite with AI' in the subtitle editor whenever you want to refine the Vietnamese wording."
     return hints.get(mode, "Choose an output mode to begin.") + polish_hint
 
 

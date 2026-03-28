@@ -48,6 +48,14 @@ class EngineRuntime:
             enable_polish=enable_polish,
         )
 
+    def rewrite_translation_segments(self, source_segments, translated_segments, *, model_path=None, src_lang: str = "auto"):
+        return self.translator.rewrite_segments(
+            source_segments,
+            translated_segments,
+            model_path=model_path,
+            src_lang=src_lang,
+        )
+
     def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None) -> bool:
         return self.ffmpeg.embed_subtitles(
             video_path,

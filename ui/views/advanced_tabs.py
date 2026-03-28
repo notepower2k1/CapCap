@@ -20,11 +20,6 @@ def build_advanced_group(gui, left_layout):
     advanced_layout = QVBoxLayout(gui.advanced_group)
     advanced_layout.setSpacing(12)
 
-    gui.enable_ai_polish_cb = QCheckBox("Use AI Translation (better but slower)", gui.advanced_group)
-    gui.enable_ai_polish_cb.setChecked(True)
-
-    advanced_layout.addWidget(gui.enable_ai_polish_cb)
-
     _build_hidden_runtime_widgets(gui)
     left_layout.addWidget(gui.advanced_group, 1)
 
