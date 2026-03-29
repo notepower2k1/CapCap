@@ -1,6 +1,14 @@
 import os
 
 
+def _normalize_selected_file_path(path: str) -> str:
+    value = str(path or "").replace("\r", "").replace("\n", "").replace("\t", " ").strip().strip('"').strip("'")
+    if not value:
+        return ""
+    value = os.path.expandvars(os.path.expanduser(value))
+    return os.path.normpath(os.path.abspath(value))
+
+
 def browse_audio_folder(gui):
     from PySide6.QtWidgets import QFileDialog
 
@@ -22,7 +30,7 @@ def browse_audio_source(gui):
 
     file_path, _ = QFileDialog.getOpenFileName(gui, "Open Audio", "", "Audio Files (*.wav *.mp3 *.flac)")
     if file_path:
-        gui.audio_source_edit.setText(file_path)
+        gui.audio_source_edit.setText(_normalize_selected_file_path(file_path))
 
 
 def browse_background_audio(gui):
@@ -30,7 +38,11 @@ def browse_background_audio(gui):
 
     file_path, _ = QFileDialog.getOpenFileName(gui, "Open Background Audio", "", "Audio Files (*.wav *.mp3 *.flac)")
     if file_path:
-        gui.bg_music_edit.setText(file_path)
+        normalized_path = _normalize_selected_file_path(file_path)
+        gui.bg_music_edit.setText(normalized_path)
+        gui.last_music_path = normalized_path
+        gui.processed_artifacts["music"] = normalized_path
+        gui.update_project_artifact("music", normalized_path)
 
 
 def browse_existing_mixed_audio(gui):
@@ -38,11 +50,12 @@ def browse_existing_mixed_audio(gui):
 
     file_path, _ = QFileDialog.getOpenFileName(gui, "Open Mixed Audio", "", "Audio Files (*.wav *.mp3 *.flac)")
     if file_path:
-        gui.mixed_audio_edit.setText(file_path)
+        normalized_path = _normalize_selected_file_path(file_path)
+        gui.mixed_audio_edit.setText(normalized_path)
         gui.use_existing_audio_radio.setChecked(True)
-        gui.last_mixed_vi_path = file_path
-        gui.processed_artifacts["mixed_vi"] = file_path
-        gui.update_project_artifact("mixed_vi", file_path)
+        gui.last_mixed_vi_path = normalized_path
+        gui.processed_artifacts["mixed_vi"] = normalized_path
+        gui.update_project_artifact("mixed_vi", normalized_path)
 
 
 def browse_voice_output_folder(gui):

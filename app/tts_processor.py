@@ -7,7 +7,10 @@ import time
 import requests
 from dotenv import load_dotenv
 
-from local_vie_neu_tts import synthesize_text_to_wav_16k_mono as vieneu_tts_to_wav_16k_mono
+from local_vie_neu_tts import (
+    synthesize_clone_to_wav_16k_mono as vieneu_clone_tts_to_wav_16k_mono,
+    synthesize_text_to_wav_16k_mono as vieneu_tts_to_wav_16k_mono,
+)
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -470,6 +473,13 @@ def synthesize_text_to_wav_16k_mono(
             text=text,
             wav_path=wav_path,
             voice_id=voice_id,
+            tmp_dir=tmp_dir,
+        )
+    if provider == "vieneuclone":
+        return vieneu_clone_tts_to_wav_16k_mono(
+            text=text,
+            wav_path=wav_path,
+            clone_id=voice_id,
             tmp_dir=tmp_dir,
         )
 

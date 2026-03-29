@@ -444,6 +444,8 @@ class VideoTranslatorGUI(QMainWindow):
             return f"zalo:{provider_voice or voice_id or '1'}"
         if provider == "vieneu":
             return f"vieneu:{provider_voice or voice_id}"
+        if provider == "vieneuclone":
+            return f"vieneuclone:{provider_voice or voice_id or entry.get('id', '')}"
         return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
 
     def _voice_provider_label(self, provider: str) -> str:
@@ -452,6 +454,7 @@ class VideoTranslatorGUI(QMainWindow):
             "zalo": "Zalo",
             "fpt": "FPT.AI",
             "vieneu": "VieNeu",
+            "vieneuclone": "VieNeu Clone",
         }
         return mapping.get(str(provider or "").strip().lower(), str(provider or "Other").strip().title() or "Other")
 
@@ -646,19 +649,49 @@ class VideoTranslatorGUI(QMainWindow):
         return label
 
     def using_existing_audio_source(self) -> bool:
-        mixed_path = self.mixed_audio_edit.text().strip() if hasattr(self, "mixed_audio_edit") else ""
+        mixed_path = self._normalize_local_file_path(
+            self.mixed_audio_edit.text().strip() if hasattr(self, "mixed_audio_edit") else ""
+        )
         use_existing = bool(hasattr(self, "use_existing_audio_radio") and self.use_existing_audio_radio.isChecked())
         return bool(use_existing and mixed_path and os.path.exists(mixed_path))
 
+    def _normalize_local_file_path(self, path: str) -> str:
+        value = str(path or "").replace("\r", "").replace("\n", "").replace("\t", " ").strip().strip('"').strip("'")
+        if not value:
+            return ""
+
+        value = os.path.expandvars(os.path.expanduser(value))
+        candidates = []
+        if os.path.isabs(value):
+            candidates.append(value)
+        else:
+            candidates.append(os.path.join(self.workspace_root, value))
+            current_project = getattr(self, "current_project_state", None)
+            if current_project and getattr(current_project, "project_root", ""):
+                candidates.append(os.path.join(current_project.project_root, value))
+            candidates.append(os.path.join(os.getcwd(), value))
+
+        for candidate in candidates:
+            normalized = os.path.normpath(os.path.abspath(candidate))
+            if os.path.exists(normalized):
+                return normalized
+
+        fallback = candidates[0] if candidates else value
+        return os.path.normpath(os.path.abspath(fallback))
+
     def resolve_selected_audio_path(self) -> str:
         if self.using_existing_audio_source():
-            return self.mixed_audio_edit.text().strip()
-        return (
-            self.processed_artifacts.get("mixed_vi")
-            or self.last_mixed_vi_path
-            or self.last_voice_vi_path
-            or ""
-        ).strip()
+            return self._normalize_local_file_path(self.mixed_audio_edit.text().strip())
+        candidates = [
+            self.processed_artifacts.get("mixed_vi"),
+            self.last_mixed_vi_path,
+            self.last_voice_vi_path,
+        ]
+        for candidate in candidates:
+            normalized = self._normalize_local_file_path(candidate)
+            if normalized and os.path.exists(normalized):
+                return normalized
+        return ""
 
     def on_audio_source_mode_changed(self):
         if not hasattr(self, "audio_source_hint_label"):
@@ -852,8 +885,9 @@ class VideoTranslatorGUI(QMainWindow):
         state = self.ensure_current_project()
         if not state or not path:
             return
-        self.processed_artifacts[artifact_name] = path
-        self.project_bridge.update_artifact(state, artifact_name, path)
+        normalized_path = self._normalize_local_file_path(path)
+        self.processed_artifacts[artifact_name] = normalized_path
+        self.project_bridge.update_artifact(state, artifact_name, normalized_path)
 
     def _dict_segments_to_models(self, segments, *, translated=False):
         return self.project_bridge.dict_segments_to_models(segments, translated=translated)
@@ -887,13 +921,13 @@ class VideoTranslatorGUI(QMainWindow):
             return
         context = self.project_bridge.load_context(state)
         self.processed_artifacts.update(context["artifacts"])
-        self.last_original_srt_path = context["last_original_srt_path"] or self.last_original_srt_path
-        self.last_translated_srt_path = context["last_translated_srt_path"] or self.last_translated_srt_path
-        self.last_extracted_audio = context["last_extracted_audio"] or self.last_extracted_audio
-        self.last_vocals_path = context["last_vocals_path"] or self.last_vocals_path
-        self.last_music_path = context["last_music_path"] or self.last_music_path
-        self.last_voice_vi_path = context["last_voice_vi_path"] or self.last_voice_vi_path
-        self.last_mixed_vi_path = context["last_mixed_vi_path"] or self.last_mixed_vi_path
+        self.last_original_srt_path = self._normalize_local_file_path(context["last_original_srt_path"] or self.last_original_srt_path)
+        self.last_translated_srt_path = self._normalize_local_file_path(context["last_translated_srt_path"] or self.last_translated_srt_path)
+        self.last_extracted_audio = self._normalize_local_file_path(context["last_extracted_audio"] or self.last_extracted_audio)
+        self.last_vocals_path = self._normalize_local_file_path(context["last_vocals_path"] or self.last_vocals_path)
+        self.last_music_path = self._normalize_local_file_path(context["last_music_path"] or self.last_music_path)
+        self.last_voice_vi_path = self._normalize_local_file_path(context["last_voice_vi_path"] or self.last_voice_vi_path)
+        self.last_mixed_vi_path = self._normalize_local_file_path(context["last_mixed_vi_path"] or self.last_mixed_vi_path)
         self.current_segment_models = context["current_segment_models"]
         self.current_translated_segment_models = context["current_translated_segment_models"]
         self.current_segments = context["current_segments"]
@@ -919,11 +953,13 @@ class VideoTranslatorGUI(QMainWindow):
             getattr(getattr(self, "current_project_state", None), "artifacts", {}).get("music", "") if getattr(self, "current_project_state", None) else "",
         ]
         for candidate in candidates:
-            if candidate and os.path.exists(candidate):
+            normalized = self._normalize_local_file_path(candidate)
+            if normalized and os.path.exists(normalized):
                 if hasattr(self, "bg_music_edit") and not self.bg_music_edit.text().strip():
-                    self.bg_music_edit.setText(candidate)
-                self.last_music_path = candidate
-                return candidate
+                    self.bg_music_edit.setText(normalized)
+                self.last_music_path = normalized
+                self.processed_artifacts["music"] = normalized
+                return normalized
         return ""
 
     def has_reusable_voice_inputs(self) -> bool:

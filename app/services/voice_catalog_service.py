@@ -157,13 +157,24 @@ class VoiceCatalogService:
             for voice in voices:
                 if not voice.get("enabled", True):
                     continue
-                if str(voice.get("provider", "")).strip().lower() == "eleven":
-                    continue
                 normalized = dict(voice)
+                provider = str(normalized.get("provider", "")).strip().lower()
+                if provider == "eleven":
+                    normalized["provider"] = "vieneuclone"
+                    normalized["provider_voice"] = str(normalized.get("id", "")).strip()
+                    normalized["reference_audio_path"] = str(normalized.get("preview_audio_path", "")).strip()
+                    normalized["reference_text"] = (
+                        "Xin chào, hôm nay là một ngày thật đẹp. "
+                        "Tôi đang thử ghi âm giọng nói để tạo ra bản sao giọng nói của mình. "
+                        "Hy vọng kết quả sẽ thật tự nhiên và rõ ràng."
+                    )
                 for key in ("preview_video_path", "preview_audio_path"):
                     raw_path = str(normalized.get(key, "") or "").strip()
                     if raw_path and not os.path.isabs(raw_path):
                         normalized[key] = os.path.join(self.workspace_root, raw_path.replace("/", os.sep))
+                raw_reference_audio = str(normalized.get("reference_audio_path", "") or "").strip()
+                if raw_reference_audio and not os.path.isabs(raw_reference_audio):
+                    normalized["reference_audio_path"] = os.path.join(self.workspace_root, raw_reference_audio.replace("/", os.sep))
                 normalized_voices.append(normalized)
             existing_ids = {str(item.get("id", "")).strip() for item in normalized_voices}
             for voice in self._fpt_catalog():

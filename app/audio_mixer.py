@@ -7,6 +7,10 @@ def _ffmpeg_path():
     return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffmpeg.exe")
 
 
+def _ffprobe_path():
+    return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffprobe.exe")
+
+
 def _probe_wav_duration_seconds(wav_path: str) -> float:
     with wave.open(wav_path, "rb") as wav_file:
         frame_rate = wav_file.getframerate() or 16000
@@ -126,11 +130,28 @@ def change_wav_speed(
 
 def _require_pydub():
     try:
+        ffmpeg = _ffmpeg_path()
+        ffprobe = _ffprobe_path()
+        ffmpeg_dir = os.path.dirname(ffmpeg)
+        if ffmpeg_dir and os.path.isdir(ffmpeg_dir):
+            current_path = os.environ.get("PATH", "")
+            path_entries = current_path.split(os.pathsep) if current_path else []
+            normalized_dir = os.path.normcase(os.path.normpath(ffmpeg_dir))
+            normalized_entries = {
+                os.path.normcase(os.path.normpath(entry))
+                for entry in path_entries
+                if entry
+            }
+            if normalized_dir not in normalized_entries:
+                os.environ["PATH"] = ffmpeg_dir + os.pathsep + current_path if current_path else ffmpeg_dir
+
         from pydub import AudioSegment
         # Point pydub to our bundled ffmpeg to avoid PATH warnings on Windows.
-        ffmpeg = _ffmpeg_path()
         if os.path.exists(ffmpeg):
             AudioSegment.converter = ffmpeg
+            AudioSegment.ffmpeg = ffmpeg
+        if os.path.exists(ffprobe):
+            AudioSegment.ffprobe = ffprobe
     except Exception as e:
         raise ImportError(
             "Missing dependency 'pydub'.\n"
