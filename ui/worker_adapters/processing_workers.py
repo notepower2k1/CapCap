@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -97,11 +98,12 @@ class TranslationWorker(QThread):
 class RewriteTranslationWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, source_segments, translated_segments, src_lang):
+    def __init__(self, source_segments, translated_segments, src_lang, style_instruction=""):
         super().__init__()
         self.source_segments = source_segments
         self.translated_segments = translated_segments
         self.src_lang = src_lang
+        self.style_instruction = style_instruction
 
     def run(self):
         try:
@@ -110,6 +112,7 @@ class RewriteTranslationWorker(QThread):
                 self.source_segments,
                 self.translated_segments,
                 src_lang=self.src_lang,
+                style_instruction=self.style_instruction,
             )
             from translation.srt_utils import to_srt
 
@@ -165,6 +168,81 @@ class RuntimeAssetsWorker(QThread):
             self.finished.emit("\n".join(details), "")
         except Exception as exc:
             self.finished.emit("", str(exc))
+
+
+class CloneVoicePreparationWorker(QThread):
+    finished = Signal(dict, str)
+
+    def __init__(self, workspace_root, audio_path, whisper_model_path, language="vi"):
+        super().__init__()
+        self.workspace_root = workspace_root
+        self.audio_path = audio_path
+        self.whisper_model_path = whisper_model_path
+        self.language = language
+
+    def _ffprobe_path(self) -> str:
+        return os.path.join(self.workspace_root, "bin", "ffmpeg", "ffprobe.exe")
+
+    def _probe_duration_seconds(self) -> float:
+        ffprobe = self._ffprobe_path()
+        if not os.path.exists(ffprobe):
+            raise FileNotFoundError(f"Bundled ffprobe is missing: {ffprobe}")
+        proc = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                self.audio_path,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr or proc.stdout or "ffprobe could not read the clone audio.")
+        try:
+            return float(str(proc.stdout or "").strip() or "0")
+        except ValueError as exc:
+            raise RuntimeError("ffprobe returned an invalid duration for the clone audio.") from exc
+
+    def run(self):
+        try:
+            if not self.audio_path or not os.path.exists(self.audio_path):
+                raise FileNotFoundError("Please choose a valid audio file for voice cloning.")
+
+            duration_seconds = self._probe_duration_seconds()
+            if duration_seconds < 10.0 or duration_seconds > 40.0:
+                raise RuntimeError(
+                    f"Clone audio must be between 10 and 40 seconds. Current length: {duration_seconds:.1f}s."
+                )
+
+            engine = EngineRuntime()
+            segments = engine.transcribe_audio(
+                self.audio_path,
+                self.whisper_model_path,
+                language=self.language or "vi",
+            )
+            transcript = " ".join(
+                str(segment.get("text", "")).strip()
+                for segment in (segments or [])
+                if str(segment.get("text", "")).strip()
+            ).strip()
+            if not transcript:
+                raise RuntimeError("Whisper could not extract a transcript from the clone audio.")
+
+            self.finished.emit(
+                {
+                    "audio_path": self.audio_path,
+                    "duration_seconds": duration_seconds,
+                    "transcript": transcript,
+                },
+                "",
+            )
+        except Exception as exc:
+            self.finished.emit({}, str(exc))
 
 
 class PrepareWorkflowWorker(QThread):

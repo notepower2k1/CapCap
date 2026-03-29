@@ -14,7 +14,15 @@ def save_user_settings(gui):
     s.setValue("free_voice_value", gui.free_voice_combo.currentData())
     s.setValue("premium_voice_name", gui.premium_voice_combo.currentText())
     s.setValue("premium_voice_value", gui.premium_voice_combo.currentData())
-    s.setValue("voice_tier", "premium" if gui.use_premium_voice_radio.isChecked() else "free")
+    if gui.use_clone_voice_radio.isChecked():
+        voice_tier = "clone"
+    elif gui.use_premium_voice_radio.isChecked():
+        voice_tier = "premium"
+    else:
+        voice_tier = "free"
+    s.setValue("clone_voice_name", gui.clone_voice_combo.currentText())
+    s.setValue("clone_voice_value", gui.clone_voice_combo.currentData())
+    s.setValue("voice_tier", voice_tier)
     s.setValue("use_existing_audio", gui.use_existing_audio_radio.isChecked())
     s.setValue("keep_audio", gui.keep_audio_cb.isChecked())
     s.setValue("keep_timeline", gui.keep_timeline_cb.isChecked())
@@ -61,9 +69,11 @@ def load_user_settings(gui):
     gui.mixed_audio_edit.setText(s.value("mixed_audio", gui.mixed_audio_edit.text()))
     gui.set_voice_combo_value(gui.free_voice_combo, s.value("free_voice_value", gui.free_voice_combo.currentData()))
     gui.set_voice_combo_value(gui.premium_voice_combo, s.value("premium_voice_value", gui.premium_voice_combo.currentData()))
+    gui.set_voice_combo_value(gui.clone_voice_combo, s.value("clone_voice_value", gui.clone_voice_combo.currentData()))
     voice_tier = str(s.value("voice_tier", "free")).lower()
     gui.use_premium_voice_radio.setChecked(voice_tier == "premium")
-    gui.use_free_voice_radio.setChecked(voice_tier != "premium")
+    gui.use_clone_voice_radio.setChecked(voice_tier == "clone")
+    gui.use_free_voice_radio.setChecked(voice_tier not in {"premium", "clone"})
     gui.keep_audio_cb.setChecked(str(s.value("keep_audio", gui.keep_audio_cb.isChecked())).lower() == "true")
     gui.keep_timeline_cb.setChecked(str(s.value("keep_timeline", gui.keep_timeline_cb.isChecked())).lower() == "true")
     gui.auto_preview_frame_cb.setChecked(str(s.value("auto_preview_frame", gui.auto_preview_frame_cb.isChecked())).lower() == "true")

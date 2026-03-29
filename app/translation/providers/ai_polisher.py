@@ -34,6 +34,7 @@ class AIPolisherProvider:
         translated_texts: list[str],
         src_lang: str,
         target_lang: str,
+        style_instruction: str = "",
         timeout: int = 60,
         max_retries: int = 2,
     ) -> list[str]:
@@ -54,6 +55,7 @@ class AIPolisherProvider:
                     translated_texts=translated_texts,
                     src_lang=src_lang,
                     target_lang=target_lang,
+                    style_instruction=style_instruction,
                     timeout=timeout,
                     max_retries=max_retries,
                 )
@@ -79,6 +81,7 @@ class AIPolisherProvider:
                     translated_texts=translated_texts,
                     src_lang=src_lang,
                     target_lang=target_lang,
+                    style_instruction=style_instruction,
                     timeout=timeout,
                     max_retries=max_retries,
                 )
@@ -104,6 +107,7 @@ class AIPolisherProvider:
         translated_texts: list[str],
         src_lang: str,
         target_lang: str,
+        style_instruction: str,
         timeout: int,
         max_retries: int,
     ) -> list[str]:
@@ -117,11 +121,14 @@ class AIPolisherProvider:
             "Make each line sound natural, punchy, concise, and easy to read quickly on screen. "
             "Preserve the original meaning, tone, and intent without adding new information."
         )
+        if style_instruction.strip():
+            system_prompt += f" Follow this rewrite style: {style_instruction.strip()}"
         user_prompt = self._build_prompt(
             source_texts=source_texts,
             translated_texts=translated_texts,
             src_lang=src_lang,
             target_lang=target_lang,
+            style_instruction=style_instruction,
         )
         payload = {
             "model": self.openrouter_model,
@@ -157,6 +164,7 @@ class AIPolisherProvider:
         translated_texts: list[str],
         src_lang: str,
         target_lang: str,
+        style_instruction: str,
         timeout: int,
         max_retries: int,
     ) -> list[str]:
@@ -165,6 +173,7 @@ class AIPolisherProvider:
             translated_texts=translated_texts,
             src_lang=src_lang,
             target_lang=target_lang,
+            style_instruction=style_instruction,
         )
         payload = {"text": prompt}
         headers = {
@@ -223,12 +232,15 @@ class AIPolisherProvider:
 
         raise TranslationProviderError(last_error or f"{label} failed.")
 
-    def _build_prompt(self, *, source_texts: list[str], translated_texts: list[str], src_lang: str, target_lang: str) -> str:
+    def _build_prompt(self, *, source_texts: list[str], translated_texts: list[str], src_lang: str, target_lang: str, style_instruction: str = "") -> str:
         lines = []
         for idx, (source, translated) in enumerate(zip(source_texts, translated_texts), 1):
             lines.append(f"{idx}. SOURCE: {source}")
             lines.append(f"{idx}. DRAFT: {translated}")
         body = "\n".join(lines)
+        style_rule = ""
+        if style_instruction.strip():
+            style_rule = f"- Rewrite style: {style_instruction.strip()}\n"
         return (
             f"Polish the following subtitle translations from {src_lang} into {target_lang} for short-form video subtitles.\n"
             "Rules:\n"
@@ -241,6 +253,7 @@ class AIPolisherProvider:
             "- Prefer conversational Vietnamese that fits short videos.\n"
             "- Keep wording tight. Remove unnecessary filler.\n"
             "- Do not invent details or exaggerate emotion.\n"
+            f"{style_rule}"
             "- Return only numbered lines in the form '1. ...'.\n\n"
             f"{body}"
         )

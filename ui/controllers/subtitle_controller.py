@@ -1,11 +1,22 @@
 import os
 
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit, QVBoxLayout
 
 from workers import RewriteTranslationWorker, TranscriptionWorker, TranslationWorker
 
 
 class SubtitleController:
+    REWRITE_STYLE_PRESETS = [
+        ("Natural short video", "Make the Vietnamese sound natural, concise, conversational, and easy to read quickly in short videos."),
+        ("TikTok natural", "Make the Vietnamese feel natural, modern, and casual like a strong TikTok creator voice, while keeping the meaning accurate and concise."),
+        ("Punchy viral", "Make the Vietnamese feel punchy and attention-grabbing for short videos, but keep the meaning accurate and avoid exaggeration."),
+        ("Sales voiceover", "Make the Vietnamese sound persuasive, benefit-driven, and smooth for a sales voiceover, but keep claims grounded in the original meaning."),
+        ("Short storytelling", "Make the Vietnamese flow like short-form storytelling: natural, engaging, emotionally clear, and easy to follow line by line."),
+        ("Neutral dubbing", "Make the Vietnamese smooth, neutral, clear, and easy for voice dubbing."),
+        ("Clean subtitle", "Make the Vietnamese compact, clean, and very easy to scan as on-screen subtitles."),
+        ("Custom", "custom"),
+    ]
+
     def __init__(self, gui):
         self.gui = gui
 
@@ -130,23 +141,14 @@ class SubtitleController:
         if len(source_segments) != len(translated_segments):
             QMessageBox.warning(self.gui, "Rewrite Unavailable", "Original and Vietnamese subtitle counts do not match, so rewrite cannot run safely.")
             return
-
-        self.gui.rewrite_translation_btn.setEnabled(False)
-        self.gui.rewrite_translation_btn.setText("Rewriting...")
-        self.gui.progress_bar.setValue(90)
-        self.gui.update_project_step("refine_translation", "running")
-
-        self.gui.rewrite_translation_thread = RewriteTranslationWorker(
-            source_segments,
-            translated_segments,
-            self.gui.get_source_language_code(),
-        )
-        self.gui.rewrite_translation_thread.finished.connect(self.gui.on_rewrite_translation_finished)
-        self.gui.rewrite_translation_thread.start()
+        self._open_rewrite_dialog(source_segments, translated_segments)
 
     def on_rewrite_translation_finished(self, translated_srt, error):
         self.gui.rewrite_translation_btn.setEnabled(True)
         self.gui.rewrite_translation_btn.setText("Rewrite with AI")
+        if hasattr(self.gui, "_rewrite_generate_btn"):
+            self.gui._rewrite_generate_btn.setEnabled(True)
+            self.gui._rewrite_generate_btn.setText("Generate Preview")
         if error or not translated_srt:
             self.gui.update_project_step("refine_translation", "failed")
             self.gui.show_error(
@@ -157,9 +159,26 @@ class SubtitleController:
             self.gui.refresh_ui_state()
             return
 
+        if hasattr(self.gui, "_rewrite_preview_edit"):
+            self.gui._rewrite_preview_edit.setPlainText(translated_srt)
+        if hasattr(self.gui, "_rewrite_apply_btn"):
+            self.gui._rewrite_apply_btn.setEnabled(True)
+        if hasattr(self.gui, "_rewrite_status_label"):
+            self.gui._rewrite_status_label.setText("Preview is ready. Review it and press Apply if it matches your style.")
+        self.gui.update_project_step("refine_translation", "done")
+        self.gui.refresh_ui_state()
+
+    def apply_rewrite_preview(self):
+        preview_edit = getattr(self.gui, "_rewrite_preview_edit", None)
+        if not preview_edit:
+            return
+        translated_srt = preview_edit.toPlainText().strip()
+        if not translated_srt:
+            QMessageBox.warning(self.gui, "Rewrite Preview", "Please generate a rewrite preview first.")
+            return
+
         self.gui.translated_text.setText(translated_srt)
         self.gui.apply_edited_translation(show_message=False, force_apply=True)
-        self.gui.update_project_step("refine_translation", "done")
 
         out_path = self.gui.last_translated_srt_path
         if not out_path:
@@ -178,8 +197,153 @@ class SubtitleController:
         else:
             self.gui.persist_translation_project_data(self.gui.current_translated_segments)
 
-        QMessageBox.information(self.gui, "Rewrite Complete", "Vietnamese subtitles were rewritten and updated in the subtitle editor.")
+        dialog = getattr(self.gui, "_rewrite_dialog", None)
+        if dialog:
+            dialog.accept()
+        QMessageBox.information(self.gui, "Rewrite Applied", "The AI rewrite preview was applied to the subtitle editor.")
         self.gui.refresh_ui_state()
+
+    def _open_rewrite_dialog(self, source_segments, translated_segments):
+        dialog = QDialog(self.gui)
+        dialog.setWindowTitle("Rewrite with AI")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(760)
+        dialog.setMinimumHeight(640)
+        dialog.setStyleSheet(
+            """
+            QDialog { background-color: #0f1724; }
+            QLabel { color: #d7e3f4; background: transparent; }
+            QLabel#statusHeadline { color: #f8fbff; font-size: 16px; font-weight: 700; }
+            QLabel#helperLabel { color: #9fb3ca; font-size: 12px; }
+            QComboBox, QTextEdit {
+                background-color: #132033;
+                color: #f8fbff;
+                border: 1px solid #2f4868;
+                border-radius: 10px;
+                padding: 8px 10px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #132033;
+                color: #f8fbff;
+                border: 1px solid #2f4868;
+                selection-background-color: #24486c;
+            }
+            QPushButton {
+                background-color: #22344d;
+                color: #f8fbff;
+                border: 1px solid #34506f;
+                border-radius: 10px;
+                padding: 8px 16px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #29405d; }
+            """
+        )
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("Choose rewrite style")
+        title.setObjectName("statusHeadline")
+        layout.addWidget(title)
+
+        hint = QLabel("Generate a rewrite preview first. Subtitle Editor will only be updated after you press Apply.")
+        hint.setObjectName("helperLabel")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        style_combo = QComboBox(dialog)
+        for label, instruction in self.REWRITE_STYLE_PRESETS:
+            style_combo.addItem(label, instruction)
+        layout.addWidget(style_combo)
+
+        custom_style_cb = QCheckBox("Add extra custom instruction", dialog)
+        layout.addWidget(custom_style_cb)
+
+        custom_prompt = QTextEdit(dialog)
+        custom_prompt.setPlaceholderText("Example: Keep the words very short and modern, suitable for TikTok voiceover.")
+        custom_prompt.setFixedHeight(88)
+        custom_prompt.setVisible(False)
+        layout.addWidget(custom_prompt)
+
+        status_label = QLabel("Ready to generate preview.")
+        status_label.setObjectName("helperLabel")
+        status_label.setWordWrap(True)
+        layout.addWidget(status_label)
+
+        preview_label = QLabel("Rewrite Preview")
+        preview_label.setObjectName("sectionTitle")
+        layout.addWidget(preview_label)
+
+        preview_edit = QTextEdit(dialog)
+        preview_edit.setPlaceholderText("AI rewrite preview will appear here.")
+        layout.addWidget(preview_edit, 1)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        close_btn = QPushButton("Close", dialog)
+        generate_btn = QPushButton("Generate Preview", dialog)
+        apply_btn = QPushButton("Apply", dialog)
+        apply_btn.setEnabled(False)
+        button_row.addWidget(close_btn)
+        button_row.addWidget(generate_btn)
+        button_row.addWidget(apply_btn)
+        layout.addLayout(button_row)
+
+        def _toggle_custom_instruction(checked: bool):
+            custom_prompt.setVisible(bool(checked))
+
+        def _build_style_instruction() -> str:
+            base_instruction = str(style_combo.currentData() or "").strip()
+            if base_instruction == "custom":
+                base_instruction = ""
+            extra_instruction = custom_prompt.toPlainText().strip() if custom_style_cb.isChecked() else ""
+            return " ".join(part for part in [base_instruction, extra_instruction] if part).strip()
+
+        def _start_preview_generation():
+            style_instruction = _build_style_instruction()
+            status_label.setText("Generating rewrite preview with AI...")
+            apply_btn.setEnabled(False)
+            generate_btn.setEnabled(False)
+            generate_btn.setText("Generating...")
+            self.gui.rewrite_translation_btn.setEnabled(False)
+            self.gui.rewrite_translation_btn.setText("Rewriting...")
+            self.gui.progress_bar.setValue(90)
+            self.gui.update_project_step("refine_translation", "running")
+
+            self.gui._rewrite_dialog = dialog
+            self.gui._rewrite_preview_edit = preview_edit
+            self.gui._rewrite_apply_btn = apply_btn
+            self.gui._rewrite_generate_btn = generate_btn
+            self.gui._rewrite_status_label = status_label
+
+            self.gui.rewrite_translation_thread = RewriteTranslationWorker(
+                source_segments,
+                translated_segments,
+                self.gui.get_source_language_code(),
+                style_instruction=style_instruction,
+            )
+            self.gui.rewrite_translation_thread.finished.connect(self.gui.on_rewrite_translation_finished)
+            self.gui.rewrite_translation_thread.start()
+
+        def _cleanup_dialog():
+            for attr in (
+                "_rewrite_dialog",
+                "_rewrite_preview_edit",
+                "_rewrite_apply_btn",
+                "_rewrite_generate_btn",
+                "_rewrite_status_label",
+            ):
+                if hasattr(self.gui, attr):
+                    delattr(self.gui, attr)
+
+        custom_style_cb.toggled.connect(_toggle_custom_instruction)
+        close_btn.clicked.connect(dialog.reject)
+        generate_btn.clicked.connect(_start_preview_generation)
+        apply_btn.clicked.connect(self.apply_rewrite_preview)
+        dialog.finished.connect(lambda _result: _cleanup_dialog())
+        dialog.exec()
 
     def apply_edited_translation(self, show_message=True, force_apply=True):
         srt_text = self.gui.translated_text.toPlainText()

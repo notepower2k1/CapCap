@@ -110,6 +110,7 @@ class TranslationOrchestrator:
         *,
         src_lang: str = "zh-Hans",
         target_lang: str = "vi",
+        style_instruction: str = "",
         polish_batch_size: int = 5,
     ) -> TranslationResult:
         if not source_segments or not translated_segments:
@@ -135,6 +136,7 @@ class TranslationOrchestrator:
                 translated_texts=draft_batch,
                 src_lang=normalized_src,
                 target_lang=target_lang,
+                style_instruction=style_instruction,
             )
             polished_texts.extend(polished_batch)
             warnings.extend(self.ai_polisher.last_warnings)

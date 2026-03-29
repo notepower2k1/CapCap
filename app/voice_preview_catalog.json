@@ -152,7 +152,7 @@
             "preview_video_url": "",
             "preview_video_path": "",
             "preview_audio_url": "",
-            "preview_audio_path": "",
+            "preview_audio_path": "assets/fpt/fpt_banmai.mp3",
             "enabled": true,
             "tags": [
                 "north",
@@ -170,7 +170,7 @@
             "preview_video_url": "",
             "preview_video_path": "",
             "preview_audio_url": "",
-            "preview_audio_path": "",
+            "preview_audio_path": "assets/fpt/fpt_lannhi.mp3",
             "enabled": true,
             "tags": [
                 "south",
@@ -188,7 +188,7 @@
             "preview_video_url": "",
             "preview_video_path": "",
             "preview_audio_url": "",
-            "preview_audio_path": "",
+            "preview_audio_path": "assets/fpt/fpt_leminh.mp3",
             "enabled": true,
             "tags": [
                 "north",
@@ -206,7 +206,7 @@
             "preview_video_url": "",
             "preview_video_path": "",
             "preview_audio_url": "",
-            "preview_audio_path": "",
+            "preview_audio_path": "assets/fpt/fpt_myan.mp3",
             "enabled": true,
             "tags": [
                 "central",
@@ -224,7 +224,7 @@
             "preview_video_url": "",
             "preview_video_path": "",
             "preview_audio_url": "",
-            "preview_audio_path": "",
+            "preview_audio_path": "assets/fpt/fpt_thuminh.mp3",
             "enabled": true,
             "tags": [
                 "north",
@@ -242,7 +242,7 @@
             "preview_video_url": "",
             "preview_video_path": "",
             "preview_audio_url": "",
-            "preview_audio_path": "",
+            "preview_audio_path": "assets/fpt/fpt_giahuy.mp3",
             "enabled": true,
             "tags": [
                 "central",
@@ -260,7 +260,7 @@
             "preview_video_url": "",
             "preview_video_path": "",
             "preview_audio_url": "",
-            "preview_audio_path": "",
+            "preview_audio_path": "assets/fpt/fpt_linhsan.mp3",
             "enabled": true,
             "tags": [
                 "south",
@@ -278,7 +278,7 @@
             "preview_video_url": "",
             "preview_video_path": "",
             "preview_audio_url": "",
-            "preview_audio_path": "",
+            "preview_audio_path": "assets/fpt/fpt_ngoclam.mp3",
             "enabled": true,
             "tags": [
                 "central",
@@ -296,7 +296,7 @@
             "preview_video_url": "",
             "preview_video_path": "",
             "preview_audio_url": "",
-            "preview_audio_path": "",
+            "preview_audio_path": "assets/fpt/fpt_minhquang.mp3",
             "enabled": true,
             "tags": [
                 "south",
@@ -850,6 +850,26 @@
                 "soft",
                 "advertisement",
                 "professional"
+            ]
+        },
+        {
+            "id": "vieneuclone_clone_audio_1_cbdb944b",
+            "name": "Clone Audio 1",
+            "provider": "vieneuclone",
+            "provider_voice": "vieneuclone_clone_audio_1_cbdb944b",
+            "language": "vi",
+            "gender": "male",
+            "tier": "clone",
+            "preview_video_url": "",
+            "preview_video_path": "",
+            "preview_audio_url": "",
+            "preview_audio_path": "assets\\clones\\vieneuclone_clone_audio_1_cbdb944b.wav",
+            "reference_audio_path": "assets\\clones\\vieneuclone_clone_audio_1_cbdb944b.wav",
+            "reference_text": "Xin chào, hôm nay là 1 này thứ 2 thực đẹp. Tôi đang thử ghi âm dụng nói để tạo ra bản sao dụng nói của mình, hy vọng kết quả sẽ thực tự nhiên và rõ ràng.",
+            "enabled": true,
+            "tags": [
+                "clone",
+                "user"
             ]
         }
     ]

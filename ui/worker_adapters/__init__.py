@@ -1,5 +1,6 @@
 from .preview_workers import ExactFramePreviewWorker, PreviewMuxWorker, QuickPreviewWorker
 from .processing_workers import (
+    CloneVoicePreparationWorker,
     ExtractionWorker,
     FinalExportWorker,
     PrepareWorkflowWorker,
@@ -14,6 +15,7 @@ from .processing_workers import (
 )
 
 __all__ = [
+    "CloneVoicePreparationWorker",
     "ExactFramePreviewWorker",
     "ExtractionWorker",
     "FinalExportWorker",

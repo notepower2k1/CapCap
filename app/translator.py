@@ -38,24 +38,26 @@ def translate_segments(segments, model_path=None, src_lang="auto", enable_polish
     return result.segments
 
 
-def rewrite_translated_segments(source_segments, translated_segments, model_path=None, src_lang="auto"):
+def rewrite_translated_segments(source_segments, translated_segments, model_path=None, src_lang="auto", style_instruction=""):
     orchestrator = TranslationOrchestrator()
     result = orchestrator.rewrite_segments(
         source_segments,
         translated_segments,
         src_lang=src_lang,
         target_lang="vi",
+        style_instruction=style_instruction,
     )
     if not result.success:
         raise TranslationError("; ".join(result.errors) or "Rewrite failed.")
     return result.segments
 
 
-def rewrite_translated_segments_to_srt(source_segments, translated_segments, model_path=None, src_lang="auto"):
+def rewrite_translated_segments_to_srt(source_segments, translated_segments, model_path=None, src_lang="auto", style_instruction=""):
     segments = rewrite_translated_segments(
         source_segments,
         translated_segments,
         model_path=model_path,
         src_lang=src_lang,
+        style_instruction=style_instruction,
     )
     return to_srt(segments)
