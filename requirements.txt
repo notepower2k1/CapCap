@@ -9,7 +9,6 @@ numpy
 librosa
 torch
 huggingface_hub
-vieneu
 llama-cpp-python
 neucodec
 sea-g2p

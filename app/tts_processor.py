@@ -7,11 +7,6 @@ import time
 import requests
 from dotenv import load_dotenv
 
-from local_vie_neu_tts import (
-    synthesize_clone_to_wav_16k_mono as vieneu_clone_tts_to_wav_16k_mono,
-    synthesize_text_to_wav_16k_mono as vieneu_tts_to_wav_16k_mono,
-)
-
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(os.path.dirname(BASE_DIR), ".env")
@@ -65,28 +60,6 @@ def _humanize_zalo_error(*, status_code: int | None = None, payload: dict | None
     return error_message or fallback or "Zalo TTS request failed."
 
 
-def _humanize_elevenlabs_error(*, status_code: int | None = None, payload: dict | None = None, fallback: str = "") -> str:
-    payload = payload or {}
-    detail = payload.get("detail", {})
-    if isinstance(detail, dict):
-        error_message = str(detail.get("message", "")).strip()
-    else:
-        error_message = str(detail or payload.get("message", "")).strip()
-    combined = f"{status_code or ''} {error_message} {fallback}".lower()
-
-    if status_code == 401 or "api key" in combined or "unauthorized" in combined:
-        return "ElevenLabs rejected the API key. Please check ELEVENLABS_API_KEY."
-    if status_code == 429 or "quota" in combined or "credit" in combined or "limit" in combined:
-        return "ElevenLabs usage limit has been reached for this API key. Please check your ElevenLabs quota or billing."
-    if status_code == 422:
-        return error_message or "ElevenLabs rejected the request payload. Please verify the selected voice and text."
-    if status_code == 400:
-        return error_message or "ElevenLabs rejected the request. Please verify the selected voice ID and model settings."
-    if status_code == 500:
-        return "ElevenLabs returned an internal server error. Please try again in a moment."
-    return error_message or fallback or "ElevenLabs request failed."
-
-
 def _humanize_fpt_error(*, status_code: int | None = None, payload: dict | None = None, fallback: str = "") -> str:
     payload = payload or {}
     error_raw = str(payload.get("error", "")).strip()
@@ -105,13 +78,6 @@ def _humanize_fpt_error(*, status_code: int | None = None, payload: dict | None 
     if status_code == 500:
         return "FPT.AI returned an internal server error. Please try again in a moment."
     return error_message or fallback or "FPT.AI request failed."
-
-
-def _resolve_env_or_literal(value: str) -> str:
-    candidate = (value or "").strip()
-    if not candidate:
-        return ""
-    return os.getenv(candidate, candidate).strip()
 
 
 def _download_with_retry(url: str, output_path: str, *, timeout: int = 120, attempts: int = 8) -> str:
@@ -287,78 +253,6 @@ def zalo_tts_to_wav_16k_mono(
     return wav_path
 
 
-def elevenlabs_tts_to_wav_16k_mono(
-    *,
-    text: str,
-    wav_path: str,
-    voice_id: str,
-    speed: float = 1.0,
-    tmp_dir: str | None = None,
-    model_id: str = "eleven_turbo_v2_5",
-) -> str:
-    api_key = os.getenv("ELEVENLABS_API_KEY")
-    if not api_key:
-        raise RuntimeError("Missing ElevenLabs API key. Please set ELEVENLABS_API_KEY in your environment or .env file.")
-
-    resolved_voice_id = _resolve_env_or_literal(voice_id)
-    if not resolved_voice_id:
-        raise RuntimeError("Missing ElevenLabs voice ID. Please set the configured ELEVENLABS_VOICE_ID_* environment variable.")
-
-    if tmp_dir is None:
-        tmp_dir = os.path.join(os.getcwd(), "temp")
-    os.makedirs(os.path.dirname(wav_path) or ".", exist_ok=True)
-    os.makedirs(tmp_dir, exist_ok=True)
-
-    ffmpeg = _ffmpeg_path()
-    if not os.path.exists(ffmpeg):
-        raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
-
-    base = _sanitize_filename(os.path.splitext(os.path.basename(wav_path))[0] or "tts")
-    download_mp3_path = os.path.join(tmp_dir, f"{base}_eleven.mp3")
-    response = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{resolved_voice_id}",
-        headers={
-            "xi-api-key": api_key,
-            "Accept": "audio/mpeg",
-            "Content-Type": "application/json",
-        },
-        json={
-            "text": text,
-            "model_id": model_id,
-            "language_code": "vi",
-            "output_format": "mp3_44100_128",
-        },
-        timeout=120,
-    )
-
-    if response.status_code >= 400:
-        try:
-            payload = response.json()
-        except ValueError:
-            payload = {}
-        raise RuntimeError(_humanize_elevenlabs_error(status_code=response.status_code, payload=payload, fallback=response.text[:200]))
-
-    with open(download_mp3_path, "wb") as audio_file:
-        audio_file.write(response.content)
-
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-i",
-        download_mp3_path,
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        wav_path,
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"FFmpeg conversion failed:\n{proc.stderr or proc.stdout}")
-
-    return wav_path
-
-
 def fpt_tts_to_wav_16k_mono(
     *,
     text: str,
@@ -468,21 +362,6 @@ def synthesize_text_to_wav_16k_mono(
             speed=speed_value,
             tmp_dir=tmp_dir,
         )
-    if provider == "vieneu":
-        return vieneu_tts_to_wav_16k_mono(
-            text=text,
-            wav_path=wav_path,
-            voice_id=voice_id,
-            tmp_dir=tmp_dir,
-        )
-    if provider == "vieneuclone":
-        return vieneu_clone_tts_to_wav_16k_mono(
-            text=text,
-            wav_path=wav_path,
-            clone_id=voice_id,
-            tmp_dir=tmp_dir,
-        )
-
     edge_rate_percent = int(round((speed_value - 1.0) * 100.0))
     edge_rate = f"{edge_rate_percent:+d}%"
     return edge_tts_to_wav_16k_mono(

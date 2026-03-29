@@ -46,11 +46,9 @@ def build_preview_panel(gui):
     gui.stop_btn = QPushButton("Reset")
     gui.blur_area_btn = QPushButton("Blur Area")
     gui.blur_area_btn.setCheckable(True)
-    gui.preview_audio_btn = QPushButton("Preview audio")
     controls_layout.addWidget(gui.play_btn)
     controls_layout.addWidget(gui.stop_btn)
     controls_layout.addWidget(gui.blur_area_btn)
-    controls_layout.addWidget(gui.preview_audio_btn)
     controls_layout.addStretch()
     controls_layout.addWidget(gui.time_label)
 

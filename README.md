@@ -41,8 +41,7 @@ Current product flow:
 - subtitle styling with ASS-based rendering
 - typewriter and word-highlight karaoke animations
 - source-timed or Vietnamese-paced text timing for supported subtitle animations
-- free, premium, and clone voice lanes
-- VieNeu local voice cloning with reusable saved clone voices
+- free and premium voice lanes
 - local speed adjustment on generated voice without forcing a new TTS API request
 - voice/background gain controls and audio source switching
 - exact-frame preview, 5-second preview, and audio preview
@@ -55,23 +54,10 @@ CapCap currently supports:
 - Edge TTS
 - Zalo TTS
 - FPT.AI TTS
-- VieNeu preset voices
-- VieNeu clone voices
-
 Voice behavior highlights:
 
 - voice speed changes are applied locally on WAV files after base synthesis
 - AI/API TTS is cached per subtitle segment
-- clone voices are isolated from free and premium voices because they are less stable
-- users can create clone voices from their own reference audio
-
-Clone voice workflow:
-
-1. choose a clean Vietnamese sample audio
-2. keep it between `10s` and `40s`
-3. CapCap transcribes the sample with Whisper
-4. the transcript is used as the clone reference text
-5. the clone can be saved for reuse or kept for the current session only
 
 ## Translation and Rewrite
 
@@ -104,7 +90,6 @@ It keeps:
 
 - source video
 - imported assets
-- clone voice library
 - final exported video
 
 ## Requirements
@@ -116,7 +101,6 @@ It keeps:
 - model downloads enabled for:
   - `faster-whisper`
   - Demucs
-  - VieNeu
 
 ## Installation
 
@@ -162,7 +146,6 @@ CapCap/
 |   |   `-- providers/
 |   |-- workflows/
 |   |-- audio_mixer.py
-|   |-- local_vie_neu_tts.py
 |   |-- preview_processor.py
 |   |-- subtitle_builder.py
 |   |-- translator.py

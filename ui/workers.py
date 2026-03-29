@@ -1,5 +1,4 @@
 from worker_adapters import (
-    CloneVoicePreparationWorker,
     ExactFramePreviewWorker,
     ExtractionWorker,
     FinalExportWorker,
@@ -17,7 +16,6 @@ from worker_adapters import (
 )
 
 __all__ = [
-    "CloneVoicePreparationWorker",
     "ExactFramePreviewWorker",
     "ExtractionWorker",
     "FinalExportWorker",

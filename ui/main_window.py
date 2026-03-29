@@ -67,7 +67,6 @@ from utils.settings_utils import load_user_settings as load_user_settings_impl, 
 from views import build_main_window_ui
 from widgets import TimelineWidget, VideoView
 from workers import (
-    CloneVoicePreparationWorker,
     ExtractionWorker,
     RuntimeAssetsWorker,
     SegmentAudioPreviewWorker,
@@ -90,7 +89,9 @@ class VideoTranslatorGUI(QMainWindow):
         self.logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "capcap.png")
         if os.path.exists(self.logo_path):
             self.setWindowIcon(QIcon(self.logo_path))
+        self.setWindowFlag(Qt.WindowCloseButtonHint, True)
         self.setWindowFlag(Qt.WindowMinimizeButtonHint, False)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, False)
         
         # Maximize and prevent resizing
         self.setWindowState(Qt.WindowMaximized)
@@ -309,8 +310,14 @@ class VideoTranslatorGUI(QMainWindow):
         self.current_segment_models = []
         self.current_translated_segment_models = []
         self.selected_whisper_model_name = "base"
-        self.session_clone_voice_entries = []
-
+        self._last_audio_preview_path = ""
+        self._segment_preview_threads = {}
+        self.voice_catalog_entries_all = []
+        self.voice_catalog_entries = []
+        self.voice_catalog_map = {}
+        self._voice_signals_bound = False
+        self.voice_preview_dialog = None
+        self._voice_preview_row_buttons = {}
         # Simple pipeline runner (Run All)
         self._pipeline_active = False
         self._pipeline_step = ""
@@ -433,26 +440,20 @@ class VideoTranslatorGUI(QMainWindow):
         self.audio_preview_player = QMediaPlayer(self)
         self.audio_preview_output = QAudioOutput(self)
         self.audio_preview_player.setAudioOutput(self.audio_preview_output)
-        self._last_audio_preview_path = ""
-        self._segment_preview_threads = {}
-        self.voice_catalog_entries_all = []
-        self.voice_catalog_entries = []
-        self.voice_catalog_map = {}
-        self._voice_signals_bound = False
+        self.voice_preview_library_player = QMediaPlayer(self)
+        self.voice_preview_library_output = QAudioOutput(self)
+        self.voice_preview_library_player.setAudioOutput(self.voice_preview_library_output)
+        self.voice_preview_dialog = None
+        self._voice_preview_row_buttons = {}
 
     def _voice_catalog_data_value(self, entry: dict) -> str:
         provider = str(entry.get("provider", "edge")).strip().lower()
         provider_voice = str(entry.get("provider_voice", "")).strip()
-        voice_id_env = str(entry.get("voice_id_env", "")).strip()
         voice_id = str(entry.get("voice_id", "")).strip()
         if provider == "fpt":
             return f"fpt:{provider_voice or voice_id or 'banmai'}"
         if provider == "zalo":
             return f"zalo:{provider_voice or voice_id or '1'}"
-        if provider == "vieneu":
-            return f"vieneu:{provider_voice or voice_id}"
-        if provider == "vieneuclone":
-            return f"vieneuclone:{provider_voice or voice_id or entry.get('id', '')}"
         return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
 
     def _voice_provider_label(self, provider: str) -> str:
@@ -460,14 +461,10 @@ class VideoTranslatorGUI(QMainWindow):
             "edge": "Edge",
             "zalo": "Zalo",
             "fpt": "FPT.AI",
-            "vieneu": "VieNeu",
-            "vieneuclone": "VieNeu Clone",
         }
         return mapping.get(str(provider or "").strip().lower(), str(provider or "Other").strip().title() or "Other")
 
     def _current_voice_tier(self) -> str:
-        if getattr(self, "use_clone_voice_radio", None) and self.use_clone_voice_radio.isChecked():
-            return "clone"
         if getattr(self, "use_premium_voice_radio", None) and self.use_premium_voice_radio.isChecked():
             return "premium"
         return "free"
@@ -499,66 +496,45 @@ class VideoTranslatorGUI(QMainWindow):
                 return
 
     def _get_previewable_voice_catalog_entry(self):
-        tier = self._current_voice_tier()
-        if tier == "clone":
-            return self.get_selected_clone_voice_catalog_entry()
-        if tier == "premium":
+        if self._current_voice_tier() == "premium":
             return self.get_selected_premium_voice_catalog_entry()
         return None
 
     def _update_voice_preview_meta(self):
-        entry = self._get_previewable_voice_catalog_entry()
         if not hasattr(self, "voice_preview_meta_label"):
             return
-        current_tier = self._current_voice_tier()
-        if current_tier not in {"premium", "clone"}:
-            self.voice_preview_meta_label.setText("Preview voice is available for premium and clone voices.")
-            if hasattr(self, "preview_voice_btn"):
-                self.preview_voice_btn.setVisible(False)
-            return
+        total_entries = len(self.voice_catalog_entries_all or [])
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setVisible(True)
-        if not entry:
-            label = "premium" if current_tier == "premium" else "clone"
-            self.voice_preview_meta_label.setText(f"Choose a valid {label} voice to preview its sample clip.")
-            if hasattr(self, "preview_voice_btn"):
-                self.preview_voice_btn.setEnabled(False)
+            self.preview_voice_btn.setEnabled(total_entries > 0)
+        if total_entries <= 0:
+            self.voice_preview_meta_label.setText("No voices are available in the catalog yet.")
             return
-        video_hint = ""
-        if entry.get("preview_video_path"):
-            video_hint = "Local preview clip ready."
-        elif entry.get("preview_video_url"):
-            video_hint = "Preview clip link available."
-        elif entry.get("preview_audio_path"):
-            video_hint = "Local preview audio ready."
-        elif entry.get("preview_audio_url"):
-            video_hint = "Preview audio link available."
-        else:
-            video_hint = "No preview media linked yet."
-        provider = self._voice_provider_label(str(entry.get("provider", "")).strip())
-        self.voice_preview_meta_label.setText(f"{entry.get('name', 'Voice')}: {provider}. {video_hint}")
-        if hasattr(self, "preview_voice_btn"):
-            self.preview_voice_btn.setEnabled(self._entry_has_preview_media(entry))
+        previewable_count = sum(1 for entry in self.voice_catalog_entries_all if self._entry_has_preview_media(entry))
+        self.voice_preview_meta_label.setText(
+            f"Open the popup to preview voices by provider. {previewable_count}/{total_entries} voices currently have preview media."
+        )
 
     def load_voice_preview_catalog(self):
-        self.voice_catalog_entries_all = self.voice_catalog_service.load_catalog() + list(self.session_clone_voice_entries or [])
+        self.voice_catalog_entries_all = self.voice_catalog_service.load_catalog()
+        if self.voice_preview_dialog is not None:
+            self.voice_preview_dialog.close()
+            self.voice_preview_dialog = None
         self.refresh_voice_catalog_combos()
 
     def refresh_voice_catalog_combos(self):
         self.voice_catalog_entries = list(self.voice_catalog_entries_all or [])
         self.voice_catalog_map = {entry.get("id", ""): entry for entry in self.voice_catalog_entries if entry.get("id")}
-        if not hasattr(self, "free_voice_combo") or not hasattr(self, "premium_voice_combo") or not hasattr(self, "clone_voice_combo"):
+        if not hasattr(self, "free_voice_combo") or not hasattr(self, "premium_voice_combo"):
             return
 
         selected_gender = self._selected_voice_gender()
         previous_free = str(self.free_voice_combo.currentData() or "")
         previous_premium = str(self.premium_voice_combo.currentData() or "")
-        previous_clone = str(self.clone_voice_combo.currentData() or "")
 
         self.free_voice_combo.clear()
         self.premium_voice_combo.clear()
-        self.clone_voice_combo.clear()
-        grouped_entries = {"free": [], "premium": [], "clone": [], "other": []}
+        grouped_entries = {"free": [], "premium": [], "other": []}
         for entry in self.voice_catalog_entries:
             entry_gender = str(entry.get("gender", "")).strip().lower()
             if selected_gender in ("male", "female") and entry_gender not in (selected_gender, "any", ""):
@@ -590,32 +566,19 @@ class VideoTranslatorGUI(QMainWindow):
                 index = self.premium_voice_combo.count() - 1
                 self.premium_voice_combo.setItemData(index, entry.get("id", ""), self.VOICE_ENTRY_ID_ROLE)
 
-        self.clone_voice_combo.addItem("None", "")
-        for entry in sorted(grouped_entries["clone"], key=lambda item: str(item.get("name", ""))):
-            voice_name = str(entry.get("name", entry.get("id", "Clone Voice")))
-            self.clone_voice_combo.addItem(voice_name, self._voice_catalog_data_value(entry))
-            index = self.clone_voice_combo.count() - 1
-            self.clone_voice_combo.setItemData(index, entry.get("id", ""), self.VOICE_ENTRY_ID_ROLE)
-
         if self.free_voice_combo.count() > 0:
             self.free_voice_combo.setCurrentIndex(0)
         self.premium_voice_combo.setCurrentIndex(0)
-        self.clone_voice_combo.setCurrentIndex(0)
         if previous_free:
             self.set_voice_combo_value(self.free_voice_combo, previous_free)
         if previous_premium:
             self.set_voice_combo_value(self.premium_voice_combo, previous_premium)
-        if previous_clone:
-            self.set_voice_combo_value(self.clone_voice_combo, previous_clone)
         if not self._voice_signals_bound:
             self.premium_voice_combo.currentIndexChanged.connect(self._update_voice_preview_meta)
-            self.clone_voice_combo.currentIndexChanged.connect(self._update_voice_preview_meta)
             if hasattr(self, "use_free_voice_radio"):
                 self.use_free_voice_radio.toggled.connect(self.on_voice_tier_changed)
             if hasattr(self, "use_premium_voice_radio"):
                 self.use_premium_voice_radio.toggled.connect(self.on_voice_tier_changed)
-            if hasattr(self, "use_clone_voice_radio"):
-                self.use_clone_voice_radio.toggled.connect(self.on_voice_tier_changed)
             self._voice_signals_bound = True
         self.on_voice_tier_changed()
         self._update_voice_preview_meta()
@@ -637,25 +600,7 @@ class VideoTranslatorGUI(QMainWindow):
                 return entry
         return None
 
-    def get_selected_clone_voice_catalog_entry(self):
-        if not hasattr(self, "clone_voice_combo"):
-            return None
-        if not hasattr(self, "voice_catalog_entries"):
-            return None
-        entry_id = self.clone_voice_combo.currentData(self.VOICE_ENTRY_ID_ROLE)
-        if entry_id and entry_id in self.voice_catalog_map:
-            return self.voice_catalog_map[entry_id]
-        current_value = str(self.clone_voice_combo.currentData() or "")
-        for entry in self.voice_catalog_entries:
-            if self._voice_catalog_data_value(entry) == current_value:
-                return entry
-        return None
-
     def get_active_voice_name(self) -> str:
-        using_clone = bool(getattr(self, "use_clone_voice_radio", None) and self.use_clone_voice_radio.isChecked())
-        clone_value = str(self.clone_voice_combo.currentData() or "").strip() if hasattr(self, "clone_voice_combo") else ""
-        if using_clone and clone_value:
-            return clone_value
         using_premium = bool(getattr(self, "use_premium_voice_radio", None) and self.use_premium_voice_radio.isChecked())
         premium_value = str(self.premium_voice_combo.currentData() or "").strip() if hasattr(self, "premium_voice_combo") else ""
         if using_premium and premium_value:
@@ -664,18 +609,14 @@ class VideoTranslatorGUI(QMainWindow):
         return free_value or "edge:vi-VN-HoaiMyNeural"
 
     def on_voice_tier_changed(self):
+        mode = self.get_output_mode_key() if hasattr(self, "output_mode_combo") else "both"
         using_premium = bool(getattr(self, "use_premium_voice_radio", None) and self.use_premium_voice_radio.isChecked())
-        using_clone = bool(getattr(self, "use_clone_voice_radio", None) and self.use_clone_voice_radio.isChecked())
         if hasattr(self, "free_voice_combo"):
-            self.free_voice_combo.setEnabled(not using_premium and not using_clone)
+            self.free_voice_combo.setEnabled(not using_premium)
         if hasattr(self, "premium_voice_combo"):
             self.premium_voice_combo.setEnabled(using_premium)
-        if hasattr(self, "clone_voice_combo"):
-            self.clone_voice_combo.setEnabled(using_clone)
-        if hasattr(self, "create_clone_voice_btn"):
-            self.create_clone_voice_btn.setEnabled(True)
         if hasattr(self, "preview_voice_btn"):
-            self.preview_voice_btn.setVisible(using_premium or using_clone)
+            self.preview_voice_btn.setVisible(mode in ("voice", "both"))
         self._update_voice_preview_meta()
 
     def _parse_voice_speed_value(self) -> float:
@@ -997,9 +938,6 @@ class VideoTranslatorGUI(QMainWindow):
             self.audio_source_edit.setText(self.last_vocals_path)
         elif self.last_extracted_audio and os.path.exists(self.last_extracted_audio):
             self.audio_source_edit.setText(self.last_extracted_audio)
-        if self.last_music_path and os.path.exists(self.last_music_path):
-            if hasattr(self, "bg_music_edit") and not self.bg_music_edit.text().strip():
-                self.bg_music_edit.setText(self.last_music_path)
         if self.current_segments:
             self.transcript_text.setText(self.format_to_srt(self.current_segments))
         if self.current_translated_segments:
@@ -1016,8 +954,6 @@ class VideoTranslatorGUI(QMainWindow):
         for candidate in candidates:
             normalized = self._normalize_local_file_path(candidate)
             if normalized and os.path.exists(normalized):
-                if hasattr(self, "bg_music_edit") and not self.bg_music_edit.text().strip():
-                    self.bg_music_edit.setText(normalized)
                 self.last_music_path = normalized
                 self.processed_artifacts["music"] = normalized
                 return normalized
@@ -1716,49 +1652,185 @@ class VideoTranslatorGUI(QMainWindow):
         else:
             self.media_player.clear_blur_region()
 
-    def preview_selected_voice_sample(self):
-        entry = self._get_previewable_voice_catalog_entry()
-        if not entry:
-            QMessageBox.warning(self, "Voice Preview", "Please choose a valid voice first.")
-            return
+    def _resolve_voice_preview_source(self, entry: dict) -> QUrl:
         preview_path = str(entry.get("preview_video_path", "")).strip()
         preview_url = str(entry.get("preview_video_url", "")).strip()
         preview_audio_path = str(entry.get("preview_audio_path", "")).strip()
         preview_audio_url = str(entry.get("preview_audio_url", "")).strip()
 
-        source = None
         if preview_path:
             if not os.path.isabs(preview_path):
                 preview_path = os.path.join(self.workspace_root, preview_path)
             if not os.path.exists(preview_path):
-                QMessageBox.warning(self, "Voice Preview", "The configured preview video file was not found.")
-                return
-            source = QUrl.fromLocalFile(preview_path)
-        elif preview_url:
-            source = QUrl(preview_url)
-        elif preview_audio_path:
+                raise FileNotFoundError("The configured preview video file was not found.")
+            return QUrl.fromLocalFile(preview_path)
+        if preview_url:
+            return QUrl(preview_url)
+        if preview_audio_path:
             if not os.path.isabs(preview_audio_path):
                 preview_audio_path = os.path.join(self.workspace_root, preview_audio_path)
             if not os.path.exists(preview_audio_path):
-                QMessageBox.warning(self, "Voice Preview", "The configured preview audio file was not found.")
-                return
-            source = QUrl.fromLocalFile(preview_audio_path)
-        elif preview_audio_url:
-            source = QUrl(preview_audio_url)
-        else:
-            QMessageBox.warning(self, "Voice Preview", "This voice does not have preview media configured yet.")
-            return
+                raise FileNotFoundError("The configured preview audio file was not found.")
+            return QUrl.fromLocalFile(preview_audio_path)
+        if preview_audio_url:
+            return QUrl(preview_audio_url)
+        raise RuntimeError("This voice does not have preview media configured yet.")
 
+    def _stop_voice_library_preview(self):
         try:
-            self.media_player.clear_subtitle()
-            self.media_player.setSource(source)
-            self.play_btn.setText("Pause")
-            self.timeline.set_segments([])
-            self.timeline.set_playing(True)
-            self.media_player.play()
+            self.voice_preview_library_player.stop()
+            self.voice_preview_library_player.setSource(QUrl())
+        except Exception:
+            pass
+        for button in self._voice_preview_row_buttons.values():
+            button.setText("Preview")
+
+    def _play_voice_preview_entry(self, entry: dict, button: QPushButton | None = None):
+        try:
+            source = self._resolve_voice_preview_source(entry)
+            self._stop_voice_library_preview()
+            self.voice_preview_library_player.setSource(source)
+            self.voice_preview_library_player.play()
+            if button is not None:
+                button.setText("Playing...")
             self.log(f"[Voice Preview] playing clip for {entry.get('name', 'voice')}")
         except Exception as exc:
             self.show_error("Voice Preview Failed", "Could not play the selected voice preview clip.", str(exc))
+
+    def _build_voice_preview_popup(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Voice Preview Library")
+        dialog.setModal(False)
+        dialog.resize(720, 560)
+        dialog.setStyleSheet(
+            """
+            QDialog {
+                background-color: #0f1724;
+            }
+            QWidget {
+                background-color: #0f1724;
+                color: #dbe5f3;
+            }
+            QScrollArea {
+                border: none;
+                background-color: #0f1724;
+            }
+            QLabel#statusHeadline {
+                color: #f8fbff;
+                font-size: 16px;
+                font-weight: 700;
+            }
+            QLabel#sectionTitle {
+                color: #8ad7ff;
+                font-weight: 700;
+            }
+            QLabel#helperLabel {
+                color: #9fb3ca;
+            }
+            QFrame#statusCard {
+                background-color: #132033;
+                border: 1px solid #2f4868;
+                border-radius: 12px;
+            }
+            QPushButton {
+                background-color: #22344d;
+                color: #f8fbff;
+                border: 1px solid #34506f;
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #29405d;
+            }
+            QPushButton:disabled {
+                background-color: #172435;
+                color: #7f92a9;
+                border-color: #24384f;
+            }
+            """
+        )
+
+        root_layout = QVBoxLayout(dialog)
+        root_layout.setContentsMargins(16, 16, 16, 16)
+        root_layout.setSpacing(12)
+
+        title = QLabel("Voice Preview Library", dialog)
+        title.setObjectName("statusHeadline")
+        root_layout.addWidget(title)
+
+        hint = QLabel(
+            "Preview each configured voice sample here. This popup uses a separate player and does not affect the main video timeline.",
+            dialog,
+        )
+        hint.setObjectName("helperLabel")
+        hint.setWordWrap(True)
+        root_layout.addWidget(hint)
+
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        container = QWidget(scroll)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        current_provider = None
+        self._voice_preview_row_buttons = {}
+        entries = sorted(
+            list(self.voice_catalog_entries_all or []),
+            key=lambda item: (
+                str(item.get("tier", "")),
+                self._voice_provider_label(str(item.get("provider", ""))),
+                str(item.get("name", "")),
+            ),
+        )
+        for entry in entries:
+            provider = self._voice_provider_label(str(entry.get("provider", "")).strip())
+            if provider != current_provider:
+                current_provider = provider
+                header = QLabel(provider, container)
+                header.setObjectName("sectionTitle")
+                layout.addWidget(header)
+
+            row = QFrame(container)
+            row.setObjectName("statusCard")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(12, 10, 12, 10)
+            row_layout.setSpacing(10)
+
+            label = QLabel(str(entry.get("name", entry.get("id", "Voice"))), row)
+            label.setWordWrap(True)
+            meta = QLabel(str(entry.get("tier", "voice")).strip().title(), row)
+            meta.setObjectName("helperLabel")
+            preview_btn = QPushButton("Preview", row)
+            preview_btn.setEnabled(self._entry_has_preview_media(entry))
+            preview_btn.clicked.connect(lambda _checked=False, item=entry, btn=preview_btn: self._play_voice_preview_entry(item, btn))
+
+            row_layout.addWidget(label, 1)
+            row_layout.addWidget(meta)
+            row_layout.addWidget(preview_btn)
+            layout.addWidget(row)
+            self._voice_preview_row_buttons[str(entry.get("id", ""))] = preview_btn
+
+        layout.addStretch()
+        scroll.setWidget(container)
+        root_layout.addWidget(scroll, 1)
+
+        close_btn = QPushButton("Close", dialog)
+        close_btn.clicked.connect(dialog.close)
+        root_layout.addWidget(close_btn, 0, Qt.AlignRight)
+
+        dialog.finished.connect(lambda _result: self._stop_voice_library_preview())
+        self.voice_preview_dialog = dialog
+        return dialog
+
+    def preview_selected_voice_sample(self):
+        dialog = self.voice_preview_dialog if self.voice_preview_dialog is not None else self._build_voice_preview_popup()
+        self._stop_voice_library_preview()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def preview_segment_audio(self, index: int):
         if index < 0 or index >= len(self.current_translated_segments or self.current_segments):
@@ -2108,8 +2180,6 @@ class VideoTranslatorGUI(QMainWindow):
         self.voiceover_btn.setEnabled(has_translated_text and generated_mode and mode in ("voice", "both"))
         if hasattr(self, "preview_btn"):
             self.preview_btn.setEnabled(v_ok and has_voice_audio and mode in ("voice", "both"))
-        if hasattr(self, "preview_audio_btn"):
-            self.preview_audio_btn.setEnabled(has_voice_audio)
         if hasattr(self, "blur_area_btn"):
             self.blur_area_btn.setEnabled(v_ok)
         if hasattr(self, "free_voice_combo"):
@@ -2117,28 +2187,16 @@ class VideoTranslatorGUI(QMainWindow):
                 generated_mode
                 and mode in ("voice", "both")
                 and not (hasattr(self, "use_premium_voice_radio") and self.use_premium_voice_radio.isChecked())
-                and not (hasattr(self, "use_clone_voice_radio") and self.use_clone_voice_radio.isChecked())
             )
         if hasattr(self, "premium_voice_combo"):
             self.premium_voice_combo.setEnabled(generated_mode and mode in ("voice", "both") and bool(hasattr(self, "use_premium_voice_radio") and self.use_premium_voice_radio.isChecked()))
-        if hasattr(self, "clone_voice_combo"):
-            self.clone_voice_combo.setEnabled(
-                generated_mode and mode in ("voice", "both") and bool(hasattr(self, "use_clone_voice_radio") and self.use_clone_voice_radio.isChecked())
-            )
-        if hasattr(self, "create_clone_voice_btn"):
-            self.create_clone_voice_btn.setEnabled(mode in ("voice", "both"))
         if hasattr(self, "bg_music_edit"):
             self.bg_music_edit.setEnabled(generated_mode and mode in ("voice", "both"))
         if hasattr(self, "mixed_audio_edit"):
             self.mixed_audio_edit.setEnabled(mode in ("voice", "both") and bool(hasattr(self, "use_existing_audio_radio") and self.use_existing_audio_radio.isChecked()))
         if hasattr(self, "preview_voice_btn"):
-            selected_entry = self._get_previewable_voice_catalog_entry()
-            using_previewable_tier = bool(
-                (hasattr(self, "use_premium_voice_radio") and self.use_premium_voice_radio.isChecked())
-                or (hasattr(self, "use_clone_voice_radio") and self.use_clone_voice_radio.isChecked())
-            )
-            self.preview_voice_btn.setVisible(using_previewable_tier)
-            self.preview_voice_btn.setEnabled(bool(using_previewable_tier and self._entry_has_preview_media(selected_entry)))
+            self.preview_voice_btn.setVisible(mode in ("voice", "both"))
+            self.preview_voice_btn.setEnabled(bool(self.voice_catalog_entries_all))
         if hasattr(self, "clean_project_btn"):
             self.clean_project_btn.setEnabled(self._has_cleanable_project_data())
         self.run_all_btn.setEnabled(v_ok and not self._pipeline_active)
@@ -2282,9 +2340,6 @@ class VideoTranslatorGUI(QMainWindow):
             if music:
                 self.processed_artifacts["music"] = music
                 self.update_project_artifact("music", music)
-                # Auto-fill background for STEP 4
-                if not self.bg_music_edit.text().strip():
-                    self.bg_music_edit.setText(music)
             self.update_project_step("separate_audio", "done")
             QMessageBox.information(self, "Success", 
                 f"Audio stems separated!\n\nVocals: {os.path.basename(vocal)}\nBackground: {os.path.basename(music)}\n\nVocals are now selected for transcription.")
@@ -2456,188 +2511,11 @@ class VideoTranslatorGUI(QMainWindow):
             f"Whisper model is now set to {self.get_whisper_model_name()}.",
         )
 
-    def open_clone_voice_dialog(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Create Clone Voice")
-        dialog.setModal(True)
-        dialog.setMinimumWidth(520)
-        dialog.setStyleSheet(
-            """
-            QDialog { background-color: #0f1724; }
-            QLabel { color: #d7e3f4; background: transparent; }
-            QLabel#statusHeadline { color: #f8fbff; font-size: 16px; font-weight: 700; }
-            QLabel#helperLabel { color: #9fb3ca; font-size: 12px; }
-            QLineEdit, QComboBox {
-                background-color: #132033;
-                color: #f8fbff;
-                border: 1px solid #2f4868;
-                border-radius: 10px;
-                padding: 8px 10px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #132033;
-                color: #f8fbff;
-                border: 1px solid #2f4868;
-                selection-background-color: #24486c;
-            }
-            QPushButton {
-                background-color: #22344d;
-                color: #f8fbff;
-                border: 1px solid #34506f;
-                border-radius: 10px;
-                padding: 8px 16px;
-                font-weight: 600;
-            }
-            QPushButton:hover { background-color: #29405d; }
-            """
-        )
-
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
-
-        title = QLabel("Create a new clone voice")
-        title.setObjectName("statusHeadline")
-        layout.addWidget(title)
-
-        hint = QLabel("Use a clean Vietnamese voice sample between 10 and 40 seconds. CapCap will transcribe it with Whisper and use that transcript as the clone reference text.")
-        hint.setObjectName("helperLabel")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        name_label = QLabel("Clone name")
-        name_edit = QLineEdit(dialog)
-        name_edit.setPlaceholderText("Example: Thanh Clone")
-        layout.addWidget(name_label)
-        layout.addWidget(name_edit)
-
-        file_label = QLabel("Reference audio")
-        file_row = QHBoxLayout()
-        file_edit = QLineEdit(dialog)
-        file_edit.setPlaceholderText("Choose a WAV, MP3 or FLAC file")
-        browse_btn = QPushButton("Browse", dialog)
-        file_row.addWidget(file_edit, 1)
-        file_row.addWidget(browse_btn)
-        layout.addWidget(file_label)
-        layout.addLayout(file_row)
-
-        gender_label = QLabel("Gender")
-        gender_combo = QComboBox(dialog)
-        gender_combo.addItems(["Any", "Male", "Female"])
-        layout.addWidget(gender_label)
-        layout.addWidget(gender_combo)
-
-        save_cb = QCheckBox("Save this clone voice for later", dialog)
-        save_cb.setChecked(True)
-        layout.addWidget(save_cb)
-
-        status_label = QLabel("Ready")
-        status_label.setObjectName("helperLabel")
-        status_label.setWordWrap(True)
-        layout.addWidget(status_label)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch()
-        cancel_btn = QPushButton("Cancel", dialog)
-        create_btn = QPushButton("Create Clone", dialog)
-        button_row.addWidget(cancel_btn)
-        button_row.addWidget(create_btn)
-        layout.addLayout(button_row)
-
-        def _browse_audio():
-            file_path, _ = QFileDialog.getOpenFileName(
-                dialog,
-                "Choose Clone Audio",
-                "",
-                "Audio Files (*.wav *.mp3 *.flac *.m4a *.aac *.ogg)",
-            )
-            if file_path:
-                file_edit.setText(self._normalize_local_file_path(file_path))
-                if not name_edit.text().strip():
-                    base_name = os.path.splitext(os.path.basename(file_path))[0]
-                    name_edit.setText(base_name[:60])
-
-        def _finish_clone_creation(payload: dict, error: str):
-            create_btn.setEnabled(True)
-            browse_btn.setEnabled(True)
-            cancel_btn.setEnabled(True)
-            if error:
-                status_label.setText(error)
-                self.show_error("Clone Voice Failed", "Could not prepare the clone voice.", error)
-                return
-
-            try:
-                entry = self.voice_catalog_service.create_clone_entry(
-                    name=name_edit.text().strip(),
-                    source_audio_path=payload.get("audio_path", ""),
-                    reference_text=payload.get("transcript", ""),
-                    gender=gender_combo.currentText().strip().lower(),
-                    save_to_catalog=save_cb.isChecked(),
-                )
-            except Exception as exc:
-                self.show_error("Clone Voice Failed", "Could not save the clone voice.", str(exc))
-                status_label.setText(str(exc))
-                return
-
-            if not save_cb.isChecked():
-                self.session_clone_voice_entries = [
-                    item for item in self.session_clone_voice_entries
-                    if str(item.get("id", "")).strip() != str(entry.get("id", "")).strip()
-                ]
-                self.session_clone_voice_entries.append(entry)
-
-            self.load_voice_preview_catalog()
-            if hasattr(self, "use_clone_voice_radio"):
-                self.use_clone_voice_radio.setChecked(True)
-            self.set_voice_combo_value(self.clone_voice_combo, self._voice_catalog_data_value(entry))
-            self.save_user_settings()
-
-            transcript_preview = str(payload.get("transcript", "")).strip()
-            short_preview = transcript_preview[:220] + ("..." if len(transcript_preview) > 220 else "")
-            QMessageBox.information(
-                self,
-                "Clone Voice Ready",
-                "Clone voice created successfully.\n\n"
-                f"Name: {entry.get('name', 'Clone Voice')}\n"
-                f"Duration: {float(payload.get('duration_seconds', 0.0)):.1f}s\n\n"
-                f"Detected transcript:\n{short_preview}",
-            )
-            dialog.accept()
-
-        def _start_clone_creation():
-            clone_name = name_edit.text().strip()
-            audio_path = self._normalize_local_file_path(file_edit.text().strip())
-            if not clone_name:
-                QMessageBox.warning(dialog, "Missing Name", "Please enter a name for this clone voice.")
-                return
-            if not audio_path or not os.path.exists(audio_path):
-                QMessageBox.warning(dialog, "Missing Audio", "Please choose a valid audio file for voice cloning.")
-                return
-
-            status_label.setText("Analyzing sample audio and generating transcript with Whisper...")
-            create_btn.setEnabled(False)
-            browse_btn.setEnabled(False)
-            cancel_btn.setEnabled(False)
-
-            self.clone_voice_prepare_thread = CloneVoicePreparationWorker(
-                self.workspace_root,
-                audio_path,
-                self.get_whisper_model_path(),
-                language="vi",
-            )
-            self.clone_voice_prepare_thread.finished.connect(_finish_clone_creation)
-            self.clone_voice_prepare_thread.start()
-
-        browse_btn.clicked.connect(_browse_audio)
-        cancel_btn.clicked.connect(dialog.reject)
-        create_btn.clicked.connect(_start_clone_creation)
-        dialog.exec()
-
     def apply_edited_translation(self, show_message=True, force_apply=True):
         result = self.subtitle_controller.apply_edited_translation(show_message=show_message, force_apply=force_apply)
         if result:
             self.sync_segment_editor_rows()
-        return result
+            return result
 
 
 
@@ -2879,7 +2757,7 @@ class VideoTranslatorGUI(QMainWindow):
             self,
             "Clean Project",
             "This will remove intermediate project files, temp previews, separated audio, and cached TTS files for the current project.\n\n"
-            "It will keep your source video, imported assets, clone voice library, and final exported video.\n\n"
+            "It will keep your source video, imported assets, and final exported video.\n\n"
             "Do you want to continue?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,

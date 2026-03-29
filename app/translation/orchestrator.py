@@ -125,23 +125,16 @@ class TranslationOrchestrator:
         translated_texts = [(seg.get("text") or "").strip() for seg in translated_segments]
         warnings = []
         polish_providers_used = []
-        polished_texts = []
-
-        for src_batch, draft_batch in zip(
-            split_text_batches(source_texts, polish_batch_size),
-            split_text_batches(translated_texts, polish_batch_size),
-        ):
-            polished_batch = self.ai_polisher.polish_batch(
-                source_texts=src_batch,
-                translated_texts=draft_batch,
-                src_lang=normalized_src,
-                target_lang=target_lang,
-                style_instruction=style_instruction,
-            )
-            polished_texts.extend(polished_batch)
-            warnings.extend(self.ai_polisher.last_warnings)
-            if self.ai_polisher.last_provider and self.ai_polisher.last_provider not in polish_providers_used:
-                polish_providers_used.append(self.ai_polisher.last_provider)
+        polished_texts = self.ai_polisher.polish_batch(
+            source_texts=source_texts,
+            translated_texts=translated_texts,
+            src_lang=normalized_src,
+            target_lang=target_lang,
+            style_instruction=style_instruction,
+        )
+        warnings.extend(self.ai_polisher.last_warnings)
+        if self.ai_polisher.last_provider:
+            polish_providers_used.append(self.ai_polisher.last_provider)
 
         if not validate_texts(polished_texts, len(translated_segments)):
             raise TranslationValidationError("AI rewrite returned an invalid number of polished segments.")

@@ -52,7 +52,7 @@ The UI layer is responsible for:
 - collecting user input
 - presenting project state
 - driving preview and export actions
-- exposing rewrite, clone voice, and cleanup actions
+- exposing rewrite and cleanup actions
 
 Current UI modules:
 
@@ -87,7 +87,7 @@ Responsibilities:
 
 - load and save project state
 - persist transcript/translation artifacts
-- manage voice catalog loading and custom clone voice persistence
+- manage voice catalog loading
 - provide a normalized bridge between UI and project data
 
 Current examples:
@@ -121,7 +121,6 @@ Provider-level modules still used under adapters:
 - `preview_processor.py`
 - `video_processor.py`
 - `vocal_processor.py`
-- `local_vie_neu_tts.py`
 
 ## 4. Core Data Model
 
@@ -194,11 +193,10 @@ Current stored artifacts may include:
 
 ## 6. Voice Architecture
 
-CapCap currently has three user-facing voice lanes:
+CapCap currently has two user-facing voice lanes:
 
 - free voice
 - premium voice
-- clone voice
 
 ### Free and premium voices
 
@@ -207,25 +205,10 @@ Current providers:
 - Edge
 - Zalo
 - FPT.AI
-- VieNeu preset voices
-
-### Clone voices
-
-Clone voices are isolated in their own lane because they are less stable than standard TTS providers.
-
-Clone voice flow:
-
-1. user selects a reference audio file
-2. the app validates a `10s` to `40s` duration window
-3. Whisper transcribes the sample
-4. the transcript becomes the clone reference text
-5. the app creates a VieNeu clone voice entry
-6. the user may save it to the catalog for later reuse
 
 Catalog source:
 
 - built-in voices come from `app/voice_preview_catalog.json`
-- custom clone voices are persisted back into the same catalog through `VoiceCatalogService`
 
 ## 7. Translation and Rewrite Architecture
 
@@ -323,7 +306,6 @@ Cleanup behavior:
 - removes generated voice/mix artifacts that belong to the current project
 - keeps source video
 - keeps imported user assets
-- keeps clone voice library
 - keeps final exported video
 
 This cleanup model is important for packaging because the app produces a large amount of transient audio data during normal use.
@@ -342,7 +324,6 @@ CapCap/
 |   |   `-- providers/
 |   |-- workflows/
 |   |-- audio_mixer.py
-|   |-- local_vie_neu_tts.py
 |   |-- main.py
 |   |-- preview_processor.py
 |   |-- subtitle_builder.py
@@ -384,7 +365,6 @@ What is already established:
 - service and adapter layers
 - subtitle editor with timeline sync
 - rewrite preview/apply flow
-- clone voice creation and persistence
 - toolbar actions for model loading and project cleanup
 
 What is still transitional:
@@ -397,6 +377,5 @@ What is still transitional:
 
 1. Continue pushing legacy processor logic fully behind adapters.
 2. Keep temp/cache directories fully project-scoped wherever practical.
-3. Improve clone voice stability with better sample selection and validation.
-4. Add stronger packaging cleanup around test files and runtime leftovers.
-5. Keep docs synchronized with the actual repo and product behavior.
+3. Add stronger packaging cleanup around test files and runtime leftovers.
+4. Keep docs synchronized with the actual repo and product behavior.

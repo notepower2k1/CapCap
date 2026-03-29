@@ -135,7 +135,6 @@ def _connect_ui_signals(gui):
     gui.mixed_audio_edit.textChanged.connect(gui.refresh_ui_state)
     gui.use_generated_audio_radio.toggled.connect(gui.on_audio_source_mode_changed)
     gui.use_existing_audio_radio.toggled.connect(gui.on_audio_source_mode_changed)
-    gui.preview_audio_btn.clicked.connect(gui.preview_current_audio_track)
     gui.blur_area_btn.toggled.connect(gui.toggle_blur_area_editing)
     gui.transcript_text.textChanged.connect(gui.refresh_ui_state)
     gui.transcript_text.textChanged.connect(gui.schedule_live_subtitle_preview_refresh)
