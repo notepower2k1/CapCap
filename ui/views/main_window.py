@@ -1,4 +1,7 @@
-from PySide6.QtCore import QTimer
+import os
+
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from .advanced_tabs import build_advanced_group
@@ -36,6 +39,21 @@ def _build_header_bar(gui):
     layout.setContentsMargins(18, 14, 18, 14)
     layout.setSpacing(12)
 
+    logo_label = QLabel()
+    logo_label.setFixedSize(34, 34)
+    logo_label.setAlignment(Qt.AlignCenter)
+    if os.path.exists(getattr(gui, "logo_path", "")):
+        logo_pixmap = QPixmap(gui.logo_path)
+        if not logo_pixmap.isNull():
+            white_logo = _tint_pixmap(logo_pixmap, QColor("#FFFFFF"))
+            logo_label.setPixmap(white_logo.scaled(30, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    layout.addWidget(logo_label)
+
+    brand_label = QLabel("CapCap")
+    brand_label.setObjectName("heroTitle")
+    brand_label.setStyleSheet("color: #ffffff; font-size: 18px; font-weight: 800;")
+    layout.addWidget(brand_label)
+
     gui.project_title_label = QLabel("Project: No video selected")
     gui.project_title_label.setObjectName("statusHeadline")
     layout.addWidget(gui.project_title_label, 1)
@@ -48,6 +66,9 @@ def _build_header_bar(gui):
     gui.load_models_btn = QPushButton("Load Models")
     gui.load_models_btn.clicked.connect(gui.load_runtime_assets)
     layout.addWidget(gui.load_models_btn)
+    gui.clean_project_btn = QPushButton("Clean Project")
+    gui.clean_project_btn.clicked.connect(gui.clean_current_project)
+    layout.addWidget(gui.clean_project_btn)
     gui.download_original_btn = QPushButton("Download Original Script")
     gui.download_original_btn.clicked.connect(gui.download_original_script)
     gui.download_subtitle_btn = QPushButton("Download Subtitle")
@@ -56,6 +77,25 @@ def _build_header_bar(gui):
     layout.addWidget(gui.download_subtitle_btn)
     layout.addWidget(gui.export_btn)
     return header
+
+
+def _tint_pixmap(pixmap: QPixmap, color: QColor) -> QPixmap:
+    image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+    tinted = QImage(image.size(), QImage.Format_ARGB32)
+    tinted.fill(Qt.transparent)
+
+    for y in range(image.height()):
+        for x in range(image.width()):
+            pixel = image.pixelColor(x, y)
+            alpha = pixel.alpha()
+            if alpha <= 0:
+                continue
+            pixel.setRed(color.red())
+            pixel.setGreen(color.green())
+            pixel.setBlue(color.blue())
+            pixel.setAlpha(alpha)
+            tinted.setPixelColor(x, y, pixel)
+    return QPixmap.fromImage(tinted)
 
 
 def _build_left_panel(gui):

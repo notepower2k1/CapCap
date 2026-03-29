@@ -1,110 +1,122 @@
 # CapCap
 
-CapCap is a local desktop application for Vietnamese video localization. It supports a project-based workflow for transcription, translation, subtitle editing, Vietnamese voice generation, audio mixing, preview, and final export.
+CapCap is a local desktop app for Vietnamese video localization. It combines transcription, translation, subtitle editing, AI rewrite, Vietnamese voice generation, audio mixing, preview, and export in one Windows workflow.
 
-This repository already contains a significant part of the target architecture described in [structure.md](/D:/CodingTime/CapCap/structure.md), but the codebase is still in transition. The README describes the current product behavior and the current implementation layout.
+![CapCap Preview](assets/preview.jpg)
 
-## What CapCap Does
+## Overview
 
-CapCap is designed for a semi-automated workflow:
+CapCap is built for short-form and social video production where the user still wants control over the final script, subtitle timing, and voice output.
 
-- automate the preparation steps that are safe to run in sequence
-- keep subtitle editing, TTS, mixing, preview, and export under user control
-- keep preview output consistent with final export output
+Current product flow:
 
-Core capabilities:
+1. load a source video
+2. extract and optionally separate audio
+3. transcribe with `faster-whisper`
+4. translate to Vietnamese
+5. rewrite Vietnamese subtitles with AI on demand
+6. edit subtitles in the built-in subtitle editor
+7. generate Vietnamese voice or use an existing mixed track
+8. mix generated voice with user-provided background audio
+9. preview subtitle and audio output
+10. export the final result
 
-- extract audio from video
-- transcribe speech with `faster-whisper`
-- translate subtitles into Vietnamese
-- rewrite translated subtitles with AI on demand
-- edit subtitles directly in the built-in subtitle editor
-- import external translated `.srt` files
-- generate Vietnamese voice tracks
-- mix generated voice with user-provided background audio
-- preview subtitle and audio output before export
-- export subtitle-only, voice-only, or combined output
+## Main Features
 
-## Current Workflow
+- project-based workflow with resumable state
+- subtitle-only, voice-only, or subtitle + voice output modes
+- `faster-whisper` transcription with selectable `base` or `medium` model
+- Microsoft Translator for raw translation
+- AI rewrite with preview-first apply flow
+- rewrite style presets for short videos:
+  - natural short video
+  - TikTok natural
+  - punchy viral
+  - sales voiceover
+  - short storytelling
+  - neutral dubbing
+  - clean subtitle
+- direct subtitle editing in the timeline-aware subtitle editor
+- import external translated `.srt`
+- subtitle styling with ASS-based rendering
+- typewriter and word-highlight karaoke animations
+- source-timed or Vietnamese-paced text timing for supported subtitle animations
+- free, premium, and clone voice lanes
+- VieNeu local voice cloning with reusable saved clone voices
+- local speed adjustment on generated voice without forcing a new TTS API request
+- voice/background gain controls and audio source switching
+- exact-frame preview, 5-second preview, and audio preview
+- top toolbar actions for model loading, project cleanup, downloads, and export
 
-### Preparation phase
+## Voice Support
 
-For non-custom workflows, CapCap can automatically run:
-
-1. audio extraction
-2. transcription
-3. raw translation
-4. optional translation rewrite or refinement
-5. optional source audio separation when the selected output requires voice work
-
-### Review and production phase
-
-The user can then control:
-
-1. transcript and subtitle editing
-2. subtitle styling
-3. AI rewrite of the translated script
-4. voice generation
-5. audio mixing
-6. frame and clip preview
-7. final export
-
-## Output Modes
-
-The UI currently supports these output modes:
-
-- `Vietnamese subtitles only`
-- `Vietnamese voice only`
-- `Vietnamese subtitles + voice`
-
-## Translation and AI Rewrite
-
-Current translation behavior:
-
-- raw subtitle translation is handled by Microsoft Translator
-- AI rewriting is a separate user action from the subtitle editor
-- OpenRouter is used as the primary rewrite provider
-- `translator-api.thach-nv` can be used as a fallback rewrite provider
-
-## Voice Providers
-
-Current voice support includes:
+CapCap currently supports:
 
 - Edge TTS
 - Zalo TTS
 - FPT.AI TTS
-- VieNeu local TTS
+- VieNeu preset voices
+- VieNeu clone voices
 
-Important implementation detail:
+Voice behavior highlights:
 
-- API TTS is cached per segment
-- voice speed changes are applied locally on WAV files instead of forcing a new TTS request
-- timing sync and force-fit operations are applied after the base audio is generated
+- voice speed changes are applied locally on WAV files after base synthesis
+- AI/API TTS is cached per subtitle segment
+- clone voices are isolated from free and premium voices because they are less stable
+- users can create clone voices from their own reference audio
 
-## Subtitle Rendering
+Clone voice workflow:
 
-CapCap renders styled subtitles through an `SRT -> ASS -> FFmpeg` pipeline.
+1. choose a clean Vietnamese sample audio
+2. keep it between `10s` and `40s`
+3. CapCap transcribes the sample with Whisper
+4. the transcript is used as the clone reference text
+5. the clone can be saved for reuse or kept for the current session only
 
-Current subtitle features include:
+## Translation and Rewrite
 
-- editable subtitle styles
-- keyword highlighting
-- exact frame preview
-- 5-second preview clips
-- karaoke-style word highlighting
-- typewriter animation
-- source-timed or Vietnamese-paced text timing for supported animations
+Current translation stack:
 
-## Environment Requirements
+- Microsoft Translator for base Vietnamese translation
+- OpenRouter as the primary AI rewrite provider
+- `translator-api.thach-nv` as fallback for rewrite when configured
+
+Rewrite safety behavior:
+
+- rewrite does not directly overwrite the subtitle editor
+- users first generate a preview in a popup
+- the preview is applied only when the user clicks `Apply`
+- the AI output is validated by item count before it is accepted
+
+## Project and Cleanup
+
+CapCap now includes a `Clean Project` button on the top toolbar.
+
+It removes intermediate data such as:
+
+- project workspace data under `projects/`
+- separated audio
+- temp preview files
+- TTS cache files
+- generated intermediate voice/mix artifacts
+
+It keeps:
+
+- source video
+- imported assets
+- clone voice library
+- final exported video
+
+## Requirements
 
 - Windows 10 or Windows 11
 - Python 3.11 recommended
-- bundled `FFmpeg` / `FFprobe` in `bin/ffmpeg`
+- bundled `ffmpeg` and `ffprobe` in `bin/ffmpeg`
 - bundled `libmpv` in `bin/mpv`
 - model downloads enabled for:
   - `faster-whisper`
   - Demucs
-  - VieNeu if local TTS is used
+  - VieNeu
 
 ## Installation
 
@@ -114,11 +126,11 @@ cd CapCap
 pip install -r requirements.txt
 ```
 
-Create `.env` from [`.env_example`](/D:/CodingTime/CapCap/.env_example) and fill in the providers you want to use.
+Create `.env` from [`.env_example`](/D:/CodingTime/CapCap/.env_example) and fill in only the providers you want to use.
 
 ## Run
 
-Primary GUI entry points:
+GUI entry points:
 
 ```bash
 python ui/gui.py
@@ -130,15 +142,13 @@ or
 python ui/main_window.py
 ```
 
-CLI workflow entry:
+CLI entry:
 
 ```bash
 python app/main.py <video_path>
 ```
 
 ## Repository Layout
-
-This is the current practical layout of the repository:
 
 ```text
 CapCap/
@@ -149,6 +159,7 @@ CapCap/
 |   |-- engines/
 |   |-- services/
 |   |-- translation/
+|   |   `-- providers/
 |   |-- workflows/
 |   |-- audio_mixer.py
 |   |-- local_vie_neu_tts.py
@@ -183,19 +194,13 @@ CapCap/
 `-- structure.md
 ```
 
-## Current Architecture Status
+## Status
 
-The codebase is partially aligned with the target architecture:
+The repository already has working engine, workflow, service, and UI layers, but some legacy processor modules still exist and are wrapped by adapters for compatibility.
 
-- `core`, `services`, `workflows`, and `engines` already exist
-- project state and segment models are already used in real workflows
-- the UI is split into views, controllers, widgets, and worker adapters
-- several legacy processor modules still exist and are wrapped by adapter layers
-- compatibility shims still exist in parts of the UI and worker entry points
+The current direction is:
 
-## Next Practical Refactor Targets
-
-1. Continue moving legacy processor logic fully behind the `engines` layer.
-2. Reduce compatibility shims in `ui/gui.py` and `ui/workers.py`.
-3. Keep provider abstractions consistent for ASR, translation, rewrite, TTS, and separation.
-4. Continue aligning preview/export behavior around a single config-driven subtitle and audio pipeline.
+- keep workflows project-aware
+- keep preview and export behavior aligned
+- reduce legacy processor leakage into UI code
+- make runtime cleanup and packaging safer

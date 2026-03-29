@@ -3,6 +3,7 @@ import os
 import re
 import time
 import json
+import shutil
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit,
                              QFileDialog, QCheckBox, QTextEdit, QComboBox,
@@ -11,7 +12,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy, QInputDialog,
                              QRadioButton)
 from PySide6.QtCore import Qt, QUrl, QTimer, QSettings
-from PySide6.QtGui import QColor, QPixmap, QTextCursor
+from PySide6.QtGui import QColor, QIcon, QPixmap, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
 APP_PATH = os.path.join(os.path.dirname(__file__), '..', 'app')
@@ -83,9 +84,13 @@ class VideoTranslatorGUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Video Subtitle Translator - Antigravity")
+        self.setWindowTitle("CapCap Video Translator")
         self.settings = QSettings("CapCap", "VideoTranslatorGUI")
         self.setAcceptDrops(True)
+        self.logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "capcap.png")
+        if os.path.exists(self.logo_path):
+            self.setWindowIcon(QIcon(self.logo_path))
+        self.setWindowFlag(Qt.WindowMinimizeButtonHint, False)
         
         # Maximize and prevent resizing
         self.setWindowState(Qt.WindowMaximized)
@@ -2134,6 +2139,8 @@ class VideoTranslatorGUI(QMainWindow):
             )
             self.preview_voice_btn.setVisible(using_previewable_tier)
             self.preview_voice_btn.setEnabled(bool(using_previewable_tier and self._entry_has_preview_media(selected_entry)))
+        if hasattr(self, "clean_project_btn"):
+            self.clean_project_btn.setEnabled(self._has_cleanable_project_data())
         self.run_all_btn.setEnabled(v_ok and not self._pipeline_active)
         self.preview_frame_btn.setEnabled(v_ok and bool(self.get_active_segments()))
         self.preview_5s_btn.setEnabled(v_ok)
@@ -2766,6 +2773,183 @@ class VideoTranslatorGUI(QMainWindow):
 
     def cleanup_temp_preview_files(self):
         cleanup_temp_preview_files_impl(self)
+
+    def _path_within_root(self, path: str, root: str) -> bool:
+        try:
+            normalized_path = os.path.normcase(os.path.abspath(path))
+            normalized_root = os.path.normcase(os.path.abspath(root))
+            return os.path.commonpath([normalized_path, normalized_root]) == normalized_root
+        except Exception:
+            return False
+
+    def _remove_path_if_safe(self, path: str, *, allowed_roots: list[str], removed: list[str]) -> None:
+        normalized = self._normalize_local_file_path(path)
+        if not normalized or not os.path.exists(normalized):
+            return
+        if not any(self._path_within_root(normalized, root) for root in allowed_roots if root):
+            return
+
+        if os.path.isdir(normalized):
+            shutil.rmtree(normalized, ignore_errors=True)
+        else:
+            try:
+                os.remove(normalized)
+            except OSError:
+                return
+        removed.append(normalized)
+
+    def _reset_project_runtime_state(self) -> None:
+        self.current_project_state = None
+        self.current_segment_models = []
+        self.current_translated_segment_models = []
+        self.current_segments = []
+        self.current_translated_segments = []
+        self.processed_artifacts = {}
+        self.last_extracted_audio = ""
+        self.last_vocals_path = ""
+        self.last_music_path = ""
+        self.last_original_srt_path = ""
+        self.last_translated_srt_path = ""
+        self.last_voice_vi_path = ""
+        self.last_mixed_vi_path = ""
+        self.last_preview_video_path = ""
+        self.last_exported_video_path = ""
+        self.last_exact_preview_5s_path = ""
+        self.last_exact_preview_frame_path = ""
+        self.live_preview_subtitle_path = ""
+        self.live_preview_ass_path = ""
+        self.live_preview_segments = []
+        self.live_preview_editor_name = ""
+        if hasattr(self, "transcript_text"):
+            self.transcript_text.clear()
+        if hasattr(self, "translated_text"):
+            self.translated_text.clear()
+        if hasattr(self, "audio_source_edit"):
+            self.audio_source_edit.clear()
+        if hasattr(self, "bg_music_edit"):
+            self.bg_music_edit.clear()
+        if hasattr(self, "mixed_audio_edit"):
+            self.mixed_audio_edit.clear()
+        if hasattr(self, "timeline"):
+            self.timeline.set_segments([])
+            self.timeline.set_playing(False)
+        self.sync_segment_editor_rows()
+        self.refresh_ui_state()
+
+    def _has_cleanable_project_data(self) -> bool:
+        project_root = str(getattr(getattr(self, "current_project_state", None), "project_root", "") or "").strip()
+        candidates = [
+            self.last_extracted_audio,
+            self.last_vocals_path,
+            self.last_music_path,
+            self.last_voice_vi_path,
+            self.last_mixed_vi_path,
+            self.live_preview_subtitle_path,
+            self.live_preview_ass_path,
+            self.last_preview_video_path,
+            self.last_exact_preview_5s_path,
+            self.last_exact_preview_frame_path,
+            os.path.join(self.workspace_root, "output", "_tts_tmp"),
+            os.path.join(self.workspace_root, "temp", "segment_audio_preview"),
+            os.path.join(self.workspace_root, "temp", "voice_sample_preview"),
+            os.path.join(self.workspace_root, "temp", "htdemucs"),
+            project_root,
+        ]
+        for candidate in candidates:
+            normalized = self._normalize_local_file_path(candidate)
+            if normalized and os.path.exists(normalized):
+                return True
+        return False
+
+    def clean_current_project(self):
+        project_state = getattr(self, "current_project_state", None)
+        if not project_state and not any(
+            [
+                getattr(self, "last_voice_vi_path", ""),
+                getattr(self, "last_mixed_vi_path", ""),
+                getattr(self, "last_extracted_audio", ""),
+                getattr(self, "last_vocals_path", ""),
+                getattr(self, "last_music_path", ""),
+            ]
+        ):
+            QMessageBox.information(self, "Clean Project", "There is no generated project data to clean right now.")
+            return
+
+        confirmation = QMessageBox.question(
+            self,
+            "Clean Project",
+            "This will remove intermediate project files, temp previews, separated audio, and cached TTS files for the current project.\n\n"
+            "It will keep your source video, imported assets, clone voice library, and final exported video.\n\n"
+            "Do you want to continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirmation != QMessageBox.Yes:
+            return
+
+        removed_paths = []
+        removed_groups = {
+            "Project folder": [],
+            "Generated voice files": [],
+            "Separated audio": [],
+            "Preview temp files": [],
+            "TTS cache": [],
+            "Temp folders": [],
+        }
+        workspace_temp_root = os.path.join(self.workspace_root, "temp")
+        output_root = os.path.join(self.workspace_root, "output")
+        project_root = str(getattr(project_state, "project_root", "") or "").strip()
+        allowed_roots = [root for root in [workspace_temp_root, output_root, project_root] if root]
+
+        self.cleanup_temp_preview_files()
+
+        file_candidates = [
+            ("Separated audio", self.last_extracted_audio),
+            ("Separated audio", self.last_vocals_path),
+            ("Separated audio", self.last_music_path),
+            ("Generated voice files", self.last_voice_vi_path),
+            ("Generated voice files", self.last_mixed_vi_path),
+            ("Preview temp files", self.live_preview_subtitle_path),
+            ("Preview temp files", self.live_preview_ass_path),
+        ]
+        for group_name, candidate in file_candidates:
+            before_count = len(removed_paths)
+            self._remove_path_if_safe(candidate, allowed_roots=allowed_roots, removed=removed_paths)
+            if len(removed_paths) > before_count:
+                removed_groups[group_name].append(removed_paths[-1])
+
+        dir_candidates = [
+            ("Project folder", project_root),
+            ("TTS cache", os.path.join(output_root, "_tts_tmp")),
+            ("Temp folders", os.path.join(workspace_temp_root, "segment_audio_preview")),
+            ("Temp folders", os.path.join(workspace_temp_root, "voice_sample_preview")),
+            ("Temp folders", os.path.join(workspace_temp_root, "htdemucs")),
+        ]
+        for group_name, candidate in dir_candidates:
+            before_count = len(removed_paths)
+            self._remove_path_if_safe(candidate, allowed_roots=allowed_roots, removed=removed_paths)
+            if len(removed_paths) > before_count:
+                removed_groups[group_name].append(removed_paths[-1])
+
+        self._reset_project_runtime_state()
+
+        if removed_paths:
+            self.log(f"[Clean Project] Removed {len(removed_paths)} intermediate paths.")
+            detail_lines = ["Cleaned these groups:"]
+            for group_name, paths in removed_groups.items():
+                if paths:
+                    detail_lines.append(f"- {group_name}: {len(paths)} item(s)")
+            QMessageBox.information(
+                self,
+                "Clean Project",
+                f"Removed {len(removed_paths)} intermediate paths for the current project.\n\n" + "\n".join(detail_lines),
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Clean Project",
+                "No removable intermediate files were found for the current project.",
+            )
 
     def closeEvent(self, event):
         try:

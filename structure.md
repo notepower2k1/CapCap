@@ -1,83 +1,77 @@
 # CapCap Structure
 
-## 1. Goal
+## 1. Product Goal
 
-CapCap is a local desktop tool for Vietnamese video localization with a project-based workflow:
+CapCap is a local Windows desktop app for Vietnamese video localization and short-form video production.
+
+It is designed around a practical hybrid workflow:
+
+- preparation can be automated
+- editing and approval remain user-controlled
+- preview should stay close to final export
+
+Typical flow:
 
 1. import a source video
 2. extract audio
 3. transcribe speech
-4. translate into Vietnamese
-5. optionally rewrite or refine the translation
-6. build and edit subtitles
-7. generate Vietnamese voice audio
+4. translate to Vietnamese
+5. optionally rewrite the Vietnamese subtitles with AI
+6. edit subtitles
+7. generate Vietnamese voice
 8. mix voice with background audio
-9. preview the result
+9. preview output
 10. export the final video
 
-The product is designed around a semi-automated model:
-
-- preparation steps can be automated
-- subtitle, TTS, mix, preview, and export remain user-controlled
-- preview should match export as closely as possible
-
-## 2. Processing Model
+## 2. Runtime Model
 
 ```text
-Project
-  -> Import source video
-  -> Prepare
-       -> Extract audio
-       -> Transcribe
-       -> Translate raw
-       -> Rewrite / refine translation (optional)
-       -> Separate source audio when needed
-  -> Manual workspace
-       -> Edit transcript / translation
-       -> Style subtitles
-       -> Generate voice
-       -> Mix audio
-       -> Preview
-  -> Export
+Video
+  -> Project
+      -> Extract audio
+      -> Optional source separation
+      -> Transcribe
+      -> Translate
+      -> Optional AI rewrite preview
+      -> Subtitle editing
+      -> Voice generation
+      -> Audio mixing
+      -> Preview
+      -> Export
+      -> Clean project intermediates
 ```
 
-## 3. Architectural Layers
+## 3. Main Layers
 
-CapCap is moving toward a three-layer architecture.
+CapCap is structured around four practical layers.
 
-### Engine layer
+### UI layer
 
-The engine layer wraps external tools and providers and returns normalized results.
+The UI layer is responsible for:
 
-Current examples:
+- collecting user input
+- presenting project state
+- driving preview and export actions
+- exposing rewrite, clone voice, and cleanup actions
 
-- `FFmpegAdapter`
-- `WhisperAdapter`
-- `TranslatorAdapter`
-- `TTSAdapter`
-- `PreviewAdapter`
-- `AudioMixAdapter`
-- `DemucsAdapter`
-- `SubtitleAdapter`
+Current UI modules:
 
-Responsibilities:
-
-- accept normalized inputs
-- call external tools or APIs
-- return normalized outputs
-- avoid workflow-specific business logic
+- `ui/views`
+- `ui/controllers`
+- `ui/widgets`
+- `ui/worker_adapters`
+- `ui/utils`
 
 ### Workflow layer
 
-The workflow layer coordinates processing steps and project state.
+The workflow layer coordinates multi-step operations and project lifecycle.
 
 Responsibilities:
 
-- decide which steps should run
+- decide which steps run
 - reuse valid outputs when possible
-- skip unnecessary work
-- update `project.json`
-- drive export and preview consistency
+- manage project state transitions
+- keep preview/export behavior consistent
 
 Current workflows:
 
@@ -85,21 +79,53 @@ Current workflows:
 - `voice_workflow.py`
 - `export_workflow.py`
 
-### UI layer
+### Service layer
 
-The UI layer should:
+The service layer owns project persistence and shared app-level logic.
 
-- display project state
-- collect user input
-- trigger workflows
-- preview output
-- display logs and errors
+Responsibilities:
 
-The UI should avoid talking directly to raw providers when an adapter or workflow already exists.
+- load and save project state
+- persist transcript/translation artifacts
+- manage voice catalog loading and custom clone voice persistence
+- provide a normalized bridge between UI and project data
+
+Current examples:
+
+- `ProjectService`
+- `GUIProjectBridge`
+- `VoiceCatalogService`
+- `EngineRuntime`
+
+### Engine / provider layer
+
+This layer wraps external tools and provider-specific integrations behind normalized interfaces.
+
+Current examples:
+
+- `FFmpegAdapter`
+- `WhisperAdapter`
+- `TranslatorAdapter`
+- `TTSAdapter`
+- `AudioMixAdapter`
+- `PreviewAdapter`
+- `DemucsAdapter`
+- `SubtitleAdapter`
+
+Provider-level modules still used under adapters:
+
+- `whisper_processor.py`
+- `translator.py`
+- `tts_processor.py`
+- `audio_mixer.py`
+- `preview_processor.py`
+- `video_processor.py`
+- `vocal_processor.py`
+- `local_vie_neu_tts.py`
 
 ## 4. Core Data Model
 
-The central unit in the system is a subtitle segment.
+The main unit of processing is a subtitle segment.
 
 Example:
 
@@ -109,110 +135,200 @@ Example:
   "start": 12.5,
   "end": 15.2,
   "original_text": "Hello everyone",
-  "raw_translation": "Xin chao moi nguoi",
-  "refined_translation": "Xin chao tat ca moi nguoi",
-  "final_text": "Xin chao moi nguoi",
-  "tts_text": "Xin chao moi nguoi",
+  "raw_translation": "Xin chào mọi người",
+  "refined_translation": "Xin chào cả nhà",
+  "final_text": "Xin chào mọi người",
+  "tts_text": "Xin chào mọi người",
   "voice_file": "audio/tts_segments/seg_0001.wav",
   "status": "ready",
-  "metadata": {}
-}
-```
-
-Important fields:
-
-- `original_text`: transcript text from ASR
-- `raw_translation`: direct translated text
-- `refined_translation`: AI-rewritten or refined text
-- `final_text`: subtitle text used for rendering
-- `tts_text`: text used for voice synthesis
-- `voice_file`: segment-level generated audio file
-- `metadata`: extra per-segment information such as manual highlights or word timing data
-
-`final_text` and `tts_text` may intentionally differ.
-
-## 5. Project Data Layout
-
-Each imported video should behave like an isolated project.
-
-Target project layout:
-
-```text
-project/
-|-- source/
-|   |-- input_video.mp4
-|   `-- extracted_audio.wav
-|-- analysis/
-|   |-- transcript_raw.json
-|   |-- transcript_segments.json
-|   `-- detected_language.json
-|-- translation/
-|   |-- translation_raw.json
-|   |-- translation_refined.json
-|   `-- translation_final.json
-|-- audio/
-|   |-- separated/
-|   |   |-- vocal.wav
-|   |   `-- background.wav
-|   |-- tts_segments/
-|   |-- voice_merged.wav
-|   `-- mixed.wav
-|-- subtitle/
-|   |-- subtitle.srt
-|   |-- subtitle.ass
-|   `-- style.json
-|-- preview/
-|-- export/
-|   `-- final_output.mp4
-`-- project.json
-```
-
-## 6. Project State
-
-Each project keeps a resumable processing state.
-
-Example:
-
-```json
-{
-  "project_id": "demo_001",
-  "input_video": "source/input_video.mp4",
-  "input_language": "en",
-  "target_language": "vi",
-  "mode": "subtitle_voice",
-  "translator_ai": true,
-  "steps": {
-    "extract_audio": "done",
-    "transcribe": "done",
-    "translate_raw": "done",
-    "refine_translation": "done",
-    "separate_audio": "done",
-    "generate_tts": "pending",
-    "mix_audio": "pending",
-    "export": "pending"
+  "metadata": {
+    "words": [],
+    "manual_highlights": []
   }
 }
 ```
 
-Standard step values:
+Important segment fields:
 
-- `pending`
-- `running`
-- `done`
-- `failed`
-- `skipped`
+- `original_text`
+- `raw_translation`
+- `refined_translation`
+- `final_text`
+- `tts_text`
+- `voice_file`
+- `metadata.words`
+- `metadata.manual_highlights`
 
-## 7. Preview and Export Consistency
+`final_text` and `tts_text` are allowed to diverge when subtitle readability and TTS readability need different phrasing.
 
-This is a hard rule for the product:
+## 5. Project Layout
 
-- subtitle preview and final export should use the same style configuration
-- audio preview and final export should use the same selected audio source
-- subtitle timing, mix settings, and output mode should be persisted in project state whenever practical
+Each video is treated as an isolated project with resumable state.
 
-## 8. Current Code Layout
+Current project structure:
 
-This is the current real repository structure, not the ideal future target.
+```text
+projects/<project_id>/
+|-- source/
+|-- analysis/
+|-- translation/
+|-- audio/
+|   |-- separated/
+|   `-- tts_segments/
+|-- subtitle/
+|-- preview/
+|   `-- cache/
+|-- export/
+|-- logs/
+`-- project.json
+```
+
+Current stored artifacts may include:
+
+- extracted audio
+- transcript JSON
+- translation JSON
+- original and translated SRT
+- separated vocals and background audio
+- final workflow state in `project.json`
+
+## 6. Voice Architecture
+
+CapCap currently has three user-facing voice lanes:
+
+- free voice
+- premium voice
+- clone voice
+
+### Free and premium voices
+
+Current providers:
+
+- Edge
+- Zalo
+- FPT.AI
+- VieNeu preset voices
+
+### Clone voices
+
+Clone voices are isolated in their own lane because they are less stable than standard TTS providers.
+
+Clone voice flow:
+
+1. user selects a reference audio file
+2. the app validates a `10s` to `40s` duration window
+3. Whisper transcribes the sample
+4. the transcript becomes the clone reference text
+5. the app creates a VieNeu clone voice entry
+6. the user may save it to the catalog for later reuse
+
+Catalog source:
+
+- built-in voices come from `app/voice_preview_catalog.json`
+- custom clone voices are persisted back into the same catalog through `VoiceCatalogService`
+
+## 7. Translation and Rewrite Architecture
+
+### Translation
+
+Base translation pipeline:
+
+- ASR output
+- Microsoft Translator
+- Vietnamese subtitle state
+
+### Rewrite
+
+Rewrite is now a user-triggered preview flow:
+
+1. user opens `Rewrite with AI`
+2. user selects a rewrite preset or custom instruction
+3. AI generates a preview
+4. preview is applied only after explicit confirmation
+
+Current rewrite presets include:
+
+- natural short video
+- TikTok natural
+- punchy viral
+- sales voiceover
+- short storytelling
+- neutral dubbing
+- clean subtitle
+- custom
+
+Providers:
+
+- OpenRouter primary
+- `translator-api.thach-nv` fallback
+
+Output validation:
+
+- numbered-line parsing
+- exact item-count validation
+- invalid AI output is rejected before it can be applied
+
+## 8. Subtitle Rendering
+
+Rendering pipeline:
+
+```text
+Subtitle segments
+  -> SRT
+  -> ASS styling
+  -> FFmpeg render
+```
+
+Current subtitle features:
+
+- editable subtitle styles
+- saved subtitle style presets
+- keyword highlighting
+- typewriter animation
+- word-highlight karaoke animation
+- source speech timing
+- Vietnamese pacing timing
+- exact frame preview
+- 5-second preview rendering
+
+## 9. Audio Pipeline
+
+Voice generation pipeline:
+
+```text
+Subtitle segments
+  -> per-segment TTS
+  -> optional local speed adjustment
+  -> optional smart timing fit
+  -> merged voice track
+  -> optional background mix
+```
+
+Important behavior:
+
+- base TTS is cached per segment
+- speed changes do not force a new TTS API call
+- timing sync happens after base synthesis
+- preview/export can use either generated mixed audio or an existing mixed file
+
+## 10. Cleanup Model
+
+The top toolbar now includes `Clean Project`.
+
+Cleanup behavior:
+
+- removes project intermediates
+- removes temp preview data
+- removes TTS cache folders
+- removes generated voice/mix artifacts that belong to the current project
+- keeps source video
+- keeps imported user assets
+- keeps clone voice library
+- keeps final exported video
+
+This cleanup model is important for packaging because the app produces a large amount of transient audio data during normal use.
+
+## 11. Current Repository Layout
 
 ```text
 CapCap/
@@ -226,7 +342,6 @@ CapCap/
 |   |   `-- providers/
 |   |-- workflows/
 |   |-- audio_mixer.py
-|   |-- highlight_selector.py
 |   |-- local_vie_neu_tts.py
 |   |-- main.py
 |   |-- preview_processor.py
@@ -237,6 +352,12 @@ CapCap/
 |   |-- vocal_processor.py
 |   |-- voice_preview_catalog.json
 |   `-- whisper_processor.py
+|-- assets/
+|-- bin/
+|-- models/
+|-- output/
+|-- projects/
+|-- temp/
 |-- ui/
 |   |-- controllers/
 |   |-- helpers/
@@ -247,40 +368,35 @@ CapCap/
 |   |-- gui.py
 |   |-- main_window.py
 |   `-- workers.py
-|-- assets/
-|-- bin/
-|-- models/
-|-- output/
-|-- projects/
-|-- temp/
+|-- .env
+|-- .env_example
 |-- README.md
 |-- requirements.txt
-|-- newSpec.md
-`-- structure.md
+|-- structure.md
+`-- newSpec.md
 ```
 
-## 9. Current Status
+## 12. Current Status
 
-The repository has already moved significantly toward the target structure, but the transition is not complete.
+What is already established:
 
-What is already in place:
-
-- core models and project state
-- service layer for project and segment persistence
-- workflow layer for prepare, voice, and export
-- adapter layer for major engines
-- split UI modules for views, controllers, widgets, and worker adapters
+- project-aware workflows
+- service and adapter layers
+- subtitle editor with timeline sync
+- rewrite preview/apply flow
+- clone voice creation and persistence
+- toolbar actions for model loading and project cleanup
 
 What is still transitional:
 
-- several legacy processor modules still exist beside the adapter layer
-- some UI compatibility shims still exist
-- not every provider abstraction is fully isolated yet
+- some legacy processor modules still sit beside adapter wrappers
+- runtime artifact cleanup can be expanded further
+- packaging still benefits from pruning temp/test leftovers before release
 
-## 10. Recommended Next Refactor Steps
+## 13. Near-Term Refactor Targets
 
-1. Continue moving legacy processing modules fully behind the `engines` layer.
-2. Keep translation, rewrite, TTS, and separation providers consistent behind service and adapter boundaries.
-3. Reduce compatibility shims in the UI entry points.
-4. Continue consolidating preview and export around one configuration source.
-5. Keep documentation aligned with the real repository structure instead of the old target-only structure.
+1. Continue pushing legacy processor logic fully behind adapters.
+2. Keep temp/cache directories fully project-scoped wherever practical.
+3. Improve clone voice stability with better sample selection and validation.
+4. Add stronger packaging cleanup around test files and runtime leftovers.
+5. Keep docs synchronized with the actual repo and product behavior.
