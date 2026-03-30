@@ -971,6 +971,8 @@ class VideoTranslatorGUI(QMainWindow):
     def schedule_auto_frame_preview(self):
         if not hasattr(self, "auto_preview_frame_cb") or not self.auto_preview_frame_cb.isChecked():
             return
+        if self.auto_preview_frame_cb.isHidden():
+            return
         if getattr(self, "_pipeline_active", False):
             return
         if not self.video_path_edit.text().strip() or not self.get_active_segments():
@@ -983,6 +985,8 @@ class VideoTranslatorGUI(QMainWindow):
 
     def schedule_seek_frame_preview(self):
         if not hasattr(self, "auto_preview_frame_cb") or not self.auto_preview_frame_cb.isChecked():
+            return
+        if self.auto_preview_frame_cb.isHidden():
             return
         if getattr(self, "_pipeline_active", False):
             return
@@ -1438,7 +1442,7 @@ class VideoTranslatorGUI(QMainWindow):
             self._segment_editor_rows = []
             rows = self._segment_editor_display_rows()
             if not rows:
-                empty_state = QFrame()
+                empty_state = QFrame(self.segment_editor_container if hasattr(self, "segment_editor_container") else None)
                 empty_state.setObjectName("statusCard")
                 empty_state.setMinimumHeight(180)
                 empty_state.setStyleSheet(
@@ -1464,32 +1468,32 @@ class VideoTranslatorGUI(QMainWindow):
 
             show_original = bool(getattr(self, "show_original_subtitle_cb", None) and self.show_original_subtitle_cb.isChecked())
             for idx, row in enumerate(rows):
-                card = QFrame()
+                card = QFrame(self.segment_editor_container if hasattr(self, "segment_editor_container") else None)
                 card.setObjectName("statusCard")
                 card_layout = QVBoxLayout(card)
                 card_layout.setContentsMargins(12, 12, 12, 12)
                 card_layout.setSpacing(6)
 
                 header_layout = QHBoxLayout()
-                timestamp_label = QLabel(f"[{self._format_compact_editor_timestamp(row['start'])}]")
+                timestamp_label = QLabel(f"[{self._format_compact_editor_timestamp(row['start'])}]", card)
                 timestamp_label.setObjectName("sectionTitle")
-                preview_btn = QPushButton("🔊")
+                preview_btn = QPushButton("🔊", card)
                 preview_btn.setFixedWidth(44)
                 preview_btn.clicked.connect(lambda _=False, idx=idx: self.preview_segment_audio(idx))
-                highlight_btn = QPushButton("Highlight")
+                highlight_btn = QPushButton("Highlight", card)
                 highlight_btn.setFixedWidth(88)
                 header_layout.addWidget(timestamp_label)
                 header_layout.addStretch()
                 header_layout.addWidget(highlight_btn)
                 header_layout.addWidget(preview_btn)
-                original_label = QLabel(row["original"] or "")
+                original_label = QLabel(row["original"] or "", card)
                 original_label.setWordWrap(True)
                 original_label.setObjectName("helperLabel")
                 original_label.setVisible(show_original and bool(row["original"].strip()))
 
-                arrow_label = QLabel("→")
+                arrow_label = QLabel("→", card)
                 arrow_label.setStyleSheet("font-size: 16px; font-weight: 700; color: #8ad7ff;")
-                translated_editor = QTextEdit()
+                translated_editor = QTextEdit(card)
                 translated_editor.setAcceptRichText(False)
                 translated_editor.setPlainText(row["translated"])
                 translated_editor.setMinimumHeight(60)
@@ -1504,9 +1508,9 @@ class VideoTranslatorGUI(QMainWindow):
                 highlight_meta_layout = QHBoxLayout()
                 highlight_meta_layout.setContentsMargins(0, 0, 0, 0)
                 highlight_meta_layout.setSpacing(6)
-                highlight_placeholder = QLabel("[ Suggest highlight ]")
+                highlight_placeholder = QLabel("[ Suggest highlight ]", card)
                 highlight_placeholder.setObjectName("helperLabel")
-                highlight_chip_container = QWidget()
+                highlight_chip_container = QWidget(card)
                 highlight_chip_layout = QHBoxLayout(highlight_chip_container)
                 highlight_chip_layout.setContentsMargins(0, 0, 0, 0)
                 highlight_chip_layout.setSpacing(6)
@@ -2010,6 +2014,7 @@ class VideoTranslatorGUI(QMainWindow):
         if not segments:
             self.live_preview_subtitle_path = ""
             self.live_preview_ass_path = ""
+            self._live_preview_signature = None
             return "", ""
 
         preview_dir = os.path.join(os.getcwd(), "temp")
@@ -2018,14 +2023,37 @@ class VideoTranslatorGUI(QMainWindow):
 
         from subtitle_builder import generate_srt
 
-        generate_srt(segments, preview_srt_path)
-        self.live_preview_subtitle_path = preview_srt_path
         video_path = self.video_path_edit.text().strip()
-        if video_path and os.path.exists(video_path):
+        if (
+            video_path
+            and os.path.exists(video_path)
+            and (
+                not getattr(self.video_view, "video_source_width", 0)
+                or not getattr(self.video_view, "video_source_height", 0)
+            )
+        ):
             self.refresh_video_dimensions(video_path)
         video_width = getattr(self.video_view, "video_source_width", 0) or 1920
         video_height = getattr(self.video_view, "video_source_height", 0) or 1080
         subtitle_style = self.get_subtitle_export_style(segments=segments)
+        preview_signature = (
+            video_path,
+            video_width,
+            video_height,
+            repr(segments),
+            repr(subtitle_style),
+        )
+        if (
+            preview_signature == getattr(self, "_live_preview_signature", None)
+            and self.live_preview_subtitle_path
+            and os.path.exists(self.live_preview_subtitle_path)
+            and self.live_preview_ass_path
+            and os.path.exists(self.live_preview_ass_path)
+        ):
+            return self.live_preview_subtitle_path, self.live_preview_ass_path
+
+        generate_srt(segments, preview_srt_path)
+        self.live_preview_subtitle_path = preview_srt_path
         self.live_preview_ass_path = srt_to_ass(
             preview_srt_path,
             video_width=video_width,
@@ -2051,6 +2079,7 @@ class VideoTranslatorGUI(QMainWindow):
             manual_highlights=subtitle_style.get("manual_highlights", []),
             word_timings=subtitle_style.get("word_timings", []),
         )
+        self._live_preview_signature = preview_signature
         self.processed_artifacts["subtitle_preview_srt"] = self.live_preview_subtitle_path
         self.processed_artifacts["subtitle_preview_ass"] = self.live_preview_ass_path
         return self.live_preview_subtitle_path, self.live_preview_ass_path
@@ -2698,6 +2727,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.live_preview_ass_path = ""
         self.live_preview_segments = []
         self.live_preview_editor_name = ""
+        self._live_preview_signature = None
         if hasattr(self, "transcript_text"):
             self.transcript_text.clear()
         if hasattr(self, "translated_text"):

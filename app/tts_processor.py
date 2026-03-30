@@ -18,6 +18,16 @@ def _ffmpeg_path():
     return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffmpeg.exe")
 
 
+def _subprocess_run_kwargs() -> dict:
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
 def _sanitize_filename(name: str) -> str:
     name = re.sub(r"[^\w\-. ]+", "_", name, flags=re.UNICODE).strip()
     return name[:120] if len(name) > 120 else name
@@ -172,7 +182,7 @@ def edge_tts_to_wav_16k_mono(
         "1",
         wav_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg conversion failed:\n{proc.stderr or proc.stdout}")
 
@@ -246,7 +256,7 @@ def zalo_tts_to_wav_16k_mono(
         "1",
         wav_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg conversion failed:\n{proc.stderr or proc.stdout}")
 
@@ -329,7 +339,7 @@ def fpt_tts_to_wav_16k_mono(
         "1",
         wav_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg conversion failed:\n{proc.stderr or proc.stdout}")
 

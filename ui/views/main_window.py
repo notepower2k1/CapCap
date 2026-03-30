@@ -197,6 +197,7 @@ def _initialize_ui_state(gui):
     gui.live_preview_ass_path = ""
     gui.live_preview_segments = []
     gui.live_preview_editor_name = ""
+    gui._live_preview_signature = None
     gui._syncing_segment_editor = False
     gui._syncing_hidden_editor_text = False
     gui._segment_editor_rows = []

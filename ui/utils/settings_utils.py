@@ -70,7 +70,11 @@ def load_user_settings(gui):
     gui.use_free_voice_radio.setChecked(voice_tier != "premium")
     gui.keep_audio_cb.setChecked(str(s.value("keep_audio", gui.keep_audio_cb.isChecked())).lower() == "true")
     gui.keep_timeline_cb.setChecked(str(s.value("keep_timeline", gui.keep_timeline_cb.isChecked())).lower() == "true")
-    gui.auto_preview_frame_cb.setChecked(str(s.value("auto_preview_frame", gui.auto_preview_frame_cb.isChecked())).lower() == "true")
+    auto_preview_enabled = str(s.value("auto_preview_frame", "false")).lower() == "true"
+    if gui.auto_preview_frame_cb.isHidden():
+        auto_preview_enabled = False
+        s.setValue("auto_preview_frame", False)
+    gui.auto_preview_frame_cb.setChecked(auto_preview_enabled)
     gui.subtitle_font_combo.setCurrentText(s.value("subtitle_font", gui.subtitle_font_combo.currentText()))
     gui.subtitle_font_size_spin.setValue(int(s.value("subtitle_size", gui.subtitle_font_size_spin.value())))
     gui.subtitle_animation_combo.setCurrentText(s.value("subtitle_animation", gui.subtitle_animation_combo.currentText()))

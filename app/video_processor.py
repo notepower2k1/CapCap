@@ -19,6 +19,16 @@ def _ffprobe_path():
     return os.path.join(os.getcwd(), 'bin', 'ffmpeg', 'ffprobe.exe')
 
 
+def _subprocess_run_kwargs() -> dict:
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
 def _escape_path_for_filter(path):
     """Escape a file path for use inside an FFmpeg -vf filter value."""
     clean = path.replace("\\", "/")
@@ -68,7 +78,8 @@ def get_video_dimensions(video_path):
              '-show_entries', 'stream=width,height',
              '-of', 'csv=s=x:p=0',
              video_path],
-            capture_output=True, text=True, check=True
+            capture_output=True, text=True, check=True,
+            **_subprocess_run_kwargs(),
         )
         w, h = result.stdout.strip().split('x')
         return int(w), int(h)
@@ -623,7 +634,7 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
     print(f"Executing: {' '.join(command)}")
 
     try:
-        subprocess.run(command, capture_output=True, text=True, check=True)
+        subprocess.run(command, capture_output=True, text=True, check=True, **_subprocess_run_kwargs())
         print("ASS subtitles embedded successfully.")
         return True
     except subprocess.CalledProcessError as e:
@@ -648,7 +659,7 @@ def extract_audio(video_path, audio_output_path, ffmpeg_path=None):
     ]
     print(f"Executing: {' '.join(command)}")
     try:
-        subprocess.run(command, capture_output=True, text=True, check=True)
+        subprocess.run(command, capture_output=True, text=True, check=True, **_subprocess_run_kwargs())
         print("Audio extraction successful.")
         return True
     except subprocess.CalledProcessError as e:

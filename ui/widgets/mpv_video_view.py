@@ -36,8 +36,8 @@ class _NullSubtitleOverlay:
 
 class _BlurRegionOverlayWindow(QWidget):
     HANDLE_SIZE = 12
-    MIN_WIDTH = 80
-    MIN_HEIGHT = 48
+    MIN_WIDTH = 32
+    MIN_HEIGHT = 24
 
     def __init__(self, on_region_changed=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool)
@@ -61,6 +61,10 @@ class _BlurRegionOverlayWindow(QWidget):
     def set_editable(self, editable: bool):
         self._editable = bool(editable)
         self.setCursor(Qt.OpenHandCursor if self._editable else Qt.ArrowCursor)
+        if self._editable:
+            self.sync_to_view()
+        else:
+            self.hide()
         self.update()
 
     def clear_region(self):
@@ -73,7 +77,7 @@ class _BlurRegionOverlayWindow(QWidget):
         return self.isVisible()
 
     def sync_to_view(self):
-        if not self._target_view or not self._target_view.isVisible():
+        if not self._editable or not self._target_view or not self._target_view.isVisible():
             self.hide()
             return
         top_left = self._target_view.mapToGlobal(QPoint(0, 0))
@@ -222,8 +226,6 @@ class _BlurRegionOverlayWindow(QWidget):
         painter.fillPath(overlay_path, QColor(225, 240, 255, 78))
         painter.setPen(QPen(QColor(110, 231, 214, 220), 2))
         painter.drawRoundedRect(rect, 12, 12)
-        painter.setPen(QColor(240, 248, 255, 220))
-        painter.drawText(rect.adjusted(12, 10, -12, -10), Qt.AlignTop | Qt.AlignLeft, "Blur Area")
 
         if self._editable:
             painter.setBrush(QColor(110, 231, 214, 235))

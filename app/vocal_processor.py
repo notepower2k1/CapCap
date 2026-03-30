@@ -3,6 +3,16 @@ import subprocess
 import shutil
 import sys
 
+
+def _subprocess_run_kwargs() -> dict:
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        kwargs["startupinfo"] = startupinfo
+    return kwargs
+
 def _write_wav_soundfile(path, audio, samplerate):
     """
     Write audio using soundfile to avoid torchaudio/torchcodec DLL issues on Windows.
@@ -119,7 +129,7 @@ def separate_vocals(audio_path, output_dir):
         # Fallback: if demucs isn't importable, verify it's runnable
         if shutil.which("demucs") is None:
             try:
-                subprocess.run([sys.executable, "-m", "demucs", "--help"], capture_output=True, check=True, text=True)
+                subprocess.run([sys.executable, "-m", "demucs", "--help"], capture_output=True, check=True, text=True, **_subprocess_run_kwargs())
             except Exception as e:
                 raise ImportError("Demucs is not installed. Please run 'pip install demucs'") from e
         # If the CLI exists but import failed, propagate the real import error.
@@ -138,7 +148,7 @@ def separate_vocals(audio_path, output_dir):
     
     print(f"Running Vocal Separation: {' '.join(cmd)}")
     try:
-        proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        proc = subprocess.run(cmd, check=True, capture_output=True, text=True, **_subprocess_run_kwargs())
         
         # Demucs output structure varies by version:
         # - output_dir/htdemucs/<track>/vocals.wav

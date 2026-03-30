@@ -6,6 +6,16 @@ def _ffmpeg_path():
     return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffmpeg.exe")
 
 
+def _subprocess_run_kwargs() -> dict:
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
 def trim_video_clip(video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -39,7 +49,7 @@ def trim_video_clip(video_path: str, output_video_path: str, start_seconds: floa
         "192k",
         output_video_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg trim video clip failed.")
     return output_video_path
@@ -76,7 +86,7 @@ def mux_audio_into_video_for_preview(video_path: str, audio_path: str, output_vi
         "-shortest",
         output_video_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux failed.")
     return output_video_path
@@ -134,7 +144,7 @@ def mux_audio_into_video_clip_for_preview(
         "-shortest",
         output_video_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux clip failed.")
     return output_video_path
@@ -228,7 +238,7 @@ def render_subtitle_frame_preview(
         "1",
         output_image_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     try:
         if os.path.exists(ass_path):
             os.remove(ass_path)

@@ -11,6 +11,16 @@ def _ffprobe_path():
     return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffprobe.exe")
 
 
+def _subprocess_run_kwargs() -> dict:
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
 def _probe_wav_duration_seconds(wav_path: str) -> float:
     with wave.open(wav_path, "rb") as wav_file:
         frame_rate = wav_file.getframerate() or 16000
@@ -84,7 +94,7 @@ def fit_wav_to_duration(
         "1",
         output_wav_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg time-stretch failed:\n{proc.stderr or proc.stdout}")
     return output_wav_path
@@ -122,7 +132,7 @@ def change_wav_speed(
         "1",
         output_wav_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg speed adjustment failed:\n{proc.stderr or proc.stdout}")
     return output_wav_path

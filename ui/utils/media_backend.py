@@ -80,15 +80,26 @@ class MpvMediaPlayerBackend(QObject):
         self._state = QMediaPlayer.StoppedState
         self._source_path = ""
         self._subtitle_ass_path = ""
+        self._applied_subtitle_path = ""
         self._blur_region = None
 
         prepare_mpv_bundle()
         import mpv
 
+        target_wid = video_view.get_mpv_target_winid() if hasattr(video_view, "get_mpv_target_winid") else video_view.winId()
+        try:
+            target_wid = int(target_wid)
+        except Exception:
+            target_wid = 0
+        if sys.platform.startswith("win"):
+            # mpv expects a Win32 HWND passed as an unsigned 32-bit integer.
+            target_wid &= 0xFFFFFFFF
+
         self._player = mpv.MPV(
-            wid=str(int(video_view.get_mpv_target_winid() if hasattr(video_view, "get_mpv_target_winid") else video_view.winId())),
+            wid=str(target_wid),
             input_default_bindings=False,
             input_vo_keyboard=False,
+            force_window="no",
             osc=False,
             pause=True,
             keep_open="always",
@@ -214,6 +225,7 @@ class MpvMediaPlayerBackend(QObject):
             except OSError:
                 pass
         self._subtitle_ass_path = ""
+        self._applied_subtitle_path = ""
         try:
             self._player.sub_visibility = False
         except Exception:
@@ -301,6 +313,12 @@ class MpvMediaPlayerBackend(QObject):
                 os.remove(self._subtitle_ass_path)
             except OSError:
                 pass
+        if ass_path == self._subtitle_ass_path and ass_path == self._applied_subtitle_path:
+            try:
+                self._player.sub_visibility = True
+            except Exception:
+                pass
+            return
         self._subtitle_ass_path = ass_path
         self._apply_current_subtitle()
 
@@ -312,10 +330,18 @@ class MpvMediaPlayerBackend(QObject):
                 self._player.sub_visibility = False
             except Exception:
                 pass
+            self._applied_subtitle_path = ""
+            return
+        if self._applied_subtitle_path == self._subtitle_ass_path:
+            try:
+                self._player.sub_visibility = True
+            except Exception:
+                pass
             return
         try:
             self._player.command("sub-add", self._subtitle_ass_path, "select")
             self._player.sub_visibility = True
+            self._applied_subtitle_path = self._subtitle_ass_path
         except Exception:
             pass
 
