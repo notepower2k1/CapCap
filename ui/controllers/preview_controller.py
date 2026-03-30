@@ -318,6 +318,7 @@ class PreviewController:
     def preview_video_with_mixed_audio(self):
         video_path = self.gui.video_path_edit.text().strip()
         audio_path = self.gui.resolve_selected_audio_path()
+        mode = self.gui.get_output_mode_key()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.gui, "Error", "Video file not found. Please select a video first.")
             return
@@ -335,6 +336,13 @@ class PreviewController:
             self.gui.processed_artifacts.pop("preview_video", None)
             self.gui.last_preview_video_path = ""
         preview_out = os.path.join(os.getcwd(), "temp", f"preview_vi_voice_{ts}.mp4")
+        preview_srt_path = ""
+        preview_segments = []
+        if mode in ("subtitle", "both"):
+            preview_srt_path, preview_segments = self.build_full_active_subtitle_srt()
+            if not preview_srt_path:
+                QMessageBox.warning(self.gui, "Error", "No active subtitle track is available for video preview.")
+                return
 
         try:
             self.gui.media_player.stop()
@@ -350,7 +358,14 @@ class PreviewController:
             self.gui.preview_btn.setText("Preparing preview...")
         self.gui.progress_bar.setValue(95)
 
-        self.gui.preview_thread = PreviewMuxWorker(video_path, audio_path, preview_out)
+        self.gui.preview_thread = PreviewMuxWorker(
+            video_path,
+            audio_path,
+            preview_out,
+            mode=mode,
+            srt_path=preview_srt_path,
+            subtitle_style=self.gui.get_subtitle_export_style(segments=preview_segments),
+        )
         self.gui.preview_thread.finished.connect(self.gui.on_preview_ready)
         self.gui.preview_thread.start()
 

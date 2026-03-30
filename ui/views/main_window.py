@@ -126,6 +126,7 @@ def _connect_ui_signals(gui):
     gui.import_translation_btn.clicked.connect(gui.import_translated_srt)
     gui.voiceover_btn.clicked.connect(gui.run_voiceover)
     gui.output_mode_combo.currentTextChanged.connect(gui.on_output_mode_changed)
+    gui.audio_handling_combo.currentTextChanged.connect(gui.refresh_ui_state)
     gui.final_output_folder_edit.textChanged.connect(gui.voice_output_folder_edit.setText)
     gui.final_output_folder_edit.textChanged.connect(gui.srt_output_folder_edit.setText)
     gui.video_path_edit.textChanged.connect(gui.refresh_ui_state)

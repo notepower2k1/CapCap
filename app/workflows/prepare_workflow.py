@@ -17,6 +17,7 @@ class PrepareWorkflow:
         source_language: str = "auto",
         target_language: str = "vi",
         mode: str = "subtitle",
+        audio_handling_mode: str = "fast",
         translator_ai: bool = True,
         whisper_model_name: str = "ggml-base.bin",
     ):
@@ -29,6 +30,7 @@ class PrepareWorkflow:
             target_language=target_language,
         )
         project_state.set_setting("whisper_model", whisper_model)
+        project_state.set_setting("audio_handling_mode", audio_handling_mode)
         self.project_service.save_project(project_state)
 
         audio_output_path = self.project_service.build_path(project_state, "source", "extracted_audio.wav")
@@ -48,8 +50,11 @@ class PrepareWorkflow:
         self.project_service.save_project(project_state)
 
         working_audio_path = audio_output_path
-        if mode in ("voice", "both"):
+        audio_mode_key = str(audio_handling_mode or "fast").strip().lower()
+        print(f"[Audio Handling] Selected mode: {audio_mode_key}")
+        if mode in ("voice", "both") and audio_mode_key == "clean":
             print("\n--- Step 1.5: Separating vocals/background ---")
+            print("[Audio Handling] Clean Voice enabled: running Demucs stem separation before transcription.")
             project_state.set_step_status("separate_audio", "running")
             self.project_service.save_project(project_state)
             separated_root = self.project_service.build_path(project_state, "audio", "separated")
@@ -59,9 +64,19 @@ class PrepareWorkflow:
                 self.project_service.save_project(project_state)
                 raise RuntimeError("Audio separation failed.")
             working_audio_path = vocal_path
+            print(f"[Audio Handling] Using separated vocals for Whisper: {working_audio_path}")
+            print(f"[Audio Handling] Background music stem ready: {music_path}")
             project_state.set_step_status("separate_audio", "done")
             project_state.set_artifact("vocals", vocal_path)
             project_state.set_artifact("music", music_path)
+            self.project_service.save_project(project_state)
+        else:
+            if mode in ("voice", "both"):
+                print("[Audio Handling] Fast Mode enabled: skipping Demucs and transcribing directly from extracted audio.")
+            else:
+                print("[Audio Handling] Subtitle mode: Demucs is not needed.")
+            print(f"[Audio Handling] Using extracted audio for Whisper: {working_audio_path}")
+            project_state.set_step_status("separate_audio", "skipped")
             self.project_service.save_project(project_state)
 
         print("\n--- Step 2: Transcribing audio (Whisper) ---")

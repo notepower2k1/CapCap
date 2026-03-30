@@ -15,20 +15,52 @@ from services import EngineRuntime
 class PreviewMuxWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, audio_path, output_path):
+    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None):
         super().__init__()
         self.video_path = video_path
         self.audio_path = audio_path
         self.output_path = output_path
+        self.mode = mode
+        self.srt_path = srt_path
+        self.subtitle_style = subtitle_style or {}
 
     def run(self):
+        temp_mux_path = ""
         try:
             from preview_processor import mux_audio_into_video_for_preview
 
-            output = mux_audio_into_video_for_preview(self.video_path, self.audio_path, self.output_path)
+            current_video = self.video_path
+            if self.audio_path and os.path.exists(self.audio_path):
+                temp_dir = os.path.join(os.getcwd(), "temp")
+                os.makedirs(temp_dir, exist_ok=True)
+                temp_mux_path = os.path.join(temp_dir, f"preview_mux_{int(time.time())}.mp4")
+                current_video = mux_audio_into_video_for_preview(self.video_path, self.audio_path, temp_mux_path)
+
+            if self.mode in ("subtitle", "both") and self.srt_path and os.path.exists(self.srt_path):
+                engine = EngineRuntime()
+                ok = engine.embed_subtitles(
+                    current_video,
+                    self.srt_path,
+                    self.output_path,
+                    subtitle_style=self.subtitle_style,
+                )
+                if not ok:
+                    raise RuntimeError("Failed to render subtitle preview video.")
+                output = self.output_path
+            else:
+                if current_video != self.output_path:
+                    shutil.copyfile(current_video, self.output_path)
+                output = self.output_path
+
             self.finished.emit(output, "")
         except Exception as exc:
             self.finished.emit("", str(exc))
+        finally:
+            if temp_mux_path and os.path.exists(temp_mux_path):
+                try:
+                    os.remove(temp_mux_path)
+                except OSError:
+                    pass
 
 
 class QuickPreviewWorker(QThread):

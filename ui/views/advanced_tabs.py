@@ -142,7 +142,7 @@ def _build_hidden_runtime_widgets(gui):
     gui.bg_gain_spin = QDoubleSpinBox(gui)
     gui.bg_gain_spin.setRange(-30.0, 30.0)
     gui.bg_gain_spin.setSingleStep(1.0)
-    gui.bg_gain_spin.setValue(-3.0)
+    gui.bg_gain_spin.setValue(0.0)
 
     gui.voiceover_btn = QPushButton("Generate Voice / Mix", gui)
     gui.keep_timeline_cb = QCheckBox("Keep the current timeline when editing Vietnamese text", gui)

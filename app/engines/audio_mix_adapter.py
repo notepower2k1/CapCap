@@ -46,6 +46,8 @@ class AudioMixAdapter:
         output_wav_path: str,
         background_gain_db: float = 0.0,
         voice_gain_db: float = 0.0,
+        ducking_mode: str = "off",
+        ducking_segments=None,
     ) -> str:
         return mix_voice_with_background(
             background_wav_path=background_wav_path,
@@ -53,4 +55,6 @@ class AudioMixAdapter:
             output_wav_path=output_wav_path,
             background_gain_db=background_gain_db,
             voice_gain_db=voice_gain_db,
+            ducking_mode=ducking_mode,
+            ducking_segments=ducking_segments,
         )

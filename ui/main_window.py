@@ -873,6 +873,10 @@ class VideoTranslatorGUI(QMainWindow):
         )
         if not state:
             return None
+        audio_handling_mode = self.get_audio_handling_mode()
+        if str(state.settings.get("audio_handling_mode", "fast")).strip().lower() != audio_handling_mode:
+            state.set_setting("audio_handling_mode", audio_handling_mode)
+            self.project_service.save_project(state)
         self.current_project_state = state
         self.processed_artifacts.update(state.artifacts)
         return state
@@ -921,6 +925,11 @@ class VideoTranslatorGUI(QMainWindow):
     def load_project_context(self, state):
         if not state:
             return
+        audio_handling_mode = str(getattr(state, "settings", {}).get("audio_handling_mode", "") or "").strip().lower()
+        if audio_handling_mode and hasattr(self, "audio_handling_combo"):
+            combo_index = self.audio_handling_combo.findData(audio_handling_mode)
+            if combo_index >= 0:
+                self.audio_handling_combo.setCurrentIndex(combo_index)
         context = self.project_bridge.load_context(state)
         self.processed_artifacts.update(context["artifacts"])
         self.last_original_srt_path = self._normalize_local_file_path(context["last_original_srt_path"] or self.last_original_srt_path)
@@ -934,10 +943,12 @@ class VideoTranslatorGUI(QMainWindow):
         self.current_translated_segment_models = context["current_translated_segment_models"]
         self.current_segments = context["current_segments"]
         self.current_translated_segments = context["current_translated_segments"]
-        if self.last_vocals_path and os.path.exists(self.last_vocals_path):
+        if self.get_audio_handling_mode() == "clean" and self.last_vocals_path and os.path.exists(self.last_vocals_path):
             self.audio_source_edit.setText(self.last_vocals_path)
         elif self.last_extracted_audio and os.path.exists(self.last_extracted_audio):
             self.audio_source_edit.setText(self.last_extracted_audio)
+        elif self.last_vocals_path and os.path.exists(self.last_vocals_path):
+            self.audio_source_edit.setText(self.last_vocals_path)
         if self.current_segments:
             self.transcript_text.setText(self.format_to_srt(self.current_segments))
         if self.current_translated_segments:
@@ -946,16 +957,43 @@ class VideoTranslatorGUI(QMainWindow):
             self.apply_segments_to_timeline()
 
     def resolve_background_audio_path(self) -> str:
-        candidates = [
-            self.bg_music_edit.text().strip() if hasattr(self, "bg_music_edit") else "",
-            getattr(self, "last_music_path", ""),
-            getattr(getattr(self, "current_project_state", None), "artifacts", {}).get("music", "") if getattr(self, "current_project_state", None) else "",
-        ]
-        for candidate in candidates:
-            normalized = self._normalize_local_file_path(candidate)
+        manual_candidate = self.bg_music_edit.text().strip() if hasattr(self, "bg_music_edit") else ""
+        if manual_candidate:
+            normalized = self._normalize_local_file_path(manual_candidate)
             if normalized and os.path.exists(normalized):
                 self.last_music_path = normalized
                 self.processed_artifacts["music"] = normalized
+                return normalized
+
+        audio_mode = self.get_audio_handling_mode()
+        state_artifacts = getattr(getattr(self, "current_project_state", None), "artifacts", {}) if getattr(self, "current_project_state", None) else {}
+        candidates = []
+        if audio_mode == "clean":
+            candidates.extend(
+                [
+                    getattr(self, "last_music_path", ""),
+                    state_artifacts.get("music", ""),
+                    getattr(self, "last_extracted_audio", ""),
+                    state_artifacts.get("extracted_audio", ""),
+                ]
+            )
+        else:
+            candidates.extend(
+                [
+                    getattr(self, "last_extracted_audio", ""),
+                    state_artifacts.get("extracted_audio", ""),
+                    getattr(self, "last_music_path", ""),
+                    state_artifacts.get("music", ""),
+                ]
+            )
+        for candidate in candidates:
+            normalized = self._normalize_local_file_path(candidate)
+            if normalized and os.path.exists(normalized):
+                if audio_mode == "clean":
+                    self.last_music_path = normalized
+                    self.processed_artifacts["music"] = normalized
+                else:
+                    self.processed_artifacts["background_source"] = normalized
                 return normalized
         return ""
 
@@ -1012,6 +1050,14 @@ class VideoTranslatorGUI(QMainWindow):
         value = self.output_mode_combo.currentText() if hasattr(self, "output_mode_combo") else "Vietnamese subtitles + voice"
         return get_output_mode_key(value)
 
+    def get_audio_handling_mode(self):
+        if not hasattr(self, "audio_handling_combo"):
+            return "fast"
+        value = self.audio_handling_combo.currentData()
+        if value:
+            return str(value).strip().lower()
+        return "fast"
+
     def get_source_language_code(self):
         if not hasattr(self, "lang_whisper_combo"):
             return "auto"
@@ -1056,6 +1102,10 @@ class VideoTranslatorGUI(QMainWindow):
             self.browse_bg_music_btn.setVisible(show_voice)
         if hasattr(self, "browse_mixed_audio_btn"):
             self.browse_mixed_audio_btn.setVisible(show_voice)
+        if hasattr(self, "audio_handling_combo"):
+            self.audio_handling_combo.setVisible(show_voice)
+        if hasattr(self, "audio_handling_hint_label"):
+            self.audio_handling_hint_label.setVisible(show_voice)
 
         if hasattr(self, "output_subtitle_radio"):
             self.output_subtitle_radio.setChecked(mode == "subtitle")
@@ -2186,6 +2236,8 @@ class VideoTranslatorGUI(QMainWindow):
         selected_audio_path = self.resolve_selected_audio_path()
         has_voice_audio = bool(selected_audio_path and os.path.exists(selected_audio_path))
         mode = self.get_output_mode_key()
+        steps = getattr(getattr(self, "current_project_state", None), "steps", {}) or {}
+        voice_running = steps.get("generate_tts") == "running" or steps.get("mix_audio") == "running"
         can_export = False
         if mode == "subtitle":
             can_export = v_ok and bool(self.last_translated_srt_path and os.path.exists(self.last_translated_srt_path))
@@ -2208,7 +2260,11 @@ class VideoTranslatorGUI(QMainWindow):
         generated_mode = not self.using_existing_audio_source()
         self.voiceover_btn.setEnabled(has_translated_text and generated_mode and mode in ("voice", "both"))
         if hasattr(self, "preview_btn"):
-            self.preview_btn.setEnabled(v_ok and has_voice_audio and mode in ("voice", "both"))
+            self.preview_btn.setEnabled(v_ok and has_voice_audio and mode in ("voice", "both") and not voice_running)
+        if hasattr(self, "play_btn"):
+            self.play_btn.setEnabled(v_ok and not voice_running)
+        if hasattr(self, "stop_btn"):
+            self.stop_btn.setEnabled(v_ok and not voice_running)
         if hasattr(self, "blur_area_btn"):
             self.blur_area_btn.setEnabled(v_ok)
         if hasattr(self, "free_voice_combo"):
@@ -2221,6 +2277,8 @@ class VideoTranslatorGUI(QMainWindow):
             self.premium_voice_combo.setEnabled(generated_mode and mode in ("voice", "both") and bool(hasattr(self, "use_premium_voice_radio") and self.use_premium_voice_radio.isChecked()))
         if hasattr(self, "bg_music_edit"):
             self.bg_music_edit.setEnabled(generated_mode and mode in ("voice", "both"))
+        if hasattr(self, "audio_handling_combo"):
+            self.audio_handling_combo.setEnabled(generated_mode and mode in ("voice", "both"))
         if hasattr(self, "mixed_audio_edit"):
             self.mixed_audio_edit.setEnabled(mode in ("voice", "both") and bool(hasattr(self, "use_existing_audio_radio") and self.use_existing_audio_radio.isChecked()))
         if hasattr(self, "preview_voice_btn"):
@@ -2589,11 +2647,19 @@ class VideoTranslatorGUI(QMainWindow):
 
         out_dir = self.voice_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
         bg_path = self.resolve_background_audio_path()
+        audio_handling_mode = self.get_audio_handling_mode()
         voice_name = self.get_active_voice_name()
         voice_speed = self._parse_voice_speed_value()
         timing_sync_mode = str(self.voice_timing_sync_combo.currentText()).strip()
         voice_gain = float(self.voice_gain_spin.value())
         bg_gain = float(self.bg_gain_spin.value())
+
+        try:
+            self.media_player.pause()
+            self.play_btn.setText("Play")
+            self.timeline.set_playing(False)
+        except Exception:
+            pass
 
         self.voiceover_btn.setEnabled(False)
         self.voiceover_btn.setText("Generating... (TTS)")
@@ -2601,6 +2667,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.update_project_step("generate_tts", "running")
         if bg_path:
             self.update_project_step("mix_audio", "running")
+        self.refresh_ui_state()
 
         project_state_path = self.project_service.project_file(self.current_project_state.project_root) if self.current_project_state else ""
         self.voice_thread = VoiceOverWorker(
@@ -2608,6 +2675,7 @@ class VideoTranslatorGUI(QMainWindow):
             segments,
             out_dir,
             bg_path,
+            audio_handling_mode,
             voice_name,
             voice_speed,
             timing_sync_mode,
@@ -2629,6 +2697,7 @@ class VideoTranslatorGUI(QMainWindow):
                 self.update_project_step("mix_audio", "failed")
             QMessageBox.critical(self, "Error", f"Voiceover failed:\n\n{error}")
             self._pipeline_fail("Voiceover failed.")
+            self.refresh_ui_state()
             return
 
         if voice_track and os.path.exists(voice_track):
@@ -2649,6 +2718,7 @@ class VideoTranslatorGUI(QMainWindow):
         else:
             QMessageBox.information(self, "Success", f"Generated Vietnamese voice track:\n\n{voice_track}\n\n(Background not provided, so no mix was created.)")
 
+        self.refresh_ui_state()
         self._pipeline_advance("voiceover")
 
     def preview_video_with_mixed_audio(self):

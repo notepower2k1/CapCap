@@ -171,6 +171,68 @@ def _require_pydub():
         ) from e
 
 
+def _merge_ducking_ranges(
+    *,
+    segments: list,
+    audio_length_ms: int,
+    attack_ms: int,
+    release_ms: int,
+) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    for seg in segments or []:
+        try:
+            start_ms = int(max(0.0, float(seg.get("start", 0.0))) * 1000.0)
+            end_ms = int(max(0.0, float(seg.get("end", 0.0))) * 1000.0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if end_ms <= start_ms:
+            continue
+        duck_start = max(0, start_ms - max(0, attack_ms))
+        duck_end = min(audio_length_ms, end_ms + max(0, release_ms))
+        if duck_end <= duck_start:
+            continue
+        if not ranges or duck_start > ranges[-1][1]:
+            ranges.append((duck_start, duck_end))
+        else:
+            prev_start, prev_end = ranges[-1]
+            ranges[-1] = (prev_start, max(prev_end, duck_end))
+    return ranges
+
+
+def _apply_timeline_ducking(
+    *,
+    background_audio,
+    ducking_ranges: list[tuple[int, int]],
+    duck_amount_db: float,
+    attack_ms: int,
+    release_ms: int,
+):
+    if not ducking_ranges:
+        return background_audio
+
+    processed = background_audio
+    for duck_start, duck_end in ducking_ranges:
+        clip = processed[duck_start:duck_end]
+        if len(clip) <= 0:
+            continue
+
+        attenuated = clip + float(duck_amount_db)
+        fade_in_ms = min(max(0, attack_ms), len(attenuated))
+        fade_out_ms = min(max(0, release_ms), len(attenuated))
+        if fade_in_ms > 0:
+            attenuated = attenuated.fade(from_gain=0.0, to_gain=float(duck_amount_db), start=0, duration=fade_in_ms)
+        if fade_out_ms > 0:
+            fade_out_start = max(0, len(attenuated) - fade_out_ms)
+            attenuated = attenuated.fade(
+                from_gain=float(duck_amount_db),
+                to_gain=0.0,
+                start=fade_out_start,
+                duration=fade_out_ms,
+            )
+        processed = processed[:duck_start] + attenuated + processed[duck_end:]
+    return processed
+
+
 def build_voice_track_from_srt_segments(
     *,
     segments: list,
@@ -226,14 +288,99 @@ def mix_voice_with_background(
     output_wav_path: str,
     background_gain_db: float = 0.0,
     voice_gain_db: float = 0.0,
+    ducking_mode: str = "off",
+    ducking_segments: list | None = None,
+    ducking_amount_db: float = -10.0,
+    ducking_threshold: float = 0.015,
+    ducking_ratio: float = 10.0,
+    ducking_attack_ms: float = 15.0,
+    ducking_release_ms: float = 350.0,
 ) -> str:
-    _require_pydub()
-    from pydub import AudioSegment
-
     if not os.path.exists(background_wav_path):
         raise FileNotFoundError(f"Background file not found: {background_wav_path}")
     if not os.path.exists(voice_wav_path):
         raise FileNotFoundError(f"Voice file not found: {voice_wav_path}")
+
+    mode_key = str(ducking_mode or "off").strip().lower()
+    if mode_key in {"timeline", "segments", "subtitle"}:
+        _require_pydub()
+        from pydub import AudioSegment
+
+        bg = AudioSegment.from_file(background_wav_path).set_frame_rate(16000).set_channels(1)
+        vc = AudioSegment.from_file(voice_wav_path).set_frame_rate(16000).set_channels(1)
+
+        if background_gain_db:
+            bg = bg + background_gain_db
+        if voice_gain_db:
+            vc = vc + voice_gain_db
+
+        if len(vc) > len(bg):
+            bg = bg + AudioSegment.silent(duration=(len(vc) - len(bg)), frame_rate=16000)
+        elif len(bg) > len(vc):
+            vc = vc + AudioSegment.silent(duration=(len(bg) - len(vc)), frame_rate=16000)
+
+        ducking_ranges = _merge_ducking_ranges(
+            segments=list(ducking_segments or []),
+            audio_length_ms=len(bg),
+            attack_ms=int(max(0.0, float(ducking_attack_ms))),
+            release_ms=int(max(0.0, float(ducking_release_ms))),
+        )
+        ducked_bg = _apply_timeline_ducking(
+            background_audio=bg,
+            ducking_ranges=ducking_ranges,
+            duck_amount_db=float(ducking_amount_db),
+            attack_ms=int(max(0.0, float(ducking_attack_ms))),
+            release_ms=int(max(0.0, float(ducking_release_ms))),
+        )
+
+        mixed = ducked_bg.overlay(vc)
+        os.makedirs(os.path.dirname(output_wav_path) or ".", exist_ok=True)
+        mixed.export(output_wav_path, format="wav")
+        return output_wav_path
+
+    if mode_key in {"auto", "duck", "ducking", "sidechain"}:
+        ffmpeg = _ffmpeg_path()
+        if not os.path.exists(ffmpeg):
+            raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
+
+        os.makedirs(os.path.dirname(output_wav_path) or ".", exist_ok=True)
+        bg_volume = f"volume={float(background_gain_db):+.2f}dB"
+        voice_volume = f"volume={float(voice_gain_db):+.2f}dB"
+        filter_complex = (
+            f"[0:a]{bg_volume}[bg];"
+            f"[1:a]{voice_volume},asplit=2[vc_sc][vc_mix];"
+            f"[bg][vc_sc]sidechaincompress="
+            f"threshold={max(0.0001, float(ducking_threshold)):.4f}:"
+            f"ratio={max(1.0, float(ducking_ratio)):.2f}:"
+            f"attack={max(0.0, float(ducking_attack_ms)):.1f}:"
+            f"release={max(0.0, float(ducking_release_ms)):.1f}:"
+            f"makeup=1[ducked];"
+            "[ducked][vc_mix]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[mixed]"
+        )
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-i",
+            background_wav_path,
+            "-i",
+            voice_wav_path,
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[mixed]",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            output_wav_path,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg ducking mix failed:\n{proc.stderr or proc.stdout}")
+        return output_wav_path
+
+    _require_pydub()
+    from pydub import AudioSegment
 
     bg = AudioSegment.from_file(background_wav_path).set_frame_rate(16000).set_channels(1)
     vc = AudioSegment.from_file(voice_wav_path).set_frame_rate(16000).set_channels(1)

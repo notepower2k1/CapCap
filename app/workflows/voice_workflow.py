@@ -146,6 +146,7 @@ class VoiceWorkflow:
         segments,
         output_dir: str,
         background_path: str = "",
+        audio_handling_mode: str = "fast",
         voice_name: str = "vi-VN-HoaiMyNeural",
         voice_speed: float = 1.0,
         timing_sync_mode: str = "off",
@@ -155,6 +156,8 @@ class VoiceWorkflow:
     ):
         state = self._load_state(project_state_path)
         self._mark_started(state, with_background=bool(background_path))
+        audio_mode_key = str(audio_handling_mode or "fast").strip().lower()
+        print(f"[Voice Workflow] Audio handling mode: {audio_mode_key}")
 
         os.makedirs(output_dir, exist_ok=True)
         tmp_dir = os.path.join(output_dir, "_tts_tmp")
@@ -188,13 +191,22 @@ class VoiceWorkflow:
         mixed = ""
         if background_path and os.path.exists(background_path):
             mixed = os.path.join(output_dir, "mixed_vi.wav")
+            if audio_mode_key == "fast":
+                print(f"[Voice Workflow] Fast Mode mix: ducking original/extracted background source {background_path}")
+            else:
+                print(f"[Voice Workflow] Clean Voice mix: overlaying TTS with separated background stem {background_path}")
             self.engine_runtime.mix_voice_with_background(
                 background_wav_path=background_path,
                 voice_wav_path=voice_track,
                 output_wav_path=mixed,
                 background_gain_db=float(bg_gain_db),
                 voice_gain_db=0.0,
+                ducking_mode="timeline" if audio_mode_key == "fast" else "off",
+                ducking_segments=segments if audio_mode_key == "fast" else None,
             )
+            print(f"[Voice Workflow] Mixed output created: {mixed}")
+        else:
+            print("[Voice Workflow] No background source found. Generating voice track only.")
 
         self._mark_completed(
             state,

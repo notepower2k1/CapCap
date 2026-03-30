@@ -19,6 +19,7 @@ class WorkflowRuntime:
         source_language: str = "auto",
         target_language: str = "vi",
         mode: str = "subtitle",
+        audio_handling_mode: str = "fast",
         translator_ai: bool = True,
         whisper_model_name: str = "ggml-base.bin",
     ):
@@ -27,6 +28,7 @@ class WorkflowRuntime:
             source_language=source_language,
             target_language=target_language,
             mode=mode,
+            audio_handling_mode=audio_handling_mode,
             translator_ai=translator_ai,
             whisper_model_name=whisper_model_name,
         )
@@ -37,6 +39,7 @@ class WorkflowRuntime:
         segments,
         output_dir: str,
         background_path: str = "",
+        audio_handling_mode: str = "fast",
         voice_name: str = "vi-VN-HoaiMyNeural",
         voice_speed: float = 1.0,
         timing_sync_mode: str = "off",
@@ -48,6 +51,7 @@ class WorkflowRuntime:
             segments=segments,
             output_dir=output_dir,
             background_path=background_path,
+            audio_handling_mode=audio_handling_mode,
             voice_name=voice_name,
             voice_speed=voice_speed,
             timing_sync_mode=timing_sync_mode,

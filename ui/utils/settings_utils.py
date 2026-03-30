@@ -38,6 +38,7 @@ def save_user_settings(gui):
     s.setValue("subtitle_highlight_color", gui.subtitle_highlight_color_combo.currentText())
     s.setValue("subtitle_highlight_mode", gui.subtitle_highlight_mode_combo.currentText())
     s.setValue("voice_speed", gui.voice_speed_spin.currentText())
+    s.setValue("audio_handling_mode", gui.get_audio_handling_mode())
     s.setValue("voice_gender", gui.voice_gender_combo.currentText())
     s.setValue("voice_timing_sync_mode", gui.voice_timing_sync_combo.currentText())
     s.setValue("voice_gain", gui.voice_gain_spin.value())
@@ -99,6 +100,10 @@ def load_user_settings(gui):
     gui.subtitle_highlight_color_combo.setCurrentText(str(s.value("subtitle_highlight_color", gui.subtitle_highlight_color_combo.currentText())))
     gui.subtitle_highlight_mode_combo.setCurrentText(str(s.value("subtitle_highlight_mode", gui.subtitle_highlight_mode_combo.currentText())))
     gui.voice_speed_spin.setCurrentText(s.value("voice_speed", gui.voice_speed_spin.currentText()))
+    audio_handling_mode = str(s.value("audio_handling_mode", gui.get_audio_handling_mode())).strip().lower()
+    audio_handling_index = gui.audio_handling_combo.findData(audio_handling_mode)
+    if audio_handling_index >= 0:
+        gui.audio_handling_combo.setCurrentIndex(audio_handling_index)
     gui.voice_gender_combo.setCurrentText(s.value("voice_gender", gui.voice_gender_combo.currentText()))
     gui.voice_timing_sync_combo.setCurrentText(s.value("voice_timing_sync_mode", gui.voice_timing_sync_combo.currentText()))
     gui.voice_gain_spin.setValue(float(s.value("voice_gain", gui.voice_gain_spin.value())))

@@ -172,11 +172,12 @@ class RuntimeAssetsWorker(QThread):
 class PrepareWorkflowWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, workspace_root, video_path, mode, source_language, translator_ai, whisper_model_name):
+    def __init__(self, workspace_root, video_path, mode, audio_handling_mode, source_language, translator_ai, whisper_model_name):
         super().__init__()
         self.workspace_root = workspace_root
         self.video_path = video_path
         self.mode = mode
+        self.audio_handling_mode = audio_handling_mode
         self.source_language = source_language
         self.translator_ai = translator_ai
         self.whisper_model_name = whisper_model_name
@@ -189,6 +190,7 @@ class PrepareWorkflowWorker(QThread):
                 source_language=self.source_language,
                 target_language="vi",
                 mode=self.mode,
+                audio_handling_mode=self.audio_handling_mode,
                 translator_ai=self.translator_ai,
                 whisper_model_name=self.whisper_model_name,
             )
@@ -200,12 +202,13 @@ class PrepareWorkflowWorker(QThread):
 class VoiceOverWorker(QThread):
     finished = Signal(str, str, str)
 
-    def __init__(self, workspace_root, segments, output_dir, background_path, voice_name, voice_speed, timing_sync_mode, voice_gain_db, bg_gain_db, project_state_path=""):
+    def __init__(self, workspace_root, segments, output_dir, background_path, audio_handling_mode, voice_name, voice_speed, timing_sync_mode, voice_gain_db, bg_gain_db, project_state_path=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.segments = segments
         self.output_dir = output_dir
         self.background_path = background_path
+        self.audio_handling_mode = audio_handling_mode
         self.voice_name = voice_name
         self.voice_speed = voice_speed
         self.timing_sync_mode = timing_sync_mode
@@ -220,6 +223,7 @@ class VoiceOverWorker(QThread):
                 segments=self.segments,
                 output_dir=self.output_dir,
                 background_path=self.background_path,
+                audio_handling_mode=self.audio_handling_mode,
                 voice_name=self.voice_name,
                 voice_speed=self.voice_speed,
                 timing_sync_mode=self.timing_sync_mode,
@@ -281,14 +285,24 @@ class SegmentAudioPreviewWorker(QThread):
             temp_dir = os.path.join(self.workspace_root, "temp", "segment_audio_preview")
             os.makedirs(temp_dir, exist_ok=True)
             wav_path = os.path.join(temp_dir, f"segment_{self.index}_{os.getpid()}.wav")
+            base_wav_path = os.path.join(temp_dir, f"segment_{self.index}_{os.getpid()}_base.wav")
             engine = EngineRuntime()
-            output = engine.synthesize_segment(
+            engine.synthesize_segment(
                 text=self.text,
-                wav_path=wav_path,
+                wav_path=base_wav_path,
                 voice=self.voice_name,
-                speed=self.voice_speed,
+                speed=1.0,
                 tmp_dir=temp_dir,
             )
+            speed_value = float(self.voice_speed)
+            if abs(speed_value - 1.0) >= 0.02:
+                output = engine.change_wav_speed(
+                    input_wav_path=base_wav_path,
+                    output_wav_path=wav_path,
+                    speed_ratio=speed_value,
+                )
+            else:
+                output = base_wav_path
             self.finished.emit(self.index, output, "")
         except Exception as exc:
             self.finished.emit(self.index, "", str(exc))
@@ -309,14 +323,24 @@ class VoiceSamplePreviewWorker(QThread):
             temp_dir = os.path.join(self.workspace_root, "temp", "voice_sample_preview")
             os.makedirs(temp_dir, exist_ok=True)
             wav_path = os.path.join(temp_dir, f"voice_sample_{os.getpid()}.wav")
+            base_wav_path = os.path.join(temp_dir, f"voice_sample_{os.getpid()}_base.wav")
             engine = EngineRuntime()
-            output = engine.synthesize_segment(
+            engine.synthesize_segment(
                 text=self.text,
-                wav_path=wav_path,
+                wav_path=base_wav_path,
                 voice=self.voice_name,
-                speed=self.voice_speed,
+                speed=1.0,
                 tmp_dir=temp_dir,
             )
+            speed_value = float(self.voice_speed)
+            if abs(speed_value - 1.0) >= 0.02:
+                output = engine.change_wav_speed(
+                    input_wav_path=base_wav_path,
+                    output_wav_path=wav_path,
+                    speed_ratio=speed_value,
+                )
+            else:
+                output = base_wav_path
             self.finished.emit(output, "")
         except Exception as exc:
             self.finished.emit("", str(exc))
