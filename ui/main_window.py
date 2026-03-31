@@ -931,6 +931,27 @@ class VideoTranslatorGUI(QMainWindow):
             if combo_index >= 0:
                 self.audio_handling_combo.setCurrentIndex(combo_index)
         context = self.project_bridge.load_context(state)
+        self.processed_artifacts = {}
+        self.last_original_srt_path = ""
+        self.last_translated_srt_path = ""
+        self.last_extracted_audio = ""
+        self.last_vocals_path = ""
+        self.last_music_path = ""
+        self.last_voice_vi_path = ""
+        self.last_mixed_vi_path = ""
+        self.current_segment_models = []
+        self.current_translated_segment_models = []
+        self.current_segments = []
+        self.current_translated_segments = []
+        if hasattr(self, "audio_source_edit"):
+            self.audio_source_edit.clear()
+        if hasattr(self, "transcript_text"):
+            self.transcript_text.clear()
+        if hasattr(self, "translated_text"):
+            self.translated_text.clear()
+        if hasattr(self, "timeline"):
+            self.timeline.set_segments([])
+            self.timeline.set_playing(False)
         self.processed_artifacts.update(context["artifacts"])
         self.last_original_srt_path = self._normalize_local_file_path(context["last_original_srt_path"] or self.last_original_srt_path)
         self.last_translated_srt_path = self._normalize_local_file_path(context["last_translated_srt_path"] or self.last_translated_srt_path)
@@ -2790,14 +2811,22 @@ class VideoTranslatorGUI(QMainWindow):
         if not any(self._path_within_root(normalized, root) for root in allowed_roots if root):
             return
 
-        if os.path.isdir(normalized):
-            shutil.rmtree(normalized, ignore_errors=True)
-        else:
+        def _on_remove_error(func, target, exc_info):
             try:
-                os.remove(normalized)
+                os.chmod(target, 0o777)
+                func(target)
             except OSError:
                 return
-        removed.append(normalized)
+
+        try:
+            if os.path.isdir(normalized):
+                shutil.rmtree(normalized, onerror=_on_remove_error)
+            else:
+                os.remove(normalized)
+        except OSError:
+            return
+        if not os.path.exists(normalized):
+            removed.append(normalized)
 
     def _reset_project_runtime_state(self) -> None:
         self.current_project_state = None
@@ -2904,6 +2933,7 @@ class VideoTranslatorGUI(QMainWindow):
         workspace_temp_root = os.path.join(self.workspace_root, "temp")
         output_root = os.path.join(self.workspace_root, "output")
         project_root = str(getattr(project_state, "project_root", "") or "").strip()
+        project_state_path = self.project_service.project_file(project_root) if project_root else ""
         allowed_roots = [root for root in [workspace_temp_root, output_root, project_root] if root]
 
         self.cleanup_temp_preview_files()
@@ -2917,6 +2947,7 @@ class VideoTranslatorGUI(QMainWindow):
             ("Preview temp files", self.live_preview_subtitle_path),
             ("Preview temp files", self.live_preview_ass_path),
             ("Preview temp files", self.last_styled_preview_path),
+            ("Project folder", project_state_path),
         ]
         for group_name, candidate in file_candidates:
             before_count = len(removed_paths)

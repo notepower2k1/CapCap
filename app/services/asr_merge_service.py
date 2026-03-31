@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -7,9 +8,27 @@ import re
 from difflib import SequenceMatcher
 
 from core.models import AudioChunk
+from whisper_processor import load_whisper_model, transcribe_audio_with_model
+
+
+_ASR_WORKER_MODEL = None
+
+
+def _init_asr_worker(model_path: str) -> None:
+    global _ASR_WORKER_MODEL
+    _ASR_WORKER_MODEL = load_whisper_model(model_path)
+
+
+def _transcribe_chunk_job(audio_path: str, language: str) -> list[dict]:
+    global _ASR_WORKER_MODEL
+    if _ASR_WORKER_MODEL is None:
+        raise RuntimeError("ASR worker model is not initialized.")
+    return transcribe_audio_with_model(_ASR_WORKER_MODEL, audio_path, language=language)
 
 
 class AsrMergeService:
+    DEFAULT_MAX_WORKERS = 3
+
     def _cache_key(self, *, chunk: AudioChunk, model_path: str, language: str, transcription_config: dict) -> str:
         payload = {
             "audio_path": os.path.abspath(chunk.audio_path),
@@ -68,6 +87,75 @@ class AsrMergeService:
         end = min(float(left.get("end", 0.0)), float(right.get("end", 0.0)))
         return max(0.0, end - start)
 
+    def _recommended_worker_count(self, pending_count: int) -> int:
+        if pending_count <= 1:
+            return 1
+        cpu_count = max(1, os.cpu_count() or 1)
+        return max(1, min(self.DEFAULT_MAX_WORKERS, pending_count, cpu_count))
+
+    def _transcribe_chunks_parallel(
+        self,
+        pending_items: list[dict],
+        *,
+        cache_dir: str,
+        model_path: str,
+        language: str,
+    ) -> None:
+        worker_count = self._recommended_worker_count(len(pending_items))
+        if worker_count <= 1:
+            raise RuntimeError("Parallel ASR requested with only one pending chunk.")
+
+        print(f"[ASR] Using process worker pool on CPU: workers={worker_count}, pending={len(pending_items)}")
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=worker_count,
+            initializer=_init_asr_worker,
+            initargs=(model_path,),
+        ) as executor:
+            future_map = {
+                executor.submit(_transcribe_chunk_job, item["chunk"].audio_path, language): item
+                for item in pending_items
+            }
+            for future in concurrent.futures.as_completed(future_map):
+                item = future_map[future]
+                segments = future.result()
+                item["segments"] = list(segments or [])
+                if cache_dir:
+                    self._save_cached_segments(cache_dir, item["cache_key"], item["segments"])
+
+    def _transcribe_chunks_sequential(
+        self,
+        pending_items: list[dict],
+        *,
+        whisper_adapter,
+        model_path: str,
+        language: str,
+        cache_dir: str,
+    ) -> None:
+        reusable_model = None
+        try:
+            if hasattr(whisper_adapter, "load_model"):
+                reusable_model = whisper_adapter.load_model(model_path)
+        except Exception:
+            reusable_model = None
+
+        for item in pending_items:
+            chunk: AudioChunk = item["chunk"]
+            if reusable_model is not None and hasattr(whisper_adapter, "transcribe_with_model"):
+                segments = whisper_adapter.transcribe_with_model(
+                    reusable_model,
+                    chunk.audio_path,
+                    language=language,
+                )
+            else:
+                segments = whisper_adapter.transcribe(
+                    chunk.audio_path,
+                    model_path,
+                    language=language,
+                )
+            item["segments"] = list(segments or [])
+            if cache_dir:
+                self._save_cached_segments(cache_dir, item["cache_key"], item["segments"])
+
     def transcribe_chunks(
         self,
         chunks: list[AudioChunk],
@@ -79,14 +167,8 @@ class AsrMergeService:
         transcription_config: dict | None = None,
     ) -> list[dict]:
         results = []
-        reusable_model = None
         config_payload = dict(transcription_config or {})
-        try:
-            if hasattr(whisper_adapter, "load_model"):
-                reusable_model = whisper_adapter.load_model(model_path)
-        except Exception:
-            reusable_model = None
-
+        pending_items: list[dict] = []
         for chunk in chunks:
             cache_key = self._cache_key(
                 chunk=chunk,
@@ -96,30 +178,37 @@ class AsrMergeService:
             )
             cached_segments = self._load_cached_segments(cache_dir, cache_key) if cache_dir else None
             from_cache = cached_segments is not None
-            segments = cached_segments
-            if segments is None:
-                if reusable_model is not None and hasattr(whisper_adapter, "transcribe_with_model"):
-                    segments = whisper_adapter.transcribe_with_model(
-                        reusable_model,
-                        chunk.audio_path,
+            result = {
+                "chunk": chunk,
+                "segments": list(cached_segments or []),
+                "cache_key": cache_key,
+                "from_cache": from_cache,
+            }
+            results.append(result)
+            if not from_cache:
+                pending_items.append(result)
+
+        if pending_items:
+            used_parallel = False
+            if self._recommended_worker_count(len(pending_items)) > 1:
+                try:
+                    self._transcribe_chunks_parallel(
+                        pending_items,
+                        cache_dir=cache_dir,
+                        model_path=model_path,
                         language=language,
                     )
-                else:
-                    segments = whisper_adapter.transcribe(
-                        chunk.audio_path,
-                        model_path,
-                        language=language,
-                    )
-                if cache_dir:
-                    self._save_cached_segments(cache_dir, cache_key, segments)
-            results.append(
-                {
-                    "chunk": chunk,
-                    "segments": list(segments or []),
-                    "cache_key": cache_key,
-                    "from_cache": from_cache,
-                }
-            )
+                    used_parallel = True
+                except Exception as exc:
+                    print(f"[ASR] Parallel worker pool failed, falling back to sequential mode: {exc}")
+            if not used_parallel:
+                self._transcribe_chunks_sequential(
+                    pending_items,
+                    whisper_adapter=whisper_adapter,
+                    model_path=model_path,
+                    language=language,
+                    cache_dir=cache_dir,
+                )
         return results
 
     def merge_chunk_results(self, chunk_results: list[dict]) -> list[dict]:

@@ -108,20 +108,6 @@ def browse_video(gui):
     gui.current_project_state = gui.ensure_current_project()
     gui.load_project_context(gui.current_project_state)
 
-    base_no_ext = os.path.splitext(file_path)[0]
-    possible_srts = [base_no_ext + ".srt", base_no_ext + "_vi.srt", base_no_ext + "_original.srt"]
-    for s_path in possible_srts:
-        if os.path.exists(s_path):
-            try:
-                with open(s_path, "r", encoding="utf-8") as handle:
-                    segs = gui.parse_srt_to_segments(handle.read())
-                    if segs:
-                        gui.current_segments = segs
-                        gui.apply_segments_to_timeline()
-                        break
-            except Exception:
-                pass
-
     gui.media_player.pause()
     gui.media_player.setPosition(0)
     QTimer.singleShot(500, gui.video_view.reposition_subtitle)
