@@ -15,7 +15,7 @@ from services import EngineRuntime
 class PreviewMuxWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None):
+    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None, render_subtitles=True):
         super().__init__()
         self.video_path = video_path
         self.audio_path = audio_path
@@ -23,6 +23,7 @@ class PreviewMuxWorker(QThread):
         self.mode = mode
         self.srt_path = srt_path
         self.subtitle_style = subtitle_style or {}
+        self.render_subtitles = bool(render_subtitles)
 
     def run(self):
         temp_mux_path = ""
@@ -36,7 +37,7 @@ class PreviewMuxWorker(QThread):
                 temp_mux_path = os.path.join(temp_dir, f"preview_mux_{int(time.time())}.mp4")
                 current_video = mux_audio_into_video_for_preview(self.video_path, self.audio_path, temp_mux_path)
 
-            if self.mode in ("subtitle", "both") and self.srt_path and os.path.exists(self.srt_path):
+            if self.render_subtitles and self.mode in ("subtitle", "both") and self.srt_path and os.path.exists(self.srt_path):
                 engine = EngineRuntime()
                 ok = engine.embed_subtitles(
                     current_video,

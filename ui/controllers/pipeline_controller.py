@@ -18,6 +18,12 @@ class PipelineController:
         state = self.gui.ensure_current_project()
         if state:
             self.gui.load_project_context(state)
+            self.gui.log(
+                "[Pipeline] Existing project loaded: "
+                f"mode={state.mode}, "
+                f"audio_mode={state.settings.get('audio_handling_mode', '')}, "
+                f"steps={dict(state.steps)}"
+            )
 
         mode = self.gui.get_output_mode_key()
         if mode in ("voice", "both") and self.gui.has_reusable_voice_inputs():
@@ -27,6 +33,13 @@ class PipelineController:
             self.gui.run_all_btn.setText("Generating voice...")
             self.gui.progress_bar.setRange(0, 100)
             self.gui.log("[Voice] Reusing existing transcript, translation, and background assets...")
+            self.gui.log(
+                "[Pipeline] Reuse path: "
+                f"translated_srt_exists={bool(self.gui.translated_text.toPlainText().strip())}, "
+                f"last_translated_srt={self.gui.last_translated_srt_path}, "
+                f"last_extracted_audio={self.gui.last_extracted_audio}, "
+                f"last_music={self.gui.last_music_path}"
+            )
             self.gui.run_voiceover()
             return
 
@@ -36,6 +49,12 @@ class PipelineController:
         self.gui.run_all_btn.setText("Preparing...")
         self.gui.progress_bar.setRange(0, 0)
         self.gui.log("[Prepare] Running prepare workflow...")
+        self.gui.log(
+            "[Pipeline] Direct prepare path: "
+            f"mode={self.gui.get_output_mode_key()}, "
+            f"audio_mode={self.gui.get_audio_handling_mode()}, "
+            f"source_lang={self.gui.get_source_language_code()}"
+        )
         self.gui.prepare_workflow_thread = PrepareWorkflowWorker(
             self.gui.workspace_root,
             video_path,
@@ -66,6 +85,12 @@ class PipelineController:
             self.gui.refresh_ui_state()
             self.gui.schedule_auto_frame_preview()
             self.gui.log(f"[Prepare] Project ready: {state.project_root}")
+            self.gui.log(
+                "[Pipeline] After prepare: "
+                f"steps={dict(state.steps)}, "
+                f"artifacts={dict(state.artifacts)}, "
+                f"audio_mode={state.settings.get('audio_handling_mode', '')}"
+            )
         except Exception as exc:
             self.gui._pipeline_fail("Could not reload project state.")
             self.gui.show_error("Prepare Failed", "Prepare workflow finished but project state could not be loaded.", str(exc))

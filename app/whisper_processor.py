@@ -98,24 +98,16 @@ def _load_whisper_model(model_name):
     return WhisperModel(model_name, **model_kwargs)
 
 
-def transcribe_audio(audio_path, model_path, whisper_path=None, language="auto", task="transcribe"):
-    """
-    Transcribes audio using faster-whisper while keeping the old compatibility API.
+def load_whisper_model(model_path):
+    model_name = _resolve_model_name(model_path)
+    return _load_whisper_model(model_name)
 
-    Args:
-        audio_path (str): Path to the input wav file.
-        model_path (str): Old ggml file path or faster-whisper model name/local directory.
-        whisper_path (str): Unused, kept for compatibility with the old whisper.cpp call sites.
-        language (str): Language of the audio ('auto', 'zh', 'en', etc.).
-        task (str): 'transcribe' to keep original language, 'translate' to translate to English.
-    """
+
+def transcribe_audio_with_model(model, audio_path, *, language="auto", task="transcribe"):
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio not found at {audio_path}")
 
-    model_name = _resolve_model_name(model_path)
     normalized_language = _normalize_language(language)
-    model = _load_whisper_model(model_name)
-
     segments, _info = model.transcribe(
         audio_path,
         language=normalized_language,
@@ -145,6 +137,24 @@ def transcribe_audio(audio_path, model_path, whisper_path=None, language="auto",
         for segment in segments
         if segment.text and segment.text.strip()
     ]
+
+
+def transcribe_audio(audio_path, model_path, whisper_path=None, language="auto", task="transcribe"):
+    """
+    Transcribes audio using faster-whisper while keeping the old compatibility API.
+
+    Args:
+        audio_path (str): Path to the input wav file.
+        model_path (str): Old ggml file path or faster-whisper model name/local directory.
+        whisper_path (str): Unused, kept for compatibility with the old whisper.cpp call sites.
+        language (str): Language of the audio ('auto', 'zh', 'en', etc.).
+        task (str): 'transcribe' to keep original language, 'translate' to translate to English.
+    """
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Audio not found at {audio_path}")
+
+    model = load_whisper_model(model_path)
+    return transcribe_audio_with_model(model, audio_path, language=language, task=task)
 
 if __name__ == "__main__":
     # Test section

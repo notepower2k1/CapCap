@@ -1089,8 +1089,10 @@ class VideoTranslatorGUI(QMainWindow):
             self.voice_section_card.setVisible(show_voice)
         if hasattr(self, "voiceover_btn"):
             self.voiceover_btn.setVisible(show_voice)
-        if hasattr(self, "preview_btn"):
-            self.preview_btn.setVisible(show_voice)
+        if hasattr(self, "quick_preview_btn"):
+            self.quick_preview_btn.setVisible(show_voice)
+        if hasattr(self, "styled_preview_btn"):
+            self.styled_preview_btn.setVisible(show_voice)
         self.mixed_audio_edit.setEnabled(show_voice)
         if hasattr(self, "use_generated_audio_radio"):
             self.use_generated_audio_radio.setVisible(show_voice)
@@ -2259,10 +2261,13 @@ class VideoTranslatorGUI(QMainWindow):
             self.rewrite_translation_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()) and has_translated_text)
         generated_mode = not self.using_existing_audio_source()
         self.voiceover_btn.setEnabled(has_translated_text and generated_mode and mode in ("voice", "both"))
-        if hasattr(self, "preview_btn"):
-            self.preview_btn.setEnabled(v_ok and has_voice_audio and mode in ("voice", "both") and not voice_running)
+        preview_enabled = v_ok and has_voice_audio and mode in ("voice", "both") and not voice_running
+        if hasattr(self, "quick_preview_btn"):
+            self.quick_preview_btn.setEnabled(preview_enabled)
+        if hasattr(self, "styled_preview_btn"):
+            self.styled_preview_btn.setEnabled(preview_enabled)
         if hasattr(self, "play_btn"):
-            self.play_btn.setEnabled(v_ok and not voice_running)
+            self.play_btn.setEnabled(v_ok and not voice_running and not getattr(self, "_styled_preview_running", False))
         if hasattr(self, "stop_btn"):
             self.stop_btn.setEnabled(v_ok and not voice_running)
         if hasattr(self, "blur_area_btn"):
@@ -2653,6 +2658,22 @@ class VideoTranslatorGUI(QMainWindow):
         timing_sync_mode = str(self.voice_timing_sync_combo.currentText()).strip()
         voice_gain = float(self.voice_gain_spin.value())
         bg_gain = float(self.bg_gain_spin.value())
+        self.log(
+            "[Voiceover] Starting with "
+            f"audio_mode={audio_handling_mode}, "
+            f"voice={voice_name}, "
+            f"speed={voice_speed:.2f}, "
+            f"segments={len(segments)}, "
+            f"translated_chars={len(translated_srt)}, "
+            f"background={bg_path or '<none>'}"
+        )
+        if state:
+            self.log(
+                "[Voiceover] State snapshot: "
+                f"project={state.project_root}, "
+                f"steps={dict(state.steps)}, "
+                f"artifacts={dict(state.artifacts)}"
+            )
 
         try:
             self.media_player.pause()
@@ -2724,8 +2745,11 @@ class VideoTranslatorGUI(QMainWindow):
     def preview_video_with_mixed_audio(self):
         self.preview_controller.preview_video_with_mixed_audio()
 
-    def on_preview_ready(self, preview_path, error):
-        self.preview_controller.on_preview_ready(preview_path, error)
+    def preview_video_with_styled_audio(self):
+        self.preview_controller.preview_video_with_styled_audio()
+
+    def on_preview_ready(self, preview_path, error, styled=False, styled_signature=""):
+        self.preview_controller.on_preview_ready(preview_path, error, styled, styled_signature)
 
     def run_all_pipeline(self):
         self.pipeline_controller.run_all_pipeline()
@@ -2790,6 +2814,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.last_voice_vi_path = ""
         self.last_mixed_vi_path = ""
         self.last_preview_video_path = ""
+        self.last_styled_preview_path = ""
+        self.last_styled_preview_signature = ""
         self.last_exported_video_path = ""
         self.last_exact_preview_5s_path = ""
         self.last_exact_preview_frame_path = ""
@@ -2825,6 +2851,7 @@ class VideoTranslatorGUI(QMainWindow):
             self.live_preview_subtitle_path,
             self.live_preview_ass_path,
             self.last_preview_video_path,
+            self.last_styled_preview_path,
             self.last_exact_preview_5s_path,
             self.last_exact_preview_frame_path,
             os.path.join(self.workspace_root, "output", "_tts_tmp"),
@@ -2889,6 +2916,7 @@ class VideoTranslatorGUI(QMainWindow):
             ("Generated voice files", self.last_mixed_vi_path),
             ("Preview temp files", self.live_preview_subtitle_path),
             ("Preview temp files", self.live_preview_ass_path),
+            ("Preview temp files", self.last_styled_preview_path),
         ]
         for group_name, candidate in file_candidates:
             before_count = len(removed_paths)

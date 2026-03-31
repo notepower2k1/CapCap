@@ -125,6 +125,8 @@ def _connect_ui_signals(gui):
     gui.rewrite_translation_btn.clicked.connect(gui.run_rewrite_translation)
     gui.import_translation_btn.clicked.connect(gui.import_translated_srt)
     gui.voiceover_btn.clicked.connect(gui.run_voiceover)
+    gui.quick_preview_btn.clicked.connect(gui.preview_video_with_mixed_audio)
+    gui.styled_preview_btn.clicked.connect(gui.preview_video_with_styled_audio)
     gui.output_mode_combo.currentTextChanged.connect(gui.on_output_mode_changed)
     gui.audio_handling_combo.currentTextChanged.connect(gui.refresh_ui_state)
     gui.final_output_folder_edit.textChanged.connect(gui.voice_output_folder_edit.setText)
@@ -191,6 +193,8 @@ def _initialize_ui_state(gui):
     gui.last_voice_vi_path = ""
     gui.last_mixed_vi_path = ""
     gui.last_preview_video_path = ""
+    gui.last_styled_preview_path = ""
+    gui.last_styled_preview_signature = ""
     gui.last_exported_video_path = ""
     gui.last_exact_preview_5s_path = ""
     gui.last_exact_preview_frame_path = ""
@@ -199,6 +203,7 @@ def _initialize_ui_state(gui):
     gui.live_preview_segments = []
     gui.live_preview_editor_name = ""
     gui._live_preview_signature = None
+    gui._styled_preview_running = False
     gui._syncing_segment_editor = False
     gui._syncing_hidden_editor_text = False
     gui._segment_editor_rows = []
