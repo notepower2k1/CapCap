@@ -11,6 +11,7 @@ from .srt_helpers import (
     format_segments_to_srt,
     format_timestamp,
     parse_srt_to_segments,
+    validate_srt_text,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "get_export_button_label",
     "get_output_mode_key",
     "parse_srt_to_segments",
+    "validate_srt_text",
 ]

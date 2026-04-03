@@ -158,10 +158,14 @@ def _connect_ui_signals(gui):
     gui.subtitle_highlight_color_combo.currentTextChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_highlight_mode_combo.currentTextChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_animation_time_spin.valueChanged.connect(gui.update_subtitle_preview_style)
+    gui.subtitle_position_mode_combo.currentTextChanged.connect(gui.on_subtitle_position_mode_changed)
     gui.subtitle_align_combo.currentTextChanged.connect(gui.update_subtitle_preview_style)
+    gui.subtitle_custom_x_spin.valueChanged.connect(gui.update_subtitle_preview_style)
+    gui.subtitle_custom_y_spin.valueChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_x_offset_spin.valueChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_bottom_offset_spin.valueChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_background_cb.toggled.connect(gui.update_subtitle_preview_style)
+
     gui.on_advanced_toggled(True)
 
 

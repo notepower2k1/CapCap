@@ -1,37 +1,112 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 
-class _NullSubtitleOverlay:
-    W = 640
-    H = 96
+class _SubtitleOverlayWidget(QWidget):
+    """A real-time overlay widget for MpvVideoView."""
 
-    def __init__(self):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setMouseTracking(False)
+        self.current_text = ""
+        self.font_name = "Segoe UI"
+        self.font_size = 20
+        self.font_color = QColor(255, 255, 255)
         self.alignment = "Bottom Center"
         self.x_offset = 0
         self.bottom_offset = 30
+        self.custom_position_enabled = False
+        self.custom_x_percent = 50
+        self.custom_y_percent = 86
+        self.W, self.H = 640, 96
+        self.hide()
 
-    def hide(self):
-        return None
+    def sync_to_view(self):
+        pass
 
-    def set_style(self, **kwargs):
-        if "font_size" in kwargs and kwargs["font_size"]:
-            self.H = max(96, int(kwargs["font_size"] * 4))
+    def set_text(self, text):
+        if self.current_text != text:
+            self.current_text = text
+            self.update()
+
+    def set_style(self, *, font_name=None, font_size=None, font_color=None):
+        changed = False
+        if font_name and font_name != self.font_name:
+            self.font_name = font_name
+            changed = True
+        if font_size and font_size != self.font_size:
+            self.font_size = font_size
+            self.H = max(96, int(font_size * 4))
+            changed = True
+        if font_color and font_color != self.font_color:
+            self.font_color = font_color
+            changed = True
+        if changed:
+            self.update()
 
     def set_alignment(self, alignment: str):
         self.alignment = alignment or "Bottom Center"
+        self.update()
 
-    def set_positioning(self, *, x_offset=None, bottom_offset=None):
+    def set_positioning(self, *, x_offset=None, bottom_offset=None, custom_position_enabled=None, custom_x_percent=None, custom_y_percent=None):
         if x_offset is not None:
             self.x_offset = x_offset
         if bottom_offset is not None:
             self.bottom_offset = bottom_offset
+        if custom_position_enabled is not None:
+            self.custom_position_enabled = bool(custom_position_enabled)
+        if custom_x_percent is not None:
+            self.custom_x_percent = int(custom_x_percent)
+        if custom_y_percent is not None:
+            self.custom_y_percent = int(custom_y_percent)
+        self.update()
 
     def set_layout_width(self, width: int):
-        self.W = max(160, int(width))
+        width = max(160, int(width))
+        if width != self.W:
+            self.W = width
+            self.update()
+
+    def paintEvent(self, event):
+        if not self.current_text and not self.isVisible():
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(0, 0, float(self.W), float(self.H))
+
+        if self.current_text:
+            painter.setPen(self.font_color)
+            font = QFont(self.font_name)
+            font.setPixelSize(max(1, int(self.font_size)))
+            font.setBold(True)
+            painter.setFont(font)
+
+            # Outline
+            outline_offsets = [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)]
+            painter.setPen(QColor(0, 0, 0, 220))
+            for dx, dy in outline_offsets:
+                painter.drawText(rect.translated(dx, dy), Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
+
+            painter.setPen(QColor(0, 0, 0, 120))
+            painter.drawText(rect.translated(2, 2), Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
+
+            painter.setPen(self.font_color)
+            painter.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
+        else:
+            # Placeholder for preview mode
+            painter.setPen(QPen(self.font_color, 1, Qt.DashLine))
+            painter.drawRoundedRect(rect, 10, 10)
+            placeholder_font = QFont(self.font_name)
+            placeholder_font.setPixelSize(12)
+            painter.setFont(placeholder_font)
+            painter.drawText(rect, Qt.AlignCenter, "(Subtitle Preview)")
+
+
 
 
 class _BlurRegionOverlayWindow(QWidget):
@@ -235,8 +310,9 @@ class _BlurRegionOverlayWindow(QWidget):
 
 
 class MpvVideoView(QWidget):
-    """A native widget host for libmpv playback."""
+    """Hosts an MPV video surface and overlays."""
     blurRegionChanged = Signal()
+    subtitlePositionChanged = Signal(int, int)  # x_percent, y_percent
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -245,12 +321,15 @@ class MpvVideoView(QWidget):
         self.setMinimumSize(320, 180)
         self.video_source_width = 0
         self.video_source_height = 0
-        self.subtitle_item = _NullSubtitleOverlay()
+        self.subtitle_item = _SubtitleOverlayWidget(self)
+        self.subtitle_item.raise_()
         self.video_surface = QWidget(self)
         self.video_surface.setAttribute(Qt.WA_NativeWindow, True)
         self.video_surface.setAutoFillBackground(True)
         self.video_surface.setStyleSheet("background-color: black;")
         self.blur_overlay = _BlurRegionOverlayWindow(on_region_changed=self.blurRegionChanged.emit)
+
+
 
     def set_video_dimensions(self, width: int, height: int):
         self.video_source_width = max(0, int(width or 0))
@@ -259,6 +338,7 @@ class MpvVideoView(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.video_surface.setGeometry(self.rect())
+        self.reposition_subtitle()
         self.blur_overlay.sync_to_view()
 
     def moveEvent(self, event):
@@ -295,7 +375,52 @@ class MpvVideoView(QWidget):
         return QRectF(offset_x, offset_y, content_w, content_h)
 
     def reposition_subtitle(self):
-        return None
+        item = self.subtitle_item
+        rect = self.get_video_content_rect()
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+
+        source_w = max(1, self.video_source_width or int(rect.width()))
+        source_h = max(1, self.video_source_height or int(rect.height()))
+        scale_x = rect.width() / source_w
+        scale_y = rect.height() / source_h
+        side_margin_px = 60 * scale_x
+
+        desired_width = min(int(rect.width() - 2 * side_margin_px), max(160, int((source_w - 120) * scale_x)))
+        item.set_layout_width(desired_width)
+
+        item_w, item_h = item.W, item.H
+        left_pad = rect.left() + side_margin_px
+        right_limit = rect.right() - item_w - side_margin_px
+
+        if item.custom_position_enabled:
+            x_pos = rect.left() + (rect.width() * item.custom_x_percent / 100.0) - (item_w / 2.0)
+            y_pos = rect.top() + (rect.height() * item.custom_y_percent / 100.0) - (item_h / 2.0)
+        else:
+            if item.alignment == "Bottom Left":
+                x_pos = left_pad
+            elif item.alignment == "Bottom Right":
+                x_pos = right_limit
+            else:
+                x_pos = rect.left() + (rect.width() - item_w) / 2
+
+            x_pos += item.x_offset * scale_x
+            if item.alignment == "Top Center":
+                y_pos = rect.top() + (item.bottom_offset * scale_y)
+            elif item.alignment == "Center":
+                y_pos = rect.top() + (rect.height() - item_h) / 2 + (item.bottom_offset * scale_y)
+            else:
+                y_pos = rect.bottom() - item_h - (item.bottom_offset * scale_y)
+
+        x_pos = max(left_pad - item_w, min(x_pos, rect.right() + item_w))
+        y_min = rect.top() - item_h
+        y_max = rect.bottom()
+        y_pos = max(y_min, min(y_pos, y_max))
+
+        # We must use move() because it's a QWidget, or setGeometry
+        item.move(int(x_pos), int(y_pos))
+        item.setFixedSize(int(item_w), int(item_h))
+        item.update()
 
     def set_blur_edit_enabled(self, enabled: bool):
         if enabled:

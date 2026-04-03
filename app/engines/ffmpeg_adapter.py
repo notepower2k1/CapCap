@@ -32,6 +32,9 @@ class FFmpegAdapter:
             manual_highlights=subtitle_style.get("manual_highlights", []),
             word_timings=subtitle_style.get("word_timings", []),
             karaoke_timing_mode=subtitle_style.get("karaoke_timing_mode", "vietnamese"),
+            custom_position_enabled=subtitle_style.get("custom_position_enabled", False),
+            custom_position_x=subtitle_style.get("custom_position_x", 50),
+            custom_position_y=subtitle_style.get("custom_position_y", 86),
             blur_region=subtitle_style.get("blur_region"),
         )
 

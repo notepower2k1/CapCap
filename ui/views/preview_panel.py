@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt
+﻿from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -78,7 +78,7 @@ def build_preview_panel(gui):
     editor_title.setObjectName("statusHeadline")
     gui.show_original_subtitle_cb = QCheckBox("Show original script")
     gui.show_original_subtitle_cb.setChecked(True)
-    gui.rewrite_translation_btn = QPushButton("Rewrite with AI")
+    gui.rewrite_translation_btn = QPushButton("Rewrite")
     gui.import_translation_btn = QPushButton("Import SRT")
     editor_top.addWidget(editor_title)
     editor_top.addStretch()
@@ -110,3 +110,4 @@ def build_preview_panel(gui):
     right_layout.addWidget(gui.progress_bar)
     right_layout.addWidget(editor_card, 4)
     return right_panel
+

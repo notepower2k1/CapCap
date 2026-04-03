@@ -37,6 +37,9 @@ class ExportWorkflow:
             "font_color": subtitle_style.get("font_color", "&H00FFFFFF"),
             "background_box": subtitle_style.get("background_box", False),
             "animation": subtitle_style.get("animation", "Static"),
+            "custom_position_enabled": subtitle_style.get("custom_position_enabled", False),
+            "custom_position_x": subtitle_style.get("custom_position_x", 50),
+            "custom_position_y": subtitle_style.get("custom_position_y", 86),
             "blur_region": subtitle_style.get("blur_region"),
         }
 

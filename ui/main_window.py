@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import os
 import re
 import time
@@ -31,6 +31,7 @@ from helpers import (
     get_export_button_label,
     get_output_mode_key,
     parse_srt_to_segments,
+    validate_srt_text,
 )
 from video_processor import srt_to_ass
 from utils.display_utils import (
@@ -424,6 +425,9 @@ class VideoTranslatorGUI(QMainWindow):
     def parse_srt_to_segments(self, srt_text):
         return parse_srt_to_segments(srt_text)
 
+    def validate_srt_text(self, srt_text, expected_len=None):
+        return validate_srt_text(srt_text, expected_len=expected_len)
+
     def extract_subtitle_text_entries(self, srt_text):
         return extract_subtitle_text_entries(srt_text)
 
@@ -775,13 +779,37 @@ class VideoTranslatorGUI(QMainWindow):
         }
         return mapping.get(self.subtitle_highlight_color_combo.currentText().strip(), "#FFD400")
 
+    def is_custom_subtitle_position_mode(self) -> bool:
+        if not hasattr(self, "subtitle_position_mode_combo"):
+            return False
+        return str(self.subtitle_position_mode_combo.currentData() or "anchor").strip().lower() == "custom"
+
+    def on_subtitle_position_mode_changed(self, *_args):
+        is_custom = self.is_custom_subtitle_position_mode()
+        if hasattr(self, "subtitle_align_label"):
+            self.subtitle_align_label.setVisible(not is_custom)
+        if hasattr(self, "subtitle_align_combo"):
+            self.subtitle_align_combo.setVisible(not is_custom)
+        if hasattr(self, "subtitle_custom_x_label"):
+            self.subtitle_custom_x_label.setVisible(is_custom)
+        if hasattr(self, "subtitle_custom_x_spin"):
+            self.subtitle_custom_x_spin.setVisible(is_custom)
+        if hasattr(self, "subtitle_custom_y_label"):
+            self.subtitle_custom_y_label.setVisible(is_custom)
+        if hasattr(self, "subtitle_custom_y_spin"):
+            self.subtitle_custom_y_spin.setVisible(is_custom)
+        self.update_subtitle_preview_style()
+
     def _saved_subtitle_style_payload(self) -> dict:
         return {
             "preset": self.get_selected_subtitle_preset(),
             "font": self.subtitle_font_combo.currentText().strip(),
             "size": int(self.subtitle_font_size_spin.value()),
             "color": self.subtitle_color_hex,
+            "position_mode": str(self.subtitle_position_mode_combo.currentData() or "anchor"),
             "position": self.subtitle_align_combo.currentText().strip(),
+            "custom_x": int(self.subtitle_custom_x_spin.value()),
+            "custom_y": int(self.subtitle_custom_y_spin.value()),
             "animation": self.subtitle_animation_combo.currentText().strip(),
             "animation_time": float(self.subtitle_animation_time_spin.value()),
             "karaoke_timing_mode": str(self.subtitle_karaoke_timing_combo.currentData() or "vietnamese"),
@@ -848,7 +876,13 @@ class VideoTranslatorGUI(QMainWindow):
         self.subtitle_font_size_spin.setValue(int(preset.get("size", self.subtitle_font_size_spin.value())))
         self.subtitle_color_hex = str(preset.get("color", self.subtitle_color_hex)).upper()
         self.subtitle_color_btn.setText(self.subtitle_color_hex)
+        position_mode = str(preset.get("position_mode", self.subtitle_position_mode_combo.currentData() or "anchor")).strip().lower()
+        position_mode_index = self.subtitle_position_mode_combo.findData(position_mode)
+        if position_mode_index >= 0:
+            self.subtitle_position_mode_combo.setCurrentIndex(position_mode_index)
         self.subtitle_align_combo.setCurrentText(str(preset.get("position", self.subtitle_align_combo.currentText())))
+        self.subtitle_custom_x_spin.setValue(int(preset.get("custom_x", self.subtitle_custom_x_spin.value())))
+        self.subtitle_custom_y_spin.setValue(int(preset.get("custom_y", self.subtitle_custom_y_spin.value())))
         self.subtitle_animation_combo.setCurrentText(str(preset.get("animation", self.subtitle_animation_combo.currentText())))
         self.subtitle_animation_time_spin.setValue(float(preset.get("animation_time", self.subtitle_animation_time_spin.value())))
         karaoke_mode = str(preset.get("karaoke_timing_mode", self.subtitle_karaoke_timing_combo.currentData() or "vietnamese"))
@@ -1248,6 +1282,9 @@ class VideoTranslatorGUI(QMainWindow):
         item.set_positioning(
             x_offset=int(self.subtitle_x_offset_spin.value()),
             bottom_offset=int(self.subtitle_bottom_offset_spin.value()),
+            custom_position_enabled=self.is_custom_subtitle_position_mode(),
+            custom_x_percent=int(self.subtitle_custom_x_spin.value()),
+            custom_y_percent=int(self.subtitle_custom_y_spin.value()),
         )
         self.video_view.reposition_subtitle()
         self.sync_live_subtitle_preview()
@@ -1290,8 +1327,12 @@ class VideoTranslatorGUI(QMainWindow):
             ) or preset.get("animation", "Static"),
             "animation_duration": float(self.subtitle_animation_time_spin.value()),
             "karaoke_timing_mode": str(self.subtitle_karaoke_timing_combo.currentData() or "vietnamese"),
+            "position_mode": "custom" if self.is_custom_subtitle_position_mode() else "anchor",
             "alignment": alignment_map.get(self.subtitle_align_combo.currentText(), 2),
             "margin_v": int(self.subtitle_bottom_offset_spin.value()),
+            "custom_position_enabled": self.is_custom_subtitle_position_mode(),
+            "custom_position_x": int(self.subtitle_custom_x_spin.value()),
+            "custom_position_y": int(self.subtitle_custom_y_spin.value()),
             "background_box": bool(self.subtitle_background_cb.isChecked() if is_custom else preset.get("background_box", False)),
             "bold": bool(self.subtitle_bold_cb.isChecked() if is_custom else preset.get("bold", False)),
             "preset_key": self.get_selected_subtitle_preset(),
@@ -1324,7 +1365,7 @@ class VideoTranslatorGUI(QMainWindow):
                 f"{preset.get('label', 'Preset')}: {preset.get('summary', '')}"
             )
         self._update_animation_time_visibility()
-        self.update_subtitle_preview_style()
+        self.on_subtitle_position_mode_changed()
 
     def _update_animation_time_visibility(self):
         current_animation = self.subtitle_animation_combo.currentText().strip().lower()
@@ -2151,6 +2192,9 @@ class VideoTranslatorGUI(QMainWindow):
             animation_duration=subtitle_style.get("animation_duration", 0.22),
             manual_highlights=subtitle_style.get("manual_highlights", []),
             word_timings=subtitle_style.get("word_timings", []),
+            custom_position_enabled=subtitle_style.get("custom_position_enabled", False),
+            custom_position_x=subtitle_style.get("custom_position_x", 50),
+            custom_position_y=subtitle_style.get("custom_position_y", 86),
         )
         self._live_preview_signature = preview_signature
         self.processed_artifacts["subtitle_preview_srt"] = self.live_preview_subtitle_path
@@ -2233,6 +2277,21 @@ class VideoTranslatorGUI(QMainWindow):
             self._set_segment_editor_highlight(active_index)
             self._set_editor_highlight(self.translated_text, active_index if target_editor is self.translated_text else -1)
             self._set_editor_highlight(self.transcript_text, active_index if target_editor is self.transcript_text else -1)
+
+            # Update live overlay text for faster feedback
+            if hasattr(self, "video_view"):
+                if 0 <= active_index < len(segments):
+                    self.video_view.subtitle_item.set_text(segments[active_index].get("text", ""))
+                    self.video_view.subtitle_item.show()
+                else:
+                    self.video_view.subtitle_item.set_text("")
+                    # Don't necessarily hide if we want to show the placeholder during style editing
+                    # but for now let's hide if no segment is active during playback
+                    if not self.media_player.is_playing():
+                         self.video_view.subtitle_item.show() # Show placeholder
+                    else:
+                         self.video_view.subtitle_item.hide()
+                self.video_view.reposition_subtitle()
         except Exception as exc:
             self.log(f"[Preview] subtitle highlight skipped: {exc}")
 

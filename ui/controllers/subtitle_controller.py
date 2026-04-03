@@ -143,9 +143,17 @@ class SubtitleController:
             return
         self._open_rewrite_dialog(source_segments, translated_segments)
 
+    def _validate_rewrite_srt(self, srt_text: str):
+        normalized_text = str(srt_text or "").strip()
+        expected_len = len(self.gui.current_translated_segments or self.gui.current_segments or []) or None
+        is_valid, parsed_segments, validation_error = self.gui.validate_srt_text(normalized_text, expected_len=expected_len)
+        if is_valid:
+            return True, parsed_segments, "srt", ""
+        return False, [], "invalid", validation_error or "Invalid SRT format."
+
     def on_rewrite_translation_finished(self, translated_srt, error):
         self.gui.rewrite_translation_btn.setEnabled(True)
-        self.gui.rewrite_translation_btn.setText("Rewrite with AI")
+        self.gui.rewrite_translation_btn.setText("Rewrite")
         if hasattr(self.gui, "_rewrite_generate_btn"):
             self.gui._rewrite_generate_btn.setEnabled(True)
             self.gui._rewrite_generate_btn.setText("Generate Preview")
@@ -161,10 +169,11 @@ class SubtitleController:
 
         if hasattr(self.gui, "_rewrite_preview_edit"):
             self.gui._rewrite_preview_edit.setPlainText(translated_srt)
-        if hasattr(self.gui, "_rewrite_apply_btn"):
-            self.gui._rewrite_apply_btn.setEnabled(True)
+        if hasattr(self.gui, "_rewrite_preview_status_updater"):
+            self.gui._rewrite_preview_status_updater()
         if hasattr(self.gui, "_rewrite_status_label"):
-            self.gui._rewrite_status_label.setText("Preview is ready. Review it and press Apply if it matches your style.")
+            self.gui._rewrite_status_label.setText("AI preview is ready. You can keep editing it, then press Apply when the SRT format is valid.")
+            self.gui._rewrite_status_label.setStyleSheet("color: #8ad7ff; font-size: 12px; font-weight: 700;")
         self.gui.update_project_step("refine_translation", "done")
         self.gui.refresh_ui_state()
 
@@ -174,11 +183,23 @@ class SubtitleController:
             return
         translated_srt = preview_edit.toPlainText().strip()
         if not translated_srt:
-            QMessageBox.warning(self.gui, "Rewrite Preview", "Please generate a rewrite preview first.")
+            QMessageBox.warning(self.gui, "Rewrite", "Please enter or generate rewritten subtitle content first.")
             return
 
-        self.gui.translated_text.setText(translated_srt)
-        self.gui.apply_edited_translation(show_message=False, force_apply=True)
+        is_valid_srt, parsed_segments, _validation_mode, validation_error = self._validate_rewrite_srt(translated_srt)
+        if not is_valid_srt:
+            QMessageBox.warning(
+                self.gui,
+                "Invalid SRT",
+                f"Rewrite content must stay in valid SRT format.\n\n{validation_error}\n\nExample:\n1\n00:00:01,000 --> 00:00:02,000\nXin chao",
+            )
+            return
+
+        self.gui.current_translated_segments = parsed_segments
+        self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(parsed_segments, translated=True)
+        normalized_srt = self.gui.format_to_srt(parsed_segments)
+        self.gui.translated_text.setText(normalized_srt)
+        self.gui.apply_segments_to_timeline()
 
         out_path = self.gui.last_translated_srt_path
         if not out_path:
@@ -190,7 +211,7 @@ class SubtitleController:
                 out_path = os.path.join(out_folder, file_basename + "_vi.srt")
         if out_path:
             with open(out_path, "w", encoding="utf-8") as handle:
-                handle.write(translated_srt)
+                handle.write(normalized_srt)
             self.gui.last_translated_srt_path = out_path
             self.gui.processed_artifacts["srt_translated"] = out_path
             self.gui.persist_translation_project_data(self.gui.current_translated_segments, out_path)
@@ -200,12 +221,14 @@ class SubtitleController:
         dialog = getattr(self.gui, "_rewrite_dialog", None)
         if dialog:
             dialog.accept()
-        QMessageBox.information(self.gui, "Rewrite Applied", "The AI rewrite preview was applied to the subtitle editor.")
+        self.gui.schedule_live_subtitle_preview_refresh()
+        self.gui.schedule_auto_frame_preview()
+        QMessageBox.information(self.gui, "Rewrite Applied", "The rewritten SRT was applied to the subtitle editor.")
         self.gui.refresh_ui_state()
 
     def _open_rewrite_dialog(self, source_segments, translated_segments):
         dialog = QDialog(self.gui)
-        dialog.setWindowTitle("Rewrite with AI")
+        dialog.setWindowTitle("Rewrite Subtitle")
         dialog.setModal(True)
         dialog.setMinimumWidth(760)
         dialog.setMinimumHeight(640)
@@ -244,11 +267,11 @@ class SubtitleController:
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        title = QLabel("Choose rewrite style")
+        title = QLabel("Rewrite subtitle")
         title.setObjectName("statusHeadline")
         layout.addWidget(title)
 
-        hint = QLabel("Generate a rewrite preview first. Subtitle Editor will only be updated after you press Apply.")
+        hint = QLabel("You can edit the Vietnamese subtitle directly here in SRT format. Use AI only if you want a rewrite suggestion, then review and apply it.")
         hint.setObjectName("helperLabel")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -267,29 +290,36 @@ class SubtitleController:
         custom_prompt.setVisible(False)
         layout.addWidget(custom_prompt)
 
-        status_label = QLabel("Ready to generate preview.")
+        status_label = QLabel("Edit the SRT below or generate an AI suggestion.")
         status_label.setObjectName("helperLabel")
         status_label.setWordWrap(True)
         layout.addWidget(status_label)
 
-        preview_label = QLabel("Rewrite Preview")
+        preview_label = QLabel("Rewrite SRT")
         preview_label.setObjectName("sectionTitle")
         layout.addWidget(preview_label)
 
         preview_edit = QTextEdit(dialog)
-        preview_edit.setPlaceholderText("AI rewrite preview will appear here.")
+        preview_edit.setPlaceholderText("Enter valid SRT content here.")
+        preview_edit.setPlainText(self.gui.format_to_srt(translated_segments))
         layout.addWidget(preview_edit, 1)
+
+        self.gui._rewrite_dialog = dialog
+        self.gui._rewrite_preview_edit = preview_edit
 
         button_row = QHBoxLayout()
         button_row.addStretch()
         close_btn = QPushButton("Close", dialog)
         generate_btn = QPushButton("Generate Preview", dialog)
-        apply_btn = QPushButton("Apply", dialog)
-        apply_btn.setEnabled(False)
+        apply_btn = QPushButton("Apply Rewrite", dialog)
         button_row.addWidget(close_btn)
         button_row.addWidget(generate_btn)
         button_row.addWidget(apply_btn)
         layout.addLayout(button_row)
+
+        self.gui._rewrite_apply_btn = apply_btn
+        self.gui._rewrite_generate_btn = generate_btn
+        self.gui._rewrite_status_label = status_label
 
         def _toggle_custom_instruction(checked: bool):
             custom_prompt.setVisible(bool(checked))
@@ -300,6 +330,23 @@ class SubtitleController:
                 base_instruction = ""
             extra_instruction = custom_prompt.toPlainText().strip() if custom_style_cb.isChecked() else ""
             return " ".join(part for part in [base_instruction, extra_instruction] if part).strip()
+
+        def _update_preview_validity():
+            current_text = preview_edit.toPlainText().strip()
+            if not current_text:
+                status_label.setText("Rewrite SRT is empty.")
+                status_label.setStyleSheet("color: #f6c177; font-size: 12px; font-weight: 600;")
+                apply_btn.setEnabled(False)
+                return
+            is_valid_srt, parsed_segments, validation_mode, validation_error = self._validate_rewrite_srt(current_text)
+            if is_valid_srt and validation_mode == "srt":
+                status_label.setText(f"Valid SRT. Segments: {len(parsed_segments)}.")
+                status_label.setStyleSheet("color: #78f0b0; font-size: 12px; font-weight: 700;")
+                apply_btn.setEnabled(True)
+            else:
+                status_label.setText(f"Invalid SRT. {validation_error or 'Keep standard blocks: index, time range, then subtitle text.'}")
+                status_label.setStyleSheet("color: #ff8f8f; font-size: 12px; font-weight: 700;")
+                apply_btn.setEnabled(False)
 
         def _start_preview_generation():
             style_instruction = _build_style_instruction()
@@ -312,11 +359,7 @@ class SubtitleController:
             self.gui.progress_bar.setValue(90)
             self.gui.update_project_step("refine_translation", "running")
 
-            self.gui._rewrite_dialog = dialog
-            self.gui._rewrite_preview_edit = preview_edit
-            self.gui._rewrite_apply_btn = apply_btn
-            self.gui._rewrite_generate_btn = generate_btn
-            self.gui._rewrite_status_label = status_label
+            self.gui._rewrite_preview_status_updater = _update_preview_validity
 
             self.gui.rewrite_translation_thread = RewriteTranslationWorker(
                 source_segments,
@@ -334,6 +377,7 @@ class SubtitleController:
                 "_rewrite_apply_btn",
                 "_rewrite_generate_btn",
                 "_rewrite_status_label",
+                "_rewrite_preview_status_updater",
             ):
                 if hasattr(self.gui, attr):
                     delattr(self.gui, attr)
@@ -342,7 +386,10 @@ class SubtitleController:
         close_btn.clicked.connect(dialog.reject)
         generate_btn.clicked.connect(_start_preview_generation)
         apply_btn.clicked.connect(self.apply_rewrite_preview)
+        preview_edit.textChanged.connect(_update_preview_validity)
         dialog.finished.connect(lambda _result: _cleanup_dialog())
+        self.gui._rewrite_preview_status_updater = _update_preview_validity
+        _update_preview_validity()
         dialog.exec()
 
     def apply_edited_translation(self, show_message=True, force_apply=True):

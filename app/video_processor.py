@@ -137,6 +137,28 @@ def _alignment_anchor_position(video_width: int, video_height: int, alignment: i
     return x, y
 
 
+def _custom_anchor_position(video_width: int, video_height: int, position_x: float, position_y: float):
+    x_ratio = max(0.0, min(100.0, float(position_x))) / 100.0
+    y_ratio = max(0.0, min(100.0, float(position_y))) / 100.0
+    x = int(round(video_width * x_ratio))
+    y = int(round(video_height * y_ratio))
+    return x, y
+
+
+def _position_override_tag(
+    video_width: int,
+    video_height: int,
+    *,
+    custom_position_enabled: bool = False,
+    custom_position_x: float = 50.0,
+    custom_position_y: float = 86.0,
+) -> str:
+    if not custom_position_enabled:
+        return ""
+    x, y = _custom_anchor_position(video_width, video_height, custom_position_x, custom_position_y)
+    return rf"\an5\pos({x},{y})"
+
+
 def _build_typewriter_text(text: str, duration_seconds: float, mapped_words=None) -> str:
     safe_text = (text or "").replace("\n", "\\N")
     if not mapped_words:
@@ -218,21 +240,31 @@ def _apply_animation_tags(
     animation_duration: float,
     word_timing_entries=None,
     timing_mode: str = "vietnamese",
+    custom_position_enabled: bool = False,
+    custom_position_x: float = 50.0,
+    custom_position_y: float = 86.0,
 ) -> str:
     safe_text = (text or "").replace("\n", "\\N")
     style = (animation_style or "Static").strip().lower()
     total_ms = _ms(max(0.05, animation_duration) * 1000.0)
+    position_tag = _position_override_tag(
+        video_width,
+        video_height,
+        custom_position_enabled=custom_position_enabled,
+        custom_position_x=custom_position_x,
+        custom_position_y=custom_position_y,
+    )
     if style == "pop in":
-        return rf"{{\fscx118\fscy118\t(0,{total_ms},\fscx100\fscy100)}}" + safe_text
+        return rf"{{{position_tag}\fscx118\fscy118\t(0,{total_ms},\fscx100\fscy100)}}" + safe_text
     if style == "fade in":
-        return rf"{{\fad({_ms(total_ms * 0.8)},{_ms(total_ms * 0.2)})}}" + safe_text
+        return rf"{{{position_tag}\fad({_ms(total_ms * 0.8)},{_ms(total_ms * 0.2)})}}" + safe_text
     if style == "fade out":
-        return rf"{{\fad({_ms(total_ms * 0.2)},{_ms(total_ms * 0.8)})}}" + safe_text
+        return rf"{{{position_tag}\fad({_ms(total_ms * 0.2)},{_ms(total_ms * 0.8)})}}" + safe_text
     if style == "pulse":
         midpoint = _ms(total_ms * 0.5)
-        return rf"{{\t(0,{midpoint},\fscx105\fscy105)\t({midpoint},{total_ms},\fscx100\fscy100)}}" + safe_text
+        return rf"{{{position_tag}\t(0,{midpoint},\fscx105\fscy105)\t({midpoint},{total_ms},\fscx100\fscy100)}}" + safe_text
     if style == "background appear":
-        return rf"{{\fad({_ms(total_ms * 0.85)},{_ms(total_ms * 0.15)})}}" + safe_text
+        return rf"{{{position_tag}\fad({_ms(total_ms * 0.85)},{_ms(total_ms * 0.15)})}}" + safe_text
     if style == "typewriter":
         source_words = (
             _normalize_word_timings(word_timing_entries, 0.0, duration_seconds)
@@ -240,15 +272,18 @@ def _apply_animation_tags(
             else []
         )
         mapped_words = _map_target_word_timings(text or "", source_words, duration_seconds)
-        return _build_typewriter_text(text or "", min(duration_seconds, max(0.15, animation_duration)), mapped_words=mapped_words)
+        typewriter_text = _build_typewriter_text(text or "", min(duration_seconds, max(0.15, animation_duration)), mapped_words=mapped_words)
+        return (rf"{{{position_tag}}}" if position_tag else "") + typewriter_text
     if style == "slide up":
-        x, y = _alignment_anchor_position(video_width, video_height, alignment, margin_v)
+        if custom_position_enabled:
+            x, y = _custom_anchor_position(video_width, video_height, custom_position_x, custom_position_y)
+        else:
+            x, y = _alignment_anchor_position(video_width, video_height, alignment, margin_v)
         start_y = y + max(24, int(font_size * 0.7))
         fade_in = _ms(total_ms * 0.35)
         fade_out = _ms(total_ms * 0.2)
-        return rf"{{\move({x},{start_y},{x},{y},0,{total_ms})\fad({fade_in},{fade_out})}}{safe_text}"
-    return safe_text
-
+        return rf"{{\an5\move({x},{start_y},{x},{y},0,{total_ms})\fad({fade_in},{fade_out})}}{safe_text}"
+    return (rf"{{{position_tag}}}" if position_tag else "") + safe_text
 
 def _ass_escape_text(text: str) -> str:
     return (text or "").replace("\n", "\\N")
@@ -389,6 +424,11 @@ def _build_karaoke_dialogue_events(
     highlight_color: str,
     word_timing_entries=None,
     timing_mode: str = "vietnamese",
+    video_width: int = 1920,
+    video_height: int = 1080,
+    custom_position_enabled: bool = False,
+    custom_position_x: float = 50.0,
+    custom_position_y: float = 86.0,
 ) -> list[str]:
     source_text = text or ""
     segment_duration = max(0.1, float(end_seconds) - float(start_seconds))
@@ -400,6 +440,14 @@ def _build_karaoke_dialogue_events(
     )
     mapped_words = _map_target_word_timings(source_text, source_words, segment_duration)
     base_text = _ass_escape_text(source_text)
+    position_tag = _position_override_tag(
+        video_width,
+        video_height,
+        custom_position_enabled=custom_position_enabled,
+        custom_position_x=custom_position_x,
+        custom_position_y=custom_position_y,
+    )
+    base_text = (rf"{{{position_tag}}}" if position_tag else "") + base_text
     events = [f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{base_text}"]
     if not mapped_words:
         return events
@@ -410,6 +458,8 @@ def _build_karaoke_dialogue_events(
         if word_end <= word_start:
             continue
         overlay_text = _build_karaoke_overlay_text(source_text, mapped["span"], highlight_color)
+        if position_tag:
+            overlay_text = rf"{{{position_tag}}}" + overlay_text
         events.append(
             "Dialogue: 1,"
             + f"{_seconds_to_ass(word_start)},{_seconds_to_ass(word_end)},Default,,0,0,0,,"
@@ -494,7 +544,10 @@ def srt_to_ass(srt_path: str,
                animation_duration: float = 0.22,
                manual_highlights=None,
                word_timings=None,
-               karaoke_timing_mode: str = "vietnamese") -> str:
+               karaoke_timing_mode: str = "vietnamese",
+               custom_position_enabled: bool = False,
+               custom_position_x: float = 50.0,
+               custom_position_y: float = 86.0) -> str:
     """Convert an SRT file to a fully-styled ASS file.
 
     Key insight: by setting PlayResX/PlayResY equal to the ACTUAL video
@@ -576,6 +629,11 @@ def srt_to_ass(srt_path: str,
                     highlight_color=highlight_color,
                     word_timing_entries=line_word_timings,
                     timing_mode=karaoke_timing_mode,
+                    video_width=video_width,
+                    video_height=video_height,
+                    custom_position_enabled=custom_position_enabled,
+                    custom_position_x=custom_position_x,
+                    custom_position_y=custom_position_y,
                 )
             )
             continue
@@ -598,6 +656,9 @@ def srt_to_ass(srt_path: str,
             animation_duration=animation_duration,
             word_timing_entries=line_word_timings,
             timing_mode=karaoke_timing_mode,
+            custom_position_enabled=custom_position_enabled,
+            custom_position_x=custom_position_x,
+            custom_position_y=custom_position_y,
         )
         events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
 
@@ -686,6 +747,9 @@ def embed_subtitles(video_path, srt_path, output_path,
                     manual_highlights=None,
                     word_timings=None,
                     karaoke_timing_mode="vietnamese",
+                    custom_position_enabled=False,
+                    custom_position_x=50.0,
+                    custom_position_y=86.0,
                     blur_region=None,
                     ffmpeg_path=None):
     """Burn subtitles into video using a properly-styled ASS file.
@@ -724,6 +788,9 @@ def embed_subtitles(video_path, srt_path, output_path,
         manual_highlights=manual_highlights,
         word_timings=word_timings,
         karaoke_timing_mode=karaoke_timing_mode,
+        custom_position_enabled=custom_position_enabled,
+        custom_position_x=custom_position_x,
+        custom_position_y=custom_position_y,
     )
 
     success = embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=ffmpeg, blur_region=blur_region)

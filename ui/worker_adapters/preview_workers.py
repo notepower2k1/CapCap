@@ -169,6 +169,9 @@ class ExactFramePreviewWorker(QThread):
                 manual_highlights=self.subtitle_style.get("manual_highlights", []),
                 word_timings=self.subtitle_style.get("word_timings", []),
                 karaoke_timing_mode=self.subtitle_style.get("karaoke_timing_mode", "vietnamese"),
+                custom_position_enabled=self.subtitle_style.get("custom_position_enabled", False),
+                custom_position_x=self.subtitle_style.get("custom_position_x", 50),
+                custom_position_y=self.subtitle_style.get("custom_position_y", 86),
             )
             self.finished.emit(output, "")
         except Exception as exc:

@@ -1,4 +1,4 @@
-from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt, Signal
 from PySide6.QtGui import QPainter
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView
@@ -82,23 +82,27 @@ class VideoView(QGraphicsView):
         item_w, item_h = item.W, item.H
         left_pad = rect.left() + side_margin_px
         right_limit = rect.right() - item_w - side_margin_px
-        if item.alignment == "Bottom Left":
-            x_pos = left_pad
-        elif item.alignment == "Bottom Right":
-            x_pos = right_limit
+        if item.custom_position_enabled:
+            x_pos = rect.left() + (rect.width() * item.custom_x_percent / 100.0) - (item_w / 2.0)
+            y_pos = rect.top() + (rect.height() * item.custom_y_percent / 100.0) - (item_h / 2.0)
         else:
-            x_pos = rect.left() + (rect.width() - item_w) / 2
+            if item.alignment == "Bottom Left":
+                x_pos = left_pad
+            elif item.alignment == "Bottom Right":
+                x_pos = right_limit
+            else:
+                x_pos = rect.left() + (rect.width() - item_w) / 2
 
-        x_pos += item.x_offset * scale_x
-        if item.alignment == "Top Center":
-            y_pos = rect.top() + (item.bottom_offset * scale_y)
-        elif item.alignment == "Center":
-            y_pos = rect.top() + (rect.height() - item_h) / 2 + (item.bottom_offset * scale_y)
-        else:
-            y_pos = rect.bottom() - item_h - (item.bottom_offset * scale_y)
+            x_pos += item.x_offset * scale_x
+            if item.alignment == "Top Center":
+                y_pos = rect.top() + (item.bottom_offset * scale_y)
+            elif item.alignment == "Center":
+                y_pos = rect.top() + (rect.height() - item_h) / 2 + (item.bottom_offset * scale_y)
+            else:
+                y_pos = rect.bottom() - item_h - (item.bottom_offset * scale_y)
 
-        x_pos = max(left_pad, min(x_pos, right_limit))
-        y_min = rect.top() + 12
-        y_max = rect.bottom() - item_h - 12
+        x_pos = max(left_pad - item_w, min(x_pos, rect.right() + item_w)) # Allow slightly off-screen
+        y_min = rect.top() - item_h
+        y_max = rect.bottom()
         y_pos = max(y_min, min(y_pos, y_max))
         item.setPos(QPointF(x_pos, y_pos))

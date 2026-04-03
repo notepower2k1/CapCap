@@ -307,18 +307,10 @@ class MpvMediaPlayerBackend(QObject):
                 auto_keyword_highlight=subtitle_style.get("auto_keyword_highlight", False),
                 animation_duration=subtitle_style.get("animation_duration", 0.22),
                 manual_highlights=subtitle_style.get("manual_highlights", []),
+                custom_position_enabled=subtitle_style.get("custom_position_enabled", False),
+                custom_position_x=subtitle_style.get("custom_position_x", 50),
+                custom_position_y=subtitle_style.get("custom_position_y", 86),
             )
-        if self._subtitle_ass_path and self._subtitle_ass_path != ass_path and os.path.exists(self._subtitle_ass_path):
-            try:
-                os.remove(self._subtitle_ass_path)
-            except OSError:
-                pass
-        if ass_path == self._subtitle_ass_path and ass_path == self._applied_subtitle_path:
-            try:
-                self._player.sub_visibility = True
-            except Exception:
-                pass
-            return
         self._subtitle_ass_path = ass_path
         self._apply_current_subtitle()
 
@@ -332,14 +324,15 @@ class MpvMediaPlayerBackend(QObject):
                 pass
             self._applied_subtitle_path = ""
             return
-        if self._applied_subtitle_path == self._subtitle_ass_path:
-            try:
-                self._player.sub_visibility = True
-            except Exception:
-                pass
-            return
         try:
-            self._player.command("sub-add", self._subtitle_ass_path, "select")
+            # We use 'sub-add' with 'replace' or just add a new one and select it.
+            # To avoid accumulating too many tracks, we could try to clear first,
+            # but mpv's sub-add with same path might already handle it.
+            # Better: use 'sub-reload' if it's already the applied path.
+            if self._applied_subtitle_path == self._subtitle_ass_path:
+                self._player.command("sub-reload")
+            else:
+                self._player.command("sub-add", self._subtitle_ass_path, "select")
             self._player.sub_visibility = True
             self._applied_subtitle_path = self._subtitle_ass_path
         except Exception:
