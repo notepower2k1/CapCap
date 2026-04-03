@@ -31,6 +31,7 @@ class ProjectState:
     target_language: str = "vi"
     mode: str = "subtitle"
     translator_ai: bool = True
+    translator_style: str = ""
     steps: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_STEP_STATUSES))
     settings: dict[str, Any] = field(default_factory=dict)
     artifacts: dict[str, str] = field(default_factory=dict)
@@ -49,11 +50,12 @@ class ProjectState:
             target_language=str(data.get("target_language", "vi") or "vi"),
             mode=str(data.get("mode", "subtitle") or "subtitle"),
             translator_ai=bool(data.get("translator_ai", True)),
+            translator_style=str(data.get("translator_style", "")),
             steps=steps,
             settings=dict(data.get("settings", {}) or {}),
             artifacts=dict(data.get("artifacts", {}) or {}),
-            created_at=str(data.get("created_at", _utc_now_iso())),
-            updated_at=str(data.get("updated_at", _utc_now_iso())),
+            created_at=str(data.get("created_at", data.get("created_at", _utc_now_iso()))),
+            updated_at=str(data.get("updated_at", data.get("updated_at", _utc_now_iso()))),
         )
 
     def touch(self) -> None:
@@ -80,10 +82,10 @@ class ProjectState:
             "target_language": self.target_language,
             "mode": self.mode,
             "translator_ai": self.translator_ai,
+            "translator_style": self.translator_style,
             "steps": self.steps,
             "settings": self.settings,
             "artifacts": self.artifacts,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
-

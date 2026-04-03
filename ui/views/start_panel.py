@@ -204,6 +204,25 @@ def build_start_group(gui, left_layout):
     target_row.addWidget(gui.lang_target_combo)
     language_layout.addLayout(source_row)
     language_layout.addLayout(target_row)
+    gui.translator_ai_cb = QCheckBox("AI Translator (Polish)")
+    gui.translator_ai_cb.setChecked(True)
+    language_layout.addWidget(gui.translator_ai_cb)
+ 
+    gui.translator_style_label = QLabel("Translation Style (Optional):")
+    gui.translator_style_label.setObjectName("helperLabel")
+    gui.translator_style_edit = QLineEdit()
+    gui.translator_style_edit.setPlaceholderText("e.g. funny, teen slang, formal, etc.")
+    language_layout.addWidget(gui.translator_style_label)
+    language_layout.addWidget(gui.translator_style_edit)
+ 
+    # Logic to show/hide style field based on AI checkbox
+    def toggle_style_field(checked):
+        gui.translator_style_label.setVisible(checked)
+        gui.translator_style_edit.setVisible(checked)
+ 
+    gui.translator_ai_cb.toggled.connect(toggle_style_field)
+    toggle_style_field(gui.translator_ai_cb.isChecked())
+ 
     control_layout.addWidget(language_card)
 
     voice_card, voice_layout = _build_collapsible_section("Section 4: Voice")

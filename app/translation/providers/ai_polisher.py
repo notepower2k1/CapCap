@@ -1,18 +1,13 @@
 import os
 import time
-
 import requests
 
 from ..errors import TranslationConfigError, TranslationProviderError, TranslationValidationError
 from ..srt_utils import parse_numbered_lines, validate_texts
 
-
 class AIPolisherProvider:
     def __init__(self):
-        self.openrouter_url = os.getenv(
-            "OPENROUTER_API_URL",
-            "https://openrouter.ai/api/v1/chat/completions",
-        ).strip()
+        self.openrouter_url = os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions").strip()
         self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         self.openrouter_model = os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free").strip()
         self.openrouter_site_url = os.getenv("OPENROUTER_SITE_URL", "").strip()
@@ -21,75 +16,30 @@ class AIPolisherProvider:
         self.fallback_url = os.getenv("AI_POLISHER_URL", os.getenv("TRANSLATOR_URL", "")).strip()
         self.fallback_api_key = os.getenv("AI_POLISHER_API_KEY", os.getenv("TRANSLATOR_API_KEY", "")).strip()
 
-        self.last_provider = ""
-        self.last_warnings: list[str] = []
-
     def is_configured(self) -> bool:
         return self._has_openrouter() or self._has_fallback()
 
-    def polish_batch(
-        self,
-        *,
-        source_texts: list[str],
-        translated_texts: list[str],
-        src_lang: str,
-        target_lang: str,
-        style_instruction: str = "",
-        timeout: int = 60,
-        max_retries: int = 2,
-    ) -> list[str]:
-        self.last_provider = ""
-        self.last_warnings = []
-
+    def polish_batch(self, *, source_texts: list[str], translated_texts: list[str] = None, src_lang: str, target_lang: str, style_instruction: str = "", timeout: int = 60, max_retries: int = 2) -> tuple[list[str], list[str], str]:
         if not self.is_configured():
-            raise TranslationConfigError(
-                "AI polisher is not configured. Please set OPENROUTER_API_KEY or AI_POLISHER_URL and AI_POLISHER_API_KEY in .env."
-            )
+            raise TranslationConfigError("AI polisher is not configured. Set OPENROUTER_API_KEY or AI_POLISHER_URL in .env.")
 
+        local_warnings = []
         errors = []
 
         if self._has_openrouter():
             try:
-                lines = self._polish_with_openrouter(
-                    source_texts=source_texts,
-                    translated_texts=translated_texts,
-                    src_lang=src_lang,
-                    target_lang=target_lang,
-                    style_instruction=style_instruction,
-                    timeout=timeout,
-                    max_retries=max_retries,
-                )
-                self.last_provider = "openrouter"
-                return lines
-            except TranslationProviderError as e:
+                lines = self._polish_with_openrouter(source_texts=source_texts, translated_texts=translated_texts, src_lang=src_lang, target_lang=target_lang, style_instruction=style_instruction, timeout=timeout, max_retries=max_retries)
+                return lines, local_warnings, "openrouter"
+            except Exception as e:
                 errors.append(str(e))
                 if self._has_fallback():
-                    self.last_warnings.append(
-                        f"OpenRouter polish failed, falling back to translator-api.thach-nv: {e}"
-                    )
-            except TranslationValidationError as e:
-                errors.append(str(e))
-                if self._has_fallback():
-                    self.last_warnings.append(
-                        f"OpenRouter polish returned invalid output, falling back to translator-api.thach-nv: {e}"
-                    )
+                    local_warnings.append(f"OpenRouter failed, using fallback: {e}")
 
         if self._has_fallback():
             try:
-                lines = self._polish_with_fallback(
-                    source_texts=source_texts,
-                    translated_texts=translated_texts,
-                    src_lang=src_lang,
-                    target_lang=target_lang,
-                    style_instruction=style_instruction,
-                    timeout=timeout,
-                    max_retries=max_retries,
-                )
-                self.last_provider = "translator-api.thach-nv"
-                return lines
-            except TranslationProviderError as e:
-                errors.append(str(e))
-            except TranslationValidationError as e:
+                lines = self._polish_with_fallback(source_texts=source_texts, translated_texts=translated_texts, src_lang=src_lang, target_lang=target_lang, style_instruction=style_instruction, timeout=timeout, max_retries=max_retries)
+                return lines, local_warnings, "translator-api.thach-nv"
+            except Exception as e:
                 errors.append(str(e))
 
         raise TranslationProviderError(" | ".join(errors) or "AI polisher failed.")
@@ -100,36 +50,12 @@ class AIPolisherProvider:
     def _has_fallback(self) -> bool:
         return bool(self.fallback_url and self.fallback_api_key)
 
-    def _polish_with_openrouter(
-        self,
-        *,
-        source_texts: list[str],
-        translated_texts: list[str],
-        src_lang: str,
-        target_lang: str,
-        style_instruction: str,
-        timeout: int,
-        max_retries: int,
-    ) -> list[str]:
-        system_prompt = (
-            f"You refine subtitle translations from {src_lang} into {target_lang} for short-form videos. "
-            "Output must be plain text only. "
-            "Return only numbered lines in the form '1. ...'. "
-            "Keep the exact same number of items. "
-            "Do not merge items. Do not split items. "
-            "Do not add commentary, labels, explanations, markdown, or code blocks. "
-            "Make each line sound natural, punchy, concise, and easy to read quickly on screen. "
-            "Preserve the original meaning, tone, and intent without adding new information."
-        )
-        if style_instruction.strip():
-            system_prompt += f" Follow this rewrite style: {style_instruction.strip()}"
-        user_prompt = self._build_prompt(
-            source_texts=source_texts,
-            translated_texts=translated_texts,
-            src_lang=src_lang,
-            target_lang=target_lang,
-            style_instruction=style_instruction,
-        )
+    def _polish_with_openrouter(self, **kwargs) -> list[str]:
+        is_direct = not kwargs.get('translated_texts')
+        mode_str = "Translate" if is_direct else "Refine"
+        system_prompt = f"{mode_str} subtitles from {kwargs['src_lang']} to {kwargs['target_lang']}. Return only numbered lines: '1. Resulting text'. No merge/split."
+        user_prompt = self._build_prompt(source_texts=kwargs['source_texts'], translated_texts=kwargs['translated_texts'], src_lang=kwargs['src_lang'], target_lang=kwargs['target_lang'], style_instruction=kwargs['style_instruction'])
+        
         payload = {
             "model": self.openrouter_model,
             "messages": [
@@ -138,152 +64,58 @@ class AIPolisherProvider:
             ],
             "temperature": 0.2,
         }
-        headers = {
-            "Authorization": f"Bearer {self.openrouter_api_key}",
-            "Content-Type": "application/json",
-        }
-        if self.openrouter_site_url:
-            headers["HTTP-Referer"] = self.openrouter_site_url
-        if self.openrouter_app_name:
-            headers["X-Title"] = self.openrouter_app_name
+        headers = {"Authorization": f"Bearer {self.openrouter_api_key}", "Content-Type": "application/json"}
+        return self._run_request(url=self.openrouter_url, headers=headers, payload=payload, **kwargs)
 
-        return self._run_request(
-            url=self.openrouter_url,
-            headers=headers,
-            payload=payload,
-            timeout=timeout,
-            max_retries=max_retries,
-            expected_items=len(translated_texts),
-            label="OpenRouter polish",
-        )
-
-    def _polish_with_fallback(
-        self,
-        *,
-        source_texts: list[str],
-        translated_texts: list[str],
-        src_lang: str,
-        target_lang: str,
-        style_instruction: str,
-        timeout: int,
-        max_retries: int,
-    ) -> list[str]:
-        prompt = self._build_prompt(
-            source_texts=source_texts,
-            translated_texts=translated_texts,
-            src_lang=src_lang,
-            target_lang=target_lang,
-            style_instruction=style_instruction,
-        )
+    def _polish_with_fallback(self, **kwargs) -> list[str]:
+        prompt = self._build_prompt(source_texts=kwargs['source_texts'], translated_texts=kwargs['translated_texts'], src_lang=kwargs['src_lang'], target_lang=kwargs['target_lang'], style_instruction=kwargs['style_instruction'])
         payload = {"text": prompt}
-        headers = {
-            "x-api-key": self.fallback_api_key,
-            "Content-Type": "application/json",
-        }
-        return self._run_request(
-            url=self.fallback_url,
-            headers=headers,
-            payload=payload,
-            timeout=timeout,
-            max_retries=max_retries,
-            expected_items=len(translated_texts),
-            label="Fallback polish",
-        )
+        headers = {"x-api-key": self.fallback_api_key, "Content-Type": "application/json"}
+        return self._run_request(url=self.fallback_url, headers=headers, payload=payload, **kwargs)
 
-    def _run_request(
-        self,
-        *,
-        url: str,
-        headers: dict,
-        payload: dict,
-        timeout: int,
-        max_retries: int,
-        expected_items: int,
-        label: str,
-    ) -> list[str]:
+    def _run_request(self, url, headers, payload, **kwargs) -> list[str]:
         last_error = ""
-        for attempt in range(1, max_retries + 1):
+        for attempt in range(1, kwargs.get('max_retries', 2) + 1):
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+                response = requests.post(url, headers=headers, json=payload, timeout=kwargs.get('timeout', 60))
                 if response.status_code != 200:
-                    last_error = f"{label} error ({response.status_code}): {response.text}"
-                    if attempt < max_retries:
+                    last_error = f"API error ({response.status_code}): {response.text}"
+                    if attempt < kwargs.get('max_retries', 2):
                         time.sleep(attempt)
                         continue
-                    raise TranslationProviderError(last_error)
-
-                polished = self._extract_text(response.json())
-                lines = parse_numbered_lines(polished)
-                if not validate_texts(lines, expected_items):
-                    raise TranslationValidationError(
-                        f"{label} returned {len(lines)} items for {expected_items} translated segments."
-                    )
+                    raise Exception(last_error)
+                
+                data = response.json()
+                text = self._extract_text(data)
+                lines = parse_numbered_lines(text)
+                if not validate_texts(lines, len(kwargs['source_texts'])):
+                    raise Exception(f"Expected {len(kwargs['source_texts'])} lines, got {len(lines)}")
                 return lines
-            except requests.exceptions.Timeout as e:
-                last_error = f"{label} timed out: {e}"
-                if attempt < max_retries:
+            except Exception as e:
+                last_error = str(e)
+                if attempt < kwargs.get('max_retries', 2):
                     time.sleep(attempt)
                     continue
-            except requests.RequestException as e:
-                last_error = f"{label} request failed: {e}"
-                if attempt < max_retries:
-                    time.sleep(attempt)
-                    continue
+        raise Exception(last_error)
 
-        raise TranslationProviderError(last_error or f"{label} failed.")
+    def _build_prompt(self, source_texts, translated_texts, src_lang, target_lang, style_instruction) -> str:
+        is_direct = not translated_texts
+        style_part = f" Style: {style_instruction}" if style_instruction else ""
+        if is_direct:
+            lines = [f"{i+1}. {s}" for i, s in enumerate(source_texts)]
+            header = f"Translate these {src_lang}->{target_lang} subtitles directly.{style_part}\nFormat: Number. Text"
+        else:
+            lines = [f"{i+1}. {s} ||| {t}" for i, (s, t) in enumerate(zip(source_texts, translated_texts))]
+            header = f"Refine these {src_lang}->{target_lang} subtitle translations.{style_part}\nFormat: Number. Source ||| Draft"
 
-    def _build_prompt(self, *, source_texts: list[str], translated_texts: list[str], src_lang: str, target_lang: str, style_instruction: str = "") -> str:
-        lines = []
-        for idx, (source, translated) in enumerate(zip(source_texts, translated_texts), 1):
-            lines.append(f"{idx}. SOURCE: {source}")
-            lines.append(f"{idx}. DRAFT: {translated}")
-        body = "\n".join(lines)
-        style_rule = ""
-        if style_instruction.strip():
-            style_rule = f"- Rewrite style: {style_instruction.strip()}\n"
-        return (
-            f"Polish the following subtitle translations from {src_lang} into {target_lang} for short-form video subtitles.\n"
-            "Rules:\n"
-            "- Keep the exact same number of items.\n"
-            "- Do not merge items or split items.\n"
-            "- Each numbered item must contain exactly one polished subtitle line.\n"
-            "- Do not add commentary, notes, labels, markdown, quotes, or code fences.\n"
-            "- Preserve meaning, tone, and intent.\n"
-            "- Make each line natural, concise, punchy, and easy to read quickly on screen.\n"
-            "- Prefer conversational Vietnamese that fits short videos.\n"
-            "- Keep wording tight. Remove unnecessary filler.\n"
-            "- Do not invent details or exaggerate emotion.\n"
-            f"{style_rule}"
-            "- Return only numbered lines in the form '1. ...'.\n\n"
-            f"{body}"
-        )
+        return (f"{header}\nRules: Natural, punchy, concise. One resulting line per number. No commentary.\n\n" + "\n".join(lines))
 
     def _extract_text(self, result) -> str:
         if isinstance(result, dict):
             choices = result.get("choices")
             if isinstance(choices, list) and choices:
-                message = choices[0].get("message", {})
-                content = message.get("content")
-                if isinstance(content, str):
-                    return content
-                if isinstance(content, list):
-                    text_parts = []
-                    for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            text_parts.append(str(item.get("text", "")))
-                    merged = "".join(text_parts).strip()
-                    if merged:
-                        return merged
-            if "response" in result:
-                return result["response"]
-            if "translation" in result:
-                return result["translation"]
-            if "translated_text" in result:
-                return result["translated_text"]
-            if "result" in result:
-                inner = result["result"]
-                if isinstance(inner, dict) and "response" in inner:
-                    return inner["response"]
-                if isinstance(inner, str):
-                    return inner
-        raise TranslationProviderError(f"Unexpected AI polisher response format: {result}")
+                content = choices[0].get("message", {}).get("content")
+                if isinstance(content, str): return content
+            if "response" in result: return result["response"]
+            if "result" in result and isinstance(result["result"], str): return result["result"]
+        return str(result)

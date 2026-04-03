@@ -21,6 +21,7 @@ class WorkflowRuntime:
         mode: str = "subtitle",
         audio_handling_mode: str = "fast",
         translator_ai: bool = True,
+        translator_style: str = "",
         whisper_model_name: str = "ggml-base.bin",
     ):
         return self.prepare_workflow.run(
@@ -30,6 +31,7 @@ class WorkflowRuntime:
             mode=mode,
             audio_handling_mode=audio_handling_mode,
             translator_ai=translator_ai,
+            translator_style=translator_style,
             whisper_model_name=whisper_model_name,
         )
 

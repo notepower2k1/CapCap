@@ -1133,7 +1133,12 @@ class VideoTranslatorGUI(QMainWindow):
         return "vi"
 
     def is_ai_polish_enabled(self):
-        return False
+        return getattr(self, "translator_ai_cb", None) and self.translator_ai_cb.isChecked()
+
+    def get_ai_style_instruction(self):
+        if hasattr(self, "translator_style_edit"):
+            return self.translator_style_edit.text().strip()
+        return ""
 
     def on_output_mode_changed(self, value: str):
         mode = self.get_output_mode_key()
@@ -2582,9 +2587,9 @@ class VideoTranslatorGUI(QMainWindow):
 
     def open_model_settings_dialog(self):
         dialog = QDialog(self)
-        dialog.setWindowTitle("Model Settings")
+        dialog.setWindowTitle("Settings")
         dialog.setModal(True)
-        dialog.setMinimumWidth(380)
+        dialog.setMinimumWidth(450)
         dialog.setStyleSheet(
             """
             QDialog {
@@ -2603,7 +2608,7 @@ class VideoTranslatorGUI(QMainWindow):
                 color: #9fb3ca;
                 font-size: 12px;
             }
-            QComboBox {
+            QComboBox, QLineEdit {
                 background-color: #132033;
                 color: #f8fbff;
                 border: 1px solid #2f4868;
@@ -2640,26 +2645,71 @@ class VideoTranslatorGUI(QMainWindow):
             """
         )
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
 
-        title = QLabel("Choose Whisper model")
-        title.setObjectName("statusHeadline")
-        layout.addWidget(title)
-
-        hint = QLabel("Base is faster and lighter. Medium is slower but may transcribe more accurately.")
-        hint.setObjectName("helperLabel")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        combo = QComboBox(dialog)
-        combo.addItem("Base", "base")
-        combo.addItem("Medium", "medium")
-        current_index = combo.findData(self.get_whisper_model_name())
+        # Whisper Section
+        whisper_title = QLabel("Whisper model")
+        whisper_title.setObjectName("statusHeadline")
+        layout.addWidget(whisper_title)
+        
+        whisper_combo = QComboBox(dialog)
+        whisper_combo.addItem("Base (Faster)", "base")
+        whisper_combo.addItem("Medium (Accurate)", "medium")
+        current_index = whisper_combo.findData(self.get_whisper_model_name())
         if current_index >= 0:
-            combo.setCurrentIndex(current_index)
-        layout.addWidget(combo)
+            whisper_combo.setCurrentIndex(current_index)
+        layout.addWidget(whisper_combo)
 
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setStyleSheet("color: #2f4868;")
+        layout.addWidget(divider)
+
+        # AI Translation Section
+        ai_title = QLabel("AI Polish Settings")
+        ai_title.setObjectName("statusHeadline")
+        layout.addWidget(ai_title)
+
+        provider_layout = QHBoxLayout()
+        provider_layout.addWidget(QLabel("Provider:"))
+        provider_combo = QComboBox(dialog)
+        provider_combo.addItem("OpenRouter", "openrouter")
+        provider_combo.addItem("Gemini", "gemini")
+        current_provider = (os.getenv("AI_POLISHER_PROVIDER") or "openrouter").strip().lower()
+        if current_provider == "gemini":
+            provider_combo.setCurrentIndex(1)
+        provider_layout.addWidget(provider_combo, 1)
+        layout.addLayout(provider_layout)
+
+        key_layout = QVBoxLayout()
+        key_label = QLabel("API Key:")
+        key_edit = QLineEdit(dialog)
+        key_edit.setEchoMode(QLineEdit.Password)
+        key_layout.addWidget(key_label)
+        key_layout.addWidget(key_edit)
+        layout.addLayout(key_layout)
+
+        model_layout = QVBoxLayout()
+        model_label = QLabel("AI Model:")
+        model_edit = QLineEdit(dialog)
+        model_layout.addWidget(model_label)
+        model_layout.addWidget(model_edit)
+        layout.addLayout(model_layout)
+
+        def update_provider_fields():
+            p = provider_combo.currentData()
+            if p == "gemini":
+                key_edit.setText(os.getenv("GEMINI_API_KEY", ""))
+                model_edit.setText(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
+            else:
+                key_edit.setText(os.getenv("OPENROUTER_API_KEY", ""))
+                model_edit.setText(os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"))
+        
+        provider_combo.currentIndexChanged.connect(update_provider_fields)
+        update_provider_fields()
+
+        # Buttons
         button_row = QHBoxLayout()
         button_row.addStretch()
         cancel_btn = QPushButton("Cancel", dialog)
@@ -2674,14 +2724,55 @@ class VideoTranslatorGUI(QMainWindow):
         if dialog.exec() != QDialog.Accepted:
             return
 
-        self.selected_whisper_model_name = str(combo.currentData() or "base").strip().lower()
+        # Save Logic
+        new_whisper = str(whisper_combo.currentData() or "base").strip().lower()
+        new_provider = str(provider_combo.currentData()).strip()
+        new_key = key_edit.text().strip()
+        new_model = model_edit.text().strip()
+
+        self.selected_whisper_model_name = new_whisper
+        
+        # Write back to .env
+        env_lines = []
+        if os.path.exists(".env"):
+            with open(".env", "r", encoding="utf-8") as f:
+                env_lines = f.readlines()
+        
+        updates = {
+            "AI_POLISHER_PROVIDER": new_provider
+        }
+        if new_provider == "gemini":
+            updates["GEMINI_API_KEY"] = new_key
+            updates["GEMINI_MODEL"] = new_model
+        else:
+            updates["OPENROUTER_API_KEY"] = new_key
+            updates["OPENROUTER_MODEL"] = new_model
+        
+        new_env_lines = []
+        handled_keys = set()
+        for line in env_lines:
+            match = re.match(r"^([^=]+)=.*", line)
+            if match:
+                k = match.group(1).strip()
+                if k in updates:
+                    new_env_lines.append(f"{k}={updates[k]}\n")
+                    handled_keys.add(k)
+                    continue
+            new_env_lines.append(line)
+        
+        for k, v in updates.items():
+            if k not in handled_keys:
+                new_env_lines.append(f"{k}={v}\n")
+        
+        with open(".env", "w", encoding="utf-8") as f:
+            f.writelines(new_env_lines)
+            
+        # Update os.environ so it takes effect immediately in this session
+        for k, v in updates.items():
+            os.environ[k] = v
+
         self.save_user_settings()
-        self.log(f"[Settings] Whisper model set to {self.get_whisper_model_name()}.")
-        QMessageBox.information(
-            self,
-            "Settings Saved",
-            f"Whisper model is now set to {self.get_whisper_model_name()}.",
-        )
+        QMessageBox.information(self, "Success", "Settings saved and updated!")
 
     def apply_edited_translation(self, show_message=True, force_apply=True):
         result = self.subtitle_controller.apply_edited_translation(show_message=show_message, force_apply=force_apply)

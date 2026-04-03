@@ -21,6 +21,7 @@ class ProjectService:
         *,
         mode: str = "subtitle",
         translator_ai: bool = True,
+        translator_style: str = "",
         input_language: str = "auto",
         target_language: str = "vi",
     ) -> ProjectState:
@@ -28,18 +29,19 @@ class ProjectService:
         project_id = self._build_project_id(video_path)
         project_root = os.path.join(self.projects_root, project_id)
         self._ensure_project_dirs(project_root)
-
+ 
         state_path = self.project_file(project_root)
         if os.path.exists(state_path):
             state = self.load_project(state_path)
             state.input_video = video_path
             state.mode = mode
             state.translator_ai = translator_ai
+            state.translator_style = translator_style
             state.input_language = input_language
             state.target_language = target_language
             self.save_project(state)
             return state
-
+ 
         state = ProjectState(
             project_id=project_id,
             project_root=project_root,
@@ -48,6 +50,7 @@ class ProjectService:
             target_language=target_language,
             mode=mode,
             translator_ai=translator_ai,
+            translator_style=translator_style,
         )
         self.save_project(state)
         return state

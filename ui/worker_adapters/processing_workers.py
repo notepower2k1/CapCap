@@ -172,7 +172,7 @@ class RuntimeAssetsWorker(QThread):
 class PrepareWorkflowWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, workspace_root, video_path, mode, audio_handling_mode, source_language, translator_ai, whisper_model_name):
+    def __init__(self, workspace_root, video_path, mode, audio_handling_mode, source_language, translator_ai, translator_style, whisper_model_name):
         super().__init__()
         self.workspace_root = workspace_root
         self.video_path = video_path
@@ -180,6 +180,7 @@ class PrepareWorkflowWorker(QThread):
         self.audio_handling_mode = audio_handling_mode
         self.source_language = source_language
         self.translator_ai = translator_ai
+        self.translator_style = translator_style
         self.whisper_model_name = whisper_model_name
 
     def run(self):
@@ -192,6 +193,7 @@ class PrepareWorkflowWorker(QThread):
                 mode=self.mode,
                 audio_handling_mode=self.audio_handling_mode,
                 translator_ai=self.translator_ai,
+                translator_style=self.translator_style,
                 whisper_model_name=self.whisper_model_name,
             )
             self.finished.emit(runtime.project_state_path(state), "")

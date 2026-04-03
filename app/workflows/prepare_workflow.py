@@ -126,6 +126,7 @@ class PrepareWorkflow:
         mode: str = "subtitle",
         audio_handling_mode: str = "fast",
         translator_ai: bool = True,
+        translator_style: str = "",
         whisper_model_name: str = "ggml-base.bin",
     ):
         workflow_started = time.perf_counter()
@@ -134,6 +135,7 @@ class PrepareWorkflow:
             video_path,
             mode=mode,
             translator_ai=translator_ai,
+            translator_style=translator_style,
             input_language=source_language,
             target_language=target_language,
         )
@@ -259,6 +261,7 @@ class PrepareWorkflow:
                 raw_segments,
                 src_lang=source_language,
                 enable_polish=translator_ai,
+                style_instruction=project_state.translator_style,
             )
             segment_models = self.segment_service.apply_translations(segment_models, translated_segments)
             self.project_service.save_segment_artifact(
@@ -267,25 +270,14 @@ class PrepareWorkflow:
                 os.path.join("translation", "translation_final.json"),
                 segment_models,
             )
-            if any(segment.refined_translation for segment in segment_models):
-                self.project_service.save_segment_artifact(
-                    project_state,
-                    "translation_refined",
-                    os.path.join("translation", "translation_refined.json"),
-                    segment_models,
-                )
+            project_state.set_step_status("translate_raw", "done")
+            if translator_ai:
                 project_state.set_step_status("refine_translation", "done")
             else:
-                self.project_service.save_segment_artifact(
-                    project_state,
-                    "translation_raw",
-                    os.path.join("translation", "translation_raw.json"),
-                    segment_models,
-                )
                 project_state.set_step_status("refine_translation", "skipped")
-            project_state.set_step_status("translate_raw", "done")
             self.project_service.save_project(project_state)
-        except Exception:
+        except Exception as e:
+            print(f"[AI Translation] Error: {e}")
             project_state.set_step_status("translate_raw", "failed")
             if translator_ai:
                 project_state.set_step_status("refine_translation", "failed")

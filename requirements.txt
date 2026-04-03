@@ -6,11 +6,6 @@ edge-tts
 demucs
 soundfile
 numpy
-librosa
 torch
 huggingface_hub
-llama-cpp-python
-neucodec
-sea-g2p
 faster-whisper
-python-mpv
