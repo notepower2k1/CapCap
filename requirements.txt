@@ -1,4 +1,4 @@
-PySide6
+﻿PySide6
 requests
 python-dotenv
 pydub
@@ -9,3 +9,5 @@ numpy
 torch
 huggingface_hub
 faster-whisper
+llama-cpp-python
+python-mpv

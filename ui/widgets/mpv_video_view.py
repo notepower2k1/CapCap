@@ -322,12 +322,15 @@ class MpvVideoView(QWidget):
         self.video_source_width = 0
         self.video_source_height = 0
         self.subtitle_item = _SubtitleOverlayWidget(self)
-        self.subtitle_item.raise_()
         self.video_surface = QWidget(self)
         self.video_surface.setAttribute(Qt.WA_NativeWindow, True)
         self.video_surface.setAutoFillBackground(True)
         self.video_surface.setStyleSheet("background-color: black;")
         self.blur_overlay = _BlurRegionOverlayWindow(on_region_changed=self.blurRegionChanged.emit)
+        self.video_surface.show()
+        self.video_surface.lower()
+        self.subtitle_item.raise_()
+        self.video_surface.winId()
 
 
 
@@ -338,6 +341,8 @@ class MpvVideoView(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.video_surface.setGeometry(self.rect())
+        self.video_surface.lower()
+        self.subtitle_item.raise_()
         self.reposition_subtitle()
         self.blur_overlay.sync_to_view()
 
@@ -347,6 +352,9 @@ class MpvVideoView(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self.video_surface.show()
+        self.video_surface.lower()
+        self.subtitle_item.raise_()
         self.blur_overlay.sync_to_view()
 
     def hideEvent(self, event):

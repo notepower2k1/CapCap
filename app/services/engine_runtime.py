@@ -32,20 +32,38 @@ class EngineRuntime:
     def transcribe_audio(self, audio_path: str, model_path: str, *, language: str):
         return self.whisper.transcribe(audio_path, model_path, language=language)
 
-    def translate_srt(self, srt_text: str, *, model_path=None, src_lang: str = "auto", enable_polish: bool = True) -> str:
+    def translate_srt(
+        self,
+        srt_text: str,
+        *,
+        model_path=None,
+        src_lang: str = "auto",
+        enable_polish: bool = True,
+        style_instruction: str = "",
+    ) -> str:
         return self.translator.translate_srt(
             srt_text,
             model_path=model_path,
             src_lang=src_lang,
             enable_polish=enable_polish,
+            style_instruction=style_instruction,
         )
 
-    def translate_segments(self, segments, *, model_path=None, src_lang: str = "auto", enable_polish: bool = True):
+    def translate_segments(
+        self,
+        segments,
+        *,
+        model_path=None,
+        src_lang: str = "auto",
+        enable_polish: bool = True,
+        style_instruction: str = "",
+    ):
         return self.translator.translate_segments(
             segments,
             model_path=model_path,
             src_lang=src_lang,
             enable_polish=enable_polish,
+            style_instruction=style_instruction,
         )
 
     def rewrite_translation_segments(self, source_segments, translated_segments, *, model_path=None, src_lang: str = "auto", style_instruction: str = ""):

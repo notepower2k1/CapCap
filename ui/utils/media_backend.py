@@ -203,7 +203,13 @@ class MpvMediaPlayerBackend(QObject):
 
     def setPosition(self, position):
         self._position_ms = int(position)
-        self._player.command("seek", max(0.0, position / 1000.0), "absolute")
+        if not self._source_path:
+            self.positionChanged.emit(self._position_ms)
+            return
+        try:
+            self._player.command("seek", max(0.0, position / 1000.0), "absolute")
+        except Exception:
+            pass
         self.positionChanged.emit(self._position_ms)
 
     def position(self):

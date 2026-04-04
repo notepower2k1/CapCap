@@ -333,6 +333,7 @@ class VideoTranslatorGUI(QMainWindow):
             self.video_view.blurRegionChanged.connect(self.apply_preview_blur_region)
         self.load_voice_preview_catalog()
         self.load_user_settings()
+        self.ensure_local_translator_auto_configured()
         self.refresh_saved_subtitle_style_presets()
 
     def get_selected_subtitle_preset(self) -> str:
@@ -769,6 +770,67 @@ class VideoTranslatorGUI(QMainWindow):
 
     def load_user_settings(self):
         load_user_settings_impl(self)
+
+    def ensure_local_translator_auto_configured(self):
+        provider = str(os.getenv("AI_POLISHER_PROVIDER") or "").strip().lower()
+        if provider != "local":
+            return
+
+        managed_keys = [
+            "LOCAL_TRANSLATOR_N_CTX",
+            "LOCAL_TRANSLATOR_N_THREADS",
+            "LOCAL_TRANSLATOR_N_THREADS_BATCH",
+            "LOCAL_TRANSLATOR_N_BATCH",
+            "LOCAL_TRANSLATOR_N_UBATCH",
+            "LOCAL_TRANSLATOR_GPU_LAYERS",
+            "LOCAL_TRANSLATOR_FLASH_ATTN",
+        ]
+        if all(str(os.getenv(key) or "").strip() for key in managed_keys):
+            return
+
+        from translation.providers.local_polisher import LocalPolisherProvider
+
+        hardware_info = LocalPolisherProvider.detect_runtime_capabilities()
+        recommended = LocalPolisherProvider.recommended_runtime_config(hardware_info)
+        updates = {
+            "LOCAL_TRANSLATOR_N_CTX": str(recommended["n_ctx"]),
+            "LOCAL_TRANSLATOR_N_THREADS": str(recommended["n_threads"]),
+            "LOCAL_TRANSLATOR_N_THREADS_BATCH": str(recommended["n_threads_batch"]),
+            "LOCAL_TRANSLATOR_N_BATCH": str(recommended["n_batch"]),
+            "LOCAL_TRANSLATOR_N_UBATCH": str(recommended["n_ubatch"]),
+            "LOCAL_TRANSLATOR_GPU_LAYERS": str(recommended["gpu_layers"]),
+            "LOCAL_TRANSLATOR_FLASH_ATTN": "true" if recommended["flash_attn"] else "false",
+        }
+
+        env_lines = []
+        if os.path.exists(".env"):
+            with open(".env", "r", encoding="utf-8") as handle:
+                env_lines = handle.readlines()
+
+        new_env_lines = []
+        handled_keys = set()
+        for line in env_lines:
+            match = re.match(r"^([^=]+)=.*", line)
+            if match:
+                key = match.group(1).strip()
+                if key in updates:
+                    new_env_lines.append(f"{key}={updates[key]}\n")
+                    handled_keys.add(key)
+                    continue
+            new_env_lines.append(line)
+
+        for key, value in updates.items():
+            if key not in handled_keys:
+                new_env_lines.append(f"{key}={value}\n")
+
+        with open(".env", "w", encoding="utf-8") as handle:
+            handle.writelines(new_env_lines)
+
+        for key, value in updates.items():
+            os.environ[key] = value
+
+        if hasattr(self, "log"):
+            self.log(f"[Local AI] Auto-optimized for this machine: {LocalPolisherProvider.runtime_status_summary(hardware_info)}")
 
     def _highlight_color_hex(self) -> str:
         mapping = {
@@ -2648,6 +2710,8 @@ class VideoTranslatorGUI(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
 
+        from translation.providers.local_polisher import LocalPolisherProvider
+
         # Whisper Section
         whisper_title = QLabel("Whisper model")
         whisper_title.setObjectName("statusHeadline")
@@ -2674,21 +2738,26 @@ class VideoTranslatorGUI(QMainWindow):
         provider_layout = QHBoxLayout()
         provider_layout.addWidget(QLabel("Provider:"))
         provider_combo = QComboBox(dialog)
-        provider_combo.addItem("OpenRouter", "openrouter")
+        provider_combo.addItem("Local (GGUF)", "local")
         provider_combo.addItem("Gemini", "gemini")
-        current_provider = (os.getenv("AI_POLISHER_PROVIDER") or "openrouter").strip().lower()
-        if current_provider == "gemini":
-            provider_combo.setCurrentIndex(1)
+        current_provider = (os.getenv("AI_POLISHER_PROVIDER") or "local").strip().lower()
+        if current_provider not in {"local", "gemini"}:
+            current_provider = "local"
+        current_provider_index = provider_combo.findData(current_provider)
+        if current_provider_index >= 0:
+            provider_combo.setCurrentIndex(current_provider_index)
         provider_layout.addWidget(provider_combo, 1)
         layout.addLayout(provider_layout)
 
-        key_layout = QVBoxLayout()
+        key_section_widget = QWidget(dialog)
+        key_layout = QVBoxLayout(key_section_widget)
+        key_layout.setContentsMargins(0, 0, 0, 0)
         key_label = QLabel("API Key:")
         key_edit = QLineEdit(dialog)
         key_edit.setEchoMode(QLineEdit.Password)
         key_layout.addWidget(key_label)
         key_layout.addWidget(key_edit)
-        layout.addLayout(key_layout)
+        layout.addWidget(key_section_widget)
 
         model_layout = QVBoxLayout()
         model_label = QLabel("AI Model:")
@@ -2697,16 +2766,172 @@ class VideoTranslatorGUI(QMainWindow):
         model_layout.addWidget(model_edit)
         layout.addLayout(model_layout)
 
+        local_actions_layout = QHBoxLayout()
+        browse_model_btn = QPushButton("Browse Model", dialog)
+        open_models_folder_btn = QPushButton("Open Models Folder", dialog)
+        local_actions_layout.addWidget(browse_model_btn)
+        local_actions_layout.addWidget(open_models_folder_btn)
+        layout.addLayout(local_actions_layout)
+
+        provider_hint = QLabel("")
+        provider_hint.setObjectName("helperLabel")
+        provider_hint.setWordWrap(True)
+        layout.addWidget(provider_hint)
+
+        local_status_label = QLabel("")
+        local_status_label.setObjectName("helperLabel")
+        local_status_label.setWordWrap(True)
+        layout.addWidget(local_status_label)
+
+        local_perf_row_1_widget = QWidget(dialog)
+        local_perf_row_1 = QHBoxLayout(local_perf_row_1_widget)
+        local_perf_row_1.setContentsMargins(0, 0, 0, 0)
+        local_context_label = QLabel("Context:")
+        local_threads_label = QLabel("Threads:")
+        local_n_ctx_edit = QLineEdit(dialog)
+        local_n_ctx_edit.setPlaceholderText("Context")
+        local_threads_edit = QLineEdit(dialog)
+        local_threads_edit.setPlaceholderText("Threads")
+        local_perf_row_1.addWidget(local_context_label)
+        local_perf_row_1.addWidget(local_n_ctx_edit)
+        local_perf_row_1.addWidget(local_threads_label)
+        local_perf_row_1.addWidget(local_threads_edit)
+        layout.addWidget(local_perf_row_1_widget)
+
+        local_perf_row_2_widget = QWidget(dialog)
+        local_perf_row_2 = QHBoxLayout(local_perf_row_2_widget)
+        local_perf_row_2.setContentsMargins(0, 0, 0, 0)
+        local_gpu_layers_label = QLabel("GPU Layers:")
+        local_batch_label = QLabel("Batch:")
+        local_gpu_layers_edit = QLineEdit(dialog)
+        local_gpu_layers_edit.setPlaceholderText("GPU layers")
+        local_batch_edit = QLineEdit(dialog)
+        local_batch_edit.setPlaceholderText("Batch")
+        local_perf_row_2.addWidget(local_gpu_layers_label)
+        local_perf_row_2.addWidget(local_gpu_layers_edit)
+        local_perf_row_2.addWidget(local_batch_label)
+        local_perf_row_2.addWidget(local_batch_edit)
+        layout.addWidget(local_perf_row_2_widget)
+
+        local_perf_row_3_widget = QWidget(dialog)
+        local_perf_row_3 = QHBoxLayout(local_perf_row_3_widget)
+        local_perf_row_3.setContentsMargins(0, 0, 0, 0)
+        local_ubatch_label = QLabel("Ubatch:")
+        local_ubatch_edit = QLineEdit(dialog)
+        local_ubatch_edit.setPlaceholderText("Ubatch")
+        local_flash_attn_cb = QCheckBox("GPU Speed Boost", dialog)
+        local_flash_attn_cb.setToolTip("Use a faster GPU attention mode when supported by the current local AI backend.")
+        local_auto_optimize_btn = QPushButton("Auto Optimize", dialog)
+        local_perf_row_3.addWidget(local_ubatch_label)
+        local_perf_row_3.addWidget(local_ubatch_edit)
+        local_perf_row_3.addWidget(local_flash_attn_cb)
+        local_perf_row_3.addWidget(local_auto_optimize_btn)
+        layout.addWidget(local_perf_row_3_widget)
+
+        def _default_local_model_path() -> str:
+            env_value = os.getenv("LOCAL_TRANSLATOR_MODEL_PATH", "").strip()
+            if env_value:
+                return env_value
+            return os.path.join(os.getcwd(), "models", "ai", "gemma-4-E4B-it-Q4_K_M.gguf")
+
+        def _apply_local_recommended_settings(force_recommended: bool = False):
+            hardware_info = LocalPolisherProvider.detect_runtime_capabilities()
+            recommended = LocalPolisherProvider.recommended_runtime_config(hardware_info)
+            local_status_label.setText(LocalPolisherProvider.runtime_status_summary(hardware_info))
+            if force_recommended or not local_n_ctx_edit.text().strip():
+                local_n_ctx_edit.setText(str(recommended["n_ctx"]))
+            if force_recommended or not local_threads_edit.text().strip():
+                local_threads_edit.setText(str(recommended["n_threads"]))
+            if force_recommended or not local_gpu_layers_edit.text().strip():
+                local_gpu_layers_edit.setText(str(recommended["gpu_layers"]))
+            if force_recommended or not local_batch_edit.text().strip():
+                local_batch_edit.setText(str(recommended["n_batch"]))
+            if force_recommended or not local_ubatch_edit.text().strip():
+                local_ubatch_edit.setText(str(recommended["n_ubatch"]))
+            if force_recommended or not getattr(local_flash_attn_cb, "_manual_override", False):
+                local_flash_attn_cb.setChecked(bool(recommended["flash_attn"]))
+
         def update_provider_fields():
             p = provider_combo.currentData()
-            if p == "gemini":
+            if p == "local":
+                key_edit.clear()
+                model_edit.setText(_default_local_model_path())
+                key_label.setText("API Key:")
+                model_label.setText("Local GGUF model path:")
+                key_edit.setEchoMode(QLineEdit.Normal)
+                key_edit.setEnabled(False)
+                key_label.setEnabled(False)
+                key_section_widget.setVisible(False)
+                browse_model_btn.setVisible(True)
+                open_models_folder_btn.setVisible(True)
+                provider_hint.setText("Use the local GGUF translator by default. Gemini is optional if you want faster cloud performance.")
+                local_status_label.setVisible(True)
+                local_perf_row_1_widget.setVisible(True)
+                local_perf_row_2_widget.setVisible(True)
+                local_perf_row_3_widget.setVisible(True)
+                local_n_ctx_edit.setText(os.getenv("LOCAL_TRANSLATOR_N_CTX", ""))
+                local_threads_edit.setText(os.getenv("LOCAL_TRANSLATOR_N_THREADS", ""))
+                local_gpu_layers_edit.setText(os.getenv("LOCAL_TRANSLATOR_GPU_LAYERS", ""))
+                local_batch_edit.setText(os.getenv("LOCAL_TRANSLATOR_N_BATCH", ""))
+                local_ubatch_edit.setText(os.getenv("LOCAL_TRANSLATOR_N_UBATCH", ""))
+                local_flash_attn_cb._manual_override = bool(os.getenv("LOCAL_TRANSLATOR_FLASH_ATTN", "").strip())
+                local_flash_attn_cb.setChecked(str(os.getenv("LOCAL_TRANSLATOR_FLASH_ATTN", "false")).strip().lower() in {"1", "true", "yes", "on"})
+                _apply_local_recommended_settings(force_recommended=False)
+            elif p == "gemini":
                 key_edit.setText(os.getenv("GEMINI_API_KEY", ""))
                 model_edit.setText(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
+                key_label.setText("API Key:")
+                model_label.setText("AI Model:")
+                key_edit.setEchoMode(QLineEdit.Password)
+                key_edit.setEnabled(True)
+                key_label.setEnabled(True)
+                key_section_widget.setVisible(True)
+                browse_model_btn.setVisible(False)
+                open_models_folder_btn.setVisible(False)
+                provider_hint.setText("Use Gemini for AI translation and rewrite.")
+                local_status_label.setVisible(False)
+                local_perf_row_1_widget.setVisible(False)
+                local_perf_row_2_widget.setVisible(False)
+                local_perf_row_3_widget.setVisible(False)
             else:
-                key_edit.setText(os.getenv("OPENROUTER_API_KEY", ""))
-                model_edit.setText(os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"))
-        
+                key_edit.setText(os.getenv("GEMINI_API_KEY", ""))
+                model_edit.setText(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
+                key_label.setText("API Key:")
+                model_label.setText("AI Model:")
+                key_edit.setEchoMode(QLineEdit.Password)
+                key_edit.setEnabled(True)
+                key_label.setEnabled(True)
+                key_section_widget.setVisible(True)
+                browse_model_btn.setVisible(False)
+                open_models_folder_btn.setVisible(False)
+                provider_hint.setText("Use Gemini as the optional cloud provider when you want higher speed than local GGUF.")
+                local_status_label.setVisible(False)
+                local_perf_row_1_widget.setVisible(False)
+                local_perf_row_2_widget.setVisible(False)
+                local_perf_row_3_widget.setVisible(False)
+
+        def browse_local_model():
+            current_path = model_edit.text().strip()
+            start_dir = current_path if os.path.isdir(current_path) else os.path.dirname(current_path) if current_path else os.path.join(os.getcwd(), "models", "ai")
+            file_path, _ = QFileDialog.getOpenFileName(
+                dialog,
+                "Choose GGUF model",
+                start_dir,
+                "GGUF Models (*.gguf);;All Files (*.*)",
+            )
+            if file_path:
+                model_edit.setText(file_path)
+
+        def open_models_folder():
+            models_dir = os.path.join(os.getcwd(), "models", "ai")
+            os.makedirs(models_dir, exist_ok=True)
+            open_folder_impl(self, models_dir)
+
         provider_combo.currentIndexChanged.connect(update_provider_fields)
+        browse_model_btn.clicked.connect(browse_local_model)
+        open_models_folder_btn.clicked.connect(open_models_folder)
+        local_auto_optimize_btn.clicked.connect(lambda: _apply_local_recommended_settings(force_recommended=True))
+        local_flash_attn_cb.toggled.connect(lambda _checked: setattr(local_flash_attn_cb, "_manual_override", True))
         update_provider_fields()
 
         # Buttons
@@ -2745,8 +2970,14 @@ class VideoTranslatorGUI(QMainWindow):
             updates["GEMINI_API_KEY"] = new_key
             updates["GEMINI_MODEL"] = new_model
         else:
-            updates["OPENROUTER_API_KEY"] = new_key
-            updates["OPENROUTER_MODEL"] = new_model
+            updates["LOCAL_TRANSLATOR_MODEL_PATH"] = new_model
+            updates["LOCAL_TRANSLATOR_N_CTX"] = local_n_ctx_edit.text().strip() or "2048"
+            updates["LOCAL_TRANSLATOR_N_THREADS"] = local_threads_edit.text().strip() or "8"
+            updates["LOCAL_TRANSLATOR_N_THREADS_BATCH"] = local_threads_edit.text().strip() or "8"
+            updates["LOCAL_TRANSLATOR_GPU_LAYERS"] = local_gpu_layers_edit.text().strip() or "0"
+            updates["LOCAL_TRANSLATOR_N_BATCH"] = local_batch_edit.text().strip() or "768"
+            updates["LOCAL_TRANSLATOR_N_UBATCH"] = local_ubatch_edit.text().strip() or "384"
+            updates["LOCAL_TRANSLATOR_FLASH_ATTN"] = "true" if local_flash_attn_cb.isChecked() else "false"
         
         new_env_lines = []
         handled_keys = set()

@@ -108,9 +108,12 @@ def browse_video(gui):
     gui.current_project_state = gui.ensure_current_project()
     gui.load_project_context(gui.current_project_state)
 
-    gui.media_player.pause()
-    gui.media_player.setPosition(0)
-    QTimer.singleShot(500, gui.video_view.reposition_subtitle)
+    try:
+        gui.media_player.pause()
+    except Exception:
+        pass
+    QTimer.singleShot(120, lambda: gui.media_player.setPosition(0))
+    QTimer.singleShot(220, gui.video_view.reposition_subtitle)
     gui.refresh_ui_state()
     gui.sync_live_subtitle_preview()
     gui.schedule_auto_frame_preview()

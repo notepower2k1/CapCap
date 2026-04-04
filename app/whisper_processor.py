@@ -1,5 +1,7 @@
 import os
+import shutil
 from pathlib import Path
+
 
 
 GGML_MODEL_ALIASES = {
@@ -73,13 +75,73 @@ def _workspace_root():
     return Path(__file__).resolve().parents[1]
 
 
+def _candidate_cuda_bin_dirs() -> list[str]:
+    candidates = []
+    workspace_cuda_bin = _workspace_root() / "bin" / "cuda12_fw"
+    if workspace_cuda_bin.exists():
+        candidates.append(str(workspace_cuda_bin))
+    toolkit_root = str(os.getenv("CUDAToolkit_ROOT", "")).strip()
+    if toolkit_root:
+        candidates.append(os.path.join(toolkit_root, "bin"))
+    nvcc_path = shutil.which("nvcc")
+    if nvcc_path:
+        candidates.append(os.path.dirname(os.path.abspath(nvcc_path)))
+    default_root = Path(r"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA")
+    if default_root.exists():
+        version_dirs = sorted(default_root.glob("v*"), reverse=True)
+        for version_dir in version_dirs:
+            candidates.append(str(version_dir / "bin"))
+    unique = []
+    seen = set()
+    for item in candidates:
+        normalized = os.path.normcase(os.path.abspath(item)) if item else ""
+        if normalized and os.path.isdir(normalized) and normalized not in seen:
+            seen.add(normalized)
+            unique.append(normalized)
+    return unique
+
+
+def _ensure_cuda_runtime_on_path() -> None:
+    current_path = os.environ.get("PATH", "")
+    for cuda_bin in _candidate_cuda_bin_dirs():
+        if cuda_bin not in current_path:
+            os.environ["PATH"] = cuda_bin + os.pathsep + os.environ.get("PATH", "")
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(cuda_bin)
+            except Exception:
+                pass
+
+
 def _faster_whisper_cache_dir():
     cache_dir = _workspace_root() / "models" / "faster_whisper"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return str(cache_dir)
 
 
+def _detect_faster_whisper_runtime() -> dict:
+    _ensure_cuda_runtime_on_path()
+    runtime = {
+        "device": "cpu",
+        "compute_type": "int8",
+        "label": "CPU / int8",
+    }
+    try:
+        import ctranslate2
+
+        if ctranslate2.get_cuda_device_count() > 0:
+            runtime = {
+                "device": "cuda",
+                "compute_type": "int8_float16",
+                "label": "CUDA / int8_float16",
+            }
+    except Exception:
+        pass
+    return runtime
+
+
 def _load_whisper_model(model_name):
+    _ensure_cuda_runtime_on_path()
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
@@ -87,15 +149,29 @@ def _load_whisper_model(model_name):
             "faster-whisper is not installed. Run `pip install -r requirements.txt` first."
         ) from exc
 
+    runtime = _detect_faster_whisper_runtime()
     model_kwargs = {
-        "device": "cpu",
-        "compute_type": "int8",
+        "device": runtime["device"],
+        "compute_type": runtime["compute_type"],
     }
 
     if not os.path.isdir(str(model_name)):
         model_kwargs["download_root"] = _faster_whisper_cache_dir()
 
-    return WhisperModel(model_name, **model_kwargs)
+    try:
+        print(f"[Whisper] Loading faster-whisper with {runtime['label']}")
+        return WhisperModel(model_name, **model_kwargs)
+    except Exception as exc:
+        if runtime["device"] == "cuda":
+            fallback_kwargs = {
+                "device": "cpu",
+                "compute_type": "int8",
+            }
+            if not os.path.isdir(str(model_name)):
+                fallback_kwargs["download_root"] = _faster_whisper_cache_dir()
+            print(f"[Whisper] CUDA load failed, falling back to CPU: {exc}")
+            return WhisperModel(model_name, **fallback_kwargs)
+        raise
 
 
 def load_whisper_model(model_path):
@@ -153,8 +229,24 @@ def transcribe_audio(audio_path, model_path, whisper_path=None, language="auto",
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio not found at {audio_path}")
 
+    model_name = _resolve_model_name(model_path)
     model = load_whisper_model(model_path)
-    return transcribe_audio_with_model(model, audio_path, language=language, task=task)
+    try:
+        return transcribe_audio_with_model(model, audio_path, language=language, task=task)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "cublas64_12.dll" in message or "cannot be loaded" in message:
+            print(f"[Whisper] CUDA runtime mismatch detected, falling back to CPU: {message}")
+            cpu_kwargs = {
+                "device": "cpu",
+                "compute_type": "int8",
+            }
+            if not os.path.isdir(str(model_name)):
+                cpu_kwargs["download_root"] = _faster_whisper_cache_dir()
+            from faster_whisper import WhisperModel
+            cpu_model = WhisperModel(model_name, **cpu_kwargs)
+            return transcribe_audio_with_model(cpu_model, audio_path, language=language, task=task)
+        raise
 
 if __name__ == "__main__":
     # Test section
