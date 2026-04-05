@@ -8,4 +8,6 @@ __all__ = [
     "SubtitleOverlayItem",
     "TimelineWidget",
     "VideoView",
+    "PipelineProgressDialog",
 ]
+from .progress_dialog import PipelineProgressDialog

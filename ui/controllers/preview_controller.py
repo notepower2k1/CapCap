@@ -303,7 +303,7 @@ class PreviewController:
             self.gui.frame_preview_image_label.setText("No frame preview yet")
             self.gui.frame_preview_image_label.setPixmap(QPixmap())
             self.gui.frame_preview_status_label.setText("Exact frame preview updates here when available.")
-            QMessageBox.information(self.gui, "Success", f"Final video exported successfully:\n\n{output_path}")
+            self.gui.log(f"[Export] Final video exported successfully: {output_path}")
 
     def on_quick_preview_ready(self, output_path, error):
         self.gui._suspend_live_subtitle_sync = False
@@ -324,11 +324,11 @@ class PreviewController:
             self.gui.media_player.setPosition(0)
             self.gui.sync_live_subtitle_preview()
             self.gui.play_btn.setText("Play")
-            QMessageBox.information(
-                self.gui,
-                "Preview Ready",
-                "Loaded the styled preview into the player.\nPress Play to review the karaoke render, then click 'Export Final Video' when you are satisfied.",
-            )
+            # QMessageBox.information(
+            #     self.gui,
+            #     "Preview Ready",
+            #     "Loaded the styled preview into the player.\nPress Play to review the karaoke render, then click 'Export Final Video' when you are satisfied.",
+            # )
             self.gui._pipeline_done()
             self.gui.apply_segments_to_timeline()
             self.gui.refresh_ui_state()
@@ -442,12 +442,12 @@ class PreviewController:
             self.gui.media_player.setSource(QUrl.fromLocalFile(preview_path))
             self.gui.sync_live_subtitle_preview()
             self.gui.play_btn.setText("Play")
-            QMessageBox.information(
-                self.gui,
-                "Preview Ready",
-                "Loaded the styled preview into the player.\nPress Play to review the karaoke render, then click 'Export Final Video' when you are satisfied.",
-            )
-            self.gui._pipeline_done()
+            # QMessageBox.information(
+            #     self.gui,
+            #     "Preview Ready",
+            #     "Loaded the styled preview into the player.\nPress Play to review the karaoke render, then click 'Export Final Video' when you are satisfied.",
+            # )
+            self.gui.pipeline_controller.pipeline_advance("preview")
             self.gui.apply_segments_to_timeline()
             self.gui.refresh_ui_state()
 

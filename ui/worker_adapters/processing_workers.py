@@ -171,6 +171,7 @@ class RuntimeAssetsWorker(QThread):
 
 class PrepareWorkflowWorker(QThread):
     finished = Signal(str, str)
+    step_started = Signal(str)
 
     def __init__(self, workspace_root, video_path, mode, audio_handling_mode, source_language, translator_ai, translator_style, whisper_model_name):
         super().__init__()
@@ -195,6 +196,7 @@ class PrepareWorkflowWorker(QThread):
                 translator_ai=self.translator_ai,
                 translator_style=self.translator_style,
                 whisper_model_name=self.whisper_model_name,
+                step_callback=lambda s: self.step_started.emit(s)
             )
             self.finished.emit(runtime.project_state_path(state), "")
         except Exception as exc:

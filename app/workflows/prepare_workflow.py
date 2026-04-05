@@ -128,7 +128,9 @@ class PrepareWorkflow:
         translator_ai: bool = True,
         translator_style: str = "",
         whisper_model_name: str = "ggml-base.bin",
-    ):
+        step_callback=None,
+    ) -> str:
+        if step_callback: step_callback("prepare")
         workflow_started = time.perf_counter()
         whisper_model = os.path.join(self.workspace_root, "models", whisper_model_name)
         project_state = self.project_service.ensure_project(
@@ -148,6 +150,7 @@ class PrepareWorkflow:
         srt_translated_path = self.project_service.build_path(project_state, "subtitle", "subtitle.srt")
 
         print("--- Step 1: Extracting audio ---")
+        if step_callback: step_callback("extraction")
         extract_started = time.perf_counter()
         project_state.set_step_status("extract_audio", "running")
         self.project_service.save_project(project_state)
@@ -167,6 +170,7 @@ class PrepareWorkflow:
         print(f"[Audio Handling] Selected mode: {audio_mode_key}")
         if mode in ("voice", "both") and audio_mode_key == "clean":
             print("\n--- Step 1.5: Separating vocals/background ---")
+            if step_callback: step_callback("separation")
             print("[Audio Handling] Clean Voice enabled: running Demucs stem separation before transcription.")
             separation_started = time.perf_counter()
             project_state.set_step_status("separate_audio", "running")
@@ -196,6 +200,7 @@ class PrepareWorkflow:
             self.project_service.save_project(project_state)
 
         print("\n--- Step 2: Transcribing audio (Whisper) ---")
+        if step_callback: step_callback("transcription")
         transcribe_started = time.perf_counter()
         project_state.set_step_status("transcribe", "running")
         self.project_service.save_project(project_state)
@@ -253,6 +258,7 @@ class PrepareWorkflow:
         self.project_service.save_project(project_state)
 
         print("\n--- Step 4: Translating to Vietnamese ---")
+        if step_callback: step_callback("translation")
         translate_started = time.perf_counter()
         project_state.set_step_status("translate_raw", "running")
         self.project_service.save_project(project_state)

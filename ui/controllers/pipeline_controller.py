@@ -1,60 +1,73 @@
 import os
-
+import sys
 from PySide6.QtWidgets import QMessageBox
-
 from workers import PrepareWorkflowWorker
 
+# Robust import for the progress widget
+try:
+    from widgets.progress_dialog import PipelineProgressDialog
+except ImportError:
+    # Fallback for different execution contexts
+    sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+    from widgets.progress_dialog import PipelineProgressDialog
 
 class PipelineController:
+    """
+    Orchestrates the multi-stage video translation pipeline.
+    Connects background workers to the UI and progress tracking widgets.
+    """
     def __init__(self, gui):
         self.gui = gui
+        self.progress_dialog = None
 
-    def run_all_pipeline(self):
-        video_path = self.gui.video_path_edit.text().strip()
+    def _setup_progress_dialog(self, includes_separation=True):
+        """Creates and initializes the progress tracking dialog."""
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            
+        self.progress_dialog = PipelineProgressDialog(self.gui)
+        self.progress_dialog.add_step("prepare", "Preparing Project")
+        self.progress_dialog.add_step("extraction", "Extracting Original Audio")
+        if includes_separation:
+            self.progress_dialog.add_step("separation", "Isolating Background Music")
+        self.progress_dialog.add_step("transcription", "Transcribing Speech (AI)")
+        self.progress_dialog.add_step("translation", "Translating & Polishing Contents")
+        self.progress_dialog.add_step("voiceover", "Synthesizing AI Voiceover")
+        self.progress_dialog.add_step("preview", "Preparing Video Preview")
+        self.progress_dialog.show()
+
+    def run_all_pipeline(self, video_path=None, requires_separation=None):
+        """Entry point for the full generation process."""
+        if video_path is None:
+            # Fallback to the UI field if not provided
+            video_path = getattr(self.gui, "video_path_edit", None)
+            if video_path:
+                video_path = video_path.text().strip()
+            else:
+                video_path = getattr(self.gui, "last_video_path", "")
+
         if not video_path or not os.path.exists(video_path):
-            QMessageBox.warning(self.gui, "Error", "Please select a video first.")
+            QMessageBox.warning(self.gui, "Error", "Please select a video file first.")
             return
 
-        state = self.gui.ensure_current_project()
-        if state:
-            self.gui.load_project_context(state)
-            self.gui.log(
-                "[Pipeline] Existing project loaded: "
-                f"mode={state.mode}, "
-                f"audio_mode={state.settings.get('audio_handling_mode', '')}, "
-                f"steps={dict(state.steps)}"
-            )
+        # Determine if we need vocal separation based on UI settings
+        if requires_separation is None:
+            requires_separation = (self.gui.get_audio_handling_mode() == "clean")
 
-        mode = self.gui.get_output_mode_key()
-        if mode in ("voice", "both") and self.gui.has_reusable_voice_inputs():
-            self.gui._pipeline_active = True
-            self.gui._pipeline_step = "voiceover"
-            self.gui.run_all_btn.setEnabled(False)
-            self.gui.run_all_btn.setText("Generating voice...")
-            self.gui.progress_bar.setRange(0, 100)
-            self.gui.log("[Voice] Reusing existing transcript, translation, and background assets...")
-            self.gui.log(
-                "[Pipeline] Reuse path: "
-                f"translated_srt_exists={bool(self.gui.translated_text.toPlainText().strip())}, "
-                f"last_translated_srt={self.gui.last_translated_srt_path}, "
-                f"last_extracted_audio={self.gui.last_extracted_audio}, "
-                f"last_music={self.gui.last_music_path}"
-            )
-            self.gui.run_voiceover()
-            return
-
+        # Initialize state
         self.gui._pipeline_active = True
         self.gui._pipeline_step = "prepare"
-        self.gui.run_all_btn.setEnabled(False)
-        self.gui.run_all_btn.setText("Preparing...")
-        self.gui.progress_bar.setRange(0, 0)
-        self.gui.log("[Prepare] Running prepare workflow...")
-        self.gui.log(
-            "[Pipeline] Direct prepare path: "
-            f"mode={self.gui.get_output_mode_key()}, "
-            f"audio_mode={self.gui.get_audio_handling_mode()}, "
-            f"source_lang={self.gui.get_source_language_code()}"
-        )
+        
+        # UI Feedback
+        if hasattr(self.gui, "run_all_btn"):
+            self.gui.run_all_btn.setEnabled(False)
+            self.gui.run_all_btn.setText("Processing...")
+            
+        self._setup_progress_dialog(includes_separation=requires_separation)
+        self.progress_dialog.start_step("prepare")
+        
+        # Start the background worker
+        self.gui.log(f"[Pipeline] Starting prepare workflow for: {video_path}")
         self.gui.prepare_workflow_thread = PrepareWorkflowWorker(
             self.gui.workspace_root,
             video_path,
@@ -65,95 +78,121 @@ class PipelineController:
             self.gui.get_ai_style_instruction(),
             self.gui.get_whisper_model_path(),
         )
-        self.gui.prepare_workflow_thread.finished.connect(self.gui.on_prepare_workflow_finished)
+        
+        # Connect signals
+        self.gui.prepare_workflow_thread.step_started.connect(self._on_prepare_step_started)
+        self.gui.prepare_workflow_thread.finished.connect(self.on_prepare_workflow_finished)
         self.gui.prepare_workflow_thread.start()
 
+    def _on_prepare_step_started(self, step_id):
+        """Callback from PrepareWorkflowWorker when an internal stage begins."""
+        if not self.progress_dialog:
+            return
+            
+        # Mapping between worker internal IDs and Progress Dialog IDs
+        order = ["prepare", "extraction", "separation", "transcription", "translation"]
+        if step_id in order:
+            idx = order.index(step_id)
+            # Mark all previous steps in the chain as done
+            for i in range(idx):
+                self.progress_dialog.finish_step(order[i])
+            # Start the current step
+            self.progress_dialog.start_step(step_id)
+            self.gui._pipeline_step = step_id
+
     def on_prepare_workflow_finished(self, project_state_path, error):
-        self.gui.progress_bar.setRange(0, 100)
+        """Callback when the background PrepareWorkflow finishes completely."""
         if error or not project_state_path:
-            self.gui._pipeline_fail("Prepare workflow failed.")
-            self.gui.show_error(
-                "Prepare Failed",
-                "Could not complete the automatic prepare workflow.",
-                error or "Unknown workflow error.",
-            )
+            self.pipeline_fail(f"Prepare workflow failed: {error}")
+            self.gui.show_error("Prepare Failed", "Could not complete project preparation.", str(error))
             return
 
+        if self.progress_dialog:
+            # Mark the preparation steps as completed
+            self.progress_dialog.finish_step("prepare")
+            self.progress_dialog.finish_step("translation") # Often the last part of prepare
+            
+        # Reload project context to reflect changes
         try:
             state = self.gui.project_service.load_project(project_state_path)
             self.gui.current_project_state = state
             self.gui.load_project_context(state)
             self.gui.refresh_ui_state()
-            self.gui.schedule_auto_frame_preview()
-            self.gui.log(f"[Prepare] Project ready: {state.project_root}")
-            self.gui.log(
-                "[Pipeline] After prepare: "
-                f"steps={dict(state.steps)}, "
-                f"artifacts={dict(state.artifacts)}, "
-                f"audio_mode={state.settings.get('audio_handling_mode', '')}"
-            )
-        except Exception as exc:
-            self.gui._pipeline_fail("Could not reload project state.")
-            self.gui.show_error("Prepare Failed", "Prepare workflow finished but project state could not be loaded.", str(exc))
-            return
+        except Exception as e:
+            self.gui.log(f"[Pipeline] Error reloading state: {e}")
 
+        # Transition to next stage (Full Video Generation)
         mode = self.gui.get_output_mode_key()
         if mode == "subtitle":
-            self.gui._pipeline_done()
-            QMessageBox.information(
-                self.gui,
-                "Ready",
-                "Vietnamese subtitles are ready.\n\nReview them if needed, then click 'Export Final Video'.",
-            )
-            return
-
-        self.gui.run_all_btn.setEnabled(False)
-        self.gui.run_all_btn.setText("Generating voice...")
-        self.gui.run_voiceover()
+            # Subtitle only mode is done after preparation
+            self.pipeline_done()
+            if self.progress_dialog: self.progress_dialog.set_completed()
+            self.gui.log("[Pipeline] Subtitles generated successfully.")
+        else:
+            # Transition to Voiceover
+            self.pipeline_advance("translation")
 
     def pipeline_advance(self, completed_step: str):
+        """Manages transitions between major pipeline segments."""
         if not self.gui._pipeline_active:
             return
+            
+        if self.progress_dialog:
+            self.progress_dialog.finish_step(completed_step)
 
         mode = self.gui.get_output_mode_key()
-        if completed_step == "extraction":
-            if mode == "subtitle":
-                self.gui.run_transcription()
-                return
-            self.gui.run_vocal_separation()
-            return
-        if completed_step == "separation":
-            self.gui.run_transcription()
-            return
-        if completed_step == "transcription":
-            self.gui.run_translation()
-            return
+        
+        # State transitions
         if completed_step == "translation":
             if mode == "subtitle":
-                self.gui._pipeline_done()
-                QMessageBox.information(
-                    self.gui,
-                    "Ready",
-                    "Vietnamese subtitles are ready.\n\nReview them if needed, then click 'Export Final Video'.",
-                )
+                self.pipeline_done()
                 return
+            # Start voiceover
+            self.gui._pipeline_step = "voiceover"
+            if self.progress_dialog: self.progress_dialog.start_step("voiceover")
             self.gui.run_voiceover()
-            return
-        if completed_step == "voiceover":
+            
+        elif completed_step == "voiceover":
+            # Start preview generation
+            self.gui._pipeline_step = "preview"
+            if self.progress_dialog: self.progress_dialog.start_step("preview")
             self.gui.preview_video()
+            
+        elif completed_step == "preview":
+            # Success!
+            self.pipeline_done()
+            if self.progress_dialog: 
+                self.progress_dialog.set_completed()
 
     def pipeline_fail(self, reason: str):
-        if not self.gui._pipeline_active:
-            return
+        """Safely stops the pipeline and restores UI state on failure."""
         self.gui._pipeline_active = False
-        self.gui._pipeline_step = ""
-        self.gui.run_all_btn.setEnabled(True)
-        self.gui.run_all_btn.setText("Generate")
+        
+        if self.progress_dialog:
+            current_step = getattr(self.gui, "_pipeline_step", "prepare")
+            self.progress_dialog.fail_step(current_step)
+            # Show the error reason in the footer
+            self.progress_dialog.footer.setText(f"FAILED: {reason}")
+            self.progress_dialog.footer.setStyleSheet("color: #FF4444; font-weight: bold;")
+
+        # Restore UI
+        if hasattr(self.gui, "run_all_btn"):
+            self.gui.run_all_btn.setEnabled(True)
+            self.gui.run_all_btn.setText("Generate Full Video")
+        
+        self.gui.progress_bar.setRange(0, 100)
+        self.gui.progress_bar.setValue(0)
+        self.gui.refresh_ui_state()
 
     def pipeline_done(self):
-        if not self.gui._pipeline_active:
-            return
+        """Marks the entire pipeline as successfully finished."""
         self.gui._pipeline_active = False
         self.gui._pipeline_step = ""
-        self.gui.run_all_btn.setEnabled(True)
-        self.gui.run_all_btn.setText("Generate")
+        
+        if hasattr(self.gui, "run_all_btn"):
+            self.gui.run_all_btn.setEnabled(True)
+            self.gui.run_all_btn.setText("Generate Full Video")
+            
+        self.gui.progress_bar.setRange(0, 100)
+        self.gui.progress_bar.setValue(100)
+        self.gui.refresh_ui_state()

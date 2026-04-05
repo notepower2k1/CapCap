@@ -3148,9 +3148,9 @@ class VideoTranslatorGUI(QMainWindow):
             self.update_project_step("mix_audio", "skipped")
 
         if mixed:
-            QMessageBox.information(self, "Success", f"Generated Vietnamese voice and mixed audio:\n\nVoice: {voice_track}\nMixed: {mixed}")
+            self.log(f"[Voiceover] Generated Vietnamese voice and mixed audio: Voice={voice_track}, Mixed={mixed}")
         else:
-            QMessageBox.information(self, "Success", f"Generated Vietnamese voice track:\n\n{voice_track}\n\n(Background not provided, so no mix was created.)")
+            self.log(f"[Voiceover] Generated Vietnamese voice track: {voice_track} (No background mix created.)")
 
         self.refresh_ui_state()
         self._pipeline_advance("voiceover")

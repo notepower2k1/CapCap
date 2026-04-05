@@ -23,7 +23,9 @@ class WorkflowRuntime:
         translator_ai: bool = True,
         translator_style: str = "",
         whisper_model_name: str = "ggml-base.bin",
-    ):
+        step_callback=None,
+    ) -> str:
+        if step_callback: step_callback("prepare")
         return self.prepare_workflow.run(
             video_path,
             source_language=source_language,
@@ -33,6 +35,7 @@ class WorkflowRuntime:
             translator_ai=translator_ai,
             translator_style=translator_style,
             whisper_model_name=whisper_model_name,
+            step_callback=step_callback,
         )
 
     def run_voice(
