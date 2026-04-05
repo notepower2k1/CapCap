@@ -140,7 +140,7 @@ class PipelineController:
             self.gui.run_voiceover()
             return
         if completed_step == "voiceover":
-            self.gui.preview_video_with_mixed_audio()
+            self.gui.preview_video()
 
     def pipeline_fail(self, reason: str):
         if not self.gui._pipeline_active:

@@ -165,8 +165,7 @@ class PreviewController:
         self.gui.progress_bar.setValue(92)
 
         try:
-            self.gui.media_player.stop()
-            self.gui.media_player.setSource(QUrl())
+            self.gui.media_player.pause()
         except Exception:
             pass
 
@@ -179,6 +178,7 @@ class PreviewController:
             srt_path=preview_srt_path,
             audio_path=chosen_audio,
             subtitle_style=self.gui.get_subtitle_export_style(segments=preview_segments),
+            render_subtitles=False,
         )
         self.gui.quick_preview_thread.finished.connect(self.gui.on_quick_preview_ready)
         self.gui.quick_preview_thread.start()
@@ -266,7 +266,7 @@ class PreviewController:
         if not clipped:
             return "", []
 
-        preview_srt_path = os.path.join(os.getcwd(), "temp", "preview_subtitle_5s.srt")
+        preview_srt_path = os.path.normpath(os.path.join(os.getcwd(), "temp", "preview_subtitle_5s.srt"))
         self.gui.cleanup_file_if_exists(preview_srt_path)
         from subtitle_builder import generate_srt
 
@@ -277,7 +277,7 @@ class PreviewController:
         segments = self.gui.get_active_segments()
         if not segments:
             return "", []
-        preview_srt_path = os.path.join(os.getcwd(), "temp", "preview_subtitle_full.srt")
+        preview_srt_path = os.path.normpath(os.path.join(os.getcwd(), "temp", "preview_subtitle_full.srt"))
         self.gui.cleanup_file_if_exists(preview_srt_path)
         from subtitle_builder import generate_srt
 
@@ -306,6 +306,7 @@ class PreviewController:
             QMessageBox.information(self.gui, "Success", f"Final video exported successfully:\n\n{output_path}")
 
     def on_quick_preview_ready(self, output_path, error):
+        self.gui._suspend_live_subtitle_sync = False
         self.gui.preview_5s_btn.setEnabled(True)
         self.gui.preview_5s_btn.setText("Open 5-Second Preview")
         self.gui.progress_bar.setValue(100)
@@ -326,45 +327,23 @@ class PreviewController:
             QMessageBox.information(
                 self.gui,
                 "Preview Ready",
-                f"Generated a 5-second preview clip with the current export style:\n\n{output_path}",
+                "Loaded the styled preview into the player.\nPress Play to review the karaoke render, then click 'Export Final Video' when you are satisfied.",
             )
+            self.gui._pipeline_done()
+            self.gui.apply_segments_to_timeline()
+            self.gui.refresh_ui_state()
 
-    def on_exact_frame_ready(self, output_path, error):
-        self.gui._frame_preview_running = False
-        self.gui.preview_frame_btn.setEnabled(True)
-        self.gui.preview_frame_btn.setText("Open Large Frame Preview")
-        self.gui.progress_bar.setValue(100)
+    def preview_video(self):
+        self._start_video_preview()
 
-        if error:
-            self.gui.show_error("Error", "Exact frame preview failed.", error)
-            self.gui.frame_preview_status_label.setText("Exact frame preview failed. You can try again.")
-        elif output_path and os.path.exists(output_path):
-            self.gui.last_exact_preview_frame_path = output_path
-            self.gui.processed_artifacts["preview_frame"] = output_path
-            self.gui.update_frame_preview_thumbnail(output_path)
-            if self.gui._show_dialog_on_frame_preview:
-                self.gui.show_frame_preview_dialog(output_path)
-
-        self.gui._show_dialog_on_frame_preview = False
-        if self.gui._pending_auto_frame_preview:
-            self.gui._pending_auto_frame_preview = False
-            if self.gui.auto_preview_frame_cb.isChecked():
-                self.gui.schedule_auto_frame_preview()
-
-    def preview_video_with_mixed_audio(self):
-        self._start_video_preview(styled=False)
-
-    def preview_video_with_styled_audio(self):
-        self._start_video_preview(styled=True)
-
-    def _start_video_preview(self, *, styled: bool):
+    def _start_video_preview(self):
         video_path = self.gui.video_path_edit.text().strip()
         audio_path = self.gui.resolve_selected_audio_path()
         mode = self.gui.get_output_mode_key()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.gui, "Error", "Video file not found. Please select a video first.")
             return
-        if not audio_path or not os.path.exists(audio_path):
+        if mode in ("voice", "both") and (not audio_path or not os.path.exists(audio_path)):
             QMessageBox.warning(
                 self.gui,
                 "Error",
@@ -373,13 +352,13 @@ class PreviewController:
             return
 
         ts = int(time.time())
-        preview_out = os.path.join(os.getcwd(), "temp", f"preview_vi_voice_{ts}.mp4")
+        preview_out = os.path.normpath(os.path.join(os.getcwd(), "temp", f"preview_vi_voice_{ts}.mp4"))
         preview_srt_path = ""
         preview_segments = []
         subtitle_style = {}
         styled_signature = ""
         cached_preview = ""
-        if styled and mode in ("subtitle", "both"):
+        if mode in ("subtitle", "both"):
             preview_srt_path, preview_segments = self.build_full_active_subtitle_srt()
             if not preview_srt_path:
                 QMessageBox.warning(self.gui, "Error", "No active subtitle track is available for video preview.")
@@ -396,34 +375,31 @@ class PreviewController:
             cached_signature = str(getattr(self.gui, "last_styled_preview_signature", "") or "").strip()
             if cached_preview and cached_signature == styled_signature and os.path.exists(cached_preview):
                 self.gui.log(f"[Preview] styled cache hit: {cached_preview}")
-                self.gui.on_preview_ready(cached_preview, "", True, styled_signature)
+                self.gui.on_preview_ready(cached_preview, "", styled_signature)
                 return
 
         if self.gui.last_preview_video_path and self.gui.last_preview_video_path != self.gui.last_exact_preview_5s_path:
-            if not (styled and cached_preview and os.path.abspath(self.gui.last_preview_video_path) == os.path.abspath(cached_preview)):
+            if not (cached_preview and os.path.abspath(self.gui.last_preview_video_path) == os.path.abspath(cached_preview)):
                 self.gui.cleanup_file_if_exists(self.gui.last_preview_video_path)
             self.gui.processed_artifacts.pop("preview_video", None)
             self.gui.last_preview_video_path = ""
 
         try:
-            self.gui.media_player.stop()
-            self.gui.media_player.setSource(QUrl())
+            self.gui.media_player.pause()
         except Exception:
             pass
 
         self.gui.log(f"[Preview] video={video_path}")
-        self.gui.log(f"[Preview] audio={audio_path}")
+        self.gui.log(f"[Preview] audio={audio_path or '<none>'}")
         self.gui.log(f"[Preview] out={preview_out}")
-        self.gui.log(f"[Preview] mode={'styled' if styled else 'quick'}")
+        self.gui.log(f"[Preview] app_mode={mode}")
+        self.gui.log("[Preview] render_mode=styled")
         if styled_signature:
             self.gui.log(f"[Preview] styled cache miss: {styled_signature[:10]}")
-        self.gui._styled_preview_running = bool(styled)
-        if hasattr(self.gui, "quick_preview_btn"):
-            self.gui.quick_preview_btn.setEnabled(False)
-            self.gui.quick_preview_btn.setText("Preparing..." if not styled else "Quick Preview")
-        if hasattr(self.gui, "styled_preview_btn"):
-            self.gui.styled_preview_btn.setEnabled(False)
-            self.gui.styled_preview_btn.setText("Preparing..." if styled else "Styled Preview")
+        self.gui._styled_preview_running = True
+        if hasattr(self.gui, "preview_btn"):
+            self.gui.preview_btn.setEnabled(False)
+            self.gui.preview_btn.setText("Preparing...")
         self.gui.progress_bar.setValue(95)
         self.gui.refresh_ui_state()
 
@@ -434,36 +410,33 @@ class PreviewController:
             mode=mode,
             srt_path=preview_srt_path,
             subtitle_style=subtitle_style,
-            render_subtitles=styled,
+            render_subtitles=False,
         )
         self.gui.preview_thread.finished.connect(
-            lambda preview_path, error: self.gui.on_preview_ready(preview_path, error, styled, styled_signature)
+            lambda preview_path, error: self.gui.on_preview_ready(preview_path, error, styled_signature)
         )
         self.gui.preview_thread.start()
 
-    def on_preview_ready(self, preview_path, error, styled=False, styled_signature=""):
+    def on_preview_ready(self, preview_path, error, styled_signature=""):
         self.gui._styled_preview_running = False
-        if hasattr(self.gui, "quick_preview_btn"):
-            self.gui.quick_preview_btn.setEnabled(True)
-            self.gui.quick_preview_btn.setText("Quick Preview")
-        if hasattr(self.gui, "styled_preview_btn"):
-            self.gui.styled_preview_btn.setEnabled(True)
-            self.gui.styled_preview_btn.setText("Styled Preview")
+        self.gui._suspend_live_subtitle_sync = False
+        if hasattr(self.gui, "preview_btn"):
+            self.gui.preview_btn.setEnabled(True)
+            self.gui.preview_btn.setText("Refresh Preview")
         self.gui.progress_bar.setValue(100)
         self.gui.refresh_ui_state()
 
         if error:
-            preview_label = "Styled preview" if styled else "Quick preview"
-            self.gui.show_error("Error", f"{preview_label} failed.", str(error))
+            self.gui._suspend_live_subtitle_sync = False
+            self.gui.show_error("Error", "Preview failed.", str(error))
             self.gui._pipeline_fail("Preview failed.")
             return
 
         if preview_path and os.path.exists(preview_path):
             self.gui.last_preview_video_path = preview_path
             self.gui.processed_artifacts["preview_video"] = preview_path
-            if styled:
-                self.gui.last_styled_preview_path = preview_path
-                self.gui.last_styled_preview_signature = styled_signature
+            self.gui.last_styled_preview_path = preview_path
+            self.gui.last_styled_preview_signature = styled_signature
             self.gui.log(f"[Preview] ready={preview_path}")
             self.gui.refresh_video_dimensions(preview_path)
             self.gui.media_player.setSource(QUrl.fromLocalFile(preview_path))
@@ -472,12 +445,9 @@ class PreviewController:
             QMessageBox.information(
                 self.gui,
                 "Preview Ready",
-                (
-                    "Loaded the styled preview into the player.\nPress Play to review the karaoke render, then click 'Export Final Video' when you are satisfied."
-                    if styled
-                    else "Loaded the quick preview into the player.\nPress Play to review voice and timing quickly. Use 'Styled Preview' when you want to inspect karaoke rendering."
-                ),
+                "Loaded the styled preview into the player.\nPress Play to review the karaoke render, then click 'Export Final Video' when you are satisfied.",
             )
             self.gui._pipeline_done()
             self.gui.apply_segments_to_timeline()
             self.gui.refresh_ui_state()
+

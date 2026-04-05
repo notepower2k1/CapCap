@@ -282,7 +282,7 @@ class VoiceWorkflow:
 
         mixed = ""
         if background_path and os.path.exists(background_path):
-            mixed = os.path.join(output_dir, "mixed_vi.wav")
+            mixed = os.path.normpath(os.path.join(output_dir, "mixed_vi.wav"))
             if audio_mode_key == "fast":
                 print(f"[Voice Workflow] Fast Mode mix: ducking original/extracted background source {background_path}")
             else:

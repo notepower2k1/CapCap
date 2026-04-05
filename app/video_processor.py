@@ -29,6 +29,34 @@ def _subprocess_run_kwargs() -> dict:
     return kwargs
 
 
+_FFMPEG_ENCODER_CACHE = {}
+
+
+def _ffmpeg_supports_encoder(ffmpeg_path: str, encoder_name: str) -> bool:
+    cache_key = (os.path.abspath(ffmpeg_path), encoder_name)
+    if cache_key in _FFMPEG_ENCODER_CACHE:
+        return _FFMPEG_ENCODER_CACHE[cache_key]
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, '-hide_banner', '-encoders'],
+            capture_output=True,
+            text=True,
+            check=True,
+            **_subprocess_run_kwargs(),
+        )
+        supported = encoder_name in (result.stdout or '')
+    except Exception:
+        supported = False
+    _FFMPEG_ENCODER_CACHE[cache_key] = supported
+    return supported
+
+
+def _preferred_h264_encoder_args(ffmpeg_path: str) -> list[str]:
+    if _ffmpeg_supports_encoder(ffmpeg_path, 'h264_nvenc'):
+        return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23', '-pix_fmt', 'yuv420p']
+    return ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p']
+
+
 def _escape_path_for_filter(path):
     """Escape a file path for use inside an FFmpeg -vf filter value."""
     clean = path.replace("\\", "/")
@@ -683,22 +711,56 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
     video_w, video_h = get_video_dimensions(video_path)
     blur_chain = _build_blur_filter_chain(blur_region, video_w, video_h)
     filter_complex = f"{blur_chain},ass='{escaped_ass}'" if blur_chain else f"ass='{escaped_ass}'"
+    video_encoder_args = _preferred_h264_encoder_args(ffmpeg)
 
     command = [
         ffmpeg,
-        '-i', video_path,
-        '-vf', filter_complex,
-        '-c:a', 'aac', '-b:a', '128k',
+        '-hide_banner',
+        '-loglevel',
+        'error',
         '-y',
-        output_path
+        '-i', video_path,
+        '-map', '0:v:0',
+        '-map', '0:a?',
+        '-vf', filter_complex,
+        *video_encoder_args,
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        output_path,
     ]
-    print(f"Executing: {' '.join(command)}")
+    encoder_name = video_encoder_args[1] if len(video_encoder_args) > 1 else 'unknown'
+    print(f"Executing ({encoder_name}): {' '.join(command)}")
 
     try:
         subprocess.run(command, capture_output=True, text=True, check=True, **_subprocess_run_kwargs())
-        print("ASS subtitles embedded successfully.")
+        print(f"ASS subtitles embedded successfully using {encoder_name}.")
         return True
     except subprocess.CalledProcessError as e:
+        if encoder_name != 'libx264':
+            fallback_args = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p']
+            fallback_command = [
+                ffmpeg,
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                '-y',
+                '-i', video_path,
+                '-map', '0:v:0',
+                '-map', '0:a?',
+                '-vf', filter_complex,
+                *fallback_args,
+                '-c:a', 'aac', '-b:a', '128k',
+                '-movflags', '+faststart',
+                output_path,
+            ]
+            print(f"NVENC subtitle burn failed, retrying with libx264. Error:\n{e.stderr}")
+            try:
+                subprocess.run(fallback_command, capture_output=True, text=True, check=True, **_subprocess_run_kwargs())
+                print("ASS subtitles embedded successfully using libx264 fallback.")
+                return True
+            except subprocess.CalledProcessError as fallback_error:
+                print(f"Error during ASS embedding fallback:\n{fallback_error.stderr}")
+                return False
         print(f"Error during ASS embedding:\n{e.stderr}")
         return False
 

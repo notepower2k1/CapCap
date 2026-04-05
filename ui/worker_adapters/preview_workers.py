@@ -34,7 +34,7 @@ class PreviewMuxWorker(QThread):
             if self.audio_path and os.path.exists(self.audio_path):
                 temp_dir = os.path.join(os.getcwd(), "temp")
                 os.makedirs(temp_dir, exist_ok=True)
-                temp_mux_path = os.path.join(temp_dir, f"preview_mux_{int(time.time())}.mp4")
+                temp_mux_path = os.path.normpath(os.path.join(temp_dir, f"preview_mux_{int(time.time())}.mp4"))
                 current_video = mux_audio_into_video_for_preview(self.video_path, self.audio_path, temp_mux_path)
 
             if self.render_subtitles and self.mode in ("subtitle", "both") and self.srt_path and os.path.exists(self.srt_path):

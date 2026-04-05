@@ -323,6 +323,12 @@ class VideoTranslatorGUI(QMainWindow):
         self._pipeline_active = False
         self._pipeline_step = ""
 
+        # Pre-rendered video state
+        self.last_preview_video_path = ""
+        self.last_styled_preview_path = ""
+        self.last_styled_preview_signature = ""
+        self.last_exact_preview_5s_path = ""
+
         # Log buffer (UI panel)
         self._log_lines = []
 
@@ -1158,7 +1164,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.start_exact_frame_preview(show_dialog=False)
 
     def update_frame_preview_thumbnail(self, image_path: str):
-        update_frame_preview_thumbnail_impl(self, image_path, QPixmap, Qt)
+        update_frame_preview_thumbnail_impl(self, image_path)
 
     def cleanup_file_if_exists(self, path: str):
         cleanup_file_if_exists_impl(path)
@@ -1344,6 +1350,8 @@ class VideoTranslatorGUI(QMainWindow):
             font_name=font_name or preset.get("font_name", "Segoe UI"),
             font_size=preview_font_size,
             font_color=QColor(self.subtitle_color_hex),
+            outline_width=preset.get("outline_width", 2),
+            outline_color=QColor(preset.get("outline_color", "#000000")),
         )
         item.set_alignment(self.subtitle_align_combo.currentText())
         item.set_positioning(
@@ -1412,6 +1420,7 @@ class VideoTranslatorGUI(QMainWindow):
             ),
             "word_timings": [list(seg.get("words", [])) for seg in (style_segments or [])],
             "blur_region": self.video_view.get_blur_region_normalized() if hasattr(self, "video_view") else None,
+            "render_subtitles": False,
         }
 
     def on_subtitle_preset_changed(self):
@@ -1463,9 +1472,6 @@ class VideoTranslatorGUI(QMainWindow):
 
     def preview_five_seconds(self):
         self.preview_controller.preview_five_seconds()
-
-    def start_exact_frame_preview(self, show_dialog: bool = True):
-        self.preview_controller.start_exact_frame_preview(show_dialog=show_dialog)
 
     def preview_exact_frame(self):
         self.preview_controller.start_exact_frame_preview(show_dialog=True)
@@ -2232,6 +2238,11 @@ class VideoTranslatorGUI(QMainWindow):
             and os.path.exists(self.live_preview_ass_path)
         ):
             return self.live_preview_subtitle_path, self.live_preview_ass_path
+
+        # Subtitle or content changed. We no longer revert the media source!
+        # Because we'll disable burned-in subs in muxed previews, the rendered
+        # background is already blank-subbed and can host our live overlay/mpv track comfortably.
+        # This solves the user's complaint that 'it reverts to original'.
 
         generate_srt(segments, preview_srt_path)
         self.live_preview_subtitle_path = preview_srt_path
@@ -3144,14 +3155,11 @@ class VideoTranslatorGUI(QMainWindow):
         self.refresh_ui_state()
         self._pipeline_advance("voiceover")
 
-    def preview_video_with_mixed_audio(self):
-        self.preview_controller.preview_video_with_mixed_audio()
+    def preview_video(self):
+        self.preview_controller.preview_video()
 
-    def preview_video_with_styled_audio(self):
-        self.preview_controller.preview_video_with_styled_audio()
-
-    def on_preview_ready(self, preview_path, error, styled=False, styled_signature=""):
-        self.preview_controller.on_preview_ready(preview_path, error, styled, styled_signature)
+    def on_preview_ready(self, preview_path, error, styled_signature=""):
+        self.preview_controller.on_preview_ready(preview_path, error, styled_signature)
 
     def run_all_pipeline(self):
         self.pipeline_controller.run_all_pipeline()

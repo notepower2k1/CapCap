@@ -60,6 +60,12 @@ class QtMediaPlayerBackend(QObject):
     def clear_subtitle(self):
         return None
 
+    def set_audio_file(self, audio_path):
+        return None
+
+    def clear_audio(self):
+        return None
+
     def set_blur_region(self, blur_region=None):
         return None
 
@@ -107,10 +113,20 @@ class MpvMediaPlayerBackend(QObject):
             sub_ass_override="no",
         )
 
+        @self._player.event_callback("file-loaded")
+        def _on_file_loaded(event):
+            # Re-apply external tracks if needed once the file is ready
+            self._apply_current_subtitle()
+            self._apply_current_audio()
+            self._apply_blur_filter()
+
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(200)
         self._poll_timer.timeout.connect(self._poll_state)
         self._poll_timer.start()
+        self._audio_path = ""
+        self._applied_subtitle_path = ""
+        self._applied_audio_path = ""
 
     def _read_property(self, primary_name, fallback_name=None, default=None):
         names = [primary_name]
@@ -165,6 +181,7 @@ class MpvMediaPlayerBackend(QObject):
         source_path = self._normalize_source(source)
         if not source_path:
             self.stop()
+            self.clear_subtitle()
             try:
                 self._player.command("stop")
             except Exception:
@@ -178,8 +195,16 @@ class MpvMediaPlayerBackend(QObject):
         self._state = QMediaPlayer.PausedState
         self._player.pause = True
         self._player.command("loadfile", source_path, "replace")
+        
+        # Reset applied tracking on source change
+        self._applied_subtitle_path = ""
+        self._applied_audio_path = ""
+        
+        # We also trigger them here just in case, though file-loaded callback
+        # is the main authority now.
         self._apply_blur_filter()
         self._apply_current_subtitle()
+        self._apply_current_audio()
 
     def play(self):
         if not self._source_path:
@@ -278,6 +303,46 @@ class MpvMediaPlayerBackend(QObject):
     def clear_blur_region(self):
         self._blur_region = None
         self._apply_blur_filter()
+
+    def set_audio_file(self, audio_path):
+        if not audio_path or not os.path.exists(audio_path):
+            self.clear_audio()
+            return
+        self._audio_path = audio_path
+        self._apply_current_audio()
+
+    def clear_audio(self):
+        self._audio_path = ""
+        try:
+            # Setting audio to no or 0
+            self._player.audio_delay = 0
+            self._player.command("audio-remove", "1") # Best effort
+        except Exception:
+            pass
+
+    def _apply_current_audio(self):
+        if not self._source_path or not self._audio_path:
+            return
+        if not os.path.exists(self._audio_path):
+            return
+        try:
+            if self._applied_audio_path == self._audio_path:
+                 # In mpv, you can't easily 'reload' an audio file like srt, 
+                 # but we can assume it's already there or just re-add if needed.
+                 # Actually, better to just re-add if it's the first time for this source.
+                 return
+            self._player.command("audio-add", self._audio_path, "select")
+            self._applied_audio_path = self._audio_path
+            self.log(f"[Backend] External audio applied: {self._audio_path}")
+        except Exception:
+            pass
+
+    def log(self, text):
+        # We can reach out to the gui if needed
+        if hasattr(self.video_view, "parent") and hasattr(self.video_view.parent(), "log"):
+             self.video_view.parent().log(text)
+        elif hasattr(self, "gui") and hasattr(self.gui, "log"):
+             self.gui.log(text)
 
     def set_subtitle_file(self, subtitle_path, subtitle_style=None):
         if not subtitle_path or not os.path.exists(subtitle_path):

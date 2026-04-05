@@ -17,6 +17,8 @@ class _SubtitleOverlayWidget(QWidget):
         self.font_name = "Segoe UI"
         self.font_size = 20
         self.font_color = QColor(255, 255, 255)
+        self.outline_width = 2
+        self.outline_color = QColor(0, 0, 0, 220)
         self.alignment = "Bottom Center"
         self.x_offset = 0
         self.bottom_offset = 30
@@ -34,20 +36,14 @@ class _SubtitleOverlayWidget(QWidget):
             self.current_text = text
             self.update()
 
-    def set_style(self, *, font_name=None, font_size=None, font_color=None):
-        changed = False
-        if font_name and font_name != self.font_name:
-            self.font_name = font_name
-            changed = True
-        if font_size and font_size != self.font_size:
-            self.font_size = font_size
-            self.H = max(96, int(font_size * 4))
-            changed = True
-        if font_color and font_color != self.font_color:
-            self.font_color = font_color
-            changed = True
-        if changed:
-            self.update()
+    def set_style(self, font_name, font_size, font_color, outline_width=2, outline_color=None):
+        self.font_name = font_name
+        self.font_size = font_size
+        self.font_color = font_color
+        self.outline_width = max(0, float(outline_width))
+        self.outline_color = outline_color or QColor(0, 0, 0, 220)
+        self.H = max(96, int(font_size * 4))
+        self.update()
 
     def set_alignment(self, alignment: str):
         self.alignment = alignment or "Bottom Center"
@@ -87,13 +83,17 @@ class _SubtitleOverlayWidget(QWidget):
             painter.setFont(font)
 
             # Outline
-            outline_offsets = [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)]
-            painter.setPen(QColor(0, 0, 0, 220))
-            for dx, dy in outline_offsets:
-                painter.drawText(rect.translated(dx, dy), Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
-
-            painter.setPen(QColor(0, 0, 0, 120))
-            painter.drawText(rect.translated(2, 2), Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
+            if self.outline_width > 0:
+                painter.setPen(self.outline_color)
+                # Drawing offsets based on outline width
+                w = max(1.0, self.outline_width)
+                offsets = [
+                    (-w, 0), (w, 0), (0, -w), (0, w),
+                    (-w*0.7, -w*0.7), (w*0.7, -w*0.7),
+                    (-w*0.7, w*0.7), (w*0.7, w*0.7)
+                ]
+                for dx, dy in offsets:
+                    painter.drawText(rect.translated(dx, dy), Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
 
             painter.setPen(self.font_color)
             painter.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
