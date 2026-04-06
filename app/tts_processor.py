@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 import wave
 
@@ -17,6 +18,31 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(os.path.dirname(BASE_DIR), ".env")
 if os.path.exists(ENV_PATH):
     load_dotenv(ENV_PATH)
+
+
+_PIPER_VOICE_CACHE: dict[str, PiperVoice] = {}
+_PIPER_VOICE_CACHE_LOCK = threading.Lock()
+
+
+def _get_cached_piper_voice(*, model_path: str, on_progress: callable = None) -> PiperVoice:
+    model_key = os.path.abspath(str(model_path or "").strip())
+    if not model_key:
+        raise ValueError("model_path is required for Piper TTS")
+
+    with _PIPER_VOICE_CACHE_LOCK:
+        cached = _PIPER_VOICE_CACHE.get(model_key)
+        if cached is not None:
+            return cached
+
+    if on_progress:
+        on_progress(f"Loading Piper model from {os.path.basename(model_key)}...")
+
+    voice = PiperVoice.load(model_key)
+
+    with _PIPER_VOICE_CACHE_LOCK:
+        # Avoid double-load if another thread raced.
+        _PIPER_VOICE_CACHE.setdefault(model_key, voice)
+        return _PIPER_VOICE_CACHE[model_key]
 
 
 def _ffmpeg_path():
@@ -119,9 +145,7 @@ def piper_tts_to_wav_16k_mono(
     normalized_text = normalizer.normalize(text)
 
     # Load Piper voice
-    if on_progress:
-        on_progress(f"Loading Piper model from {os.path.basename(model_path)}...")
-    voice = PiperVoice.load(model_path)
+    voice = _get_cached_piper_voice(model_path=model_path, on_progress=on_progress)
 
     # Configure synthesis
     if on_progress:

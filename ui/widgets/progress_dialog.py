@@ -139,7 +139,9 @@ class PipelineProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("CapCap AI Pipeline")
         self.setFixedSize(580, 700)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+        # Do not force the progress dialog above QMessageBox/other dialogs.
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        self.setWindowModality(Qt.NonModal)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.workflow_start_time = None
         self.total_timer = QTimer(self)

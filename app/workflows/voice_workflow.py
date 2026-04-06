@@ -194,7 +194,11 @@ class VoiceWorkflow:
             )
 
         if pending_jobs:
-            worker_count = max(1, min(self.MAX_TTS_WORKERS, len(pending_jobs)))
+            provider = self._voice_provider(voice_name)
+            if provider == "piper":
+                worker_count = 1
+            else:
+                worker_count = max(1, min(self.MAX_TTS_WORKERS, len(pending_jobs)))
             print(
                 "[Voice Workflow] TTS synth jobs: "
                 f"pending={len(pending_jobs)}, cache_hits={cache_hits}, workers={worker_count}, native_speed={provider_speed:.2f}"

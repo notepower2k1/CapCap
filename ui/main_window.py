@@ -560,10 +560,55 @@ class VideoTranslatorGUI(QMainWindow):
     def load_voice_preview_catalog(self):
         self._auto_sync_piper_voices_to_catalog()
         self.voice_catalog_entries_all = self.voice_catalog_service.load_catalog()
+        self._apply_piper_voice_meta_overrides()
         if self.voice_preview_dialog is not None:
             self.voice_preview_dialog.close()
             self.voice_preview_dialog = None
         self.refresh_voice_catalog_combos()
+
+    def _load_piper_voice_meta(self) -> dict:
+        meta_path = os.path.join(self.workspace_root, "models", "piper", "voices_meta.json")
+        if not os.path.exists(meta_path):
+            return {}
+        try:
+            with open(meta_path, "r", encoding="utf-8-sig") as handle:
+                payload = json.load(handle)
+            if not isinstance(payload, dict):
+                return {}
+            voices = payload.get("voices", {})
+            return voices if isinstance(voices, dict) else {}
+        except Exception:
+            return {}
+
+    def _normalize_gender_value(self, value: str) -> str:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return ""
+        if raw in {"m", "male", "nam"}:
+            return "male"
+        if raw in {"f", "female", "nu", "nữ"}:
+            return "female"
+        if raw in {"any", "unknown", "none"}:
+            return ""
+        return raw
+
+    def _apply_piper_voice_meta_overrides(self):
+        voices_meta = self._load_piper_voice_meta()
+        if not voices_meta:
+            return
+        for entry in self.voice_catalog_entries_all or []:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("provider", "")).strip().lower() != "piper":
+                continue
+            voice_id = str(entry.get("id", "")).strip()
+            if not voice_id:
+                continue
+            meta = voices_meta.get(voice_id, {})
+            if not isinstance(meta, dict):
+                continue
+            if "gender" in meta:
+                entry["gender"] = self._normalize_gender_value(meta.get("gender", ""))
 
     def _auto_sync_piper_voices_to_catalog(self):
         models_dir = os.path.join(self.workspace_root, "models", "piper")
