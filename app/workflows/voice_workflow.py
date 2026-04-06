@@ -67,10 +67,39 @@ class VoiceWorkflow:
 
     def _voice_provider(self, voice_name: str) -> str:
         raw = str(voice_name or "").strip()
+        
+        # If has ":" prefix format, parse it
         if ":" in raw:
             provider, _voice_id = raw.split(":", 1)
             return provider.strip().lower() or "edge"
-        return "edge"
+        
+        # Otherwise, assume it's a voice ID - load from catalog to find provider
+        import json
+        import os as os_module
+        
+        # Try multiple paths to find catalog
+        catalog_paths = [
+            os_module.path.join(self.workspace_root, "app", "voice_preview_catalog.json"),
+            os_module.path.join(os_module.path.dirname(os_module.path.dirname(__file__)), "voice_preview_catalog.json"),
+            os_module.path.join(os_module.getcwd(), "app", "voice_preview_catalog.json"),
+        ]
+        
+        for catalog_path in catalog_paths:
+            try:
+                if os_module.path.exists(catalog_path):
+                    with open(catalog_path, "r", encoding="utf-8") as f:
+                        catalog = json.load(f)
+                    for voice in catalog.get("voices", []):
+                        if voice.get("id") == raw:
+                            provider = voice.get("provider", "edge").strip().lower()
+                            print(f"[Voice] Found voice '{raw}' with provider: {provider}")
+                            return provider
+            except Exception as e:
+                print(f"[Voice] Error reading catalog from {catalog_path}: {e}")
+        
+        print(f"[Voice] Voice '{raw}' not found in catalog, defaulting to 'piper'")
+        # Default to piper for local voices
+        return "piper"
 
     def _provider_native_speed(self, *, voice_name: str, requested_speed: float) -> float:
         provider = self._voice_provider(voice_name)
@@ -120,7 +149,7 @@ class VoiceWorkflow:
             synced_wavs.append(fitted_path)
         return synced_wavs
 
-    def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str, provider_speed: float = 1.0):
+    def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str, provider_speed: float = 1.0, on_progress: callable = None):
         segments = list(segments or [])
         manifest = self._load_manifest(tmp_dir)
         manifest_segments = dict(manifest.get("segments", {}) or {})
@@ -170,6 +199,8 @@ class VoiceWorkflow:
                 "[Voice Workflow] TTS synth jobs: "
                 f"pending={len(pending_jobs)}, cache_hits={cache_hits}, workers={worker_count}, native_speed={provider_speed:.2f}"
             )
+            if on_progress:
+                on_progress(f"Synthesizing {len(pending_jobs)} subtitle segments (using {worker_count} workers)...")
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 future_map = {
                     executor.submit(
@@ -179,9 +210,11 @@ class VoiceWorkflow:
                         voice=voice_name,
                         speed=provider_speed,
                         tmp_dir=tmp_dir,
+                        on_progress=on_progress,
                     ): job
                     for job in pending_jobs
                 }
+                completed_count = 0
                 for future in as_completed(future_map):
                     job = future_map[future]
                     idx = int(job["idx"])
@@ -189,10 +222,15 @@ class VoiceWorkflow:
                     seg_wav = str(job["wav_path"])
                     try:
                         future.result()
+                        completed_count += 1
+                        if on_progress:
+                            on_progress(f"✓ Synthesized {completed_count}/{len(pending_jobs)} segments")
                     except Exception as exc:
                         preview = " ".join(txt.split())
                         if len(preview) > 120:
                             preview = preview[:117] + "..."
+                        if on_progress:
+                            on_progress(f"✗ Error at segment {idx + 1}: {preview[:50]}...")
                         raise RuntimeError(
                             f"TTS failed at subtitle segment {idx + 1}: \"{preview}\". {exc}"
                         ) from exc
@@ -220,12 +258,13 @@ class VoiceWorkflow:
         output_dir: str,
         background_path: str = "",
         audio_handling_mode: str = "fast",
-        voice_name: str = "vi-VN-HoaiMyNeural",
+        voice_name: str = "vi_VN-vais1000-medium",
         voice_speed: float = 1.0,
         timing_sync_mode: str = "off",
         voice_gain_db: float = 0.0,
         bg_gain_db: float = 0.0,
         project_state_path: str = "",
+        on_progress: callable = None,
     ):
         workflow_started = time.perf_counter()
         state = self._load_state(project_state_path)
@@ -252,6 +291,7 @@ class VoiceWorkflow:
             tmp_dir=tmp_dir,
             voice_name=voice_name,
             provider_speed=provider_speed,
+            on_progress=on_progress,
         )
         wavs = self._apply_segment_speed(
             wavs=wavs,

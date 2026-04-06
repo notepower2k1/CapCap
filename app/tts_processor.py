@@ -1,11 +1,16 @@
 import asyncio
+import json
 import os
 import re
 import subprocess
 import time
+import wave
 
 import requests
 from dotenv import load_dotenv
+from piper import PiperVoice
+from piper.config import SynthesisConfig
+from vietnormalizer.normalizer import VietnameseNormalizer
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +21,39 @@ if os.path.exists(ENV_PATH):
 
 def _ffmpeg_path():
     return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffmpeg.exe")
+
+
+def _subprocess_run_kwargs() -> dict:
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)    
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
+def _sanitize_filename(name: str) -> str:
+    name = re.sub(r"[^\w\-. ]+", "_", name, flags=re.UNICODE).strip()
+    return name[:120] if len(name) > 120 else name
+
+
+def _voice_provider_and_id(voice: str) -> tuple[str, str]:
+    raw = (voice or "").strip()
+    if ":" in raw:
+        provider, voice_id = raw.split(":", 1)
+        return provider.strip().lower(), voice_id.strip()
+    return "edge", raw
+
+
+def _speed_to_float(speed) -> float:
+    if isinstance(speed, (int, float)):
+        return float(speed)
+    text = str(speed or "").strip().lower().replace("x", "")
+    try:
+        return float(text or "1.0")
+    except ValueError:
+        return 1.0
 
 
 def _subprocess_run_kwargs() -> dict:
@@ -51,80 +89,53 @@ def _speed_to_float(speed) -> float:
         return 1.0
 
 
-def _humanize_zalo_error(*, status_code: int | None = None, payload: dict | None = None, fallback: str = "") -> str:
-    payload = payload or {}
-    error_code = int(payload.get("error_code", -1)) if payload else -1
-    error_message = str(payload.get("error_message", "")).strip() if payload else ""
-    combined = f"{status_code or ''} {error_code} {error_message} {fallback}".lower()
-
-    if error_code == 155 or "allowed limit of 2000 characters" in combined:
-        return "Zalo TTS rejected the request because the text is too long. Please shorten the subtitle line or split it into smaller segments."
-    if status_code == 401 or error_code == 401 or "wrong apikey" in combined:
-        return "Zalo TTS rejected the API key. Please check ZALO_API_KEY."
-    if status_code == 429 or "rate limit" in combined or "quota" in combined or "limit" in combined or "insufficient" in combined:
-        return "Zalo TTS usage limit has been reached for this API key. Please check your Zalo AI quota or try again later."
-    if status_code == 403 or "forbidden" in combined:
-        return "Zalo TTS denied access for this request. Please verify your API key permissions."
-    if status_code == 500 or error_code == 500:
-        return "Zalo TTS returned an internal server error. Please try again in a moment."
-    return error_message or fallback or "Zalo TTS request failed."
 
 
-def _humanize_fpt_error(*, status_code: int | None = None, payload: dict | None = None, fallback: str = "") -> str:
-    payload = payload or {}
-    error_raw = str(payload.get("error", "")).strip()
-    error_code = int(error_raw) if error_raw.lstrip("-").isdigit() else -1
-    error_message = str(payload.get("message", "")).strip()
-    combined = f"{status_code or ''} {error_code} {error_message} {fallback}".lower()
 
-    if status_code == 401 or "api key" in combined or "unauthorized" in combined:
-        return "FPT.AI rejected the API key. Please check FPT_API_KEY."
-    if status_code == 429 or "quota" in combined or "limit" in combined:
-        return "FPT.AI usage limit has been reached. Please check your quota or billing."
-    if "at least 3 characters" in combined:
-        return "FPT.AI requires at least 3 characters per request."
-    if "5000" in combined or "too long" in combined:
-        return "FPT.AI supports up to 5,000 characters per request. Please shorten the text."
-    if status_code == 500:
-        return "FPT.AI returned an internal server error. Please try again in a moment."
-    return error_message or fallback or "FPT.AI request failed."
+def piper_tts_to_wav_16k_mono(
+    *,
+    text: str,
+    wav_path: str,
+    model_path: str,
+    speed: float = 1.0,
+    tmp_dir: str | None = None,
+    on_progress: callable = None,
+) -> str:
+    """
+    Synthesize text to WAV (16kHz, mono) using Piper TTS with ONNX model.
+    
+    Args:
+        on_progress: Optional callback for progress updates: on_progress(message)
+    """
+    if tmp_dir is None:
+        tmp_dir = os.path.join(os.getcwd(), "temp")
+    os.makedirs(os.path.dirname(wav_path) or ".", exist_ok=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
+    # Normalize text
+    if on_progress:
+        on_progress(f"Normalizing Vietnamese text...")
+    normalizer = VietnameseNormalizer()
+    normalized_text = normalizer.normalize(text)
 
-def _download_with_retry(url: str, output_path: str, *, timeout: int = 120, attempts: int = 8) -> str:
-    last_error = ""
-    session = requests.Session()
-    headers = {
-        "User-Agent": "CapCap/1.0",
-        "Accept": "*/*",
-    }
-    for attempt in range(1, attempts + 1):
-        try:
-            response = session.get(url, headers=headers, timeout=timeout, stream=True)
-            if response.status_code == 200:
-                with open(output_path, "wb") as output_file:
-                    for chunk in response.iter_content(chunk_size=65536):
-                        if chunk:
-                            output_file.write(chunk)
-                if os.path.getsize(output_path) > 0:
-                    return output_path
-                last_error = "Downloaded audio file is empty."
-            else:
-                last_error = f"{response.status_code} {response.reason}"
-        except requests.RequestException as exc:
-            last_error = str(exc)
+    # Load Piper voice
+    if on_progress:
+        on_progress(f"Loading Piper model from {os.path.basename(model_path)}...")
+    voice = PiperVoice.load(model_path)
 
-        if attempt < attempts:
-            time.sleep(min(4.0, 0.6 * attempt))
+    # Configure synthesis
+    if on_progress:
+        on_progress(f"Synthesizing speech (speed: {speed}x)...")
+    syn_config = SynthesisConfig(length_scale=1.0 / speed)
 
-    raise RuntimeError(f"Failed to download generated audio after {attempts} attempts: {last_error}")
+    # Synthesize to WAV
+    with wave.open(wav_path, "wb") as wav_file:
+        voice.synthesize_wav(normalized_text, wav_file, syn_config=syn_config)
 
-
-def _speed_to_fpt_value(speed) -> str:
-    speed_value = _speed_to_float(speed)
-    delta = speed_value - 1.0
-    step = int(round(delta * 10))
-    step = max(-3, min(3, step))
-    return f"{step:+d}" if step else "0"
+    if on_progress:
+        on_progress(f"✓ Synthesis complete: {os.path.basename(wav_path)}")
+    
+    return wav_path
 
 
 async def _edge_tts_to_mp3_async(text: str, mp3_path: str, voice: str, rate: str, volume: str):
@@ -185,164 +196,6 @@ def edge_tts_to_wav_16k_mono(
     proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg conversion failed:\n{proc.stderr or proc.stdout}")
-
-    return wav_path
-
-
-def zalo_tts_to_wav_16k_mono(
-    *,
-    text: str,
-    wav_path: str,
-    speaker_id: str = "1",
-    speed: float = 1.0,
-    tmp_dir: str | None = None,
-    quality: int = 0,
-) -> str:
-    api_key = os.getenv("ZALO_API_KEY") or os.getenv("ZALO_TTS_API_KEY")
-    if not api_key:
-        raise RuntimeError("Missing Zalo TTS API key. Please set ZALO_API_KEY in your environment or .env file.")
-
-    if tmp_dir is None:
-        tmp_dir = os.path.join(os.getcwd(), "temp")
-    os.makedirs(os.path.dirname(wav_path) or ".", exist_ok=True)
-    os.makedirs(tmp_dir, exist_ok=True)
-
-    ffmpeg = _ffmpeg_path()
-    if not os.path.exists(ffmpeg):
-        raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
-
-    base = _sanitize_filename(os.path.splitext(os.path.basename(wav_path))[0] or "tts")
-    download_mp3_path = os.path.join(tmp_dir, f"{base}_zalo.mp3")
-    request_speed = max(0.8, min(1.2, float(speed)))
-
-    response = requests.post(
-        "https://api.zalo.ai/v1/tts/synthesize",
-        headers={"apikey": api_key},
-        data={
-            "input": text,
-            "speaker_id": str(speaker_id),
-            "speed": f"{request_speed:.2f}",
-            "quality": str(int(quality)),
-            "encode_type": "1",
-        },
-        timeout=60,
-    )
-    try:
-        payload = response.json()
-    except ValueError:
-        payload = {}
-    if response.status_code >= 400:
-        raise RuntimeError(_humanize_zalo_error(status_code=response.status_code, payload=payload, fallback=response.text[:200]))
-    if int(payload.get("error_code", -1)) != 0:
-        raise RuntimeError(_humanize_zalo_error(status_code=response.status_code, payload=payload))
-
-    audio_url = (((payload.get("data") or {}).get("url")) or "").strip()
-    if not audio_url:
-        raise RuntimeError("Zalo TTS did not return an audio URL.")
-
-    try:
-        _download_with_retry(audio_url, download_mp3_path)
-    except Exception as exc:
-        raise RuntimeError(_humanize_zalo_error(fallback=str(exc))) from exc
-
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-i",
-        download_mp3_path,
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        wav_path,
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
-    if proc.returncode != 0:
-        raise RuntimeError(f"FFmpeg conversion failed:\n{proc.stderr or proc.stdout}")
-
-    return wav_path
-
-
-def fpt_tts_to_wav_16k_mono(
-    *,
-    text: str,
-    wav_path: str,
-    voice: str = "banmai",
-    speed: float = 1.0,
-    tmp_dir: str | None = None,
-    output_format: str = "mp3",
-) -> str:
-    api_key = os.getenv("FPT_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("Missing FPT API key. Please set FPT_API_KEY in your environment or .env file.")
-
-    if tmp_dir is None:
-        tmp_dir = os.path.join(os.getcwd(), "temp")
-    os.makedirs(os.path.dirname(wav_path) or ".", exist_ok=True)
-    os.makedirs(tmp_dir, exist_ok=True)
-
-    ffmpeg = _ffmpeg_path()
-    if not os.path.exists(ffmpeg):
-        raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
-
-    base = _sanitize_filename(os.path.splitext(os.path.basename(wav_path))[0] or "tts")
-    download_audio_path = os.path.join(tmp_dir, f"{base}_fpt.{output_format}")
-    response = requests.post(
-        "https://api.fpt.ai/hmi/tts/v5",
-        headers={
-            "api_key": api_key,
-            "api-key": api_key,
-            "voice": (voice or "banmai").strip(),
-            "speed": _speed_to_fpt_value(speed),
-            "format": output_format,
-            "Cache-Control": "no-cache",
-        },
-        data=(text or "").strip().encode("utf-8"),
-        timeout=120,
-    )
-
-    try:
-        payload = response.json()
-    except ValueError:
-        payload = {}
-
-    if response.status_code >= 400:
-        raise RuntimeError(_humanize_fpt_error(status_code=response.status_code, payload=payload, fallback=response.text[:200]))
-
-    error_raw = str(payload.get("error", "")).strip()
-    if not error_raw.lstrip("-").isdigit() or int(error_raw) != 0:
-        raise RuntimeError(_humanize_fpt_error(status_code=response.status_code, payload=payload, fallback=response.text[:200]))
-
-    audio_url = str(payload.get("async", "") or "").strip()
-    if not audio_url.startswith("http"):
-        raise RuntimeError(
-            _humanize_fpt_error(
-                status_code=response.status_code,
-                payload=payload,
-                fallback="FPT.AI did not return a valid async audio URL.",
-            )
-        )
-
-    try:
-        _download_with_retry(audio_url, download_audio_path, attempts=30)
-    except Exception as exc:
-        raise RuntimeError(_humanize_fpt_error(fallback=str(exc))) from exc
-
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-i",
-        download_audio_path,
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        wav_path,
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
-    if proc.returncode != 0:
-        raise RuntimeError(f"FFmpeg conversion failed:\n{proc.stderr or proc.stdout}")
-
     return wav_path
 
 
@@ -350,35 +203,76 @@ def synthesize_text_to_wav_16k_mono(
     *,
     text: str,
     wav_path: str,
-    voice: str = "vi-VN-HoaiMyNeural",
+    voice: str = "vi_VN-vais1000-medium",
     speed: float = 1.0,
     tmp_dir: str | None = None,
+    on_progress: callable = None,
 ) -> str:
-    provider, voice_id = _voice_provider_and_id(voice)
-    speed_value = _speed_to_float(speed)
-    if provider == "zalo":
-        return zalo_tts_to_wav_16k_mono(
+    # Load voice catalog
+    catalog_path = os.path.join(BASE_DIR, "voice_preview_catalog.json")
+    with open(catalog_path, "r", encoding="utf-8") as f:
+        catalog = json.load(f)
+    
+    # Find voice in catalog
+    voice_entry = None
+    voice_to_search = str(voice).strip()
+    
+    # First try exact match by ID
+    for v in catalog.get("voices", []):
+        if v["id"] == voice_to_search:
+            voice_entry = v
+            break
+    
+    # If not found, try to parse it (e.g., "edge:...", "piper:...", etc.)
+    if not voice_entry and ":" in voice_to_search:
+        parts = voice_to_search.split(":", 1)
+        provider = parts[0].strip().lower()
+        provider_voice = parts[1].strip()
+        for v in catalog.get("voices", []):
+            if v.get("provider") == provider and (v.get("provider_voice") == provider_voice or v.get("id") == provider_voice):
+                voice_entry = v
+                break
+    
+    # Fallback: use the first available voice
+    if not voice_entry:
+        voices = catalog.get("voices", [])
+        if voices:
+            voice_entry = voices[0]
+            if on_progress:
+                on_progress(f"Voice '{voice_to_search}' not found, using fallback: {voice_entry.get('name')}")
+    
+    if not voice_entry:
+        raise ValueError(f"No voice found in catalog for: {voice_to_search}")
+    
+    provider = voice_entry["provider"]
+    provider_voice = voice_entry["provider_voice"]
+    
+    if provider == "piper":
+        # Use Piper TTS with local model
+        model_path = os.path.join(os.getcwd(), provider_voice)
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Piper model not found at {model_path}. Please download and place the model there.")
+        
+        return piper_tts_to_wav_16k_mono(
             text=text,
             wav_path=wav_path,
-            speaker_id=voice_id or "1",
-            speed=speed_value,
+            model_path=model_path,
+            speed=speed,
             tmp_dir=tmp_dir,
+            on_progress=on_progress,
         )
-    if provider == "fpt":
-        return fpt_tts_to_wav_16k_mono(
+    elif provider == "edge":
+        # Use Edge TTS
+        speed_value = _speed_to_float(speed)
+        edge_rate_percent = int(round((speed_value - 1.0) * 100.0))
+        edge_rate = f"{edge_rate_percent:+d}%"
+        return edge_tts_to_wav_16k_mono(
             text=text,
             wav_path=wav_path,
-            voice=voice_id or "banmai",
-            speed=speed_value,
+            voice=provider_voice or "vi-VN-HoaiMyNeural",
+            rate=edge_rate,
             tmp_dir=tmp_dir,
         )
-    edge_rate_percent = int(round((speed_value - 1.0) * 100.0))
-    edge_rate = f"{edge_rate_percent:+d}%"
-    return edge_tts_to_wav_16k_mono(
-        text=text,
-        wav_path=wav_path,
-        voice=voice_id or "vi-VN-HoaiMyNeural",
-        rate=edge_rate,
-        tmp_dir=tmp_dir,
-    )
+    else:
+        raise ValueError(f"Unsupported TTS provider: {provider}. Only 'piper' and 'edge' are supported.")
 

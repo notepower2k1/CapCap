@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from services.project_service import ProjectService
-from workflows import ExportWorkflow, PrepareWorkflow, VoiceWorkflow
 
 
 class WorkflowRuntime:
     def __init__(self, workspace_root: str):
         self.workspace_root = workspace_root
         self.project_service = ProjectService(workspace_root)
+        
+        # Import workflows here to avoid circular imports
+        from workflows.prepare_workflow import PrepareWorkflow
+        from workflows.voice_workflow import VoiceWorkflow
+        from workflows.export_workflow import ExportWorkflow
+        
         self.prepare_workflow = PrepareWorkflow(workspace_root)
         self.voice_workflow = VoiceWorkflow(workspace_root)
         self.export_workflow = ExportWorkflow(workspace_root)
@@ -45,12 +50,13 @@ class WorkflowRuntime:
         output_dir: str,
         background_path: str = "",
         audio_handling_mode: str = "fast",
-        voice_name: str = "vi-VN-HoaiMyNeural",
+        voice_name: str = "vi_VN-vais1000-medium",
         voice_speed: float = 1.0,
         timing_sync_mode: str = "off",
         voice_gain_db: float = 0.0,
         bg_gain_db: float = 0.0,
         project_state_path: str = "",
+        on_progress: callable = None,
     ):
         return self.voice_workflow.run(
             segments=segments,
@@ -63,6 +69,7 @@ class WorkflowRuntime:
             voice_gain_db=voice_gain_db,
             bg_gain_db=bg_gain_db,
             project_state_path=project_state_path,
+            on_progress=on_progress,
         )
 
     def run_export(

@@ -461,6 +461,11 @@ class VideoTranslatorGUI(QMainWindow):
         provider = str(entry.get("provider", "edge")).strip().lower()
         provider_voice = str(entry.get("provider_voice", "")).strip()
         voice_id = str(entry.get("voice_id", "")).strip()
+        entry_id = str(entry.get("id", "")).strip()
+        
+        # For Piper, use the entry ID directly (e.g., "vi_VN-vais1000-medium")
+        if provider == "piper":
+            return entry_id or provider_voice or "piper:default"
         if provider == "fpt":
             return f"fpt:{provider_voice or voice_id or 'banmai'}"
         if provider == "zalo":
@@ -617,7 +622,8 @@ class VideoTranslatorGUI(QMainWindow):
         if using_premium and premium_value:
             return premium_value
         free_value = str(self.free_voice_combo.currentData() or "").strip() if hasattr(self, "free_voice_combo") else ""
-        return free_value or "edge:vi-VN-HoaiMyNeural"
+        # Default to Piper voice instead of Edge
+        return free_value or "vi_VN-vais1000-medium"
 
     def on_voice_tier_changed(self):
         mode = self.get_output_mode_key() if hasattr(self, "output_mode_combo") else "both"
@@ -3071,6 +3077,22 @@ class VideoTranslatorGUI(QMainWindow):
         timing_sync_mode = str(self.voice_timing_sync_combo.currentText()).strip()
         voice_gain = float(self.voice_gain_spin.value())
         bg_gain = float(self.bg_gain_spin.value())
+        
+        # DEBUG: Log voice combo state and active voice
+        use_free = self.use_free_voice_radio.isChecked() if hasattr(self, "use_free_voice_radio") else False
+        active_combo = self.free_voice_combo if use_free else self.premium_voice_combo
+        combo_data = active_combo.currentData()
+        combo_text = active_combo.currentText()
+        combo_id = active_combo.currentData(self.VOICE_ENTRY_ID_ROLE)
+        self.log(
+            f"[Voiceover DEBUG] Voice combo state: "
+            f"use_free={use_free}, "
+            f"combo_text='{combo_text}', "
+            f"combo_data='{combo_data}', "
+            f"combo_id='{combo_id}', "
+            f"get_active_voice_name()='{voice_name}'"
+        )
+        
         self.log(
             "[Voiceover] Starting with "
             f"audio_mode={audio_handling_mode}, "

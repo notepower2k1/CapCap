@@ -11,3 +11,5 @@ huggingface_hub
 faster-whisper
 llama-cpp-python
 python-mpv
+vietnormalizer
+piper-tts

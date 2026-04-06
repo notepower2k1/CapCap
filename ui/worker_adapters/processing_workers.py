@@ -205,6 +205,7 @@ class PrepareWorkflowWorker(QThread):
 
 class VoiceOverWorker(QThread):
     finished = Signal(str, str, str)
+    progress = Signal(str)  # New signal for progress messages
 
     def __init__(self, workspace_root, segments, output_dir, background_path, audio_handling_mode, voice_name, voice_speed, timing_sync_mode, voice_gain_db, bg_gain_db, project_state_path=""):
         super().__init__()
@@ -222,6 +223,9 @@ class VoiceOverWorker(QThread):
 
     def run(self):
         try:
+            print(f"[VoiceOverWorker DEBUG] Starting with voice_name='{self.voice_name}'")
+            self.progress.emit(f"[VoiceOverWorker DEBUG] voice_name='{self.voice_name}'")
+            
             runtime = WorkflowRuntime(self.workspace_root)
             result = runtime.run_voice(
                 segments=self.segments,
@@ -234,9 +238,11 @@ class VoiceOverWorker(QThread):
                 voice_gain_db=self.voice_gain_db,
                 bg_gain_db=self.bg_gain_db,
                 project_state_path=self.project_state_path,
+                on_progress=self.progress.emit,  # Pass callback
             )
             self.finished.emit(result.get("voice_track", ""), result.get("mixed_path", ""), "")
         except Exception as exc:
+            print(f"[VoiceOverWorker ERROR] {str(exc)}")
             self.finished.emit("", "", str(exc))
 
 
