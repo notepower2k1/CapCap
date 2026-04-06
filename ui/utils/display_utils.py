@@ -1,5 +1,6 @@
-import os
+﻿import os
 
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QLabel, QMessageBox, QDialog, QScrollArea, QVBoxLayout
 
 
@@ -74,6 +75,13 @@ def show_processed_files(gui):
 
 
 def cleanup_temp_preview_files(gui):
+    try:
+        if getattr(gui, "media_player", None):
+            gui.media_player.stop()
+            gui.media_player.setSource(QUrl())
+    except Exception:
+        pass
+
     paths = [
         gui.last_preview_video_path,
         gui.last_exact_preview_5s_path,
@@ -83,9 +91,30 @@ def cleanup_temp_preview_files(gui):
     ]
     for path in paths:
         gui.cleanup_file_if_exists(path)
+
+    # Prune old styled preview renders to avoid temp folder bloat.
+    try:
+        temp_root = os.path.join(os.getcwd(), "temp")
+        if os.path.isdir(temp_root):
+            candidates = []
+            for name in os.listdir(temp_root):
+                lower = name.lower()
+                if name.startswith("preview_vi_voice_") and lower.endswith(".mp4"):
+                    full = os.path.join(temp_root, name)
+                    if os.path.isfile(full):
+                        candidates.append(full)
+            candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+            for old_path in candidates[2:]:
+                gui.cleanup_file_if_exists(old_path)
+    except Exception:
+        pass
+
     gui.last_preview_video_path = ""
     gui.last_exact_preview_5s_path = ""
     gui.last_exact_preview_frame_path = ""
     gui.processed_artifacts.pop("preview_video", None)
     gui.processed_artifacts.pop("preview_video_5s", None)
     gui.processed_artifacts.pop("preview_frame", None)
+
+
+

@@ -1,4 +1,5 @@
-import os
+﻿import os
+import time
 
 
 def _normalize_selected_file_path(path: str) -> str:
@@ -83,8 +84,22 @@ def open_folder(gui, path):
 def cleanup_file_if_exists(path: str):
     if not path:
         return
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass
+    normalized = str(path).strip().strip('\"').strip("'")
+    if not normalized:
+        return
+    normalized = os.path.normpath(normalized)
+
+    for attempt in range(5):
+        try:
+            if os.path.exists(normalized):
+                try:
+                    os.chmod(normalized, 0o666)
+                except OSError:
+                    pass
+                os.remove(normalized)
+        except OSError:
+            if attempt < 4:
+                time.sleep(0.15)
+                continue
+        break
+

@@ -146,6 +146,12 @@ class PreviewController:
         duration_seconds = 5.0
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         if self.gui.last_preview_video_path and self.gui.last_preview_video_path != self.gui.last_exact_preview_5s_path:
+            try:
+                # Release file handle so Windows can delete the previous preview clip.
+                self.gui.media_player.stop()
+                self.gui.media_player.setSource(QUrl())
+            except Exception:
+                pass
             self.gui.cleanup_file_if_exists(self.gui.last_preview_video_path)
             self.gui.processed_artifacts.pop("preview_video", None)
             self.gui.last_preview_video_path = ""
@@ -380,6 +386,12 @@ class PreviewController:
 
         if self.gui.last_preview_video_path and self.gui.last_preview_video_path != self.gui.last_exact_preview_5s_path:
             if not (cached_preview and os.path.abspath(self.gui.last_preview_video_path) == os.path.abspath(cached_preview)):
+                try:
+                    # Release file handle so Windows can delete the previous preview clip.
+                    self.gui.media_player.stop()
+                    self.gui.media_player.setSource(QUrl())
+                except Exception:
+                    pass
                 self.gui.cleanup_file_if_exists(self.gui.last_preview_video_path)
             self.gui.processed_artifacts.pop("preview_video", None)
             self.gui.last_preview_video_path = ""
