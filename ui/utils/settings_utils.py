@@ -12,13 +12,9 @@ def save_user_settings(gui):
     s.setValue("mixed_audio", gui.mixed_audio_edit.text())
     s.setValue("free_voice_name", gui.free_voice_combo.currentText())
     s.setValue("free_voice_value", gui.free_voice_combo.currentData())
-    s.setValue("premium_voice_name", gui.premium_voice_combo.currentText())
-    s.setValue("premium_voice_value", gui.premium_voice_combo.currentData())
-    if gui.use_premium_voice_radio.isChecked():
-        voice_tier = "premium"
-    else:
-        voice_tier = "free"
-    s.setValue("voice_tier", voice_tier)
+    s.setValue("premium_voice_name", "")
+    s.setValue("premium_voice_value", "")
+    s.setValue("voice_tier", "free")
     s.setValue("use_existing_audio", gui.use_existing_audio_radio.isChecked())
     s.setValue("keep_audio", gui.keep_audio_cb.isChecked())
     s.setValue("keep_timeline", gui.keep_timeline_cb.isChecked())
@@ -68,10 +64,10 @@ def load_user_settings(gui):
     gui.bg_music_edit.setText(s.value("background_audio", gui.bg_music_edit.text()))
     gui.mixed_audio_edit.setText(s.value("mixed_audio", gui.mixed_audio_edit.text()))
     gui.set_voice_combo_value(gui.free_voice_combo, s.value("free_voice_value", gui.free_voice_combo.currentData()))
-    gui.set_voice_combo_value(gui.premium_voice_combo, s.value("premium_voice_value", gui.premium_voice_combo.currentData()))
-    voice_tier = str(s.value("voice_tier", "free")).lower()
-    gui.use_premium_voice_radio.setChecked(voice_tier == "premium")
-    gui.use_free_voice_radio.setChecked(voice_tier != "premium")
+    if hasattr(gui, "use_premium_voice_radio"):
+        gui.use_premium_voice_radio.setChecked(False)
+    if hasattr(gui, "use_free_voice_radio"):
+        gui.use_free_voice_radio.setChecked(True)
     gui.keep_audio_cb.setChecked(str(s.value("keep_audio", gui.keep_audio_cb.isChecked())).lower() == "true")
     gui.keep_timeline_cb.setChecked(str(s.value("keep_timeline", gui.keep_timeline_cb.isChecked())).lower() == "true")
     auto_preview_enabled = str(s.value("auto_preview_frame", "false")).lower() == "true"

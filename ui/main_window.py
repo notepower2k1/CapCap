@@ -71,6 +71,7 @@ from workers import (
     ExtractionWorker,
     RuntimeAssetsWorker,
     SegmentAudioPreviewWorker,
+    VoiceSamplePreviewWorker,
     VocalSeparationWorker,
     VoiceOverWorker,
 )
@@ -313,6 +314,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.selected_whisper_model_name = "base"
         self._last_audio_preview_path = ""
         self._segment_preview_threads = {}
+        self._voice_sample_preview_thread = None
         self.voice_catalog_entries_all = []
         self.voice_catalog_entries = []
         self.voice_catalog_map = {}
@@ -333,6 +335,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._log_lines = []
 
         self.setup_ui()
+        self._configure_local_voice_mode_ui()
         self.setup_media_player()
         self.setup_audio_preview_player()
         if hasattr(self, "video_view") and hasattr(self.video_view, "blurRegionChanged"):
@@ -447,6 +450,39 @@ class VideoTranslatorGUI(QMainWindow):
     def setup_ui(self):
         build_main_window_ui(self)
 
+    def _configure_local_voice_mode_ui(self):
+        if hasattr(self, "use_free_voice_radio"):
+            try:
+                self.use_free_voice_radio.setChecked(True)
+                self.use_free_voice_radio.setVisible(False)
+                self.use_free_voice_radio.setEnabled(False)
+            except Exception:
+                pass
+        if hasattr(self, "use_premium_voice_radio"):
+            try:
+                self.use_premium_voice_radio.setChecked(False)
+                self.use_premium_voice_radio.setVisible(False)
+                self.use_premium_voice_radio.setEnabled(False)
+            except Exception:
+                pass
+        if hasattr(self, "premium_voice_combo"):
+            try:
+                self.premium_voice_combo.clear()
+                self.premium_voice_combo.setVisible(False)
+                self.premium_voice_combo.setEnabled(False)
+            except Exception:
+                pass
+        if hasattr(self, "preview_voice_btn"):
+            try:
+                self.preview_voice_btn.setText("Preview voice")
+            except Exception:
+                pass
+        if hasattr(self, "voice_preview_meta_label"):
+            try:
+                self.voice_preview_meta_label.setText("Generate a short preview audio clip with the selected local voice.")
+            except Exception:
+                pass
+
     def setup_audio_preview_player(self):
         self.audio_preview_player = QMediaPlayer(self)
         self.audio_preview_output = QAudioOutput(self)
@@ -458,31 +494,24 @@ class VideoTranslatorGUI(QMainWindow):
         self._voice_preview_row_buttons = {}
 
     def _voice_catalog_data_value(self, entry: dict) -> str:
-        provider = str(entry.get("provider", "edge")).strip().lower()
+        provider = str(entry.get("provider", "")).strip().lower()
         provider_voice = str(entry.get("provider_voice", "")).strip()
-        voice_id = str(entry.get("voice_id", "")).strip()
         entry_id = str(entry.get("id", "")).strip()
-        
-        # For Piper, use the entry ID directly (e.g., "vi_VN-vais1000-medium")
         if provider == "piper":
-            return entry_id or provider_voice or "piper:default"
-        if provider == "fpt":
-            return f"fpt:{provider_voice or voice_id or 'banmai'}"
-        if provider == "zalo":
-            return f"zalo:{provider_voice or voice_id or '1'}"
-        return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
+            return entry_id
+        if provider == "edge":
+            return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
+        return ""
 
     def _voice_provider_label(self, provider: str) -> str:
-        mapping = {
-            "edge": "Edge",
-            "zalo": "Zalo",
-            "fpt": "FPT.AI",
-        }
-        return mapping.get(str(provider or "").strip().lower(), str(provider or "Other").strip().title() or "Other")
+        provider_key = str(provider or "").strip().lower()
+        if provider_key == "piper":
+            return "Local"
+        if provider_key == "edge":
+            return "Edge"
+        return str(provider or "Other").strip().title() or "Other"
 
     def _current_voice_tier(self) -> str:
-        if getattr(self, "use_premium_voice_radio", None) and self.use_premium_voice_radio.isChecked():
-            return "premium"
         return "free"
 
     def _selected_voice_gender(self) -> str:
@@ -512,89 +541,241 @@ class VideoTranslatorGUI(QMainWindow):
                 return
 
     def _get_previewable_voice_catalog_entry(self):
-        if self._current_voice_tier() == "premium":
-            return self.get_selected_premium_voice_catalog_entry()
         return None
 
     def _update_voice_preview_meta(self):
         if not hasattr(self, "voice_preview_meta_label"):
             return
-        total_entries = len(self.voice_catalog_entries_all or [])
+        total_entries = len(self.voice_catalog_entries or [])
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setVisible(True)
             self.preview_voice_btn.setEnabled(total_entries > 0)
         if total_entries <= 0:
             self.voice_preview_meta_label.setText("No voices are available in the catalog yet.")
             return
-        previewable_count = sum(1 for entry in self.voice_catalog_entries_all if self._entry_has_preview_media(entry))
         self.voice_preview_meta_label.setText(
-            f"Open the popup to preview voices by provider. {previewable_count}/{total_entries} voices currently have preview media."
+            f"Local voices: {total_entries}. Click “Preview voice” to generate a short test clip."
         )
 
     def load_voice_preview_catalog(self):
+        self._auto_sync_piper_voices_to_catalog()
         self.voice_catalog_entries_all = self.voice_catalog_service.load_catalog()
         if self.voice_preview_dialog is not None:
             self.voice_preview_dialog.close()
             self.voice_preview_dialog = None
         self.refresh_voice_catalog_combos()
 
+    def _auto_sync_piper_voices_to_catalog(self):
+        models_dir = os.path.join(self.workspace_root, "models", "piper")
+        if not os.path.isdir(models_dir):
+            return
+        catalog_path = os.path.join(self.workspace_root, "app", "voice_preview_catalog.json")
+
+        def titleize(voice_id: str) -> str:
+            stem = str(voice_id or "").strip()
+            if not stem:
+                return "Voice"
+            if re.match(r"^[a-z]{2}_[A-Z]{2}-", stem):
+                return stem
+            text = re.sub(r"[_-]+", " ", stem, flags=re.UNICODE).strip()
+            text = re.sub(r"\s+", " ", text, flags=re.UNICODE)
+            parts = [p for p in text.split(" ") if p]
+            out = []
+            for part in parts:
+                if any(ch.isdigit() for ch in part):
+                    out.append(part)
+                else:
+                    out.append(part[:1].upper() + part[1:].lower())
+            return " ".join(out) if out else stem
+
+        def language_from_piper_config(model_path: str) -> str:
+            cfg_path = f"{model_path}.json"
+            if not os.path.exists(cfg_path):
+                return ""
+            try:
+                with open(cfg_path, "r", encoding="utf-8", errors="ignore") as handle:
+                    head = handle.read(16384)
+            except Exception:
+                return ""
+            match = re.search(
+                r"\"espeak\"\\s*:\\s*{[^}]*\"voice\"\\s*:\\s*\"([^\"]+)\"",
+                head,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            voice = (match.group(1).strip() if match else "").lower()
+            if not voice:
+                return ""
+            return re.split(r"[-_]", voice, 1)[0].strip().lower()
+
+        def provider_voice_for_model(model_path: str) -> str:
+            return f"models/piper/{os.path.basename(model_path)}"
+
+        try:
+            if os.path.exists(catalog_path):
+                with open(catalog_path, "r", encoding="utf-8-sig") as handle:
+                    payload = json.load(handle) or {}
+            else:
+                payload = {}
+        except Exception:
+            payload = {}
+
+        if not isinstance(payload, dict):
+            payload = {}
+        payload.setdefault("schema_version", 2)
+        payload.setdefault("voices", [])
+        voices = list(payload.get("voices", []) or [])
+
+        by_id = {}
+        for entry in voices:
+            if isinstance(entry, dict) and entry.get("id"):
+                by_id[str(entry.get("id")).strip()] = entry
+
+        model_paths = sorted(
+            [os.path.join(models_dir, name) for name in os.listdir(models_dir) if name.lower().endswith(".onnx")],
+            key=lambda p: os.path.basename(p).lower(),
+        )
+        changed = False
+        model_ids = set()
+        if not model_paths:
+            # No models => remove all Piper voices from catalog (keep non-piper voices like Edge).
+            new_voices = []
+            for entry in voices:
+                if not isinstance(entry, dict):
+                    continue
+                provider = str(entry.get("provider", "")).strip().lower()
+                if provider == "piper":
+                    changed = True
+                    continue
+                new_voices.append(entry)
+            if not changed:
+                return
+            payload["voices"] = new_voices
+            try:
+                with open(catalog_path, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, ensure_ascii=False, indent=2)
+                    handle.write("\n")
+            except Exception as exc:
+                try:
+                    self.log(f"[Voice Catalog] Auto-sync Piper failed: {exc}")
+                except Exception:
+                    pass
+            return
+
+        for model_path in model_paths:
+            voice_id = os.path.splitext(os.path.basename(model_path))[0]
+            model_ids.add(voice_id)
+            pv = provider_voice_for_model(model_path)
+            lang = language_from_piper_config(model_path) or "vi"
+
+            existing = by_id.get(voice_id)
+            if isinstance(existing, dict) and str(existing.get("provider", "")).strip().lower() == "piper":
+                if str(existing.get("provider_voice", "")).strip() != pv:
+                    existing["provider_voice"] = pv
+                    changed = True
+                if not str(existing.get("language", "")).strip():
+                    existing["language"] = lang
+                    changed = True
+                for key in ("preview_audio_url", "preview_audio_path", "preview_video_url", "preview_video_path"):
+                    if key not in existing:
+                        existing[key] = ""
+                        changed = True
+                if "tier" not in existing:
+                    existing["tier"] = "free"
+                    changed = True
+                if "enabled" not in existing:
+                    existing["enabled"] = True
+                    changed = True
+                if "tags" not in existing:
+                    existing["tags"] = ["local", "piper"]
+                    changed = True
+                continue
+
+            if voice_id == "vi_VN-vais1000-medium":
+                name = "Vais1000 Medium (Local)"
+            else:
+                name = f"{titleize(voice_id)} (Local)"
+            voices.append(
+                {
+                    "id": voice_id,
+                    "name": name,
+                    "provider": "piper",
+                    "provider_voice": pv,
+                    "language": lang,
+                    "gender": "",
+                    "tier": "free",
+                    "preview_video_url": "",
+                    "preview_video_path": "",
+                    "preview_audio_url": "",
+                    "preview_audio_path": "",
+                    "enabled": True,
+                    "tags": ["local", "piper"],
+                }
+            )
+            changed = True
+
+        # Remove Piper entries whose models were deleted.
+        new_voices = []
+        for entry in voices:
+            if not isinstance(entry, dict):
+                continue
+            provider = str(entry.get("provider", "")).strip().lower()
+            if provider == "piper":
+                entry_id = str(entry.get("id", "")).strip()
+                if not entry_id or entry_id not in model_ids:
+                    changed = True
+                    continue
+            new_voices.append(entry)
+        voices = new_voices
+
+        if not changed:
+            return
+
+        payload["voices"] = voices
+        try:
+            with open(catalog_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+        except Exception as exc:
+            try:
+                self.log(f"[Voice Catalog] Auto-sync Piper failed: {exc}")
+            except Exception:
+                pass
+
     def refresh_voice_catalog_combos(self):
-        self.voice_catalog_entries = list(self.voice_catalog_entries_all or [])
+        self.voice_catalog_entries = []
+        for entry in (self.voice_catalog_entries_all or []):
+            if not entry or not isinstance(entry, dict):
+                continue
+            if not entry.get("enabled", True):
+                continue
+            provider = str(entry.get("provider", "")).strip().lower()
+            if provider not in {"piper", "edge"}:
+                continue
+            self.voice_catalog_entries.append(entry)
         self.voice_catalog_map = {entry.get("id", ""): entry for entry in self.voice_catalog_entries if entry.get("id")}
-        if not hasattr(self, "free_voice_combo") or not hasattr(self, "premium_voice_combo"):
+        if not hasattr(self, "free_voice_combo"):
             return
 
         selected_gender = self._selected_voice_gender()
         previous_free = str(self.free_voice_combo.currentData() or "")
-        previous_premium = str(self.premium_voice_combo.currentData() or "")
 
         self.free_voice_combo.clear()
-        self.premium_voice_combo.clear()
-        grouped_entries = {"free": [], "premium": [], "other": []}
         for entry in self.voice_catalog_entries:
             entry_gender = str(entry.get("gender", "")).strip().lower()
             if selected_gender in ("male", "female") and entry_gender not in (selected_gender, "any", ""):
                 continue
-            tier = str(entry.get("tier", "other")).strip().lower()
-            grouped_entries[tier if tier in grouped_entries else "other"].append(entry)
-
-        self.premium_voice_combo.addItem("None", "")
-        for entry in grouped_entries["free"] + grouped_entries["other"]:
-            self.free_voice_combo.addItem(str(entry.get("name", entry.get("id", "Voice"))), self._voice_catalog_data_value(entry))
+            self.free_voice_combo.addItem(
+                str(entry.get("name", entry.get("id", "Voice"))),
+                self._voice_catalog_data_value(entry),
+            )
             index = self.free_voice_combo.count() - 1
             self.free_voice_combo.setItemData(index, entry.get("id", ""), self.VOICE_ENTRY_ID_ROLE)
 
-        premium_by_provider = {}
-        for entry in grouped_entries["premium"]:
-            provider_key = str(entry.get("provider", "other")).strip().lower() or "other"
-            premium_by_provider.setdefault(provider_key, []).append(entry)
-
-        for provider_key in sorted(premium_by_provider.keys(), key=lambda key: self._voice_provider_label(key)):
-            provider_label = self._voice_provider_label(provider_key)
-            self.premium_voice_combo.addItem(f"--- {provider_label} ---", "")
-            header_index = self.premium_voice_combo.count() - 1
-            header_item = self.premium_voice_combo.model().item(header_index)
-            if header_item is not None:
-                header_item.setEnabled(False)
-            for entry in sorted(premium_by_provider[provider_key], key=lambda item: str(item.get("name", ""))):
-                voice_name = str(entry.get("name", entry.get("id", "Voice")))
-                self.premium_voice_combo.addItem(f"{provider_label} | {voice_name}", self._voice_catalog_data_value(entry))
-                index = self.premium_voice_combo.count() - 1
-                self.premium_voice_combo.setItemData(index, entry.get("id", ""), self.VOICE_ENTRY_ID_ROLE)
-
         if self.free_voice_combo.count() > 0:
             self.free_voice_combo.setCurrentIndex(0)
-        self.premium_voice_combo.setCurrentIndex(0)
         if previous_free:
             self.set_voice_combo_value(self.free_voice_combo, previous_free)
-        if previous_premium:
-            self.set_voice_combo_value(self.premium_voice_combo, previous_premium)
         if not self._voice_signals_bound:
-            self.premium_voice_combo.currentIndexChanged.connect(self._update_voice_preview_meta)
-            if hasattr(self, "use_free_voice_radio"):
-                self.use_free_voice_radio.toggled.connect(self.on_voice_tier_changed)
-            if hasattr(self, "use_premium_voice_radio"):
-                self.use_premium_voice_radio.toggled.connect(self.on_voice_tier_changed)
             self._voice_signals_bound = True
         self.on_voice_tier_changed()
         self._update_voice_preview_meta()
@@ -617,21 +798,13 @@ class VideoTranslatorGUI(QMainWindow):
         return None
 
     def get_active_voice_name(self) -> str:
-        using_premium = bool(getattr(self, "use_premium_voice_radio", None) and self.use_premium_voice_radio.isChecked())
-        premium_value = str(self.premium_voice_combo.currentData() or "").strip() if hasattr(self, "premium_voice_combo") else ""
-        if using_premium and premium_value:
-            return premium_value
         free_value = str(self.free_voice_combo.currentData() or "").strip() if hasattr(self, "free_voice_combo") else ""
-        # Default to Piper voice instead of Edge
         return free_value or "vi_VN-vais1000-medium"
 
     def on_voice_tier_changed(self):
         mode = self.get_output_mode_key() if hasattr(self, "output_mode_combo") else "both"
-        using_premium = bool(getattr(self, "use_premium_voice_radio", None) and self.use_premium_voice_radio.isChecked())
         if hasattr(self, "free_voice_combo"):
-            self.free_voice_combo.setEnabled(not using_premium)
-        if hasattr(self, "premium_voice_combo"):
-            self.premium_voice_combo.setEnabled(using_premium)
+            self.free_voice_combo.setEnabled(True)
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setVisible(mode in ("voice", "both"))
         self._update_voice_preview_meta()
@@ -779,9 +952,25 @@ class VideoTranslatorGUI(QMainWindow):
 
     def save_user_settings(self):
         save_user_settings_impl(self)
+        try:
+            self.settings.setValue("premium_voice_name", "")
+            self.settings.setValue("premium_voice_value", "")
+            self.settings.setValue("voice_tier", "free")
+        except Exception:
+            pass
 
     def load_user_settings(self):
         load_user_settings_impl(self)
+        if hasattr(self, "use_premium_voice_radio"):
+            try:
+                self.use_premium_voice_radio.setChecked(False)
+            except Exception:
+                pass
+        if hasattr(self, "use_free_voice_radio"):
+            try:
+                self.use_free_voice_radio.setChecked(True)
+            except Exception:
+                pass
 
     def ensure_local_translator_auto_configured(self):
         provider = str(os.getenv("AI_POLISHER_PROVIDER") or "").strip().lower()
@@ -2023,11 +2212,45 @@ class VideoTranslatorGUI(QMainWindow):
         return dialog
 
     def preview_selected_voice_sample(self):
-        dialog = self.voice_preview_dialog if self.voice_preview_dialog is not None else self._build_voice_preview_popup()
-        self._stop_voice_library_preview()
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        if not (self.voice_catalog_entries or []):
+            QMessageBox.information(self, "Preview voice", "No local voices are available yet. Please add Piper models to models/piper first.")
+            return
+
+        if self._voice_sample_preview_thread is not None:
+            QMessageBox.information(self, "Preview voice", "A preview is already being generated. Please wait a moment.")
+            return
+
+        voice_name = self.get_active_voice_name()
+        voice_speed = self._parse_voice_speed_value()
+        text = "Chào bạn, đây là đoạn thử giọng nhận diện giọng nói tiếng Việt."
+
+        if hasattr(self, "preview_voice_btn"):
+            self.preview_voice_btn.setEnabled(False)
+            self.preview_voice_btn.setText("...")
+
+        worker = VoiceSamplePreviewWorker(self.workspace_root, text, voice_name, voice_speed)
+        worker.finished.connect(self.on_voice_sample_preview_ready)
+        self._voice_sample_preview_thread = worker
+        worker.start()
+
+    def on_voice_sample_preview_ready(self, audio_path: str, error: str):
+        if hasattr(self, "preview_voice_btn"):
+            self.preview_voice_btn.setEnabled(True)
+            self.preview_voice_btn.setText("Preview voice")
+        self._voice_sample_preview_thread = None
+
+        if error:
+            self.show_error("Voice Preview Failed", "Could not generate the preview audio.", error)
+            return
+        if not audio_path:
+            self.show_error("Voice Preview Failed", "Preview audio path is missing.", "")
+            return
+
+        try:
+            self.play_audio_preview_file(audio_path)
+            self.log(f"[Voice Preview] playing generated sample: {audio_path}")
+        except Exception as exc:
+            self.show_error("Voice Preview Failed", "Could not play the generated preview audio.", str(exc))
 
     def preview_segment_audio(self, index: int):
         if index < 0 or index >= len(self.current_translated_segments or self.current_segments):
@@ -2440,10 +2663,9 @@ class VideoTranslatorGUI(QMainWindow):
             self.free_voice_combo.setEnabled(
                 generated_mode
                 and mode in ("voice", "both")
-                and not (hasattr(self, "use_premium_voice_radio") and self.use_premium_voice_radio.isChecked())
             )
         if hasattr(self, "premium_voice_combo"):
-            self.premium_voice_combo.setEnabled(generated_mode and mode in ("voice", "both") and bool(hasattr(self, "use_premium_voice_radio") and self.use_premium_voice_radio.isChecked()))
+            self.premium_voice_combo.setEnabled(False)
         if hasattr(self, "bg_music_edit"):
             self.bg_music_edit.setEnabled(generated_mode and mode in ("voice", "both"))
         if hasattr(self, "audio_handling_combo"):
@@ -3078,20 +3300,10 @@ class VideoTranslatorGUI(QMainWindow):
         voice_gain = float(self.voice_gain_spin.value())
         bg_gain = float(self.bg_gain_spin.value())
         
-        # DEBUG: Log voice combo state and active voice
-        use_free = self.use_free_voice_radio.isChecked() if hasattr(self, "use_free_voice_radio") else False
-        active_combo = self.free_voice_combo if use_free else self.premium_voice_combo
-        combo_data = active_combo.currentData()
-        combo_text = active_combo.currentText()
-        combo_id = active_combo.currentData(self.VOICE_ENTRY_ID_ROLE)
-        self.log(
-            f"[Voiceover DEBUG] Voice combo state: "
-            f"use_free={use_free}, "
-            f"combo_text='{combo_text}', "
-            f"combo_data='{combo_data}', "
-            f"combo_id='{combo_id}', "
-            f"get_active_voice_name()='{voice_name}'"
-        )
+        combo_text = self.free_voice_combo.currentText() if hasattr(self, "free_voice_combo") else ""
+        combo_data = self.free_voice_combo.currentData() if hasattr(self, "free_voice_combo") else ""
+        combo_id = self.free_voice_combo.currentData(self.VOICE_ENTRY_ID_ROLE) if hasattr(self, "free_voice_combo") else ""
+        self.log(f"[Voiceover] Selected voice: text='{combo_text}', data='{combo_data}', id='{combo_id}'")
         
         self.log(
             "[Voiceover] Starting with "
