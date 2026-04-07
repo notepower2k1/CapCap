@@ -1,4 +1,4 @@
-import os
+﻿import os
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QImage, QPixmap
@@ -127,6 +127,8 @@ def _connect_ui_signals(gui):
     gui.voiceover_btn.clicked.connect(gui.run_voiceover)
     gui.preview_btn.clicked.connect(gui.preview_video)
     gui.output_mode_combo.currentTextChanged.connect(gui.on_output_mode_changed)
+    if hasattr(gui, "output_quality_combo"):
+        gui.output_quality_combo.currentIndexChanged.connect(gui.refresh_ui_state)
     gui.audio_handling_combo.currentTextChanged.connect(gui.refresh_ui_state)
     gui.final_output_folder_edit.textChanged.connect(gui.voice_output_folder_edit.setText)
     gui.final_output_folder_edit.textChanged.connect(gui.srt_output_folder_edit.setText)
@@ -220,3 +222,4 @@ def _initialize_ui_state(gui):
     gui.update_project_header()
     gui.refresh_ui_state()
     gui.sync_segment_editor_rows()
+

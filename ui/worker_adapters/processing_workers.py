@@ -123,6 +123,7 @@ class RewriteTranslationWorker(QThread):
 
 class RuntimeAssetsWorker(QThread):
     finished = Signal(str, str)
+    progress = Signal(int, str)  # percent (0-100) or -1 for indeterminate, message
 
     def __init__(self, workspace_root, whisper_model_name="base", demucs_model_name="htdemucs"):
         super().__init__()
@@ -134,10 +135,12 @@ class RuntimeAssetsWorker(QThread):
         try:
             details = []
 
+            self.progress.emit(5, "Checking bundled runtime assets...")
             ffmpeg_path = Path(self.workspace_root) / "bin" / "ffmpeg" / "ffmpeg.exe"
             if not ffmpeg_path.exists():
                 raise FileNotFoundError(f"Bundled FFmpeg is missing: {ffmpeg_path}")
             details.append(f"FFmpeg ready: {ffmpeg_path}")
+            self.progress.emit(12, "FFmpeg is ready.")
 
             mpv_path = Path(self.workspace_root) / "bin" / "mpv" / "libmpv-2.dll"
             if not mpv_path.exists():
@@ -146,11 +149,20 @@ class RuntimeAssetsWorker(QThread):
                     raise FileNotFoundError(f"Bundled libmpv is missing: {mpv_path}")
                 mpv_path = alt_mpv_path
             details.append(f"libmpv ready: {mpv_path}")
+            self.progress.emit(20, "Preview runtime is ready.")
 
             from faster_whisper import WhisperModel
 
             whisper_cache_dir = Path(self.workspace_root) / "models" / "faster_whisper"
             whisper_cache_dir.mkdir(parents=True, exist_ok=True)
+            cached = any(
+                p.is_dir() and self.whisper_model_name in p.name.lower()
+                for p in whisper_cache_dir.glob("models--*")
+            )
+            if cached:
+                self.progress.emit(35, f"Loading Whisper model: {self.whisper_model_name} ...")
+            else:
+                self.progress.emit(-1, f"Downloading Whisper model: {self.whisper_model_name} ...")
             WhisperModel(
                 self.whisper_model_name,
                 device="cpu",
@@ -159,11 +171,14 @@ class RuntimeAssetsWorker(QThread):
             )
             details.append(f"Whisper model ready: {self.whisper_model_name}")
 
+            self.progress.emit(80, f"Whisper model ready: {self.whisper_model_name}")
             from demucs.pretrained import get_model
 
+            self.progress.emit(-1, f"Downloading Demucs model: {self.demucs_model_name} ...")
             get_model(self.demucs_model_name)
             details.append(f"Demucs model ready: {self.demucs_model_name}")
 
+            self.progress.emit(100, "All models ready.")
             self.finished.emit("\n".join(details), "")
         except Exception as exc:
             self.finished.emit("", str(exc))
@@ -249,7 +264,7 @@ class VoiceOverWorker(QThread):
 class FinalExportWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, project_state_path=""):
+    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", project_state_path=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.video_path = video_path
@@ -259,6 +274,7 @@ class FinalExportWorker(QThread):
         self.ass_path = ass_path
         self.audio_path = audio_path
         self.subtitle_style = subtitle_style or {}
+        self.output_quality = output_quality
         self.project_state_path = project_state_path
 
     def run(self):
@@ -272,6 +288,7 @@ class FinalExportWorker(QThread):
                 ass_path=self.ass_path,
                 audio_path=self.audio_path,
                 subtitle_style=self.subtitle_style,
+                output_quality=self.output_quality,
                 project_state_path=self.project_state_path,
             )
             self.finished.emit(output, "")
@@ -354,3 +371,6 @@ class VoiceSamplePreviewWorker(QThread):
             self.finished.emit(output, "")
         except Exception as exc:
             self.finished.emit("", str(exc))
+
+
+

@@ -1,6 +1,7 @@
-import os
+﻿import os
 import sys
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox, QProgressDialog
 from workers import PrepareWorkflowWorker
 
 # Robust import for the progress widget
@@ -19,7 +20,53 @@ class PipelineController:
     def __init__(self, gui):
         self.gui = gui
         self.progress_dialog = None
+        self.whisper_download_dialog = None
 
+    
+    def _whisper_model_cached(self, model_name: str) -> bool:
+        try:
+            name = str(model_name or "").strip().lower()
+            if not name:
+                return True
+            cache_root = os.path.join(self.gui.workspace_root, "models", "faster_whisper")
+            if not os.path.isdir(cache_root):
+                return False
+            for entry in os.listdir(cache_root):
+                low = entry.lower()
+                if low.startswith("models--") and name in low:
+                    return True
+            return False
+        except Exception:
+            return True
+
+    def _hide_whisper_download_dialog(self):
+        try:
+            if self.whisper_download_dialog is not None:
+                self.whisper_download_dialog.hide()
+                self.whisper_download_dialog.deleteLater()
+                self.whisper_download_dialog = None
+        except Exception:
+            self.whisper_download_dialog = None
+
+    def _show_whisper_download_dialog(self):
+        try:
+            if self.whisper_download_dialog is not None:
+                return
+            model_name = getattr(self.gui, "get_whisper_model_name", lambda: "base")()
+            dlg = QProgressDialog(f"Downloading Whisper model: {model_name} ...", "Hide", 0, 0, self.gui)
+            dlg.setWindowTitle("Downloading models")
+            dlg.setWindowModality(Qt.NonModal)
+            dlg.setMinimumDuration(0)
+            dlg.setAutoReset(False)
+            dlg.setAutoClose(False)
+            try:
+                dlg.canceled.connect(dlg.hide)
+            except Exception:
+                pass
+            self.whisper_download_dialog = dlg
+            dlg.show()
+        except Exception:
+            self.whisper_download_dialog = None
     def _setup_progress_dialog(self, includes_separation=True):
         """Creates and initializes the progress tracking dialog."""
         if self.progress_dialog:
@@ -100,7 +147,7 @@ class PipelineController:
             self.progress_dialog.start_step(step_id)
             self.gui._pipeline_step = step_id
 
-    def on_prepare_workflow_finished(self, project_state_path, error):
+            self._hide_whisper_download_dialog()
         """Callback when the background PrepareWorkflow finishes completely."""
         if error or not project_state_path:
             self.pipeline_fail(f"Prepare workflow failed: {error}")
@@ -196,3 +243,4 @@ class PipelineController:
         self.gui.progress_bar.setRange(0, 100)
         self.gui.progress_bar.setValue(100)
         self.gui.refresh_ui_state()
+

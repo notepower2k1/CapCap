@@ -1,4 +1,4 @@
-import os
+﻿import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -183,6 +183,16 @@ def build_start_group(gui, left_layout):
     output_layout.addWidget(gui.output_subtitle_radio)
     output_layout.addWidget(gui.output_voice_radio)
     output_layout.addWidget(gui.output_both_radio)
+
+    output_layout.addSpacing(6)
+    output_layout.addWidget(QLabel("Output Quality:"))
+    gui.output_quality_combo = QComboBox()
+    gui.output_quality_combo.addItem("Max (source)", "source")
+    gui.output_quality_combo.addItem("720p", "720p")
+    gui.output_quality_combo.addItem("1080p (Full HD)", "1080p")
+    gui.output_quality_combo.addItem("1440p (2K)", "1440p")
+    gui.output_quality_combo.addItem("2160p (4K)", "2160p")
+    output_layout.addWidget(gui.output_quality_combo)
     control_layout.addWidget(output_card)
 
     language_card, language_layout = _build_collapsible_section("Section 3: Language")
@@ -458,3 +468,8 @@ def build_start_group(gui, left_layout):
 
 def build_workflow_group(left_layout):
     return None
+
+
+
+
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from engines import (
     AudioMixAdapter,
@@ -74,17 +74,18 @@ class EngineRuntime:
             src_lang=src_lang,
             style_instruction=style_instruction,
         )
-
-    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None) -> bool:
+    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, target_width=None, target_height=None) -> bool:
         return self.ffmpeg.embed_subtitles(
             video_path,
             srt_path,
             output_path,
             subtitle_style=subtitle_style,
+            target_width=target_width,
+            target_height=target_height,
         )
 
-    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None) -> bool:
-        return self.ffmpeg.embed_ass_subtitles(video_path, ass_path, output_path, blur_region=blur_region)
+    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, target_width=None, target_height=None) -> bool:
+        return self.ffmpeg.embed_ass_subtitles(video_path, ass_path, output_path, blur_region=blur_region, target_width=target_width, target_height=target_height)
 
     def get_video_dimensions(self, video_path: str):
         return self.ffmpeg.get_video_dimensions(video_path)
@@ -161,8 +162,8 @@ class EngineRuntime:
             ducking_segments=ducking_segments,
         )
 
-    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str) -> str:
-        return self.preview.mux_audio_for_preview(video_path, audio_path, output_video_path)
+    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None) -> str:
+        return self.preview.mux_audio_for_preview(video_path, audio_path, output_video_path, target_width=target_width, target_height=target_height)
 
     def trim_video_clip(self, video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:
         return self.preview.trim_video_clip(video_path, output_video_path, start_seconds, duration_seconds)
@@ -199,3 +200,4 @@ class EngineRuntime:
             timestamp_seconds,
             subtitle_style=subtitle_style,
         )
+

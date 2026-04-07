@@ -1,4 +1,4 @@
-import os
+﻿import os
 import subprocess
 
 
@@ -55,10 +55,20 @@ def trim_video_clip(video_path: str, output_video_path: str, start_seconds: floa
     return output_video_path
 
 
-def mux_audio_into_video_for_preview(video_path: str, audio_path: str, output_video_path: str) -> str:
-    """
-    Create a preview video by copying video stream and replacing audio.
-    This is meant for quick local preview (temp file), not final export.
+def mux_audio_into_video_for_preview(
+    video_path: str,
+    audio_path: str,
+    output_video_path: str,
+    *,
+    target_width=None,
+    target_height=None,
+) -> str:
+    """Create a video by replacing audio.
+
+    - When no target size is provided, this keeps video stream copy for speed.
+    - When target size is provided, video is re-encoded and scaled/padded.
+
+    This is used for quick local preview and also for voice-only final export.
     """
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -70,27 +80,66 @@ def mux_audio_into_video_for_preview(video_path: str, audio_path: str, output_vi
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
 
+    vf = ""
+    try:
+        if target_width and target_height:
+            tw = int(target_width)
+            th = int(target_height)
+            if tw > 0 and th > 0:
+                vf = (
+                    f"scale=w={tw}:h={th}:force_original_aspect_ratio=decrease,"
+                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
+                )
+    except Exception:
+        vf = ""
+
     cmd = [
         ffmpeg,
         "-hide_banner",
         "-loglevel",
         "error",
         "-y",
-        "-i", video_path,
-        "-i", audio_path,
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-b:a", "192k",
+        "-i",
+        video_path,
+        "-i",
+        audio_path,
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+    ]
+
+    if vf:
+        cmd += [
+            "-vf",
+            vf,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    else:
+        cmd += ["-c:v", "copy"]
+
+    cmd += [
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
         "-shortest",
+        "-movflags",
+        "+faststart",
         output_video_path,
     ]
+
     proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux failed.")
     return output_video_path
-
 
 def mux_audio_into_video_clip_for_preview(
     video_path: str,
@@ -253,4 +302,5 @@ def render_subtitle_frame_preview(
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg frame preview render failed.")
     return output_image_path
+
 

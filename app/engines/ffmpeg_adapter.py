@@ -1,11 +1,11 @@
-from video_processor import embed_ass_subtitles, embed_subtitles, extract_audio, get_video_dimensions
+﻿from video_processor import embed_ass_subtitles, embed_subtitles, extract_audio, get_video_dimensions
 
 
 class FFmpegAdapter:
     def extract_audio(self, video_path: str, audio_output_path: str) -> bool:
         return extract_audio(video_path, audio_output_path)
 
-    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None) -> bool:
+    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, target_width=None, target_height=None) -> bool:
         subtitle_style = subtitle_style or {}
         return embed_subtitles(
             video_path,
@@ -36,10 +36,13 @@ class FFmpegAdapter:
             custom_position_x=subtitle_style.get("custom_position_x", 50),
             custom_position_y=subtitle_style.get("custom_position_y", 86),
             blur_region=subtitle_style.get("blur_region"),
+            target_width=target_width,
+            target_height=target_height,
         )
 
-    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None) -> bool:
-        return embed_ass_subtitles(video_path, ass_path, output_path, blur_region=blur_region)
+    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, target_width=None, target_height=None) -> bool:
+        return embed_ass_subtitles(video_path, ass_path, output_path, blur_region=blur_region, target_width=target_width, target_height=target_height)
 
     def get_video_dimensions(self, video_path: str):
         return get_video_dimensions(video_path)
+

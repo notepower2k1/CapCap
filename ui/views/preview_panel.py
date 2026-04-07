@@ -44,7 +44,7 @@ def build_preview_panel(gui):
     controls_layout = QHBoxLayout()
     gui.play_btn = QPushButton("Play")
     gui.stop_btn = QPushButton("Reset")
-    gui.preview_btn = QPushButton("Refresh Preview")
+    gui.preview_btn = QPushButton("Render Preview")
     gui.blur_area_btn = QPushButton("Blur Area")
     gui.blur_area_btn.setCheckable(True)
     controls_layout.addWidget(gui.play_btn)
@@ -108,4 +108,5 @@ def build_preview_panel(gui):
     right_layout.addWidget(gui.progress_bar)
     right_layout.addWidget(editor_card, 4)
     return right_panel
+
 

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from services.project_service import ProjectService
 
@@ -82,6 +82,7 @@ class WorkflowRuntime:
         ass_path: str = "",
         audio_path: str = "",
         subtitle_style=None,
+        output_quality: str = "source",
         project_state_path: str = "",
     ) -> str:
         return self.export_workflow.run(
@@ -92,8 +93,11 @@ class WorkflowRuntime:
             ass_path=ass_path,
             audio_path=audio_path,
             subtitle_style=subtitle_style,
+            output_quality=output_quality,
             project_state_path=project_state_path,
         )
 
     def project_state_path(self, state) -> str:
         return self.project_service.project_file(state.project_root)
+
+

@@ -1,4 +1,4 @@
-import os
+﻿import os
 import hashlib
 import json
 import time
@@ -112,6 +112,7 @@ class PreviewController:
             ass_path=translated_ass_path,
             audio_path=chosen_audio,
             subtitle_style=self.gui.get_subtitle_export_style(segments=self.gui.get_active_segments()),
+            output_quality=self.gui.get_output_quality_key(),
             project_state_path=project_state_path,
         )
         self.gui.export_thread.finished.connect(self.gui.on_export_finished)
@@ -357,6 +358,16 @@ class PreviewController:
             )
             return
 
+        # Subtitle-only preview uses mpv's live subtitle overlay; avoid copying the full video into temp.
+        if mode == "subtitle":
+            try:
+                self.gui.media_player.setSource(QUrl.fromLocalFile(video_path))
+                self.gui.sync_live_subtitle_preview()
+                self.gui.play_btn.setText("Play")
+                self.gui.refresh_ui_state()
+            except Exception:
+                pass
+            return
         ts = int(time.time())
         preview_out = os.path.normpath(os.path.join(os.getcwd(), "temp", f"preview_vi_voice_{ts}.mp4"))
         preview_srt_path = ""
@@ -462,4 +473,9 @@ class PreviewController:
             self.gui.pipeline_controller.pipeline_advance("preview")
             self.gui.apply_segments_to_timeline()
             self.gui.refresh_ui_state()
+
+
+
+
+
 

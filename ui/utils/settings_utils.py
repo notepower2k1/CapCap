@@ -1,6 +1,7 @@
-def save_user_settings(gui):
+﻿def save_user_settings(gui):
     s = gui.settings
     s.setValue("output_mode", gui.output_mode_combo.currentText())
+    s.setValue("output_quality", gui.get_output_quality_key())
     s.setValue("source_lang", gui.lang_whisper_combo.currentText())
     s.setValue("whisper_model_name", gui.get_whisper_model_name())
     s.setValue("final_output_folder", gui.final_output_folder_edit.text())
@@ -49,6 +50,11 @@ def save_user_settings(gui):
 def load_user_settings(gui):
     s = gui.settings
     gui.output_mode_combo.setCurrentText(s.value("output_mode", gui.output_mode_combo.currentText()))
+    output_quality = str(s.value("output_quality", "source") or "source").strip().lower()
+    if hasattr(gui, "output_quality_combo"):
+        idx = gui.output_quality_combo.findData(output_quality)
+        if idx >= 0:
+            gui.output_quality_combo.setCurrentIndex(idx)
     source_lang = s.value("source_lang", gui.lang_whisper_combo.currentText())
     gui.selected_whisper_model_name = str(s.value("whisper_model_name", getattr(gui, "selected_whisper_model_name", "base")) or "base").strip().lower()
     source_index = gui.lang_whisper_combo.findText(source_lang)
@@ -126,3 +132,6 @@ def load_user_settings(gui):
     gui.update_subtitle_preview_style()
     gui.on_output_mode_changed(gui.output_mode_combo.currentText())
     gui.refresh_ui_state()
+
+
+

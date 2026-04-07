@@ -4,7 +4,8 @@ import re
 import time
 import json
 import shutil
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+from PySide6.QtWidgets import (
+    QProgressDialog,QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit,
                              QFileDialog, QCheckBox, QTextEdit, QComboBox,
                              QGroupBox, QSlider, QFrame, QProgressBar, QMessageBox,
@@ -586,7 +587,7 @@ class VideoTranslatorGUI(QMainWindow):
             return ""
         if raw in {"m", "male", "nam"}:
             return "male"
-        if raw in {"f", "female", "nu", "nữ"}:
+        if raw in {"f", "female", "nu", "ná»¯"}:
             return "female"
         if raw in {"any", "unknown", "none"}:
             return ""
@@ -1408,10 +1409,17 @@ class VideoTranslatorGUI(QMainWindow):
 
     def cleanup_file_if_exists(self, path: str):
         cleanup_file_if_exists_impl(path)
-
     def get_output_mode_key(self):
         value = self.output_mode_combo.currentText() if hasattr(self, "output_mode_combo") else "Vietnamese subtitles + voice"
         return get_output_mode_key(value)
+
+    def get_output_quality_key(self):
+        if not hasattr(self, "output_quality_combo"):
+            return "source"
+        value = self.output_quality_combo.currentData()
+        if value:
+            return str(value).strip().lower()
+        return str(self.output_quality_combo.currentText() or "source").strip().lower() or "source"
 
     def get_audio_handling_mode(self):
         if not hasattr(self, "audio_handling_combo"):
@@ -1904,7 +1912,7 @@ class VideoTranslatorGUI(QMainWindow):
                 header_layout = QHBoxLayout()
                 timestamp_label = QLabel(f"[{self._format_compact_editor_timestamp(row['start'])}]", card)
                 timestamp_label.setObjectName("sectionTitle")
-                preview_btn = QPushButton("🔊", card)
+                preview_btn = QPushButton("ðŸ”Š", card)
                 preview_btn.setFixedWidth(44)
                 preview_btn.clicked.connect(lambda _=False, idx=idx: self.preview_segment_audio(idx))
                 highlight_btn = QPushButton("Highlight", card)
@@ -2267,7 +2275,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         voice_name = self.get_active_voice_name()
         voice_speed = self._parse_voice_speed_value()
-        text = "Chào bạn, đây là đoạn thử giọng nhận diện giọng nói tiếng Việt."
+        text = "ChÃ o báº¡n, Ä‘Ã¢y lÃ  Ä‘oáº¡n thá»­ giá»ng nháº­n diá»‡n giá»ng nÃ³i tiáº¿ng Viá»‡t."
 
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setEnabled(False)
@@ -2324,7 +2332,7 @@ class VideoTranslatorGUI(QMainWindow):
         row = self._segment_editor_rows[index] if index < len(self._segment_editor_rows) else None
         if row:
             row["preview_button"].setEnabled(True)
-            row["preview_button"].setText("🔊")
+            row["preview_button"].setText("ðŸ”Š")
         self._segment_preview_threads.pop(index, None)
 
         if error:
@@ -2698,6 +2706,9 @@ class VideoTranslatorGUI(QMainWindow):
             self.quick_preview_btn.setEnabled(preview_enabled)
         if hasattr(self, "styled_preview_btn"):
             self.styled_preview_btn.setEnabled(preview_enabled)
+        if hasattr(self, "preview_btn"):
+            self.preview_btn.setVisible(mode in ("voice", "both"))
+            self.preview_btn.setEnabled(preview_enabled and not getattr(self, "_styled_preview_running", False))
         if hasattr(self, "play_btn"):
             self.play_btn.setEnabled(v_ok and not voice_running and not getattr(self, "_styled_preview_running", False))
         if hasattr(self, "stop_btn"):
@@ -2890,22 +2901,104 @@ class VideoTranslatorGUI(QMainWindow):
     def on_rewrite_translation_finished(self, translated_srt, error):
         self.subtitle_controller.on_rewrite_translation_finished(translated_srt, error)
 
+    def _close_assets_progress_dialog(self):
+        try:
+            dlg = getattr(self, "assets_progress_dialog", None)
+            if dlg is not None:
+                dlg.hide()
+                dlg.deleteLater()
+        finally:
+            self.assets_progress_dialog = None
+
+    def _ensure_assets_progress_dialog(self):
+        try:
+            dlg = getattr(self, "assets_progress_dialog", None)
+            if dlg is not None:
+                return dlg
+            dlg = QProgressDialog("Preparing runtime assets...", "Hide", 0, 100, self)
+            dlg.setWindowTitle("Loading Models")
+            dlg.setWindowModality(Qt.WindowModal)
+            dlg.setMinimumDuration(0)
+            dlg.setAutoReset(False)
+            dlg.setAutoClose(False)
+            dlg.setMinimumWidth(520)
+            dlg.setValue(0)
+            dlg.setLabelText("Preparing runtime assets...\n\nWaiting to start...")
+            dlg.setStyleSheet(
+                "QProgressDialog { background-color: #101826; color: #e6eef9; }"
+                "QLabel { color: #e6eef9; background: transparent; }"
+                "QPushButton { background-color: #24364f; color: #ffffff; border: 1px solid #335171; border-radius: 10px; padding: 8px 14px; font-weight: 700; }"
+                "QPushButton:hover { background-color: #2d4665; border-color: #4575a8; }"
+                "QProgressBar { border: 1px solid #2a3a50; border-radius: 10px; text-align: center; background-color: #111927; color: white; min-height: 16px; }"
+                "QProgressBar::chunk { background-color: #4ed0b3; border-radius: 10px; }"
+            )
+            try:
+                dlg.setCancelButtonText("Run in background")
+                dlg.canceled.connect(dlg.hide)
+            except Exception:
+                pass
+            self.assets_progress_dialog = dlg
+            dlg.show()
+            return dlg
+        except Exception:
+            return None
+
+    def on_runtime_assets_progress(self, percent: int, message: str):
+        dlg = self._ensure_assets_progress_dialog()
+        if dlg is None:
+            return
+        try:
+            message_text = str(message or "Preparing runtime assets...").strip() or "Preparing runtime assets..."
+            history = list(getattr(self, "_assets_progress_messages", []) or [])
+            if not history or history[-1] != message_text:
+                history.append(message_text)
+            self._assets_progress_messages = history[-4:]
+            label_lines = ["Preparing required models and runtime files:", ""] + self._assets_progress_messages
+            dlg.setLabelText("\n".join(label_lines))
+            if percent is None or int(percent) < 0:
+                dlg.setRange(0, 0)
+            else:
+                if dlg.maximum() == 0:
+                    dlg.setRange(0, 100)
+                dlg.setValue(max(0, min(100, int(percent))))
+        except Exception:
+            return
+
     def load_runtime_assets(self):
+        if getattr(self, "runtime_assets_thread", None) is not None and self.runtime_assets_thread.isRunning():
+            dlg = self._ensure_assets_progress_dialog()
+            if dlg is not None:
+                dlg.show()
+                dlg.raise_()
+                dlg.activateWindow()
+            return
         if hasattr(self, "load_models_btn"):
             self.load_models_btn.setEnabled(False)
             self.load_models_btn.setText("Loading...")
+        self._assets_progress_messages = ["Checking bundled runtime assets..."]
+        dlg = self._ensure_assets_progress_dialog()
+        if dlg is not None:
+            dlg.setRange(0, 100)
+            dlg.setValue(0)
+            dlg.setLabelText("Preparing required models and runtime files...\n\nChecking bundled runtime assets...")
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
         self.log("[Assets] Preloading required models and runtime files...")
         self.runtime_assets_thread = RuntimeAssetsWorker(
             self.workspace_root,
             whisper_model_name=self.get_whisper_model_name(),
         )
         self.runtime_assets_thread.finished.connect(self.on_runtime_assets_loaded)
+        self.runtime_assets_thread.progress.connect(self.on_runtime_assets_progress)
         self.runtime_assets_thread.start()
 
     def on_runtime_assets_loaded(self, details, error):
+        self._close_assets_progress_dialog()
         if hasattr(self, "load_models_btn"):
             self.load_models_btn.setEnabled(True)
             self.load_models_btn.setText("Load Models")
+        self.runtime_assets_thread = None
         if error:
             self.show_error(
                 "Load Models Failed",
@@ -3688,3 +3781,9 @@ if __name__ == "__main__":
     window = VideoTranslatorGUI()
     window.show()
     sys.exit(app.exec())
+
+
+
+
+
+
