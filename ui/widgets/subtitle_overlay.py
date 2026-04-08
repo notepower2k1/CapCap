@@ -27,7 +27,7 @@ class SubtitleOverlayItem(QGraphicsItem):
             self.current_text = text
             self.update()
 
-    def set_style(self, *, font_name=None, font_size=None, font_color=None):
+    def set_style(self, *, font_name=None, font_size=None, font_color=None, single_line=None):
         changed = False
         if font_name and font_name != self.font_name:
             self.font_name = font_name

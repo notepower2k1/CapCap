@@ -1,4 +1,4 @@
-﻿from video_processor import embed_ass_subtitles, embed_subtitles, extract_audio, get_video_dimensions
+from video_processor import embed_ass_subtitles, embed_subtitles, extract_audio, get_video_dimensions
 
 
 class FFmpegAdapter:
@@ -35,6 +35,7 @@ class FFmpegAdapter:
             custom_position_enabled=subtitle_style.get("custom_position_enabled", False),
             custom_position_x=subtitle_style.get("custom_position_x", 50),
             custom_position_y=subtitle_style.get("custom_position_y", 86),
+            single_line=subtitle_style.get("single_line", False),
             blur_region=subtitle_style.get("blur_region"),
             target_width=target_width,
             target_height=target_height,

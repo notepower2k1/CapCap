@@ -31,10 +31,17 @@ class SegmentService:
         models: list[Segment] = []
         base_models = base_models or []
         for idx, seg in enumerate(translated_segments or [], start=1):
+            model = Segment.from_dict(seg, default_id=idx)
             if idx - 1 < len(base_models):
-                model = Segment.from_dict(base_models[idx - 1].to_dict(), default_id=idx)
-            else:
-                model = Segment.from_dict(seg, default_id=idx)
+                base_model = base_models[idx - 1]
+                if not model.original_text:
+                    model.original_text = base_model.original_text
+                source_words = base_model.metadata.get("words")
+                if source_words and "words" not in seg:
+                    model.metadata["words"] = list(source_words)
+                source_highlights = base_model.metadata.get("manual_highlights")
+                if source_highlights and "manual_highlights" not in seg:
+                    model.metadata["manual_highlights"] = list(source_highlights)
             translated_text = seg.get("text", "")
             model.apply_translation(translated_text, refined=bool(seg.get("polished")))
             model.metadata["translation_provider"] = seg.get("provider", "")
@@ -43,5 +50,8 @@ class SegmentService:
                 model.metadata["words"] = list(seg.get("words") or [])
             if "manual_highlights" in seg:
                 model.metadata["manual_highlights"] = list(seg.get("manual_highlights") or [])
+            for key in ("tts_group_id", "tts_group_start", "tts_group_end"):
+                if key in seg:
+                    model.metadata[key] = seg.get(key)
             models.append(model)
         return models

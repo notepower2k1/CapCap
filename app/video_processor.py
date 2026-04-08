@@ -1,4 +1,4 @@
-﻿import subprocess
+import subprocess
 import os
 import re
 
@@ -575,7 +575,8 @@ def srt_to_ass(srt_path: str,
                karaoke_timing_mode: str = "vietnamese",
                custom_position_enabled: bool = False,
                custom_position_x: float = 50.0,
-               custom_position_y: float = 86.0) -> str:
+               custom_position_y: float = 86.0,
+               single_line: bool = False) -> str:
     """Convert an SRT file to a fully-styled ASS file.
 
     Key insight: by setting PlayResX/PlayResY equal to the ACTUAL video
@@ -599,13 +600,14 @@ def srt_to_ass(srt_path: str,
     back_color = _with_alpha(background_color, background_alpha) if background_box else _with_alpha(shadow_color, 0.7)
     bold_flag = -1 if bold else 0
 
+    wrap_style = 2 if single_line else 1
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
         f"PlayResX: {video_width}\n"
         f"PlayResY: {video_height}\n"
         "ScaledBorderAndShadow: yes\n"
-        "WrapStyle: 1\n"          # smart word-level wrapping
+        f"WrapStyle: {wrap_style}\n"
         "\n"
         "[V4+ Styles]\n"
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
@@ -645,6 +647,8 @@ def srt_to_ass(srt_path: str,
         if isinstance(word_timings, list) and event_index < len(word_timings):
             line_word_timings = word_timings[event_index] or []
         raw_text = m.group(3).strip()
+        if single_line:
+            raw_text = " ".join(part.strip() for part in raw_text.splitlines() if part.strip())
         style_key = (animation_style or "Static").strip().lower()
         if style_key == "word highlight karaoke":
             events.extend(
@@ -662,7 +666,7 @@ def srt_to_ass(srt_path: str,
                     custom_position_enabled=custom_position_enabled,
                     custom_position_x=custom_position_x,
                     custom_position_y=custom_position_y,
-                )
+    )
             )
             continue
 
@@ -687,7 +691,7 @@ def srt_to_ass(srt_path: str,
             custom_position_enabled=custom_position_enabled,
             custom_position_x=custom_position_x,
             custom_position_y=custom_position_y,
-        )
+    )
         events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
 
     with open(ass_path, 'w', encoding='utf-8-sig') as f:
@@ -831,6 +835,7 @@ def embed_subtitles(video_path, srt_path, output_path,
                     custom_position_enabled=False,
                     custom_position_x=50.0,
                     custom_position_y=86.0,
+                    single_line=False,
                     blur_region=None,
                      target_width=None,
                      target_height=None,
@@ -882,6 +887,7 @@ def embed_subtitles(video_path, srt_path, output_path,
         custom_position_enabled=custom_position_enabled,
         custom_position_x=custom_position_x,
         custom_position_y=custom_position_y,
+        single_line=single_line,
     )
 
     success = embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=ffmpeg, blur_region=blur_region, target_width=target_width, target_height=target_height)

@@ -381,6 +381,7 @@ class MpvMediaPlayerBackend(QObject):
                 custom_position_enabled=subtitle_style.get("custom_position_enabled", False),
                 custom_position_x=subtitle_style.get("custom_position_x", 50),
                 custom_position_y=subtitle_style.get("custom_position_y", 86),
+                single_line=subtitle_style.get("single_line", False),
             )
         self._subtitle_ass_path = ass_path
         self._apply_current_subtitle()

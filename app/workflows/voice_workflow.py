@@ -101,8 +101,7 @@ class VoiceWorkflow:
         # Default to piper for local voices
         return "piper"
 
-    def _provider_native_speed(self, *, voice_name: str, requested_speed: float) -> float:
-        provider = self._voice_provider(voice_name)
+    def _provider_native_speed(self, *, provider: str, requested_speed: float) -> float:
         speed_value = float(requested_speed)
         if provider == "edge":
             return speed_value
@@ -149,7 +148,7 @@ class VoiceWorkflow:
             synced_wavs.append(fitted_path)
         return synced_wavs
 
-    def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str, provider_speed: float = 1.0, on_progress: callable = None):
+    def _synthesize_segment_wavs(self, *, segments, tmp_dir: str, voice_name: str, provider_speed: float = 1.0, voice_provider: str = '', on_progress: callable = None):
         segments = list(segments or [])
         manifest = self._load_manifest(tmp_dir)
         manifest_segments = dict(manifest.get("segments", {}) or {})
@@ -159,7 +158,7 @@ class VoiceWorkflow:
         cache_hits = 0
 
         for idx, seg in enumerate(segments):
-            txt = (seg.get("text") or "").strip()
+            txt = (seg.get("tts_text") or seg.get("text") or "").strip()
             if not txt:
                 wavs[idx] = ""
                 continue
@@ -194,8 +193,7 @@ class VoiceWorkflow:
             )
 
         if pending_jobs:
-            provider = self._voice_provider(voice_name)
-            if provider == "piper":
+            if voice_provider == "piper":
                 worker_count = 1
             else:
                 worker_count = max(1, min(self.MAX_TTS_WORKERS, len(pending_jobs)))
@@ -279,8 +277,9 @@ class VoiceWorkflow:
         os.makedirs(output_dir, exist_ok=True)
         tmp_dir = os.path.join(output_dir, "_tts_tmp")
         os.makedirs(tmp_dir, exist_ok=True)
+        voice_provider = self._voice_provider(voice_name)
         provider_speed = self._provider_native_speed(
-            voice_name=voice_name,
+            provider=voice_provider,
             requested_speed=float(voice_speed),
         )
         residual_speed = (

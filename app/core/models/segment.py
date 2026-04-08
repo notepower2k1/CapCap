@@ -31,6 +31,9 @@ class Segment:
             metadata["words"] = list(data.get("words") or [])
         if "manual_highlights" in data and "manual_highlights" not in metadata:
             metadata["manual_highlights"] = list(data.get("manual_highlights") or [])
+        for key in ("tts_group_id", "tts_group_start", "tts_group_end"):
+            if key in data and key not in metadata:
+                metadata[key] = data.get(key)
         return cls(
             id=int(segment_id or 0),
             start=float(data.get("start", 0.0) or 0.0),
@@ -106,6 +109,11 @@ class Segment:
             "end": self.end,
             "text": self.subtitle_text,
         }
+        if self.tts_text:
+            payload["tts_text"] = self.tts_text
+        for key in ("tts_group_id", "tts_group_start", "tts_group_end"):
+            if key in self.metadata:
+                payload[key] = self.metadata.get(key)
         if self.metadata.get("words"):
             payload["words"] = list(self.metadata.get("words") or [])
         if self.metadata.get("manual_highlights"):

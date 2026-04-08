@@ -1,4 +1,4 @@
-﻿import os
+import os
 import subprocess
 
 
@@ -229,6 +229,7 @@ def render_subtitle_frame_preview(
     custom_position_enabled: bool = False,
     custom_position_x: float = 50.0,
     custom_position_y: float = 86.0,
+    single_line: bool = False,
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -270,6 +271,7 @@ def render_subtitle_frame_preview(
         custom_position_enabled=custom_position_enabled,
         custom_position_x=custom_position_x,
         custom_position_y=custom_position_y,
+        single_line=single_line,
     )
 
     escaped_ass = ass_path.replace("\\", "/")

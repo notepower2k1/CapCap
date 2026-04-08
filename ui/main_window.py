@@ -1452,9 +1452,14 @@ class VideoTranslatorGUI(QMainWindow):
         return getattr(self, "translator_ai_cb", None) and self.translator_ai_cb.isChecked()
 
     def get_ai_style_instruction(self):
+        style_parts = []
         if hasattr(self, "translator_style_edit"):
-            return self.translator_style_edit.text().strip()
-        return ""
+            custom_style = self.translator_style_edit.text().strip()
+            if custom_style:
+                style_parts.append(custom_style)
+        if hasattr(self, "subtitle_single_line_cb") and self.subtitle_single_line_cb.isChecked():
+            style_parts.append("[subtitle_layout=single_line]")
+        return " | ".join(part for part in style_parts if part).strip()
 
     def on_output_mode_changed(self, value: str):
         mode = self.get_output_mode_key()
@@ -1588,6 +1593,9 @@ class VideoTranslatorGUI(QMainWindow):
         preview_h = max(1.0, preview_rect.height() or float(self.video_view.height()) or 1.0)
         preset = self.get_subtitle_preset_config()
         export_font_size = int(self.subtitle_font_size_spin.value())
+        single_line_enabled = bool(getattr(self, "subtitle_single_line_cb", None) and self.subtitle_single_line_cb.isChecked())
+        if single_line_enabled:
+            export_font_size = max(10, int(round(export_font_size * 0.84)))
         preview_font_size = max(10, int(round(export_font_size * (preview_h / source_h))))
         font_name = (
             self.subtitle_font_combo.currentText().strip()
@@ -1600,6 +1608,7 @@ class VideoTranslatorGUI(QMainWindow):
             font_color=QColor(self.subtitle_color_hex),
             outline_width=preset.get("outline_width", 2),
             outline_color=QColor(preset.get("outline_color", "#000000")),
+            single_line=bool(getattr(self, "subtitle_single_line_cb", None) and self.subtitle_single_line_cb.isChecked()),
         )
         item.set_alignment(self.subtitle_align_combo.currentText())
         item.set_positioning(
@@ -1626,6 +1635,8 @@ class VideoTranslatorGUI(QMainWindow):
         preset = self.get_subtitle_preset_config()
         is_custom = self.get_selected_subtitle_preset() == "custom"
         export_font_size = max(1, int(round(int(self.subtitle_font_size_spin.value()) * self.subtitle_export_font_scale)))
+        if bool(getattr(self, "subtitle_single_line_cb", None) and self.subtitle_single_line_cb.isChecked()):
+            export_font_size = max(10, int(round(export_font_size * 0.84)))
         style_segments = segments if segments is not None else self.get_active_segments()
         return {
             "font_name": (
@@ -2018,6 +2029,10 @@ class VideoTranslatorGUI(QMainWindow):
                     "start": float(base.get("start", 0.0)),
                     "end": float(base.get("end", 0.0)),
                     "text": str(self.current_translated_segments[idx].get("text", "")) if idx < len(self.current_translated_segments) else "",
+                    "tts_text": str(self.current_translated_segments[idx].get("tts_text", base.get("tts_text", "")) or "") if idx < len(self.current_translated_segments) else str(base.get("tts_text", "") or ""),
+                    "tts_group_id": self.current_translated_segments[idx].get("tts_group_id", base.get("tts_group_id", "")) if idx < len(self.current_translated_segments) else base.get("tts_group_id", ""),
+                    "tts_group_start": float(self.current_translated_segments[idx].get("tts_group_start", base.get("tts_group_start", base.get("start", 0.0))) or base.get("start", 0.0)) if idx < len(self.current_translated_segments) else float(base.get("tts_group_start", base.get("start", 0.0)) or base.get("start", 0.0)),
+                    "tts_group_end": float(self.current_translated_segments[idx].get("tts_group_end", base.get("tts_group_end", base.get("end", 0.0))) or base.get("end", 0.0)) if idx < len(self.current_translated_segments) else float(base.get("tts_group_end", base.get("end", 0.0)) or base.get("end", 0.0)),
                     "words": list(base.get("words", [])),
                     "manual_highlights": list(base.get("manual_highlights", [])),
                 }
@@ -2466,6 +2481,10 @@ class VideoTranslatorGUI(QMainWindow):
                         "start": float(base["start"]),
                         "end": float(base["end"]),
                         "text": edited_texts[idx],
+                        "tts_text": str(base.get("tts_text", "") or ""),
+                        "tts_group_id": base.get("tts_group_id", ""),
+                        "tts_group_start": float(base.get("tts_group_start", base.get("start", 0.0)) or 0.0),
+                        "tts_group_end": float(base.get("tts_group_end", base.get("end", 0.0)) or 0.0),
                         "words": list(base.get("words", [])),
                         "manual_highlights": list(base.get("manual_highlights", [])),
                     }
@@ -2475,8 +2494,14 @@ class VideoTranslatorGUI(QMainWindow):
         parsed_segments = self.parse_srt_to_segments(srt_text)
         if base_segments and len(parsed_segments) == len(base_segments):
             for idx, segment in enumerate(parsed_segments):
-                segment["words"] = list(base_segments[idx].get("words", []))
-                segment["manual_highlights"] = list(base_segments[idx].get("manual_highlights", []))
+                base = base_segments[idx]
+                segment["words"] = list(base.get("words", []))
+                segment["manual_highlights"] = list(base.get("manual_highlights", []))
+                if base.get("tts_text"):
+                    segment["tts_text"] = str(base.get("tts_text", "") or "")
+                    segment["tts_group_id"] = base.get("tts_group_id", "")
+                    segment["tts_group_start"] = float(base.get("tts_group_start", base.get("start", 0.0)) or 0.0)
+                    segment["tts_group_end"] = float(base.get("tts_group_end", base.get("end", 0.0)) or 0.0)
         return parsed_segments
 
     def _write_live_preview_assets(self, segments):
@@ -2555,6 +2580,7 @@ class VideoTranslatorGUI(QMainWindow):
             custom_position_enabled=subtitle_style.get("custom_position_enabled", False),
             custom_position_x=subtitle_style.get("custom_position_x", 50),
             custom_position_y=subtitle_style.get("custom_position_y", 86),
+            single_line=subtitle_style.get("single_line", False),
         )
         self._live_preview_signature = preview_signature
         self.processed_artifacts["subtitle_preview_srt"] = self.live_preview_subtitle_path
@@ -3414,6 +3440,43 @@ class VideoTranslatorGUI(QMainWindow):
     def browse_voice_output_folder(self):
         browse_voice_output_folder_impl(self)
 
+    def _get_voiceover_segments(self):
+        source_segments = list(self.current_translated_segments or [])
+        if not source_segments:
+            translated_srt = self.translated_text.toPlainText().strip()
+            return self.parse_srt_to_segments(translated_srt) if translated_srt else []
+
+        grouped_segments = []
+        idx = 0
+        while idx < len(source_segments):
+            segment = dict(source_segments[idx])
+            group_id = str(segment.get('tts_group_id', '') or '').strip()
+            tts_text = ' '.join(str(segment.get('tts_text') or '').split()).strip()
+            if not group_id or not tts_text:
+                fallback_text = ' '.join(str(segment.get('text') or '').split()).strip()
+                segment['text'] = fallback_text
+                grouped_segments.append(segment)
+                idx += 1
+                continue
+
+            group_items = [segment]
+            cursor = idx + 1
+            while cursor < len(source_segments):
+                candidate = source_segments[cursor]
+                if str(candidate.get('tts_group_id', '') or '').strip() != group_id:
+                    break
+                group_items.append(dict(candidate))
+                cursor += 1
+
+            grouped_segments.append({
+                'start': float(group_items[0].get('tts_group_start', group_items[0].get('start', 0.0)) or group_items[0].get('start', 0.0)),
+                'end': float(group_items[-1].get('tts_group_end', group_items[-1].get('end', 0.0)) or group_items[-1].get('end', 0.0)),
+                'text': tts_text,
+                'tts_text': tts_text,
+            })
+            idx = cursor
+        return grouped_segments
+
     def run_voiceover(self):
         state = self.ensure_current_project()
         if state and not self.translated_text.toPlainText().strip():
@@ -3424,7 +3487,7 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.warning(self, "Error", "No translated SRT available. Please run translation first (STEP 3).")
             return
 
-        segments = self.parse_srt_to_segments(translated_srt)
+        segments = self._get_voiceover_segments()
         if not segments:
             QMessageBox.warning(self, "Error", "Translated SRT could not be parsed to segments.")
             return
@@ -3474,6 +3537,10 @@ class VideoTranslatorGUI(QMainWindow):
         if bg_path:
             self.update_project_step("mix_audio", "running")
         self.refresh_ui_state()
+        try:
+            QApplication.processEvents()
+        except Exception:
+            pass
 
         project_state_path = self.project_service.project_file(self.current_project_state.project_root) if self.current_project_state else ""
         self.voice_thread = VoiceOverWorker(

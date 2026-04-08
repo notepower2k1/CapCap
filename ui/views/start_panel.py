@@ -1,4 +1,4 @@
-﻿import os
+import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -381,6 +381,8 @@ def build_start_group(gui, left_layout):
     gui.subtitle_background_cb.setChecked(False)
     gui.subtitle_bold_cb = QCheckBox("Bold")
     gui.subtitle_bold_cb.setChecked(True)
+    gui.subtitle_single_line_cb = QCheckBox("Single-line subtitle (Netflix)")
+    gui.subtitle_single_line_cb.setChecked(False)
     gui.subtitle_animation_combo = QComboBox()
     gui.subtitle_animation_combo.addItems(
         ["Static", "Pop In", "Slide Up", "Fade In", "Fade Out", "Pulse", "Background Appear", "Typewriter", "Word Highlight Karaoke"]
@@ -423,6 +425,7 @@ def build_start_group(gui, left_layout):
     custom_controls_layout.addWidget(gui.subtitle_karaoke_timing_combo, 9, 1)
     custom_controls_layout.addWidget(gui.subtitle_background_cb, 10, 0)
     custom_controls_layout.addWidget(gui.subtitle_bold_cb, 10, 1)
+    custom_controls_layout.addWidget(gui.subtitle_single_line_cb, 11, 0, 1, 2)
 
     custom_wrapper_layout.addWidget(gui.custom_settings_content)
     subtitle_layout.addWidget(custom_wrapper)

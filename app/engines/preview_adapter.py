@@ -1,4 +1,4 @@
-﻿from preview_processor import (
+from preview_processor import (
     mux_audio_into_video_clip_for_preview,
     mux_audio_into_video_for_preview,
     render_subtitle_frame_preview,
@@ -68,5 +68,6 @@ class PreviewAdapter:
             custom_position_enabled=subtitle_style.get("custom_position_enabled", False),
             custom_position_x=subtitle_style.get("custom_position_x", 50),
             custom_position_y=subtitle_style.get("custom_position_y", 86),
+            single_line=subtitle_style.get("single_line", False),
         )
 

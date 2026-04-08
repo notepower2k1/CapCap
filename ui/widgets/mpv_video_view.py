@@ -36,7 +36,7 @@ class _SubtitleOverlayWidget(QWidget):
             self.current_text = text
             self.update()
 
-    def set_style(self, font_name, font_size, font_color, outline_width=2, outline_color=None):
+    def set_style(self, font_name, font_size, font_color, outline_width=2, outline_color=None, single_line=None):
         self.font_name = font_name
         self.font_size = font_size
         self.font_color = font_color

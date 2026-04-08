@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox, QProgressDialog
@@ -135,31 +135,35 @@ class PipelineController:
         """Callback from PrepareWorkflowWorker when an internal stage begins."""
         if not self.progress_dialog:
             return
-            
-        # Mapping between worker internal IDs and Progress Dialog IDs
+
         order = ["prepare", "extraction", "separation", "transcription", "translation"]
         if step_id in order:
             idx = order.index(step_id)
-            # Mark all previous steps in the chain as done
             for i in range(idx):
                 self.progress_dialog.finish_step(order[i])
-            # Start the current step
             self.progress_dialog.start_step(step_id)
             self.gui._pipeline_step = step_id
 
-            self._hide_whisper_download_dialog()
+            if step_id == "transcription":
+                self._hide_whisper_download_dialog()
+            elif step_id == "prepare":
+                model_name = getattr(self.gui, "get_whisper_model_name", lambda: "base")()
+                if not self._whisper_model_cached(model_name):
+                    self._show_whisper_download_dialog()
+
+    def on_prepare_workflow_finished(self, project_state_path, error):
         """Callback when the background PrepareWorkflow finishes completely."""
+        self._hide_whisper_download_dialog()
+
         if error or not project_state_path:
             self.pipeline_fail(f"Prepare workflow failed: {error}")
             self.gui.show_error("Prepare Failed", "Could not complete project preparation.", str(error))
             return
 
         if self.progress_dialog:
-            # Mark the preparation steps as completed
             self.progress_dialog.finish_step("prepare")
-            self.progress_dialog.finish_step("translation") # Often the last part of prepare
-            
-        # Reload project context to reflect changes
+            self.progress_dialog.finish_step("translation")
+
         try:
             state = self.gui.project_service.load_project(project_state_path)
             self.gui.current_project_state = state
@@ -168,15 +172,13 @@ class PipelineController:
         except Exception as e:
             self.gui.log(f"[Pipeline] Error reloading state: {e}")
 
-        # Transition to next stage (Full Video Generation)
         mode = self.gui.get_output_mode_key()
         if mode == "subtitle":
-            # Subtitle only mode is done after preparation
             self.pipeline_done()
-            if self.progress_dialog: self.progress_dialog.set_completed()
+            if self.progress_dialog:
+                self.progress_dialog.set_completed()
             self.gui.log("[Pipeline] Subtitles generated successfully.")
         else:
-            # Transition to Voiceover
             self.pipeline_advance("translation")
 
     def pipeline_advance(self, completed_step: str):
