@@ -13,3 +13,4 @@ llama-cpp-python
 python-mpv
 vietnormalizer
 piper-tts
+torchcodec

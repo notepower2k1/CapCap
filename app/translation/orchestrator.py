@@ -236,17 +236,23 @@ class TranslationOrchestrator:
         providers_used = set()
 
         if provider_type == "local":
-            result_lines, batch_warnings, provider_name = polisher.polish_batch(
-                source_texts=source_texts,
-                translated_texts=translated_texts,
-                src_lang=src_lang,
-                target_lang=target_lang,
-                style_instruction=style_instruction,
-            )
-            warnings.extend(batch_warnings)
-            if provider_name:
-                providers_used.add(provider_name)
-            return result_lines, sorted(providers_used), warnings
+            local_batch_size = max(6, min(int(polish_batch_size or 12), 12))
+            source_batches = list(split_text_batches(source_texts, local_batch_size))
+            translated_batches = list(split_text_batches(translated_texts, local_batch_size)) if translated_texts else [None] * len(source_batches)
+            merged: list[str] = []
+            for idx, source_batch in enumerate(source_batches):
+                batch_result, batch_warnings, provider_name = polisher.polish_batch(
+                    source_texts=source_batch,
+                    translated_texts=translated_batches[idx],
+                    src_lang=src_lang,
+                    target_lang=target_lang,
+                    style_instruction=style_instruction,
+                )
+                merged.extend(batch_result)
+                warnings.extend(batch_warnings)
+                if provider_name:
+                    providers_used.add(provider_name)
+            return merged, sorted(providers_used), warnings
 
         source_batches = list(split_text_batches(source_texts, polish_batch_size))
         translated_batches = list(split_text_batches(translated_texts, polish_batch_size)) if translated_texts else [None] * len(source_batches)
@@ -333,7 +339,12 @@ class TranslationOrchestrator:
             optimized_segments = clone_with_texts(translated_segments, normalized_texts, provider=provider_type, polished=True)
             if single_line:
                 before_count = len(optimized_segments)
-                optimized_segments = self._split_segments_for_single_line(optimized_segments)
+                optimized_segments = self._split_segments_for_single_line(
+                    optimized_segments,
+                    polisher=polisher,
+                    provider_type=provider_type,
+                    target_lang=target_lang,
+                )
                 print(f'[AI Subtitle Optimization] Single-line cue split: {before_count} -> {len(optimized_segments)} cues')
             return optimized_segments
         except Exception as exc:
@@ -480,7 +491,14 @@ class TranslationOrchestrator:
     def _remove_phrase_case_insensitive(self, text: str, phrase: str) -> str:
         return re.sub(re.escape(phrase), '', text, flags=re.IGNORECASE).replace('  ', ' ').strip()
 
-    def _split_segments_for_single_line(self, segments: list[dict]) -> list[dict]:
+    def _split_segments_for_single_line(
+        self,
+        segments: list[dict],
+        *,
+        polisher=None,
+        provider_type: str = "",
+        target_lang: str = "vi",
+    ) -> list[dict]:
         split_segments: list[dict] = []
         for seg in segments or []:
             text = ' '.join(str(seg.get('text') or '').replace('\n', ' ').split()).strip()
@@ -492,7 +510,13 @@ class TranslationOrchestrator:
             duration = max(0.6, end - start)
             tts_text = ' '.join(str(seg.get('tts_text') or text).replace('\n', ' ').split()).strip() or text
             group_id = f"tts-{seg.get('id', len(split_segments) + 1)}-{int(round(start * 1000))}"
-            chunks = self._split_text_into_single_line_chunks(text, duration)
+            chunks = self._split_text_into_single_line_chunks(
+                text,
+                duration,
+                polisher=polisher,
+                provider_type=provider_type,
+                target_lang=target_lang,
+            )
             if len(chunks) <= 1:
                 updated = dict(seg)
                 updated['text'] = chunks[0] if chunks else text
@@ -527,7 +551,56 @@ class TranslationOrchestrator:
                 split_segments.append(updated)
         return split_segments
 
-    def _split_text_into_single_line_chunks(self, text: str, duration: float) -> list[str]:
+    def _try_ai_split_single_line_chunks(
+        self,
+        text: str,
+        duration: float,
+        *,
+        polisher=None,
+        provider_type: str = "",
+        target_lang: str = "vi",
+        max_chars: int = 24,
+    ) -> list[str] | None:
+        if polisher is None or not hasattr(polisher, 'split_single_line_text'):
+            return None
+        if len(text.split()) <= 5:
+            return None
+        max_chunks = 2 if duration <= 1.6 else 3 if duration <= 3.4 else 4
+        try:
+            chunks = polisher.split_single_line_text(
+                text=text,
+                target_lang=target_lang,
+                max_chars=max_chars,
+                max_chunks=max_chunks,
+            )
+        except Exception:
+            return None
+        normalized = [self._normalize_ai_split_chunk(part) for part in chunks if self._normalize_ai_split_chunk(part)]
+        if len(normalized) <= 1:
+            return None
+        original_key = self._normalized_chunk_key(text)
+        candidate_key = self._normalized_chunk_key(' '.join(normalized))
+        if original_key != candidate_key:
+            return None
+        if any(len(chunk.split()) <= 1 for chunk in normalized):
+            return None
+        return normalized
+
+    def _normalize_ai_split_chunk(self, text: str) -> str:
+        return ' '.join(str(text or '').replace('\n', ' ').split()).strip(' |,;')
+
+    def _normalized_chunk_key(self, text: str) -> str:
+        return re.sub(r'\W+', '', str(text or '').lower(), flags=re.UNICODE)
+
+    def _split_text_into_single_line_chunks(
+        self,
+        text: str,
+        duration: float,
+        *,
+        polisher=None,
+        provider_type: str = "",
+        target_lang: str = "vi",
+    ) -> list[str]:
         compact = ' '.join(str(text or '').replace('\n', ' ').split()).strip()
         if not compact:
             return []
@@ -535,6 +608,17 @@ class TranslationOrchestrator:
         max_chars = max(18, self._target_max_chars(duration, single_line=True))
         if len(compact) <= max_chars or len(compact.split()) <= 4:
             return [compact]
+
+        ai_chunks = self._try_ai_split_single_line_chunks(
+            compact,
+            duration,
+            polisher=polisher,
+            provider_type=provider_type,
+            target_lang=target_lang,
+            max_chars=max_chars,
+        )
+        if ai_chunks:
+            return ai_chunks
 
         sentence_parts = [part.strip(' ,') for part in re.split(r'(?<=[,.;:!?])\s+', compact) if part.strip(' ,')]
         if len(sentence_parts) > 1:

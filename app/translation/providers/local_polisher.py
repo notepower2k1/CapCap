@@ -295,6 +295,59 @@ class LocalPolisherProvider:
                     return content.strip()
         return str(result or "").strip()
 
+    def split_single_line_text(
+        self,
+        *,
+        text: str,
+        target_lang: str = "vi",
+        max_chars: int = 24,
+        max_chunks: int = 4,
+    ) -> list[str]:
+        if not self.is_configured():
+            raise TranslationConfigError(
+                "Local translator is not configured. Set LOCAL_TRANSLATOR_MODEL_PATH to a valid .gguf file."
+            )
+        compact = " ".join(str(text or "").replace("\n", " ").split()).strip()
+        if not compact:
+            return []
+
+        try:
+            model = self._get_model()
+        except Exception as exc:
+            raise TranslationConfigError(str(exc)) from exc
+
+        prompt = (
+            f"Split this {target_lang} subtitle into natural short reading chunks for single-line subtitles. "
+            f"Keep the exact same wording and order. Do not rewrite, add, or remove words. "
+            f"Return one line only, using ' || ' as the separator between chunks. "
+            f"Target around {max_chars} characters per chunk, maximum {max_chunks} chunks.\n\n"
+            f"Text: {compact}"
+        )
+
+        try:
+            result = model.create_chat_completion(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You only split subtitle text into reading chunks. "
+                            "Preserve the original wording exactly. Return one plain line using ' || ' separators only."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_tokens=min(256, self.max_tokens),
+            )
+        except Exception as exc:
+            raise TranslationProviderError(f"Local GGUF cue split failed: {exc}") from exc
+
+        output = self._extract_text(result)
+        chunks = [" ".join(part.split()) for part in output.split("||") if part.strip()]
+        if not chunks:
+            return [compact]
+        return chunks
+
     def _estimate_max_tokens(self, source_texts: list[str], translated_texts: list[str] | None) -> int:
         total_chars = sum(len(str(item or "")) for item in source_texts)
         if translated_texts:

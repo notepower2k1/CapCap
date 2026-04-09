@@ -195,6 +195,8 @@ class VoiceWorkflow:
         if pending_jobs:
             if voice_provider == "piper":
                 worker_count = 1
+            elif voice_provider == "edge":
+                worker_count = max(1, min(2, len(pending_jobs)))
             else:
                 worker_count = max(1, min(self.MAX_TTS_WORKERS, len(pending_jobs)))
             print(

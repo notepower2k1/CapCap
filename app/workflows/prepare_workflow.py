@@ -176,11 +176,16 @@ class PrepareWorkflow:
             project_state.set_step_status("separate_audio", "running")
             self.project_service.save_project(project_state)
             separated_root = self.project_service.build_path(project_state, "audio", "separated")
-            vocal_path, music_path = self.engine_runtime.separate_vocals(audio_output_path, separated_root)
+            try:
+                vocal_path, music_path = self.engine_runtime.separate_vocals(audio_output_path, separated_root)
+            except Exception as exc:
+                project_state.set_step_status("separate_audio", "failed")
+                self.project_service.save_project(project_state)
+                raise RuntimeError(f"Audio separation failed: {exc}") from exc
             if not vocal_path or not music_path:
                 project_state.set_step_status("separate_audio", "failed")
                 self.project_service.save_project(project_state)
-                raise RuntimeError("Audio separation failed.")
+                raise RuntimeError("Audio separation failed: Demucs did not return vocals/background stems.")
             separation_elapsed = time.perf_counter() - separation_started
             working_audio_path = vocal_path
             print(f"[Audio Handling] Using separated vocals for Whisper: {working_audio_path}")

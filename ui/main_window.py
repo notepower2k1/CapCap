@@ -2290,7 +2290,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         voice_name = self.get_active_voice_name()
         voice_speed = self._parse_voice_speed_value()
-        text = "ChÃ o báº¡n, Ä‘Ã¢y lÃ  Ä‘oáº¡n thá»­ giá»ng nháº­n diá»‡n giá»ng nÃ³i tiáº¿ng Viá»‡t."
+        text = "Chào bạn, đây là bản xem trước giọng nói của mẫu được chọn."  # "Hello, this is a preview of the selected voice sample." in Vietnamese
 
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setEnabled(False)

@@ -199,8 +199,20 @@ def edge_tts_to_wav_16k_mono(
     base = _sanitize_filename(os.path.splitext(os.path.basename(wav_path))[0] or "tts")
     mp3_path = os.path.join(tmp_dir, f"{base}.mp3")
 
-    # Run async edge-tts safely in sync context
-    asyncio.run(_edge_tts_to_mp3_async(text, mp3_path, voice, rate, volume))
+    # Run async edge-tts safely in sync context with a few retries for transient empty-audio failures.
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            asyncio.run(_edge_tts_to_mp3_async(text, mp3_path, voice, rate, volume))
+            last_error = None
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt >= 3:
+                raise
+            time.sleep(0.6 * attempt)
+    if last_error is not None:
+        raise last_error
 
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):

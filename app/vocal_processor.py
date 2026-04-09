@@ -195,4 +195,4 @@ def separate_vocals(audio_path, output_dir):
         raise RuntimeError(msg) from e
     except Exception as e:
         print(f"Vocal separation error: {e}")
-        return None, None
+        raise RuntimeError(f"Vocal separation error: {e}") from e

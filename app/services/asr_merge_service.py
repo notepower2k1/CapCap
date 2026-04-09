@@ -242,7 +242,7 @@ class AsrMergeService:
                     "chunk": chunk,
                 }
                 self._append_with_dedup(merged_segments, candidate)
-        return [entry["segment"] for entry in merged_segments]
+        return self.normalize_segment_timeline([entry["segment"] for entry in merged_segments])
 
     def _append_with_dedup(self, merged_entries: list[dict], candidate: dict) -> None:
         if not candidate["segment"]["text"]:
@@ -276,3 +276,38 @@ class AsrMergeService:
             return
 
         merged_entries.append(candidate)
+
+    def normalize_segment_timeline(self, segments: list[dict]) -> list[dict]:
+        normalized: list[dict] = []
+        previous_end = 0.0
+        for segment in segments or []:
+            current = dict(segment)
+            start = float(current.get("start", 0.0) or 0.0)
+            end = float(current.get("end", 0.0) or 0.0)
+            if end <= start:
+                end = start + 0.12
+            if start < previous_end:
+                shift = previous_end - start
+                start = previous_end
+                if end <= start:
+                    end = start + max(0.12, 0.12 - shift)
+            current["start"] = round(start, 3)
+            current["end"] = round(max(start + 0.12, end), 3)
+            if current.get("words"):
+                adjusted_words = []
+                for word in current.get("words") or []:
+                    try:
+                        word_start = max(float(word.get("start", start) or start), start)
+                        word_end = max(word_start, float(word.get("end", word_start) or word_start))
+                        word_end = min(word_end, current["end"])
+                        adjusted_words.append({
+                            "start": round(word_start, 3),
+                            "end": round(word_end, 3),
+                            "text": str(word.get("text", "") or "").strip(),
+                        })
+                    except (TypeError, ValueError, AttributeError):
+                        continue
+                current["words"] = adjusted_words
+            normalized.append(current)
+            previous_end = current["end"]
+        return normalized
