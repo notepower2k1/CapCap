@@ -252,6 +252,7 @@ def build_start_group(gui, left_layout):
     gui.audio_handling_hint_label = QLabel("Fast Mode skips Demucs and uses auto ducking. Clean Voice separates background for a cleaner mix.")
     gui.audio_handling_hint_label.setObjectName("helperLabel")
     gui.audio_handling_hint_label.setWordWrap(True)
+    gui.free_voice_combo.currentIndexChanged.connect(gui.on_selected_voice_changed)
     gui.preview_voice_btn = QPushButton("Preview voice")
     gui.preview_voice_btn.clicked.connect(gui.preview_selected_voice_sample)
     gui.voice_preview_meta_label = QLabel("Generate a short preview audio clip with the selected local voice.")

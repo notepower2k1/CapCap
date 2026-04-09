@@ -101,6 +101,8 @@ class PreviewController:
         self.gui.export_btn.setText("Exporting...")
         self.gui.progress_bar.setValue(96)
         self.gui.update_project_step("export", "running")
+        self.gui._export_progress_messages = ["Preparing final export..."]
+        self.gui.on_export_progress(5, "Preparing final export...")
 
         project_state_path = self.gui.project_service.project_file(self.gui.current_project_state.project_root) if self.gui.current_project_state else ""
         self.gui.export_thread = FinalExportWorker(
@@ -115,6 +117,7 @@ class PreviewController:
             output_quality=self.gui.get_output_quality_key(),
             project_state_path=project_state_path,
         )
+        self.gui.export_thread.progress.connect(self.gui.on_export_progress)
         self.gui.export_thread.finished.connect(self.gui.on_export_finished)
         self.gui.export_thread.start()
 
@@ -292,6 +295,7 @@ class PreviewController:
         return preview_srt_path, segments
 
     def on_export_finished(self, output_path, error):
+        self.gui._close_export_progress_dialog()
         self.gui.export_btn.setEnabled(True)
         self.gui.on_output_mode_changed(self.gui.output_mode_combo.currentText())
         self.gui.progress_bar.setValue(100)

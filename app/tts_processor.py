@@ -235,6 +235,41 @@ def edge_tts_to_wav_16k_mono(
     return wav_path
 
 
+def preload_tts_voice(voice: str, on_progress: callable = None) -> bool:
+    catalog_path = os.path.join(BASE_DIR, "voice_preview_catalog.json")
+    with open(catalog_path, "r", encoding="utf-8") as f:
+        catalog = json.load(f)
+
+    voice_entry = None
+    voice_to_search = str(voice).strip()
+    for v in catalog.get("voices", []):
+        if v["id"] == voice_to_search:
+            voice_entry = v
+            break
+    if not voice_entry and ":" in voice_to_search:
+        provider, provider_voice = voice_to_search.split(":", 1)
+        provider = provider.strip().lower()
+        provider_voice = provider_voice.strip()
+        for v in catalog.get("voices", []):
+            if v.get("provider") == provider and (v.get("provider_voice") == provider_voice or v.get("id") == provider_voice):
+                voice_entry = v
+                break
+    if not voice_entry:
+        return False
+
+    provider = voice_entry.get("provider", "").strip().lower()
+    provider_voice = str(voice_entry.get("provider_voice", "")).strip()
+    if provider != "piper":
+        return False
+
+    model_path = os.path.join(os.getcwd(), provider_voice)
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Piper model not found at {model_path}. Please download and place the model there.")
+
+    _get_cached_piper_voice(model_path=model_path, on_progress=on_progress)
+    return True
+
+
 def synthesize_text_to_wav_16k_mono(
     *,
     text: str,

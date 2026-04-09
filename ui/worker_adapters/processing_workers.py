@@ -263,6 +263,7 @@ class VoiceOverWorker(QThread):
 
 class FinalExportWorker(QThread):
     finished = Signal(str, str)
+    progress = Signal(int, str)
 
     def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", project_state_path=""):
         super().__init__()
@@ -290,6 +291,7 @@ class FinalExportWorker(QThread):
                 subtitle_style=self.subtitle_style,
                 output_quality=self.output_quality,
                 project_state_path=self.project_state_path,
+                on_progress=self.progress.emit,
             )
             self.finished.emit(output, "")
         except Exception as exc:

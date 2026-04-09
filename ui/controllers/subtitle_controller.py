@@ -197,7 +197,8 @@ class SubtitleController:
 
         self.gui.current_translated_segments = parsed_segments
         self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(parsed_segments, translated=True)
-        normalized_srt = self.gui.format_to_srt(parsed_segments)
+        self.gui.refresh_ai_keyword_highlights(force=True)
+        normalized_srt = self.gui.format_to_srt(self.gui.current_translated_segments)
         self.gui.translated_text.setText(normalized_srt)
         self.gui.apply_segments_to_timeline()
 

@@ -9,6 +9,7 @@ from services import EngineRuntime, ProjectService
 
 class VoiceWorkflow:
     MAX_TTS_WORKERS = 6
+    PIPER_TTS_WORKERS = 2
 
     def __init__(self, workspace_root: str):
         self.workspace_root = workspace_root
@@ -194,7 +195,30 @@ class VoiceWorkflow:
 
         if pending_jobs:
             if voice_provider == "piper":
-                worker_count = 1
+                worker_count = max(1, min(self.PIPER_TTS_WORKERS, len(pending_jobs)))
+                try:
+                    # Warm Piper once before parallel synthesis so the UI does not appear frozen during first-load.
+                    self.engine_runtime.synthesize_segment(
+                        text=pending_jobs[0]["text"],
+                        wav_path=pending_jobs[0]["wav_path"],
+                        voice=voice_name,
+                        speed=provider_speed,
+                        tmp_dir=tmp_dir,
+                        on_progress=on_progress,
+                    )
+                    manifest_segments[str(pending_jobs[0]["idx"])] = {
+                        "cache_key": str(pending_jobs[0]["cache_key"]),
+                        "wav_path": str(pending_jobs[0]["wav_path"]),
+                        "text": str(pending_jobs[0]["text"]),
+                        "voice_name": voice_name,
+                        "provider_speed": provider_speed,
+                    }
+                    manifest_by_cache_key[str(pending_jobs[0]["cache_key"])] = dict(manifest_segments[str(pending_jobs[0]["idx"])])
+                    wavs[int(pending_jobs[0]["idx"])] = str(pending_jobs[0]["wav_path"])
+                    pending_jobs = pending_jobs[1:]
+                    cache_hits += 1
+                except Exception:
+                    pass
             elif voice_provider == "edge":
                 worker_count = max(1, min(2, len(pending_jobs)))
             else:
@@ -205,6 +229,11 @@ class VoiceWorkflow:
             )
             if on_progress:
                 on_progress(f"Synthesizing {len(pending_jobs)} subtitle segments (using {worker_count} workers)...")
+            if not pending_jobs:
+                manifest["segments"] = manifest_segments
+                manifest["by_cache_key"] = manifest_by_cache_key
+                self._save_manifest(tmp_dir, manifest)
+                return wavs
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 future_map = {
                     executor.submit(

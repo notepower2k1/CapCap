@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import re
 from pathlib import Path
 
 from ..errors import TranslationConfigError, TranslationProviderError, TranslationValidationError
@@ -348,6 +349,79 @@ class LocalPolisherProvider:
             return [compact]
         return chunks
 
+    def select_keyword_highlights_batch(
+        self,
+        *,
+        texts: list[str],
+        target_lang: str = "vi",
+        max_keywords: int = 2,
+    ) -> list[list[str]]:
+        if not self.is_configured():
+            raise TranslationConfigError(
+                "Local translator is not configured. Set LOCAL_TRANSLATOR_MODEL_PATH to a valid .gguf file."
+            )
+        cleaned_texts = [" ".join(str(text or "").replace("\n", " ").split()).strip() for text in (texts or [])]
+        if not cleaned_texts:
+            return []
+
+        try:
+            model = self._get_model()
+        except Exception as exc:
+            raise TranslationConfigError(str(exc)) from exc
+
+        numbered_lines = "\n".join(f"{idx + 1}. {text}" for idx, text in enumerate(cleaned_texts))
+        prompt = (
+            f"Select up to {max_keywords} short keyword phrases from each {target_lang} subtitle line for visual highlighting. "
+            "Keep the exact original wording from the line. Do not rewrite or translate. "
+            "Prefer names, numbers, products, strong nouns, and emotionally important phrases. "
+            "Return only numbered lines. Use ' || ' between phrases on the same line. "
+            "If a line should not highlight anything, still return the numbered line with nothing after the dot.\n\n"
+            f"{numbered_lines}"
+        )
+
+        try:
+            result = model.create_chat_completion(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You select subtitle highlight phrases only. "
+                            "Return numbered lines only. Keep exact wording from the input line. "
+                            "Never explain your choices."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_tokens=min(512, self.max_tokens),
+            )
+        except Exception as exc:
+            raise TranslationProviderError(f"Local GGUF keyword highlight failed: {exc}") from exc
+
+        output = self._extract_text(result)
+        parsed_lines = self._parse_numbered_output(output)
+        if len(parsed_lines) != len(cleaned_texts):
+            raise TranslationValidationError(
+                f"Local keyword highlight returned {len(parsed_lines)} lines but expected {len(cleaned_texts)}."
+            )
+
+        results: list[list[str]] = []
+        for raw_line in parsed_lines:
+            parts = [" ".join(part.split()) for part in str(raw_line or "").split("||")]
+            deduped: list[str] = []
+            seen = set()
+            for part in parts:
+                normalized = part.strip(" ,;|-")
+                key = normalized.lower()
+                if not normalized or key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(normalized)
+                if len(deduped) >= max_keywords:
+                    break
+            results.append(deduped)
+        return results
+
     def _estimate_max_tokens(self, source_texts: list[str], translated_texts: list[str] | None) -> int:
         total_chars = sum(len(str(item or "")) for item in source_texts)
         if translated_texts:
@@ -355,6 +429,14 @@ class LocalPolisherProvider:
         estimated = 160 + (total_chars // 2)
         estimated = max(256, min(self.max_tokens, estimated))
         return estimated
+
+    def _parse_numbered_output(self, raw: str) -> list[str]:
+        items: list[str] = []
+        for line in str(raw or "").splitlines():
+            match = re.match(r"^\s*\d+\.\s*(.*?)\s*$", line)
+            if match:
+                items.append(match.group(1).strip())
+        return items
 
     def _safe_int(self, raw_value: str, fallback: int) -> int:
         try:

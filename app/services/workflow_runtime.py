@@ -84,6 +84,7 @@ class WorkflowRuntime:
         subtitle_style=None,
         output_quality: str = "source",
         project_state_path: str = "",
+        on_progress: callable = None,
     ) -> str:
         return self.export_workflow.run(
             video_path=video_path,
@@ -95,6 +96,7 @@ class WorkflowRuntime:
             subtitle_style=subtitle_style,
             output_quality=output_quality,
             project_state_path=project_state_path,
+            on_progress=on_progress,
         )
 
     def project_state_path(self, state) -> str:

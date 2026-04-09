@@ -5,6 +5,10 @@ from services import EngineRuntime, ProjectService
 
 
 class ExportWorkflow:
+    def _emit_progress(self, on_progress, percent: int, message: str):
+        if callable(on_progress):
+            on_progress(int(percent), str(message or "Exporting video..."))
+
     def __init__(self, workspace_root: str):
         self.workspace_root = workspace_root
         self.project_service = ProjectService(workspace_root)
@@ -118,16 +122,19 @@ class ExportWorkflow:
         subtitle_style=None,
         output_quality: str = "source",
         project_state_path: str = "",
+        on_progress=None,
     ) -> str:
         subtitle_style = subtitle_style or {}
         target_w, target_h = self._resolve_target_dimensions(video_path, output_quality)
 
         state = self._load_state(project_state_path)
         self._mark_started(state)
+        self._emit_progress(on_progress, 5, "Preparing final export...")
 
         tmp_mux_path = ""
         try:
             if mode == "subtitle":
+                self._emit_progress(on_progress, 20, "Burning subtitles into the video...")
                 self._export_subtitle_video(
                     video_path=video_path,
                     srt_path=srt_path,
@@ -138,6 +145,7 @@ class ExportWorkflow:
                     target_height=target_h,
                 )
             elif mode == "voice":
+                self._emit_progress(on_progress, 25, "Muxing Vietnamese audio into the video...")
                 self.engine_runtime.mux_audio_for_preview(
                     video_path,
                     audio_path,
@@ -147,8 +155,10 @@ class ExportWorkflow:
                 )
             elif mode == "both":
                 tmp_mux_path = self._build_temp_mux_path()
+                self._emit_progress(on_progress, 18, "Muxing Vietnamese audio with the source video...")
                 # Keep this mux fast (no scaling). Scaling happens in the subtitle-burn step.
                 self.engine_runtime.mux_audio_for_preview(video_path, audio_path, tmp_mux_path)
+                self._emit_progress(on_progress, 62, "Burning styled subtitles into the final video...")
                 self._export_subtitle_video(
                     video_path=tmp_mux_path,
                     srt_path=srt_path,
@@ -161,7 +171,9 @@ class ExportWorkflow:
             else:
                 raise ValueError(f"Unsupported export mode: {mode}")
 
+            self._emit_progress(on_progress, 95, "Finalizing exported video...")
             self._mark_completed(state, output_path)
+            self._emit_progress(on_progress, 100, "Export completed.")
             return output_path
         except Exception:
             self._mark_failed(state)

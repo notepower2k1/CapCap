@@ -4,6 +4,7 @@ import re
 import time
 import json
 import shutil
+import threading
 from PySide6.QtWidgets import (
     QProgressDialog,QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit,
@@ -35,6 +36,7 @@ from helpers import (
     validate_srt_text,
 )
 from video_processor import srt_to_ass
+from tts_processor import preload_tts_voice
 from utils.display_utils import (
     cleanup_temp_preview_files as cleanup_temp_preview_files_impl,
     clear_log as clear_log_impl,
@@ -68,6 +70,7 @@ from utils.media_utils import (
 from utils.settings_utils import load_user_settings as load_user_settings_impl, save_user_settings as save_user_settings_impl
 from views import build_main_window_ui
 from widgets import TimelineWidget, VideoView
+from translation.providers import LocalPolisherProvider
 from workers import (
     ExtractionWorker,
     RuntimeAssetsWorker,
@@ -829,6 +832,43 @@ class VideoTranslatorGUI(QMainWindow):
     def on_voice_gender_changed(self):
         self.refresh_voice_catalog_combos()
 
+    def on_selected_voice_changed(self):
+        self._update_voice_preview_meta()
+        self._preload_active_voice_if_needed()
+
+    def _preload_active_voice_if_needed(self):
+        voice_name = self.get_active_voice_name()
+        if not voice_name:
+            return
+        entry_id = str(self.free_voice_combo.currentData(self.VOICE_ENTRY_ID_ROLE) or '').strip() if hasattr(self, 'free_voice_combo') else ''
+        entry = self.voice_catalog_map.get(entry_id) if hasattr(self, 'voice_catalog_map') else None
+        provider = str((entry or {}).get('provider', '')).strip().lower()
+        if provider != 'piper':
+            return
+        current_token = voice_name.strip()
+        if getattr(self, '_voice_preload_inflight', '') == current_token or getattr(self, '_voice_preloaded_name', '') == current_token:
+            return
+
+        self._voice_preload_inflight = current_token
+
+        def _worker(expected_voice: str):
+            try:
+                preload_tts_voice(expected_voice)
+                def _mark_ready():
+                    if getattr(self, '_voice_preload_inflight', '') == expected_voice:
+                        self._voice_preload_inflight = ''
+                        self._voice_preloaded_name = expected_voice
+                        self.log(f"[Voice] Piper voice preloaded: {expected_voice}")
+                QTimer.singleShot(0, _mark_ready)
+            except Exception as exc:
+                def _mark_failed():
+                    if getattr(self, '_voice_preload_inflight', '') == expected_voice:
+                        self._voice_preload_inflight = ''
+                        self.log(f"[Voice] Piper preload skipped: {exc}")
+                QTimer.singleShot(0, _mark_failed)
+
+        threading.Thread(target=_worker, args=(current_token,), daemon=True).start()
+
     def get_selected_premium_voice_catalog_entry(self):
         if not hasattr(self, "premium_voice_combo"):
             return None
@@ -1459,6 +1499,13 @@ class VideoTranslatorGUI(QMainWindow):
                 style_parts.append(custom_style)
         if hasattr(self, "subtitle_single_line_cb") and self.subtitle_single_line_cb.isChecked():
             style_parts.append("[subtitle_layout=single_line]")
+        if (
+            hasattr(self, "subtitle_keyword_highlight_cb")
+            and self.subtitle_keyword_highlight_cb.isChecked()
+            and hasattr(self, "subtitle_highlight_mode_combo")
+            and self.subtitle_highlight_mode_combo.currentText().strip() in ("Auto", "Auto + Manual")
+        ):
+            style_parts.append("[keyword_highlight=ai_local]")
         return " | ".join(part for part in style_parts if part).strip()
 
     def on_output_mode_changed(self, value: str):
@@ -1671,16 +1718,38 @@ class VideoTranslatorGUI(QMainWindow):
             "bold": bool(self.subtitle_bold_cb.isChecked() if is_custom else preset.get("bold", False)),
             "preset_key": self.get_selected_subtitle_preset(),
             "auto_keyword_highlight": bool(self.subtitle_keyword_highlight_cb.isChecked())
-            and self.subtitle_highlight_mode_combo.currentText().strip() in ("Auto", "Auto + Manual"),
-            "manual_highlights": (
-                [list(seg.get("manual_highlights", [])) for seg in (style_segments or [])]
-                if self.subtitle_highlight_mode_combo.currentText().strip() in ("Manual", "Auto + Manual")
-                else [[] for _ in (style_segments or [])]
-            ),
+            and self.subtitle_highlight_mode_combo.currentText().strip() in ("Auto", "Auto + Manual")
+            and not any(seg.get("auto_highlights") for seg in (style_segments or [])),
+            "manual_highlights": self._build_render_highlight_lists(style_segments or []),
             "word_timings": [list(seg.get("words", [])) for seg in (style_segments or [])],
             "blur_region": self.video_view.get_blur_region_normalized() if hasattr(self, "video_view") else None,
             "render_subtitles": False,
         }
+
+    def _build_render_highlight_lists(self, style_segments):
+        mode = self.subtitle_highlight_mode_combo.currentText().strip() if hasattr(self, "subtitle_highlight_mode_combo") else "Auto"
+        include_auto = mode in ("Auto", "Auto + Manual")
+        include_manual = mode in ("Manual", "Auto + Manual")
+        rows = []
+        for seg in style_segments or []:
+            merged = []
+            seen = set()
+            if include_auto:
+                for phrase in seg.get("auto_highlights", []) or []:
+                    normalized = self._normalize_manual_highlight(phrase)
+                    key = normalized.lower()
+                    if normalized and key not in seen:
+                        seen.add(key)
+                        merged.append(normalized)
+            if include_manual:
+                for phrase in seg.get("manual_highlights", []) or []:
+                    normalized = self._normalize_manual_highlight(phrase)
+                    key = normalized.lower()
+                    if normalized and key not in seen:
+                        seen.add(key)
+                        merged.append(normalized)
+            rows.append(merged)
+        return rows
 
     def on_subtitle_preset_changed(self):
         preset = self.get_subtitle_preset_config()
@@ -1771,6 +1840,64 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _normalize_manual_highlight(self, text: str) -> str:
         return re.sub(r"\s+", " ", (text or "").replace("\u2029", " ").replace("\n", " ")).strip()
+
+    def refresh_ai_keyword_highlights(self, force: bool = False):
+        if not getattr(self, "current_translated_segments", None):
+            return
+        if not getattr(self, "subtitle_keyword_highlight_cb", None) or not self.subtitle_keyword_highlight_cb.isChecked():
+            return
+        if not hasattr(self, "subtitle_highlight_mode_combo") or self.subtitle_highlight_mode_combo.currentText().strip() not in ("Auto", "Auto + Manual"):
+            return
+
+        provider = LocalPolisherProvider()
+        if not provider.is_configured():
+            self.log("[AI Keyword Highlight] Local provider is not configured, keeping fallback highlight behavior.")
+            return
+
+        pending_indexes = []
+        pending_texts = []
+        for idx, segment in enumerate(self.current_translated_segments or []):
+            text = ' '.join(str(segment.get("text") or "").replace("\n", " ").split()).strip()
+            if not text:
+                segment["auto_highlights"] = []
+                continue
+            cached_key = segment.get("_auto_highlights_source_text", "")
+            if not force and cached_key == text and isinstance(segment.get("auto_highlights"), list):
+                continue
+            pending_indexes.append(idx)
+            pending_texts.append(text)
+
+        if not pending_texts:
+            return
+
+        self.log(f"[AI Keyword Highlight] Generating highlight phrases for {len(pending_texts)} subtitle lines...")
+        batch_size = 10
+        resolved_batches = []
+        for start_idx in range(0, len(pending_texts), batch_size):
+            batch = pending_texts[start_idx:start_idx + batch_size]
+            try:
+                resolved_batches.extend(provider.select_keyword_highlights_batch(texts=batch, target_lang="vi", max_keywords=2))
+            except Exception as exc:
+                self.log(f"[AI Keyword Highlight] Fallback to built-in auto highlight: {exc}")
+                return
+
+        for idx, phrases in zip(pending_indexes, resolved_batches):
+            segment = self.current_translated_segments[idx]
+            text = ' '.join(str(segment.get("text") or "").replace("\n", " ").split()).strip()
+            cleaned = []
+            seen = set()
+            lowered = text.lower()
+            for phrase in phrases or []:
+                normalized = self._normalize_manual_highlight(phrase)
+                key = normalized.lower()
+                if not normalized or key in seen or key not in lowered:
+                    continue
+                seen.add(key)
+                cleaned.append(normalized)
+            segment["auto_highlights"] = cleaned
+            segment["_auto_highlights_source_text"] = text
+
+        self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
 
     def _reconcile_manual_highlights(self, segment: dict):
         text = str(segment.get("text", ""))
@@ -2927,6 +3054,68 @@ class VideoTranslatorGUI(QMainWindow):
     def on_rewrite_translation_finished(self, translated_srt, error):
         self.subtitle_controller.on_rewrite_translation_finished(translated_srt, error)
 
+    def _close_export_progress_dialog(self):
+        try:
+            dlg = getattr(self, "export_progress_dialog", None)
+            if dlg is not None:
+                dlg.hide()
+                dlg.deleteLater()
+        finally:
+            self.export_progress_dialog = None
+
+    def _ensure_export_progress_dialog(self):
+        dlg = getattr(self, "export_progress_dialog", None)
+        if dlg is not None:
+            return dlg
+        dlg = QProgressDialog("Preparing final export...", "Hide", 0, 100, self)
+        dlg.setWindowTitle("Exporting Video")
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoReset(False)
+        dlg.setAutoClose(False)
+        dlg.setMinimumWidth(520)
+        dlg.setValue(0)
+        dlg.setLabelText("Exporting final video...\n\nWaiting to start...")
+        dlg.setStyleSheet(
+            "QProgressDialog { background-color: #101826; color: #e6eef9; }"
+            "QLabel { color: #e6eef9; background: transparent; }"
+            "QPushButton { background-color: #24364f; color: #ffffff; border: 1px solid #335171; border-radius: 10px; padding: 8px 14px; font-weight: 700; }"
+            "QPushButton:hover { background-color: #2d4665; border-color: #4575a8; }"
+            "QProgressBar { border: 1px solid #2a3a50; border-radius: 10px; text-align: center; background-color: #111927; color: white; min-height: 16px; }"
+            "QProgressBar::chunk { background-color: #4ed0b3; border-radius: 10px; }"
+        )
+        try:
+            dlg.setCancelButtonText("Run in background")
+            dlg.canceled.connect(dlg.hide)
+        except Exception:
+            pass
+        self.export_progress_dialog = dlg
+        dlg.show()
+        return dlg
+
+    def on_export_progress(self, percent: int, message: str):
+        dlg = self._ensure_export_progress_dialog()
+        if dlg is None:
+            return
+        message_text = str(message or "Exporting final video...").strip() or "Exporting final video..."
+        history = list(getattr(self, "_export_progress_messages", []) or [])
+        if not history or history[-1] != message_text:
+            history.append(message_text)
+        self._export_progress_messages = history[-4:]
+        dlg.setLabelText("Exporting final video...\n\n" + "\n".join(self._export_progress_messages))
+        if percent is None or int(percent) < 0:
+            dlg.setRange(0, 0)
+        else:
+            if dlg.maximum() == 0:
+                dlg.setRange(0, 100)
+            value = max(0, min(100, int(percent)))
+            dlg.setValue(value)
+            try:
+                self.progress_bar.setValue(value)
+            except Exception:
+                pass
+        dlg.show()
+
     def _close_assets_progress_dialog(self):
         try:
             dlg = getattr(self, "assets_progress_dialog", None)
@@ -3411,6 +3600,7 @@ class VideoTranslatorGUI(QMainWindow):
     def apply_edited_translation(self, show_message=True, force_apply=True):
         result = self.subtitle_controller.apply_edited_translation(show_message=show_message, force_apply=force_apply)
         if result:
+            self.refresh_ai_keyword_highlights()
             self.sync_segment_editor_rows()
             return result
 

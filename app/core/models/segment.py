@@ -31,6 +31,8 @@ class Segment:
             metadata["words"] = list(data.get("words") or [])
         if "manual_highlights" in data and "manual_highlights" not in metadata:
             metadata["manual_highlights"] = list(data.get("manual_highlights") or [])
+        if "auto_highlights" in data and "auto_highlights" not in metadata:
+            metadata["auto_highlights"] = list(data.get("auto_highlights") or [])
         for key in ("tts_group_id", "tts_group_start", "tts_group_end"):
             if key in data and key not in metadata:
                 metadata[key] = data.get(key)
@@ -118,6 +120,8 @@ class Segment:
             payload["words"] = list(self.metadata.get("words") or [])
         if self.metadata.get("manual_highlights"):
             payload["manual_highlights"] = list(self.metadata.get("manual_highlights") or [])
+        if self.metadata.get("auto_highlights"):
+            payload["auto_highlights"] = list(self.metadata.get("auto_highlights") or [])
         return payload
 
     def to_original_subtitle_dict(self) -> dict[str, Any]:

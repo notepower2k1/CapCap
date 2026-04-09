@@ -13,6 +13,15 @@ def _subprocess_run_kwargs() -> dict:
         kwargs["startupinfo"] = startupinfo
     return kwargs
 
+def _detect_demucs_device() -> str:
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
 def _write_wav_soundfile(path, audio, samplerate):
     """
     Write audio using soundfile to avoid torchaudio/torchcodec DLL issues on Windows.
@@ -67,7 +76,8 @@ def _separate_vocals_via_api(audio_path, output_dir):
     from demucs.pretrained import get_model
 
     model = get_model("htdemucs")
-    device = "cpu"
+    device = _detect_demucs_device()
+    print(f"[Demucs] Using device: {device}")
     model.to(device)
 
     wav = load_track(audio_path, model.audio_channels, model.samplerate)
@@ -139,8 +149,11 @@ def separate_vocals(audio_path, output_dir):
             f"Original error: {e}"
         ) from e
 
+    demucs_device = _detect_demucs_device()
+    print(f"[Demucs] Using device: {demucs_device}")
     cmd = [
         str(sys.executable), "-m", "demucs",
+        "--device", demucs_device,
         "--two-stems", "vocals",
         "-o", str(output_dir),
         str(audio_path)

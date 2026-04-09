@@ -21,6 +21,8 @@ class SegmentService:
                     model.metadata["words"] = list(seg.get("words") or [])
                 if "manual_highlights" in seg:
                     model.metadata["manual_highlights"] = list(seg.get("manual_highlights") or [])
+                if "auto_highlights" in seg:
+                    model.metadata["auto_highlights"] = list(seg.get("auto_highlights") or [])
             elif not model.original_text:
                 model.original_text = str(seg.get("text", "") or "")
                 model.status = "transcribed"
@@ -42,6 +44,9 @@ class SegmentService:
                 source_highlights = base_model.metadata.get("manual_highlights")
                 if source_highlights and "manual_highlights" not in seg:
                     model.metadata["manual_highlights"] = list(source_highlights)
+                source_auto_highlights = base_model.metadata.get("auto_highlights")
+                if source_auto_highlights and "auto_highlights" not in seg:
+                    model.metadata["auto_highlights"] = list(source_auto_highlights)
             translated_text = seg.get("text", "")
             model.apply_translation(translated_text, refined=bool(seg.get("polished")))
             model.metadata["translation_provider"] = seg.get("provider", "")
@@ -50,6 +55,8 @@ class SegmentService:
                 model.metadata["words"] = list(seg.get("words") or [])
             if "manual_highlights" in seg:
                 model.metadata["manual_highlights"] = list(seg.get("manual_highlights") or [])
+            if "auto_highlights" in seg:
+                model.metadata["auto_highlights"] = list(seg.get("auto_highlights") or [])
             for key in ("tts_group_id", "tts_group_start", "tts_group_end"):
                 if key in seg:
                     model.metadata[key] = seg.get(key)

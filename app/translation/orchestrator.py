@@ -346,6 +346,12 @@ class TranslationOrchestrator:
                     target_lang=target_lang,
                 )
                 print(f'[AI Subtitle Optimization] Single-line cue split: {before_count} -> {len(optimized_segments)} cues')
+            if self._style_prefers_ai_keyword_highlight(style_instruction):
+                optimized_segments = self._maybe_generate_ai_keyword_highlights(
+                    optimized_segments,
+                    target_lang=target_lang,
+                    warnings=warnings,
+                )
             return optimized_segments
         except Exception as exc:
             msg = f'Subtitle optimization skipped: {exc}'
@@ -474,6 +480,7 @@ class TranslationOrchestrator:
     def _strip_layout_markers(self, style_instruction: str) -> str:
         text = str(style_instruction or '')
         text = text.replace('[subtitle_layout=single_line]', ' ')
+        text = text.replace('[keyword_highlight=ai_local]', ' ')
         text = text.replace('|  |', '|')
         text = text.replace('||', '|')
         parts = [part.strip() for part in text.split('|') if part.strip()]
@@ -490,6 +497,69 @@ class TranslationOrchestrator:
 
     def _remove_phrase_case_insensitive(self, text: str, phrase: str) -> str:
         return re.sub(re.escape(phrase), '', text, flags=re.IGNORECASE).replace('  ', ' ').strip()
+
+    def _style_prefers_ai_keyword_highlight(self, style_instruction: str) -> bool:
+        normalized = str(style_instruction or '').strip().lower()
+        return '[keyword_highlight=ai_local]' in normalized
+
+    def _maybe_generate_ai_keyword_highlights(
+        self,
+        segments: list[dict],
+        *,
+        target_lang: str,
+        warnings: list[str],
+    ) -> list[dict]:
+        if not segments:
+            return segments
+        polisher = self.local_polisher
+        if not polisher.is_configured():
+            msg = 'AI keyword highlight skipped: Local provider is not configured.'
+            print(f'[AI Keyword Highlight] WARNING: {msg}')
+            warnings.append(msg)
+            return segments
+
+        texts = [' '.join(str(seg.get('text') or '').replace('\n', ' ').split()).strip() for seg in segments]
+        batch_size = 10
+        all_highlights: list[list[str]] = []
+        try:
+            for start_idx in range(0, len(texts), batch_size):
+                batch = texts[start_idx:start_idx + batch_size]
+                all_highlights.extend(
+                    polisher.select_keyword_highlights_batch(
+                        texts=batch,
+                        target_lang=target_lang,
+                        max_keywords=2,
+                    )
+                )
+            if len(all_highlights) != len(segments):
+                raise TranslationValidationError('AI keyword highlight returned invalid segment count.')
+        except Exception as exc:
+            msg = f'AI keyword highlight skipped: {exc}'
+            print(f'[AI Keyword Highlight] WARNING: {msg}')
+            warnings.append(msg)
+            return segments
+
+        updated_segments: list[dict] = []
+        for seg, phrases in zip(segments, all_highlights):
+            updated = dict(seg)
+            updated['auto_highlights'] = self._normalize_auto_highlight_phrases(updated.get('text', ''), phrases)
+            updated_segments.append(updated)
+        print('[AI Keyword Highlight] Success: local highlight phrases generated.')
+        return updated_segments
+
+    def _normalize_auto_highlight_phrases(self, text: str, phrases) -> list[str]:
+        source_text = str(text or '')
+        lowered = source_text.lower()
+        cleaned: list[str] = []
+        seen = set()
+        for phrase in phrases or []:
+            normalized = ' '.join(str(phrase or '').replace('\n', ' ').split()).strip(' ,;|')
+            key = normalized.lower()
+            if not normalized or key in seen or key not in lowered:
+                continue
+            seen.add(key)
+            cleaned.append(normalized)
+        return cleaned
 
     def _split_segments_for_single_line(
         self,
