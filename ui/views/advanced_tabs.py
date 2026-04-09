@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFrame,
     QGroupBox,
@@ -107,7 +108,28 @@ def _build_audio_mix_controls(gui, advanced_layout):
     gui.bg_gain_label = QLabel("BG gain")
     gain_row.addWidget(gui.bg_gain_label)
     gain_row.addWidget(gui.bg_gain_spin)
+    gui.ducking_amount_label = QLabel("BG ducking")
+    gain_row.addWidget(gui.ducking_amount_label)
+    gain_row.addWidget(gui.ducking_amount_spin)
     advanced_layout.addLayout(gain_row)
+
+    preset_row = QHBoxLayout()
+    gui.audio_mix_preset_label = QLabel("Mix preset")
+    preset_row.addWidget(gui.audio_mix_preset_label)
+    gui.audio_mix_preset_combo = QComboBox(gui)
+    gui.audio_mix_preset_combo.addItem("Custom", "custom")
+    gui.audio_mix_preset_combo.addItem("Voice Focus", "voice_focus")
+    gui.audio_mix_preset_combo.addItem("Balanced", "balanced")
+    gui.audio_mix_preset_combo.addItem("Music Forward", "music_forward")
+    gui.audio_mix_preset_combo.currentIndexChanged.connect(gui.on_audio_mix_preset_changed)
+    preset_row.addWidget(gui.audio_mix_preset_combo, 1)
+    advanced_layout.addLayout(preset_row)
+
+    gui.audio_mix_preset_hint = gui.make_helper_label(
+        "Use presets to quickly keep more or less background music under the Vietnamese voice."
+    )
+    gui.audio_mix_preset_hint.setParent(gui)
+    advanced_layout.addWidget(gui.audio_mix_preset_hint)
 
     advanced_layout.addWidget(gui.voiceover_btn)
 
@@ -143,6 +165,10 @@ def _build_hidden_runtime_widgets(gui):
     gui.bg_gain_spin.setRange(-30.0, 30.0)
     gui.bg_gain_spin.setSingleStep(1.0)
     gui.bg_gain_spin.setValue(0.0)
+    gui.ducking_amount_spin = QDoubleSpinBox(gui)
+    gui.ducking_amount_spin.setRange(-24.0, 0.0)
+    gui.ducking_amount_spin.setSingleStep(1.0)
+    gui.ducking_amount_spin.setValue(-6.0)
 
     gui.voiceover_btn = QPushButton("Generate Voice / Mix", gui)
     gui.keep_timeline_cb = QCheckBox("Keep the current timeline when editing Vietnamese text", gui)

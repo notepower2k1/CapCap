@@ -422,13 +422,13 @@ class VideoTranslatorGUI(QMainWindow):
                 "font_color": self.subtitle_color_hex,
                 "highlight_color": "#00E5FF",
                 "outline_color": "#000000",
-                "outline_width": 3,
+                "outline_width": 3 if bool(getattr(self, "subtitle_outline_cb", None) and self.subtitle_outline_cb.isChecked()) else 0,
                 "shadow_color": "#000000",
                 "shadow_depth": 1,
                 "shadow_alpha": 0.3,
                 "background_box": bool(self.subtitle_background_cb.isChecked()),
-                "background_color": "#000000",
-                "background_alpha": 0.35,
+                "background_color": getattr(self, "subtitle_background_color_hex", "#000000"),
+                "background_alpha": float(self.subtitle_bg_alpha_spin.value()) if hasattr(self, "subtitle_bg_alpha_spin") else 0.6,
                 "animation": self.subtitle_animation_combo.currentText().strip() or "Static",
                 "bold": bool(self.subtitle_bold_cb.isChecked()),
                 "summary": "Fully manual preset. Font, size, color, animation and background follow your own selections.",
@@ -895,6 +895,23 @@ class VideoTranslatorGUI(QMainWindow):
             self.preview_voice_btn.setVisible(mode in ("voice", "both"))
         self._update_voice_preview_meta()
 
+    def on_audio_mix_preset_changed(self):
+        if not hasattr(self, "audio_mix_preset_combo"):
+            return
+        preset_key = str(self.audio_mix_preset_combo.currentData() or "custom").strip().lower()
+        presets = {
+            "voice_focus": {"bg_gain": -1.0, "ducking": -8.0},
+            "balanced": {"bg_gain": 1.0, "ducking": -5.0},
+            "music_forward": {"bg_gain": 3.0, "ducking": -3.0},
+        }
+        if preset_key in presets:
+            values = presets[preset_key]
+            if hasattr(self, "bg_gain_spin"):
+                self.bg_gain_spin.setValue(float(values["bg_gain"]))
+            if hasattr(self, "ducking_amount_spin"):
+                self.ducking_amount_spin.setValue(float(values["ducking"]))
+        self.refresh_ui_state()
+
     def _parse_voice_speed_value(self) -> float:
         raw = str(getattr(self, "voice_speed_spin", None).currentText() if getattr(self, "voice_speed_spin", None) else "1.0x").strip().lower()
         raw = raw.replace("x", "")
@@ -1155,6 +1172,7 @@ class VideoTranslatorGUI(QMainWindow):
             "font": self.subtitle_font_combo.currentText().strip(),
             "size": int(self.subtitle_font_size_spin.value()),
             "color": self.subtitle_color_hex,
+            "background_color": getattr(self, "subtitle_background_color_hex", "#000000"),
             "position_mode": str(self.subtitle_position_mode_combo.currentData() or "anchor"),
             "position": self.subtitle_align_combo.currentText().strip(),
             "custom_x": int(self.subtitle_custom_x_spin.value()),
@@ -1163,6 +1181,8 @@ class VideoTranslatorGUI(QMainWindow):
             "animation_time": float(self.subtitle_animation_time_spin.value()),
             "karaoke_timing_mode": str(self.subtitle_karaoke_timing_combo.currentData() or "vietnamese"),
             "background": bool(self.subtitle_background_cb.isChecked()),
+            "outline": bool(getattr(self, "subtitle_outline_cb", None) and self.subtitle_outline_cb.isChecked()),
+            "background_alpha": float(self.subtitle_bg_alpha_spin.value()) if hasattr(self, "subtitle_bg_alpha_spin") else 0.6,
             "bold": bool(self.subtitle_bold_cb.isChecked()),
             "auto_keyword_highlight": bool(self.subtitle_keyword_highlight_cb.isChecked()),
             "highlight_color": self.subtitle_highlight_color_combo.currentText().strip(),
@@ -1225,6 +1245,9 @@ class VideoTranslatorGUI(QMainWindow):
         self.subtitle_font_size_spin.setValue(int(preset.get("size", self.subtitle_font_size_spin.value())))
         self.subtitle_color_hex = str(preset.get("color", self.subtitle_color_hex)).upper()
         self.subtitle_color_btn.setText(self.subtitle_color_hex)
+        self.subtitle_background_color_hex = str(preset.get("background_color", getattr(self, "subtitle_background_color_hex", "#000000"))).upper()
+        if hasattr(self, "subtitle_background_color_btn"):
+            self.subtitle_background_color_btn.setText(self.subtitle_background_color_hex)
         position_mode = str(preset.get("position_mode", self.subtitle_position_mode_combo.currentData() or "anchor")).strip().lower()
         position_mode_index = self.subtitle_position_mode_combo.findData(position_mode)
         if position_mode_index >= 0:
@@ -1239,6 +1262,10 @@ class VideoTranslatorGUI(QMainWindow):
         if karaoke_index >= 0:
             self.subtitle_karaoke_timing_combo.setCurrentIndex(karaoke_index)
         self.subtitle_background_cb.setChecked(bool(preset.get("background", self.subtitle_background_cb.isChecked())))
+        if hasattr(self, "subtitle_outline_cb"):
+            self.subtitle_outline_cb.setChecked(bool(preset.get("outline", self.subtitle_outline_cb.isChecked())))
+        if hasattr(self, "subtitle_bg_alpha_spin"):
+            self.subtitle_bg_alpha_spin.setValue(float(preset.get("background_alpha", self.subtitle_bg_alpha_spin.value())))
         self.subtitle_bold_cb.setChecked(bool(preset.get("bold", self.subtitle_bold_cb.isChecked())))
         self.subtitle_keyword_highlight_cb.setChecked(bool(preset.get("auto_keyword_highlight", self.subtitle_keyword_highlight_cb.isChecked())))
         self.subtitle_highlight_color_combo.setCurrentText(str(preset.get("highlight_color", self.subtitle_highlight_color_combo.currentText())))
@@ -1631,6 +1658,16 @@ class VideoTranslatorGUI(QMainWindow):
         self.subtitle_color_btn.setText(self.subtitle_color_hex)
         self.update_subtitle_preview_style()
 
+    def choose_subtitle_background_color(self):
+        current = getattr(self, "subtitle_background_color_hex", "#000000")
+        color = QColorDialog.getColor(QColor(current), self, "Choose Subtitle Background Color")
+        if not color.isValid():
+            return
+        self.subtitle_background_color_hex = color.name().upper()
+        if hasattr(self, "subtitle_background_color_btn"):
+            self.subtitle_background_color_btn.setText(self.subtitle_background_color_hex)
+        self.update_subtitle_preview_style()
+
     def update_subtitle_preview_style(self):
         if not hasattr(self, "video_view"):
             return
@@ -1649,12 +1686,17 @@ class VideoTranslatorGUI(QMainWindow):
             if self.get_selected_subtitle_preset() == "custom"
             else preset.get("font_name", "Segoe UI")
         )
+        bg_alpha = float(preset.get("background_alpha", 0.0))
+        bg_color = QColor(preset.get("background_color", "#000000"))
+        bg_color.setAlpha(max(0, min(255, int(round(bg_alpha * 255.0)))))
         item.set_style(
             font_name=font_name or preset.get("font_name", "Segoe UI"),
             font_size=preview_font_size,
             font_color=QColor(self.subtitle_color_hex),
             outline_width=preset.get("outline_width", 2),
             outline_color=QColor(preset.get("outline_color", "#000000")),
+            background_box=bool(self.subtitle_background_cb.isChecked() if self.get_selected_subtitle_preset() == "custom" else preset.get("background_box", False)),
+            background_color=bg_color,
             single_line=bool(getattr(self, "subtitle_single_line_cb", None) and self.subtitle_single_line_cb.isChecked()),
         )
         item.set_alignment(self.subtitle_align_combo.currentText())
@@ -1758,11 +1800,19 @@ class VideoTranslatorGUI(QMainWindow):
             self.subtitle_font_combo.setCurrentText(preset.get("font_name", "Arial"))
             self.subtitle_animation_combo.setCurrentText(preset.get("animation", "Static"))
             self.subtitle_background_cb.setChecked(bool(preset.get("background_box", False)))
+            if hasattr(self, "subtitle_outline_cb"):
+                self.subtitle_outline_cb.setChecked(bool(preset.get("outline_width", 0) > 0))
+            if hasattr(self, "subtitle_bg_alpha_spin"):
+                self.subtitle_bg_alpha_spin.setValue(float(preset.get("background_alpha", self.subtitle_bg_alpha_spin.value())))
             self.subtitle_bold_cb.setChecked(bool(preset.get("bold", False)))
         self.subtitle_font_combo.setEnabled(is_custom)
         self.subtitle_animation_combo.setEnabled(is_custom)
         self.subtitle_karaoke_timing_combo.setEnabled(is_custom)
         self.subtitle_background_cb.setEnabled(is_custom)
+        if hasattr(self, "subtitle_outline_cb"):
+            self.subtitle_outline_cb.setEnabled(is_custom)
+        if hasattr(self, "subtitle_bg_alpha_spin"):
+            self.subtitle_bg_alpha_spin.setEnabled(is_custom)
         self.subtitle_bold_cb.setEnabled(is_custom)
         if hasattr(self, "subtitle_preset_summary_label"):
             self.subtitle_preset_summary_label.setText(
@@ -3690,6 +3740,7 @@ class VideoTranslatorGUI(QMainWindow):
         timing_sync_mode = str(self.voice_timing_sync_combo.currentText()).strip()
         voice_gain = float(self.voice_gain_spin.value())
         bg_gain = float(self.bg_gain_spin.value())
+        ducking_amount = float(self.ducking_amount_spin.value()) if hasattr(self, "ducking_amount_spin") else -6.0
         
         combo_text = self.free_voice_combo.currentText() if hasattr(self, "free_voice_combo") else ""
         combo_data = self.free_voice_combo.currentData() if hasattr(self, "free_voice_combo") else ""
@@ -3744,6 +3795,7 @@ class VideoTranslatorGUI(QMainWindow):
             timing_sync_mode,
             voice_gain,
             bg_gain,
+            ducking_amount,
             project_state_path,
         )
         self.voice_thread.finished.connect(self.on_voiceover_finished)

@@ -595,9 +595,11 @@ def srt_to_ass(srt_path: str,
         return ass_color
 
     border_style = 3 if background_box else 1
-    outline = 0 if background_box else float(outline_width)
+    outline = max(3.0, float(outline_width)) if background_box else float(outline_width)
     shadow = 0 if background_box else float(shadow_depth)
-    back_color = _with_alpha(background_color, background_alpha) if background_box else _with_alpha(shadow_color, 0.7)
+    box_color = _with_alpha(background_color, background_alpha) if background_box else None
+    style_outline_color = box_color if background_box else outline_color
+    back_color = box_color if background_box else _with_alpha(shadow_color, 0.7)
     bold_flag = -1 if bold else 0
 
     wrap_style = 2 if single_line else 1
@@ -615,7 +617,7 @@ def srt_to_ass(srt_path: str,
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font_name},{font_size},"
-        f"{font_color},{highlight_color},{outline_color},{back_color},"
+        f"{font_color},{highlight_color},{style_outline_color},{back_color},"
         f"{bold_flag},0,0,0,100,100,0,0,{border_style},{outline},{shadow},"
         f"{alignment},60,60,{margin_v},1\n"
         "\n"

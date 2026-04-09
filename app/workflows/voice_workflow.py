@@ -296,6 +296,7 @@ class VoiceWorkflow:
         timing_sync_mode: str = "off",
         voice_gain_db: float = 0.0,
         bg_gain_db: float = 0.0,
+        ducking_amount_db: float = -6.0,
         project_state_path: str = "",
         on_progress: callable = None,
     ):
@@ -370,6 +371,7 @@ class VoiceWorkflow:
                 voice_gain_db=0.0,
                 ducking_mode="timeline" if audio_mode_key == "fast" else "off",
                 ducking_segments=segments if audio_mode_key == "fast" else None,
+                ducking_amount_db=float(ducking_amount_db),
             )
             mix_elapsed = time.perf_counter() - mix_started
             print(f"[Voice Workflow] Mixed output created: {mixed}")

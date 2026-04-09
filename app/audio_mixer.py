@@ -290,7 +290,7 @@ def mix_voice_with_background(
     voice_gain_db: float = 0.0,
     ducking_mode: str = "off",
     ducking_segments: list | None = None,
-    ducking_amount_db: float = -10.0,
+    ducking_amount_db: float = -6.0,
     ducking_threshold: float = 0.015,
     ducking_ratio: float = 10.0,
     ducking_attack_ms: float = 15.0,

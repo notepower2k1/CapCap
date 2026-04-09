@@ -103,7 +103,7 @@ def _build_left_panel(gui):
     gui.left_panel_scroll_area = scroll_area
     scroll_area.setObjectName("leftPanelArea")
     scroll_area.setWidgetResizable(True)
-    scroll_area.setFixedWidth(480)
+    scroll_area.setFixedWidth(560)
     scroll_area.setFrameShape(QFrame.NoFrame)
 
     left_panel_container = QWidget()

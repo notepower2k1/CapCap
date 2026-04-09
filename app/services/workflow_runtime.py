@@ -55,6 +55,7 @@ class WorkflowRuntime:
         timing_sync_mode: str = "off",
         voice_gain_db: float = 0.0,
         bg_gain_db: float = 0.0,
+        ducking_amount_db: float = -6.0,
         project_state_path: str = "",
         on_progress: callable = None,
     ):
@@ -68,6 +69,7 @@ class WorkflowRuntime:
             timing_sync_mode=timing_sync_mode,
             voice_gain_db=voice_gain_db,
             bg_gain_db=bg_gain_db,
+            ducking_amount_db=ducking_amount_db,
             project_state_path=project_state_path,
             on_progress=on_progress,
         )

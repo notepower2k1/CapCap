@@ -16,6 +16,9 @@ class SubtitleOverlayItem(QGraphicsItem):
         self.font_size = 20
         self.font_color = QColor(255, 255, 255)
         self.alignment = "Bottom Center"
+        self.background_box = False
+        self.background_color = QColor(0, 0, 0, 170)
+        self.single_line = False
         self.x_offset = 0
         self.bottom_offset = 30
         self.custom_position_enabled = False
@@ -27,7 +30,7 @@ class SubtitleOverlayItem(QGraphicsItem):
             self.current_text = text
             self.update()
 
-    def set_style(self, *, font_name=None, font_size=None, font_color=None, single_line=None):
+    def set_style(self, *, font_name=None, font_size=None, font_color=None, background_box=None, background_color=None, single_line=None):
         changed = False
         if font_name and font_name != self.font_name:
             self.font_name = font_name
@@ -38,6 +41,15 @@ class SubtitleOverlayItem(QGraphicsItem):
             changed = True
         if font_color and font_color != self.font_color:
             self.font_color = font_color
+            changed = True
+        if background_box is not None and bool(background_box) != self.background_box:
+            self.background_box = bool(background_box)
+            changed = True
+        if background_color is not None and background_color != self.background_color:
+            self.background_color = background_color
+            changed = True
+        if single_line is not None and bool(single_line) != self.single_line:
+            self.single_line = bool(single_line)
             changed = True
         if changed:
             self.update()
@@ -80,18 +92,27 @@ class SubtitleOverlayItem(QGraphicsItem):
             font.setPixelSize(max(1, int(self.font_size)))
             font.setBold(True)
             painter.setFont(font)
+            flags = Qt.AlignCenter if self.single_line else (Qt.AlignCenter | Qt.TextWordWrap)
+
+            if self.background_box:
+                metrics = painter.fontMetrics()
+                text_rect = metrics.boundingRect(rect.toRect(), int(flags), self.current_text).adjusted(-18, -10, 18, 10)
+                text_rect = text_rect.intersected(rect.toRect().adjusted(4, 4, -4, -4))
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(self.background_color)
+                painter.drawRoundedRect(QRectF(text_rect), 14, 14)
 
             # Outline
             outline_offsets = [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)]
             painter.setPen(QColor(0, 0, 0, 220))
             for dx, dy in outline_offsets:
-                painter.drawText(rect.translated(dx, dy), Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
+                painter.drawText(rect.translated(dx, dy), flags, self.current_text)
 
             painter.setPen(QColor(0, 0, 0, 120))
-            painter.drawText(rect.translated(2, 2), Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
+            painter.drawText(rect.translated(2, 2), flags, self.current_text)
 
             painter.setPen(self.font_color)
-            painter.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, self.current_text)
+            painter.drawText(rect, flags, self.current_text)
         else:
             # Placeholder for preview mode
             painter.setPen(QPen(self.font_color, 1, Qt.DashLine))

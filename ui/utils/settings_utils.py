@@ -32,7 +32,10 @@
     s.setValue("subtitle_x_offset", gui.subtitle_x_offset_spin.value())
     s.setValue("subtitle_vertical_offset", gui.subtitle_bottom_offset_spin.value())
     s.setValue("subtitle_color", gui.subtitle_color_hex)
+    s.setValue("subtitle_background_color", getattr(gui, "subtitle_background_color_hex", "#000000"))
     s.setValue("subtitle_background", gui.subtitle_background_cb.isChecked())
+    s.setValue("subtitle_outline", getattr(gui, "subtitle_outline_cb", None).isChecked() if hasattr(gui, "subtitle_outline_cb") else True)
+    s.setValue("subtitle_background_alpha", getattr(gui, "subtitle_bg_alpha_spin", None).value() if hasattr(gui, "subtitle_bg_alpha_spin") else 0.6)
     s.setValue("subtitle_bold", gui.subtitle_bold_cb.isChecked())
     s.setValue("subtitle_auto_keyword_highlight", gui.subtitle_keyword_highlight_cb.isChecked())
     s.setValue("subtitle_highlight_color", gui.subtitle_highlight_color_combo.currentText())
@@ -43,6 +46,9 @@
     s.setValue("voice_timing_sync_mode", gui.voice_timing_sync_combo.currentText())
     s.setValue("voice_gain", gui.voice_gain_spin.value())
     s.setValue("bg_gain", gui.bg_gain_spin.value())
+    s.setValue("ducking_amount", gui.ducking_amount_spin.value())
+    if hasattr(gui, "audio_mix_preset_combo"):
+        s.setValue("audio_mix_preset", gui.audio_mix_preset_combo.currentData())
     if hasattr(gui, "toggle_advanced_btn"):
         s.setValue("advanced_section_open", gui.toggle_advanced_btn.isChecked())
 
@@ -105,7 +111,14 @@ def load_user_settings(gui):
     gui.subtitle_bottom_offset_spin.setValue(int(s.value("subtitle_vertical_offset", gui.subtitle_bottom_offset_spin.value())))
     gui.subtitle_color_hex = str(s.value("subtitle_color", gui.subtitle_color_hex)).upper()
     gui.subtitle_color_btn.setText(gui.subtitle_color_hex)
+    gui.subtitle_background_color_hex = str(s.value("subtitle_background_color", getattr(gui, "subtitle_background_color_hex", "#000000"))).upper()
+    if hasattr(gui, "subtitle_background_color_btn"):
+        gui.subtitle_background_color_btn.setText(gui.subtitle_background_color_hex)
     gui.subtitle_background_cb.setChecked(str(s.value("subtitle_background", gui.subtitle_background_cb.isChecked())).lower() == "true")
+    if hasattr(gui, "subtitle_outline_cb"):
+        gui.subtitle_outline_cb.setChecked(str(s.value("subtitle_outline", gui.subtitle_outline_cb.isChecked())).lower() == "true")
+    if hasattr(gui, "subtitle_bg_alpha_spin"):
+        gui.subtitle_bg_alpha_spin.setValue(float(s.value("subtitle_background_alpha", gui.subtitle_bg_alpha_spin.value())))
     gui.subtitle_bold_cb.setChecked(str(s.value("subtitle_bold", gui.subtitle_bold_cb.isChecked())).lower() == "true")
     gui.subtitle_keyword_highlight_cb.setChecked(str(s.value("subtitle_auto_keyword_highlight", gui.subtitle_keyword_highlight_cb.isChecked())).lower() == "true")
     gui.subtitle_highlight_color_combo.setCurrentText(str(s.value("subtitle_highlight_color", gui.subtitle_highlight_color_combo.currentText())))
@@ -119,6 +132,12 @@ def load_user_settings(gui):
     gui.voice_timing_sync_combo.setCurrentText(s.value("voice_timing_sync_mode", gui.voice_timing_sync_combo.currentText()))
     gui.voice_gain_spin.setValue(float(s.value("voice_gain", gui.voice_gain_spin.value())))
     gui.bg_gain_spin.setValue(float(s.value("bg_gain", gui.bg_gain_spin.value())))
+    gui.ducking_amount_spin.setValue(float(s.value("ducking_amount", gui.ducking_amount_spin.value())))
+    if hasattr(gui, "audio_mix_preset_combo"):
+        preset_value = str(s.value("audio_mix_preset", gui.audio_mix_preset_combo.currentData() or "custom")).strip().lower()
+        preset_index = gui.audio_mix_preset_combo.findData(preset_value)
+        if preset_index >= 0:
+            gui.audio_mix_preset_combo.setCurrentIndex(preset_index)
     use_existing = str(s.value("use_existing_audio", "false")).lower() == "true"
     gui.use_existing_audio_radio.setChecked(use_existing)
     gui.use_generated_audio_radio.setChecked(not use_existing)
