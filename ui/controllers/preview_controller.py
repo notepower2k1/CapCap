@@ -310,11 +310,8 @@ class PreviewController:
             self.gui.processed_artifacts["final_video"] = output_path
             self.gui.update_project_artifact("final_video", output_path)
             self.gui.update_project_step("export", "done")
-            self.gui.cleanup_temp_preview_files()
-            self.gui.frame_preview_image_label.setText("No frame preview yet")
-            self.gui.frame_preview_image_label.setPixmap(QPixmap())
-            self.gui.frame_preview_status_label.setText("Exact frame preview updates here when available.")
             self.gui.log(f"[Export] Final video exported successfully: {output_path}")
+            self.gui.log("[Export] Kept current preview/subtitle state so you can continue editing after export.")
 
     def on_quick_preview_ready(self, output_path, error):
         self.gui._suspend_live_subtitle_sync = False
