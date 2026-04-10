@@ -310,10 +310,12 @@ class TranslationOrchestrator:
             ]
             translated_texts = [seg.get('text') or '' for seg in translated_segments]
             optimization_instruction = (
-                'Subtitle optimization mode. Convert the accurate translation draft into easy-to-read subtitle text for short video. '
-                'Requirements: (1) shorten sentences when possible, (2) use <br> only for natural line breaks, '
-                '(3) fit the subtitle to the visible duration hint and reading speed limit, (4) keep the meaning faithful and do not add new ideas, '
-                '(5) output max 2 lines. '
+                'Subtitle optimization mode. Start from the existing Vietnamese draft and keep its wording whenever it is already natural and clear. '
+                'Only make minimal edits when needed for subtitle readability. '
+                'Requirements: (1) keep the meaning faithful and do not add new ideas, (2) prefer the original draft unchanged if it already reads well, '
+                '(3) only shorten or simplify when really needed for timing/readability, (4) preserve names, numbers, products, and key terms exactly, '
+                '(5) prefer a single natural line whenever possible, (6) use <br> only when a second line is truly needed for readability, '
+                '(7) allow up to 2 lines maximum, not as a target. '
                 'Return only numbered lines. Keep exact line count.'
             )
             if cleaned_style_instruction:
@@ -330,8 +332,13 @@ class TranslationOrchestrator:
             )
             warnings.extend(batch_warnings)
             normalized_texts = [
-                self._normalize_optimized_subtitle_text(text, source_seg, single_line=False)
-                for text, source_seg in zip(optimized_texts, source_segments)
+                self._normalize_optimized_subtitle_text(
+                    text,
+                    source_seg,
+                    draft_text=(translated_seg.get('text') or ''),
+                    single_line=False,
+                )
+                for text, source_seg, translated_seg in zip(optimized_texts, source_segments, translated_segments)
             ]
             if not validate_texts(normalized_texts, len(translated_segments)):
                 raise TranslationValidationError('Subtitle optimization returned invalid text count.')
@@ -371,13 +378,56 @@ class TranslationOrchestrator:
             f"[max_lines={max_lines}] {seg.get('text') or ''}"
         )
 
-    def _normalize_optimized_subtitle_text(self, text: str, seg: dict, *, single_line: bool = False) -> str:
+    def _normalize_optimized_subtitle_text(self, text: str, seg: dict, *, draft_text: str = '', single_line: bool = False) -> str:
         cleaned = str(text or '').replace('<br/>', '\n').replace('<br />', '\n').replace('<br>', '\n')
         cleaned = '\n'.join(' '.join(part.split()) for part in cleaned.splitlines() if part.strip())
+        draft = str(draft_text or '').replace('<br/>', '\n').replace('<br />', '\n').replace('<br>', '\n')
+        draft = '\n'.join(' '.join(part.split()) for part in draft.splitlines() if part.strip())
         if not cleaned:
-            cleaned = str(seg.get('text') or '').strip()
+            cleaned = draft or str(seg.get('text') or '').strip()
         duration = max(0.6, float(seg.get('end', 0.0) or 0.0) - float(seg.get('start', 0.0) or 0.0))
-        return self._wrap_subtitle_text(cleaned, duration, single_line=single_line)
+        wrapped_cleaned = self._wrap_subtitle_text(cleaned, duration, single_line=single_line)
+        wrapped_draft = self._wrap_subtitle_text(draft, duration, single_line=single_line) if draft else ''
+        if wrapped_draft and self._should_keep_original_translation(wrapped_draft, wrapped_cleaned, duration, single_line=single_line):
+            return wrapped_draft
+        return wrapped_cleaned
+
+    def _should_keep_original_translation(self, original_text: str, optimized_text: str, duration: float, *, single_line: bool = False) -> bool:
+        original = str(original_text or '').strip()
+        optimized = str(optimized_text or '').strip()
+        if not original or not optimized or original == optimized:
+            return False
+        if not self._is_subtitle_readable(original, duration, single_line=single_line):
+            return False
+        overlap = self._token_overlap_ratio(original, optimized)
+        length_delta = abs(len(original.replace('\n', ' ')) - len(optimized.replace('\n', ' ')))
+        return overlap < 0.58 and length_delta >= 8
+
+    def _is_subtitle_readable(self, text: str, duration: float, *, single_line: bool = False) -> bool:
+        normalized = str(text or '').strip()
+        if not normalized:
+            return False
+        lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+        if not lines:
+            return False
+        max_lines = 1 if single_line else 2
+        if len(lines) > max_lines:
+            return False
+        max_chars = self._target_max_chars(duration, single_line=single_line)
+        if any(len(line) > max_chars + 6 for line in lines):
+            return False
+        cps = len(' '.join(lines).replace(' ', '')) / max(duration, 0.6)
+        return cps <= (self._target_max_cps(duration, single_line=single_line) + 1.5)
+
+    def _token_overlap_ratio(self, left_text: str, right_text: str) -> float:
+        left_tokens = re.findall(r'\w+', str(left_text or '').lower())
+        right_tokens = re.findall(r'\w+', str(right_text or '').lower())
+        if not left_tokens or not right_tokens:
+            return 1.0
+        left_set = set(left_tokens)
+        right_set = set(right_tokens)
+        common = len(left_set & right_set)
+        return common / max(1, len(left_set | right_set))
 
     def _wrap_subtitle_text(self, text: str, duration: float, *, single_line: bool = False) -> str:
         normalized = ' '.join(str(text or '').replace('\n', ' \n ').split())
@@ -388,15 +438,20 @@ class TranslationOrchestrator:
         if single_line:
             compact = ' '.join(existing_lines).strip()
             return self._shorten_single_line_text(compact, duration)
-        if len(existing_lines) > 1:
-            return '\n'.join(existing_lines[:2])
-        single = existing_lines[0]
+        single = ' '.join(existing_lines).strip() if len(existing_lines) > 1 else existing_lines[0]
         max_line_chars = self._target_max_chars(duration, single_line=False)
-        if len(single) <= max_line_chars:
+        cps_limit = self._target_max_cps(duration, single_line=False)
+        compact_single = ' '.join(single.split()).strip()
+        if compact_single:
+            compact_cps = len(compact_single.replace(' ', '')) / max(duration, 0.6)
+            if len(compact_single) <= max_line_chars + 6 and compact_cps <= cps_limit + 0.8:
+                return compact_single
+        if len(existing_lines) > 1:
+            if len(existing_lines) <= 2 and all(len(line) <= max_line_chars + 6 for line in existing_lines):
+                return '\n'.join(existing_lines[:2])
+        if len(single) <= max_line_chars or len(single.split()) < 3:
             return single
         words = single.split()
-        if len(words) < 3:
-            return single
         target = len(single) / 2
         best_index = 1
         best_score = float('inf')

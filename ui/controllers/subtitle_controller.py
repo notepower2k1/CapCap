@@ -3,6 +3,7 @@ import os
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit, QVBoxLayout
 
 from workers import RewriteTranslationWorker, TranscriptionWorker, TranslationWorker
+from translation import TranslationOrchestrator
 
 
 class SubtitleController:
@@ -129,6 +130,78 @@ class SubtitleController:
         self.gui.refresh_ui_state()
         self.gui._pipeline_advance("translation")
 
+    def _collapse_translated_segments_for_rewrite(self, source_segments, translated_segments):
+        source_segments = list(source_segments or [])
+        translated_segments = list(translated_segments or [])
+        if not translated_segments:
+            return []
+        if len(source_segments) == len(translated_segments):
+            collapsed = []
+            for idx, seg in enumerate(translated_segments):
+                item = dict(seg)
+                if idx < len(source_segments):
+                    item["source_text"] = source_segments[idx].get("source_text") or source_segments[idx].get("text", "")
+                collapsed.append(item)
+            return collapsed
+
+        collapsed = []
+        idx = 0
+        while idx < len(translated_segments):
+            seg = dict(translated_segments[idx] or {})
+            group_id = str(seg.get("tts_group_id", "") or "").strip()
+            group_items = [seg]
+            idx += 1
+            if group_id:
+                while idx < len(translated_segments):
+                    candidate = dict(translated_segments[idx] or {})
+                    if str(candidate.get("tts_group_id", "") or "").strip() != group_id:
+                        break
+                    group_items.append(candidate)
+                    idx += 1
+            base_text = ' '.join(str(group_items[0].get("tts_text") or "").split()).strip()
+            if not base_text:
+                base_text = ' '.join(' '.join(str(item.get("text") or "").split()).strip() for item in group_items).strip()
+            collapsed.append({
+                "start": float(group_items[0].get("tts_group_start", group_items[0].get("start", 0.0)) or group_items[0].get("start", 0.0)),
+                "end": float(group_items[-1].get("tts_group_end", group_items[-1].get("end", 0.0)) or group_items[-1].get("end", 0.0)),
+                "text": base_text,
+                "tts_text": base_text,
+                "tts_group_id": group_id,
+                "tts_group_start": float(group_items[0].get("tts_group_start", group_items[0].get("start", 0.0)) or group_items[0].get("start", 0.0)),
+                "tts_group_end": float(group_items[-1].get("tts_group_end", group_items[-1].get("end", 0.0)) or group_items[-1].get("end", 0.0)),
+                "words": list(group_items[0].get("words", []) or []),
+                "manual_highlights": list(group_items[0].get("manual_highlights", []) or []),
+            })
+        if len(collapsed) == len(source_segments):
+            for i, seg in enumerate(collapsed):
+                seg["source_text"] = source_segments[i].get("source_text") or source_segments[i].get("text", "")
+        return collapsed
+
+    def _expand_rewrite_segments_for_current_layout(self, rewritten_segments, source_segments):
+        normalized = []
+        source_segments = list(source_segments or [])
+        for idx, seg in enumerate(rewritten_segments or []):
+            item = dict(seg)
+            if idx < len(source_segments):
+                base = source_segments[idx]
+                item["source_text"] = base.get("source_text") or base.get("text", "")
+                item.setdefault("words", list(base.get("words", []) or []))
+                item.setdefault("manual_highlights", list(base.get("manual_highlights", []) or []))
+            normalized.append(item)
+        single_line_enabled = bool(getattr(self.gui, "subtitle_single_line_cb", None) and self.gui.subtitle_single_line_cb.isChecked())
+        if not single_line_enabled:
+            return normalized
+        orchestrator = TranslationOrchestrator()
+        provider_type, polisher = orchestrator._resolve_ai_provider()
+        if not polisher.is_configured():
+            polisher = None
+        return orchestrator._split_segments_for_single_line(
+            normalized,
+            polisher=polisher,
+            provider_type=provider_type,
+            target_lang=self.gui.get_target_language_code(),
+        )
+
     def run_rewrite_translation(self):
         source_segments = list(self.gui.current_segments or [])
         translated_segments = list(self.gui.current_translated_segments or [])
@@ -138,14 +211,18 @@ class SubtitleController:
         if not translated_segments:
             QMessageBox.warning(self.gui, "Rewrite Unavailable", "Vietnamese subtitles are missing. Please translate or load them first.")
             return
-        if len(source_segments) != len(translated_segments):
-            QMessageBox.warning(self.gui, "Rewrite Unavailable", "Original and Vietnamese subtitle counts do not match, so rewrite cannot run safely.")
+        rewrite_segments = self._collapse_translated_segments_for_rewrite(source_segments, translated_segments)
+        if len(source_segments) != len(rewrite_segments):
+            QMessageBox.warning(self.gui, "Rewrite Unavailable", "Could not rebuild the original subtitle groups for rewrite safely.")
             return
-        self._open_rewrite_dialog(source_segments, translated_segments)
+        self.gui._rewrite_source_segments = source_segments
+        self.gui._rewrite_base_translated_segments = rewrite_segments
+        self._open_rewrite_dialog(source_segments, rewrite_segments)
 
     def _validate_rewrite_srt(self, srt_text: str):
         normalized_text = str(srt_text or "").strip()
-        expected_len = len(self.gui.current_translated_segments or self.gui.current_segments or []) or None
+        expected_segments = getattr(self.gui, "_rewrite_base_translated_segments", None) or self.gui.current_translated_segments or self.gui.current_segments or []
+        expected_len = len(expected_segments) or None
         is_valid, parsed_segments, validation_error = self.gui.validate_srt_text(normalized_text, expected_len=expected_len)
         if is_valid:
             return True, parsed_segments, "srt", ""
@@ -195,8 +272,10 @@ class SubtitleController:
             )
             return
 
-        self.gui.current_translated_segments = parsed_segments
-        self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(parsed_segments, translated=True)
+        rewrite_source_segments = getattr(self.gui, "_rewrite_source_segments", None) or list(self.gui.current_segments or [])
+        applied_segments = self._expand_rewrite_segments_for_current_layout(parsed_segments, rewrite_source_segments)
+        self.gui.current_translated_segments = applied_segments
+        self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(applied_segments, translated=True)
         self.gui.refresh_ai_keyword_highlights(force=True)
         normalized_srt = self.gui.format_to_srt(self.gui.current_translated_segments)
         self.gui.translated_text.setText(normalized_srt)
@@ -362,9 +441,11 @@ class SubtitleController:
 
             self.gui._rewrite_preview_status_updater = _update_preview_validity
 
+            rewrite_source_segments = getattr(self.gui, "_rewrite_source_segments", source_segments)
+            rewrite_base_segments = getattr(self.gui, "_rewrite_base_translated_segments", translated_segments)
             self.gui.rewrite_translation_thread = RewriteTranslationWorker(
-                source_segments,
-                translated_segments,
+                rewrite_source_segments,
+                rewrite_base_segments,
                 self.gui.get_source_language_code(),
                 style_instruction=style_instruction,
             )
@@ -379,6 +460,8 @@ class SubtitleController:
                 "_rewrite_generate_btn",
                 "_rewrite_status_label",
                 "_rewrite_preview_status_updater",
+                "_rewrite_source_segments",
+                "_rewrite_base_translated_segments",
             ):
                 if hasattr(self.gui, attr):
                     delattr(self.gui, attr)
