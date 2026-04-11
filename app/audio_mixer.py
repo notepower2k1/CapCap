@@ -2,13 +2,15 @@ import os
 import subprocess
 import wave
 
+from runtime_paths import bin_path
+
 
 def _ffmpeg_path():
-    return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffmpeg.exe")
+    return bin_path("ffmpeg", "ffmpeg.exe")
 
 
 def _ffprobe_path():
-    return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffprobe.exe")
+    return bin_path("ffmpeg", "ffprobe.exe")
 
 
 def _subprocess_run_kwargs() -> dict:

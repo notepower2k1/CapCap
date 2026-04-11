@@ -72,7 +72,7 @@ class PreviewController:
             )
             return
 
-        default_dir = self.gui.final_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
+        default_dir = self.gui.final_output_folder_edit.text().strip() or os.path.join(self.gui.workspace_root, "output")
         os.makedirs(default_dir, exist_ok=True)
         if mode == "subtitle":
             suggested_name = f"{video_name}_sub_vi.mp4"
@@ -128,7 +128,7 @@ class PreviewController:
             return
 
         mode = self.gui.get_output_mode_key()
-        out_dir = self.gui.final_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
+        out_dir = self.gui.final_output_folder_edit.text().strip() or os.path.join(self.gui.workspace_root, "output")
         os.makedirs(out_dir, exist_ok=True)
 
         translated_srt_path = self.gui.last_translated_srt_path
@@ -212,7 +212,7 @@ class PreviewController:
             return
 
         timestamp_seconds = max(0.0, self.gui.media_player.position() / 1000.0)
-        out_dir = os.path.join(os.getcwd(), "temp")
+        out_dir = os.path.join(self.gui.workspace_root, "temp")
         os.makedirs(out_dir, exist_ok=True)
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         self.gui.cleanup_file_if_exists(self.gui.last_exact_preview_frame_path)
@@ -276,7 +276,7 @@ class PreviewController:
         if not clipped:
             return "", []
 
-        preview_srt_path = os.path.normpath(os.path.join(os.getcwd(), "temp", "preview_subtitle_5s.srt"))
+        preview_srt_path = os.path.normpath(os.path.join(self.gui.workspace_root, "temp", "preview_subtitle_5s.srt"))
         self.gui.cleanup_file_if_exists(preview_srt_path)
         from subtitle_builder import generate_srt
 
@@ -287,7 +287,7 @@ class PreviewController:
         segments = self.gui.get_active_segments()
         if not segments:
             return "", []
-        preview_srt_path = os.path.normpath(os.path.join(os.getcwd(), "temp", "preview_subtitle_full.srt"))
+        preview_srt_path = os.path.normpath(os.path.join(self.gui.workspace_root, "temp", "preview_subtitle_full.srt"))
         self.gui.cleanup_file_if_exists(preview_srt_path)
         from subtitle_builder import generate_srt
 
@@ -370,7 +370,7 @@ class PreviewController:
                 pass
             return
         ts = int(time.time())
-        preview_out = os.path.normpath(os.path.join(os.getcwd(), "temp", f"preview_vi_voice_{ts}.mp4"))
+        preview_out = os.path.normpath(os.path.join(self.gui.workspace_root, "temp", f"preview_vi_voice_{ts}.mp4"))
         preview_srt_path = ""
         preview_segments = []
         subtitle_style = {}

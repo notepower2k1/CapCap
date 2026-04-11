@@ -11,6 +11,7 @@ import requests
 from dotenv import load_dotenv
 from piper import PiperVoice
 from piper.config import SynthesisConfig
+from runtime_paths import app_path, bin_path, bundle_root, models_path, temp_path
 from vietnormalizer.normalizer import VietnameseNormalizer
 
 
@@ -22,6 +23,25 @@ if os.path.exists(ENV_PATH):
 
 _PIPER_VOICE_CACHE: dict[str, PiperVoice] = {}
 _PIPER_VOICE_CACHE_LOCK = threading.Lock()
+
+
+def _voice_catalog_path() -> str:
+    return app_path("voice_preview_catalog.json")
+
+
+def _resolve_piper_model_path(provider_voice: str) -> str:
+    raw = str(provider_voice or "").strip().replace("/", os.sep)
+    if not raw:
+        return ""
+    normalized = os.path.normpath(raw)
+    if os.path.isabs(normalized):
+        return normalized
+    if normalized.startswith(f"models{os.sep}"):
+        candidate = os.path.join(bundle_root(), normalized)
+        if os.path.exists(candidate):
+            return candidate
+        return os.path.join(os.path.dirname(bundle_root()), normalized)
+    return models_path(normalized)
 
 
 def _get_cached_piper_voice(*, model_path: str, on_progress: callable = None) -> PiperVoice:
@@ -46,7 +66,7 @@ def _get_cached_piper_voice(*, model_path: str, on_progress: callable = None) ->
 
 
 def _ffmpeg_path():
-    return os.path.join(os.getcwd(), "bin", "ffmpeg", "ffmpeg.exe")
+    return bin_path("ffmpeg", "ffmpeg.exe")
 
 
 def _subprocess_run_kwargs() -> dict:
@@ -134,7 +154,7 @@ def piper_tts_to_wav_16k_mono(
         on_progress: Optional callback for progress updates: on_progress(message)
     """
     if tmp_dir is None:
-        tmp_dir = os.path.join(os.getcwd(), "temp")
+        tmp_dir = temp_path()
     os.makedirs(os.path.dirname(wav_path) or ".", exist_ok=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
@@ -192,7 +212,7 @@ def edge_tts_to_wav_16k_mono(
     Returns wav_path.
     """
     if tmp_dir is None:
-        tmp_dir = os.path.join(os.getcwd(), "temp")
+        tmp_dir = temp_path()
     os.makedirs(os.path.dirname(wav_path) or ".", exist_ok=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
@@ -236,7 +256,7 @@ def edge_tts_to_wav_16k_mono(
 
 
 def preload_tts_voice(voice: str, on_progress: callable = None) -> bool:
-    catalog_path = os.path.join(BASE_DIR, "voice_preview_catalog.json")
+    catalog_path = _voice_catalog_path()
     with open(catalog_path, "r", encoding="utf-8") as f:
         catalog = json.load(f)
 
@@ -262,7 +282,7 @@ def preload_tts_voice(voice: str, on_progress: callable = None) -> bool:
     if provider != "piper":
         return False
 
-    model_path = os.path.join(os.getcwd(), provider_voice)
+    model_path = _resolve_piper_model_path(provider_voice)
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Piper model not found at {model_path}. Please download and place the model there.")
 
@@ -280,7 +300,7 @@ def synthesize_text_to_wav_16k_mono(
     on_progress: callable = None,
 ) -> str:
     # Load voice catalog
-    catalog_path = os.path.join(BASE_DIR, "voice_preview_catalog.json")
+    catalog_path = _voice_catalog_path()
     with open(catalog_path, "r", encoding="utf-8") as f:
         catalog = json.load(f)
     
@@ -320,7 +340,7 @@ def synthesize_text_to_wav_16k_mono(
     
     if provider == "piper":
         # Use Piper TTS with local model
-        model_path = os.path.join(os.getcwd(), provider_voice)
+        model_path = _resolve_piper_model_path(provider_voice)
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Piper model not found at {model_path}. Please download and place the model there.")
         

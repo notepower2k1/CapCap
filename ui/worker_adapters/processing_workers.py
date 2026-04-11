@@ -1,5 +1,6 @@
 import os
 import sys
+import traceback
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -8,6 +9,7 @@ APP_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "app")
 if APP_PATH not in sys.path:
     sys.path.append(APP_PATH)
 
+from runtime_paths import bin_path
 from services import EngineRuntime, WorkflowRuntime
 
 
@@ -51,7 +53,7 @@ class ExtractionWorker(QThread):
 
 
 class TranscriptionWorker(QThread):
-    finished = Signal(list)
+    finished = Signal(list, str)
 
     def __init__(self, audio_path, model_path, language):
         super().__init__()
@@ -63,10 +65,11 @@ class TranscriptionWorker(QThread):
         try:
             engine = EngineRuntime()
             segments = engine.transcribe_audio(self.audio_path, self.model_path, language=self.language)
-            self.finished.emit(segments if segments else [])
+            self.finished.emit(segments if segments else [], "")
         except Exception as exc:
-            print(f"Transcription Thread Error: {exc}")
-            self.finished.emit([])
+            details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
+            print(f"Transcription Thread Error:\n{details}")
+            self.finished.emit([], details or str(exc))
 
 
 class TranslationWorker(QThread):
@@ -136,22 +139,22 @@ class RuntimeAssetsWorker(QThread):
             details = []
 
             self.progress.emit(5, "Checking bundled runtime assets...")
-            ffmpeg_path = Path(self.workspace_root) / "bin" / "ffmpeg" / "ffmpeg.exe"
+            ffmpeg_path = Path(bin_path("ffmpeg", "ffmpeg.exe"))
             if not ffmpeg_path.exists():
                 raise FileNotFoundError(f"Bundled FFmpeg is missing: {ffmpeg_path}")
             details.append(f"FFmpeg ready: {ffmpeg_path}")
             self.progress.emit(12, "FFmpeg is ready.")
 
-            mpv_path = Path(self.workspace_root) / "bin" / "mpv" / "libmpv-2.dll"
+            mpv_path = Path(bin_path("mpv", "libmpv-2.dll"))
             if not mpv_path.exists():
-                alt_mpv_path = Path(self.workspace_root) / "bin" / "mpv" / "mpv-2.dll"
+                alt_mpv_path = Path(bin_path("mpv", "mpv-2.dll"))
                 if not alt_mpv_path.exists():
                     raise FileNotFoundError(f"Bundled libmpv is missing: {mpv_path}")
                 mpv_path = alt_mpv_path
             details.append(f"libmpv ready: {mpv_path}")
             self.progress.emit(20, "Preview runtime is ready.")
 
-            from faster_whisper import WhisperModel
+            from whisper_processor import load_whisper_model
 
             whisper_cache_dir = Path(self.workspace_root) / "models" / "faster_whisper"
             whisper_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -163,25 +166,27 @@ class RuntimeAssetsWorker(QThread):
                 self.progress.emit(35, f"Loading Whisper model: {self.whisper_model_name} ...")
             else:
                 self.progress.emit(-1, f"Downloading Whisper model: {self.whisper_model_name} ...")
-            WhisperModel(
-                self.whisper_model_name,
-                device="cpu",
-                compute_type="int8",
-                download_root=str(whisper_cache_dir),
-            )
+            load_whisper_model(self.whisper_model_name)
             details.append(f"Whisper model ready: {self.whisper_model_name}")
 
             self.progress.emit(80, f"Whisper model ready: {self.whisper_model_name}")
             from demucs.pretrained import get_model
 
-            self.progress.emit(-1, f"Downloading Demucs model: {self.demucs_model_name} ...")
-            get_model(self.demucs_model_name)
-            details.append(f"Demucs model ready: {self.demucs_model_name}")
+            try:
+                self.progress.emit(-1, f"Downloading Demucs model: {self.demucs_model_name} ...")
+                get_model(self.demucs_model_name)
+                details.append(f"Demucs model ready: {self.demucs_model_name}")
+            except Exception as demucs_exc:
+                warning = f"Demucs preload skipped: {demucs_exc}"
+                print(f"RuntimeAssetsWorker Warning: {warning}")
+                details.append(warning)
 
             self.progress.emit(100, "All models ready.")
             self.finished.emit("\n".join(details), "")
         except Exception as exc:
-            self.finished.emit("", str(exc))
+            details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
+            print(f"RuntimeAssetsWorker Error:\n{details}")
+            self.finished.emit("", details or str(exc))
 
 
 class PrepareWorkflowWorker(QThread):

@@ -1,16 +1,30 @@
 ﻿import os
 
 from PySide6.QtCore import QUrl
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QLabel, QMessageBox, QDialog, QScrollArea, QVBoxLayout
 
 
 def log_message(gui, message: str):
     if not message:
         return
-    gui._log_lines.append(str(message))
+    message = str(message)
+    gui._log_lines.append(message)
+    trimmed = False
     if len(gui._log_lines) > 500:
         gui._log_lines = gui._log_lines[-500:]
-    gui.log_view.setPlainText("\n".join(gui._log_lines))
+        trimmed = True
+    if not hasattr(gui, "log_view") or gui.log_view is None:
+        return
+    if trimmed or not gui.log_view.toPlainText():
+        gui.log_view.setPlainText("\n".join(gui._log_lines))
+    else:
+        cursor = gui.log_view.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        if gui.log_view.toPlainText():
+            cursor.insertText("\n")
+        cursor.insertText(message)
+        gui.log_view.setTextCursor(cursor)
     gui.log_view.verticalScrollBar().setValue(gui.log_view.verticalScrollBar().maximum())
 
 

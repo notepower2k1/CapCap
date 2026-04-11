@@ -152,9 +152,9 @@ def _build_audio_mix_controls(gui, advanced_layout):
 
 
 def _build_hidden_runtime_widgets(gui):
-    gui.audio_folder_edit = QLineEdit(os.path.join(os.getcwd(), "temp"), gui)
+    gui.audio_folder_edit = QLineEdit(os.path.join(gui.workspace_root, "temp"), gui)
     gui.audio_source_edit = QLineEdit(gui)
-    gui.srt_output_folder_edit = QLineEdit(os.path.join(os.getcwd(), "output"), gui)
+    gui.srt_output_folder_edit = QLineEdit(os.path.join(gui.workspace_root, "output"), gui)
     gui.keep_audio_cb = QCheckBox("Keep extracted audio", gui)
     gui.keep_audio_cb.setChecked(True)
 
@@ -172,7 +172,7 @@ def _build_hidden_runtime_widgets(gui):
         "Preview and export will use the generated voice or voice+background mix by default."
     )
     gui.audio_source_hint_label.setParent(gui)
-    gui.voice_output_folder_edit = QLineEdit(os.path.join(os.getcwd(), "output"), gui)
+    gui.voice_output_folder_edit = QLineEdit(os.path.join(gui.workspace_root, "output"), gui)
 
     gui.voice_gain_spin = QDoubleSpinBox(gui)
     gui.voice_gain_spin.setRange(-30.0, 30.0)

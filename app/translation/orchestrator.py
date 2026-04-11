@@ -7,6 +7,7 @@ from .models import TranslationResult
 from .providers import (
     AIPolisherProvider,
     GeminiPolisherProvider,
+    GoogleWebTranslatorProvider,
     LocalPolisherProvider,
     MicrosoftTranslatorProvider,
 )
@@ -16,6 +17,7 @@ from .srt_utils import clone_with_texts, parse_srt, split_text_batches, to_srt, 
 class TranslationOrchestrator:
     def __init__(self):
         self.microsoft = MicrosoftTranslatorProvider()
+        self.google_web = GoogleWebTranslatorProvider()
         self.ai_polisher = AIPolisherProvider()
         self.gemini_polisher = GeminiPolisherProvider()
         self.local_polisher = LocalPolisherProvider()
@@ -82,17 +84,17 @@ class TranslationOrchestrator:
                         used_fallback=bool(warnings),
                     )
                 except Exception as exc:
-                    msg = f"AI translation failed, falling back to Microsoft: {exc}"
+                    msg = f"AI translation failed, falling back to Google web translate: {exc}"
                     print(f"[AI Translation] WARNING: {msg}")
                     warnings.append(msg)
             else:
-                print(f"[AI Translation] AI Provider ({provider_type}) not configured, using Microsoft.")
+                print(f"[AI Translation] AI Provider ({provider_type}) not configured, using Google web translate.")
 
-        print(f"[Translation] Starting Microsoft Translator (batch_size={ms_batch_size})...")
+        print(f"[Translation] Starting Google web translate fallback (batch_size={ms_batch_size})...")
         try:
             translated_texts = []
             for batch in split_text_batches(source_texts, ms_batch_size):
-                translated_batch = self.microsoft.translate_batch(
+                translated_batch = self.google_web.translate_batch(
                     batch,
                     src_lang=normalized_src,
                     target_lang=target_lang,
@@ -100,19 +102,45 @@ class TranslationOrchestrator:
                 translated_texts.extend(translated_batch)
 
             if not validate_texts(translated_texts, len(segments)):
-                raise TranslationValidationError("Microsoft Translator returned an invalid number of segments.")
+                raise TranslationValidationError("Google web translate returned an invalid number of segments.")
 
-            print("[Translation] Success: Microsoft translation completed.")
-            final_segments = clone_with_texts(segments, translated_texts, provider="microsoft", polished=False)
+            print("[Translation] Success: Google web translate completed.")
+            final_segments = clone_with_texts(segments, translated_texts, provider="google-web", polished=False)
             return TranslationResult(
                 success=True,
                 segments=final_segments,
                 warnings=warnings,
                 stage="translation",
-                primary_provider="microsoft",
+                primary_provider="google-web",
                 used_fallback=bool(warnings),
             )
         except Exception as exc:
+            if self.microsoft.is_configured():
+                try:
+                    warnings.append(f"Google web translate failed, falling back to Microsoft: {exc}")
+                    print(f"[Translation] WARNING: Google web translate failed, trying Microsoft Translator: {exc}")
+                    translated_texts = []
+                    for batch in split_text_batches(source_texts, ms_batch_size):
+                        translated_batch = self.microsoft.translate_batch(
+                            batch,
+                            src_lang=normalized_src,
+                            target_lang=target_lang,
+                        )
+                        translated_texts.extend(translated_batch)
+                    if not validate_texts(translated_texts, len(segments)):
+                        raise TranslationValidationError("Microsoft Translator returned an invalid number of segments.")
+                    print("[Translation] Success: Microsoft translation completed.")
+                    final_segments = clone_with_texts(segments, translated_texts, provider="microsoft", polished=False)
+                    return TranslationResult(
+                        success=True,
+                        segments=final_segments,
+                        warnings=warnings,
+                        stage="translation",
+                        primary_provider="microsoft",
+                        used_fallback=True,
+                    )
+                except Exception as ms_exc:
+                    return TranslationResult(success=False, errors=[str(ms_exc)], warnings=warnings, stage="translation")
             return TranslationResult(success=False, errors=[str(exc)], warnings=warnings, stage="translation")
 
     def rewrite_segments(

@@ -1,6 +1,15 @@
 import os
 import shutil
+import threading
+import traceback
 from pathlib import Path
+
+from runtime_paths import models_path, workspace_root
+
+
+_WHISPER_MODEL_CACHE: dict[tuple[str, str, str], object] = {}
+_WHISPER_MODEL_LOCK = threading.Lock()
+_WHISPER_TRANSCRIBE_LOCK = threading.Lock()
 
 
 
@@ -72,7 +81,7 @@ def _normalize_language(language):
 
 
 def _workspace_root():
-    return Path(__file__).resolve().parents[1]
+    return Path(workspace_root())
 
 
 def _candidate_cuda_bin_dirs() -> list[str]:
@@ -114,7 +123,7 @@ def _ensure_cuda_runtime_on_path() -> None:
 
 
 def _faster_whisper_cache_dir():
-    cache_dir = _workspace_root() / "models" / "faster_whisper"
+    cache_dir = Path(models_path("faster_whisper"))
     cache_dir.mkdir(parents=True, exist_ok=True)
     return str(cache_dir)
 
@@ -157,21 +166,34 @@ def _load_whisper_model(model_name):
 
     if not os.path.isdir(str(model_name)):
         model_kwargs["download_root"] = _faster_whisper_cache_dir()
+    cache_key = (str(model_name), str(model_kwargs["device"]), str(model_kwargs["compute_type"]))
+    with _WHISPER_MODEL_LOCK:
+        cached_model = _WHISPER_MODEL_CACHE.get(cache_key)
+        if cached_model is not None:
+            return cached_model
 
-    try:
-        print(f"[Whisper] Loading faster-whisper with {runtime['label']}")
-        return WhisperModel(model_name, **model_kwargs)
-    except Exception as exc:
-        if runtime["device"] == "cuda":
-            fallback_kwargs = {
-                "device": "cpu",
-                "compute_type": "int8",
-            }
-            if not os.path.isdir(str(model_name)):
-                fallback_kwargs["download_root"] = _faster_whisper_cache_dir()
-            print(f"[Whisper] CUDA load failed, falling back to CPU: {exc}")
-            return WhisperModel(model_name, **fallback_kwargs)
-        raise
+        try:
+            print(f"[Whisper] Loading faster-whisper with {runtime['label']}")
+            model = WhisperModel(model_name, **model_kwargs)
+            _WHISPER_MODEL_CACHE[cache_key] = model
+            return model
+        except Exception as exc:
+            if runtime["device"] == "cuda":
+                fallback_kwargs = {
+                    "device": "cpu",
+                    "compute_type": "int8",
+                }
+                if not os.path.isdir(str(model_name)):
+                    fallback_kwargs["download_root"] = _faster_whisper_cache_dir()
+                print(f"[Whisper] CUDA load failed, falling back to CPU: {exc}")
+                fallback_key = (str(model_name), str(fallback_kwargs["device"]), str(fallback_kwargs["compute_type"]))
+                cached_fallback = _WHISPER_MODEL_CACHE.get(fallback_key)
+                if cached_fallback is not None:
+                    return cached_fallback
+                model = WhisperModel(model_name, **fallback_kwargs)
+                _WHISPER_MODEL_CACHE[fallback_key] = model
+                return model
+            raise
 
 
 def load_whisper_model(model_path):
@@ -184,14 +206,25 @@ def transcribe_audio_with_model(model, audio_path, *, language="auto", task="tra
         raise FileNotFoundError(f"Audio not found at {audio_path}")
 
     normalized_language = _normalize_language(language)
-    segments, _info = model.transcribe(
-        audio_path,
-        language=normalized_language,
-        task=task,
-        vad_filter=True,
-        beam_size=5,
-        word_timestamps=True,
-    )
+    transcribe_kwargs = {
+        "language": normalized_language,
+        "task": task,
+        "vad_filter": True,
+        "beam_size": 5,
+        "word_timestamps": True,
+    }
+
+    with _WHISPER_TRANSCRIBE_LOCK:
+        try:
+            segments, _info = model.transcribe(audio_path, **transcribe_kwargs)
+        except Exception as exc:
+            error_text = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+            if "onnxruntime" not in error_text.lower() and "onnxruntimeerror" not in error_text.lower():
+                raise
+            print(f"[Whisper] VAD failed with ONNX Runtime, retrying without VAD: {error_text}")
+            fallback_kwargs = dict(transcribe_kwargs)
+            fallback_kwargs["vad_filter"] = False
+            segments, _info = model.transcribe(audio_path, **fallback_kwargs)
 
     return [
         {

@@ -5,6 +5,7 @@ import time
 import json
 import shutil
 import threading
+import webbrowser
 from PySide6.QtWidgets import (
     QProgressDialog,QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit,
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
                              QScrollArea,
                              QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy, QInputDialog,
                              QRadioButton)
-from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QSize
+from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QSize, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
@@ -55,6 +56,7 @@ from utils.file_dialog_utils import (
     cleanup_file_if_exists as cleanup_file_if_exists_impl,
     open_folder as open_folder_impl,
 )
+from utils.icon_utils import load_icon
 from utils.media_utils import (
     browse_video as browse_video_impl,
     duration_changed as duration_changed_impl,
@@ -71,6 +73,7 @@ from utils.settings_utils import load_user_settings as load_user_settings_impl, 
 from views import build_main_window_ui
 from widgets import TimelineWidget, VideoView
 from translation.providers import LocalPolisherProvider
+from runtime_paths import app_path, asset_path, models_path, workspace_root
 from workers import (
     ExtractionWorker,
     RuntimeAssetsWorker,
@@ -86,13 +89,15 @@ from video_processor import get_video_dimensions
 
 class VideoTranslatorGUI(QMainWindow):
     VOICE_ENTRY_ID_ROLE = Qt.UserRole + 1
+    log_requested = Signal(str)
+    clear_log_requested = Signal()
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CapCap Video Translator")
         self.settings = QSettings("CapCap", "VideoTranslatorGUI")
         self.setAcceptDrops(True)
-        self.logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "capcap.png")
+        self.logo_path = asset_path("capcap.png")
         if os.path.exists(self.logo_path):
             self.setWindowIcon(QIcon(self.logo_path))
         self.setWindowFlag(Qt.WindowCloseButtonHint, True)
@@ -305,7 +310,7 @@ class VideoTranslatorGUI(QMainWindow):
         # Track generated/selected artifacts for quick inspection.
         # Keys are stable IDs, values are absolute file paths.
         self.processed_artifacts = {}
-        self.workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        self.workspace_root = workspace_root()
         self.project_service = ProjectService(self.workspace_root)
         self.project_bridge = GUIProjectBridge(self.project_service)
         self.voice_catalog_service = VoiceCatalogService(self.workspace_root)
@@ -339,6 +344,8 @@ class VideoTranslatorGUI(QMainWindow):
         self._log_lines = []
 
         self.setup_ui()
+        self.log_requested.connect(self._append_log_message)
+        self.clear_log_requested.connect(self._clear_log_widget)
         self._configure_local_voice_mode_ui()
         self.setup_media_player()
         self.setup_audio_preview_player()
@@ -575,7 +582,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.refresh_voice_catalog_combos()
 
     def _load_piper_voice_meta(self) -> dict:
-        meta_path = os.path.join(self.workspace_root, "models", "piper", "voices_meta.json")
+        meta_path = models_path("piper", "voices_meta.json")
         if not os.path.exists(meta_path):
             return {}
         try:
@@ -619,10 +626,11 @@ class VideoTranslatorGUI(QMainWindow):
                 entry["gender"] = self._normalize_gender_value(meta.get("gender", ""))
 
     def _auto_sync_piper_voices_to_catalog(self):
-        models_dir = os.path.join(self.workspace_root, "models", "piper")
+        models_dir = models_path("piper")
         if not os.path.isdir(models_dir):
             return
-        catalog_path = os.path.join(self.workspace_root, "app", "voice_preview_catalog.json")
+        catalog_path = app_path("voice_preview_catalog.json")
+        os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
 
         def titleize(voice_id: str) -> str:
             stem = str(voice_id or "").strip()
@@ -828,6 +836,8 @@ class VideoTranslatorGUI(QMainWindow):
             self.free_voice_combo.setCurrentIndex(0)
         if previous_free:
             self.set_voice_combo_value(self.free_voice_combo, previous_free)
+        elif "vi_VN-vais1000-medium" in self.voice_catalog_map:
+            self.set_voice_combo_value(self.free_voice_combo, "vi_VN-vais1000-medium")
         if not self._voice_signals_bound:
             self._voice_signals_bound = True
         self.on_voice_tier_changed()
@@ -889,7 +899,20 @@ class VideoTranslatorGUI(QMainWindow):
 
     def get_active_voice_name(self) -> str:
         free_value = str(self.free_voice_combo.currentData() or "").strip() if hasattr(self, "free_voice_combo") else ""
-        return free_value or "vi_VN-vais1000-medium"
+        if free_value and free_value.startswith("edge:"):
+            return free_value
+        if free_value and free_value in getattr(self, "voice_catalog_map", {}):
+            return free_value
+        if "vi_VN-vais1000-medium" in getattr(self, "voice_catalog_map", {}):
+            return "vi_VN-vais1000-medium"
+        if hasattr(self, "free_voice_combo") and self.free_voice_combo.count() > 0:
+            fallback_value = str(self.free_voice_combo.itemData(0) or "").strip()
+            if fallback_value:
+                return fallback_value
+            fallback_entry_id = str(self.free_voice_combo.itemData(0, self.VOICE_ENTRY_ID_ROLE) or "").strip()
+            if fallback_entry_id:
+                return fallback_entry_id
+        return "vi_VN-vais1000-medium"
 
     def on_voice_tier_changed(self):
         mode = self.get_output_mode_key() if hasattr(self, "output_mode_combo") else "both"
@@ -928,9 +951,15 @@ class VideoTranslatorGUI(QMainWindow):
     # Logging + error helpers
     # -----------------------------
     def log(self, message: str):
-        log_message_impl(self, message)
+        self.log_requested.emit("" if message is None else str(message))
 
     def clear_log(self):
+        self.clear_log_requested.emit()
+
+    def _append_log_message(self, message: str):
+        log_message_impl(self, message)
+
+    def _clear_log_widget(self):
         clear_log_impl(self)
 
     def show_error(self, title: str, short_msg: str, details: str = ""):
@@ -968,7 +997,7 @@ class VideoTranslatorGUI(QMainWindow):
             current_project = getattr(self, "current_project_state", None)
             if current_project and getattr(current_project, "project_root", ""):
                 candidates.append(os.path.join(current_project.project_root, value))
-            candidates.append(os.path.join(os.getcwd(), value))
+            candidates.append(os.path.join(self.workspace_root, value))
 
         for candidate in candidates:
             normalized = os.path.normpath(os.path.abspath(candidate))
@@ -2114,7 +2143,7 @@ class VideoTranslatorGUI(QMainWindow):
                 preview_btn = QPushButton("", card)
                 preview_btn.setFixedSize(38, 38)
                 preview_btn.setToolTip("Preview this subtitle line as audio")
-                preview_btn.setIcon(QIcon(os.path.join(self.workspace_root, "assets", "icons", "audio_preview.svg")))
+                preview_btn.setIcon(load_icon(asset_path("icons", "audio_preview.svg"), 18))
                 preview_btn.setIconSize(QSize(18, 18))
                 preview_btn.clicked.connect(lambda _=False, idx=idx: self.preview_segment_audio(idx))
                 highlight_btn = QPushButton("Highlight", card)
@@ -2537,7 +2566,7 @@ class VideoTranslatorGUI(QMainWindow):
         row = self._segment_editor_rows[index] if index < len(self._segment_editor_rows) else None
         if row:
             row["preview_button"].setEnabled(True)
-            row["preview_button"].setIcon(QIcon(os.path.join(self.workspace_root, "assets", "icons", "audio_preview.svg")))
+            row["preview_button"].setIcon(load_icon(asset_path("icons", "audio_preview.svg"), 18))
         self._segment_preview_threads.pop(index, None)
 
         if error:
@@ -2566,7 +2595,7 @@ class VideoTranslatorGUI(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Import Vietnamese Subtitle",
-            self.srt_output_folder_edit.text().strip() or os.getcwd(),
+            self.srt_output_folder_edit.text().strip() or self.workspace_root,
             "Subtitle Files (*.srt)",
         )
         if not file_path:
@@ -2701,7 +2730,7 @@ class VideoTranslatorGUI(QMainWindow):
             self._live_preview_signature = None
             return "", ""
 
-        preview_dir = os.path.join(os.getcwd(), "temp")
+        preview_dir = os.path.join(self.workspace_root, "temp")
         os.makedirs(preview_dir, exist_ok=True)
         preview_srt_path = os.path.join(preview_dir, "live_preview_subtitle.srt")
 
@@ -3102,8 +3131,8 @@ class VideoTranslatorGUI(QMainWindow):
     def run_transcription(self):
         self.subtitle_controller.run_transcription()
 
-    def on_transcription_finished(self, segments):
-        self.subtitle_controller.on_transcription_finished(segments)
+    def on_transcription_finished(self, segments, error=""):
+        self.subtitle_controller.on_transcription_finished(segments, error)
 
     def run_translation(self):
         self.subtitle_controller.run_translation()
@@ -3278,6 +3307,7 @@ class VideoTranslatorGUI(QMainWindow):
             self.load_models_btn.setText("Load Models")
         self.runtime_assets_thread = None
         if error:
+            self.log(f"[Assets] Failed\n{error}")
             self.show_error(
                 "Load Models Failed",
                 "Could not finish loading required models and runtime assets.",
@@ -3297,8 +3327,8 @@ class VideoTranslatorGUI(QMainWindow):
 
     def get_whisper_model_path(self) -> str:
         mapping = {
-            "base": os.path.join(os.getcwd(), "models", "ggml-base.bin"),
-            "medium": os.path.join(os.getcwd(), "models", "ggml-medium.bin"),
+            "base": os.path.join(self.workspace_root, "models", "ggml-base.bin"),
+            "medium": os.path.join(self.workspace_root, "models", "ggml-medium.bin"),
         }
         return mapping.get(self.get_whisper_model_name(), mapping["base"])
 
@@ -3424,9 +3454,25 @@ class VideoTranslatorGUI(QMainWindow):
         local_actions_layout = QHBoxLayout()
         browse_model_btn = QPushButton("Browse Model", dialog)
         open_models_folder_btn = QPushButton("Open Models Folder", dialog)
+        open_gpu_pack_folder_btn = QPushButton("Open GPU Pack Folder", dialog)
         local_actions_layout.addWidget(browse_model_btn)
         local_actions_layout.addWidget(open_models_folder_btn)
+        local_actions_layout.addWidget(open_gpu_pack_folder_btn)
         layout.addLayout(local_actions_layout)
+
+        local_download_layout = QHBoxLayout()
+        download_model_btn = QPushButton("Download Local AI Model", dialog)
+        download_gpu_pack_btn = QPushButton("Download GPU Pack", dialog)
+        local_download_layout.addWidget(download_model_btn)
+        local_download_layout.addWidget(download_gpu_pack_btn)
+        layout.addLayout(local_download_layout)
+
+        voice_assets_layout = QHBoxLayout()
+        open_voices_folder_btn = QPushButton("Open Voices Folder", dialog)
+        download_voices_btn = QPushButton("Download Voices", dialog)
+        voice_assets_layout.addWidget(open_voices_folder_btn)
+        voice_assets_layout.addWidget(download_voices_btn)
+        layout.addLayout(voice_assets_layout)
 
         provider_hint = QLabel("")
         provider_hint.setObjectName("helperLabel")
@@ -3437,6 +3483,21 @@ class VideoTranslatorGUI(QMainWindow):
         local_status_label.setObjectName("helperLabel")
         local_status_label.setWordWrap(True)
         layout.addWidget(local_status_label)
+
+        local_model_status_label = QLabel("")
+        local_model_status_label.setObjectName("helperLabel")
+        local_model_status_label.setWordWrap(True)
+        layout.addWidget(local_model_status_label)
+
+        local_gpu_pack_status_label = QLabel("")
+        local_gpu_pack_status_label.setObjectName("helperLabel")
+        local_gpu_pack_status_label.setWordWrap(True)
+        layout.addWidget(local_gpu_pack_status_label)
+
+        local_voices_status_label = QLabel("")
+        local_voices_status_label.setObjectName("helperLabel")
+        local_voices_status_label.setWordWrap(True)
+        layout.addWidget(local_voices_status_label)
 
         local_perf_row_1_widget = QWidget(dialog)
         local_perf_row_1 = QHBoxLayout(local_perf_row_1_widget)
@@ -3487,12 +3548,53 @@ class VideoTranslatorGUI(QMainWindow):
             env_value = os.getenv("LOCAL_TRANSLATOR_MODEL_PATH", "").strip()
             if env_value:
                 return env_value
-            return os.path.join(os.getcwd(), "models", "ai", "gemma-4-E4B-it-Q4_K_M.gguf")
+            return os.path.join(self.workspace_root, "models", "ai", "gemma-4-E4B-it-Q4_K_M.gguf")
+
+        def _gpu_pack_dir() -> str:
+            return os.path.join(self.workspace_root, "bin", "cuda12_fw")
+
+        def _piper_models_dir() -> str:
+            return models_path("piper")
+
+        def _download_url(env_key: str, default_url: str) -> str:
+            return (os.getenv(env_key, "") or "").strip() or default_url
+
+        def _update_local_asset_status():
+            model_path = model_edit.text().strip() or _default_local_model_path()
+            model_ready = os.path.exists(model_path)
+            model_name = os.path.basename(model_path) if model_path else "No model selected"
+            local_model_status_label.setText(
+                f"Local AI model: {'Ready' if model_ready else 'Missing'}"
+                f"{f' ({model_name})' if model_name else ''}"
+            )
+
+            gpu_pack_dir = _gpu_pack_dir()
+            gpu_pack_ready = os.path.isdir(gpu_pack_dir) and os.path.exists(os.path.join(gpu_pack_dir, "cublas64_12.dll"))
+            local_gpu_pack_status_label.setText(
+                "Whisper GPU pack: "
+                + ("Ready (optional accelerator installed)" if gpu_pack_ready else "Missing (optional, only needed for faster Whisper on NVIDIA)")
+            )
+
+            piper_dir = _piper_models_dir()
+            piper_models = []
+            if os.path.isdir(piper_dir):
+                try:
+                    piper_models = [
+                        name for name in os.listdir(piper_dir)
+                        if name.lower().endswith(".onnx")
+                    ]
+                except Exception:
+                    piper_models = []
+            local_voices_status_label.setText(
+                "Local voices: "
+                + (f"Ready ({len(piper_models)} voice model{'s' if len(piper_models) != 1 else ''} found)" if piper_models else "Missing (add Piper voice files to models/piper)")
+            )
 
         def _apply_local_recommended_settings(force_recommended: bool = False):
             hardware_info = LocalPolisherProvider.detect_runtime_capabilities()
             recommended = LocalPolisherProvider.recommended_runtime_config(hardware_info)
             local_status_label.setText(LocalPolisherProvider.runtime_status_summary(hardware_info))
+            _update_local_asset_status()
             if force_recommended or not local_n_ctx_edit.text().strip():
                 local_n_ctx_edit.setText(str(recommended["n_ctx"]))
             if force_recommended or not local_threads_edit.text().strip():
@@ -3519,8 +3621,16 @@ class VideoTranslatorGUI(QMainWindow):
                 key_section_widget.setVisible(False)
                 browse_model_btn.setVisible(True)
                 open_models_folder_btn.setVisible(True)
+                open_gpu_pack_folder_btn.setVisible(True)
+                open_voices_folder_btn.setVisible(True)
+                download_model_btn.setVisible(True)
+                download_gpu_pack_btn.setVisible(True)
+                download_voices_btn.setVisible(True)
                 provider_hint.setText("Use the local GGUF translator by default. Gemini is optional if you want faster cloud performance.")
                 local_status_label.setVisible(True)
+                local_model_status_label.setVisible(True)
+                local_gpu_pack_status_label.setVisible(True)
+                local_voices_status_label.setVisible(True)
                 local_perf_row_1_widget.setVisible(True)
                 local_perf_row_2_widget.setVisible(True)
                 local_perf_row_3_widget.setVisible(True)
@@ -3543,8 +3653,16 @@ class VideoTranslatorGUI(QMainWindow):
                 key_section_widget.setVisible(True)
                 browse_model_btn.setVisible(False)
                 open_models_folder_btn.setVisible(False)
+                open_gpu_pack_folder_btn.setVisible(False)
+                open_voices_folder_btn.setVisible(False)
+                download_model_btn.setVisible(False)
+                download_gpu_pack_btn.setVisible(False)
+                download_voices_btn.setVisible(False)
                 provider_hint.setText("Use Gemini for AI translation and rewrite.")
                 local_status_label.setVisible(False)
+                local_model_status_label.setVisible(False)
+                local_gpu_pack_status_label.setVisible(False)
+                local_voices_status_label.setVisible(False)
                 local_perf_row_1_widget.setVisible(False)
                 local_perf_row_2_widget.setVisible(False)
                 local_perf_row_3_widget.setVisible(False)
@@ -3559,15 +3677,23 @@ class VideoTranslatorGUI(QMainWindow):
                 key_section_widget.setVisible(True)
                 browse_model_btn.setVisible(False)
                 open_models_folder_btn.setVisible(False)
+                open_gpu_pack_folder_btn.setVisible(False)
+                open_voices_folder_btn.setVisible(False)
+                download_model_btn.setVisible(False)
+                download_gpu_pack_btn.setVisible(False)
+                download_voices_btn.setVisible(False)
                 provider_hint.setText("Use Gemini as the optional cloud provider when you want higher speed than local GGUF.")
                 local_status_label.setVisible(False)
+                local_model_status_label.setVisible(False)
+                local_gpu_pack_status_label.setVisible(False)
+                local_voices_status_label.setVisible(False)
                 local_perf_row_1_widget.setVisible(False)
                 local_perf_row_2_widget.setVisible(False)
                 local_perf_row_3_widget.setVisible(False)
 
         def browse_local_model():
             current_path = model_edit.text().strip()
-            start_dir = current_path if os.path.isdir(current_path) else os.path.dirname(current_path) if current_path else os.path.join(os.getcwd(), "models", "ai")
+            start_dir = current_path if os.path.isdir(current_path) else os.path.dirname(current_path) if current_path else os.path.join(self.workspace_root, "models", "ai")
             file_path, _ = QFileDialog.getOpenFileName(
                 dialog,
                 "Choose GGUF model",
@@ -3576,17 +3702,43 @@ class VideoTranslatorGUI(QMainWindow):
             )
             if file_path:
                 model_edit.setText(file_path)
+                _update_local_asset_status()
 
         def open_models_folder():
-            models_dir = os.path.join(os.getcwd(), "models", "ai")
+            models_dir = os.path.join(self.workspace_root, "models", "ai")
             os.makedirs(models_dir, exist_ok=True)
             open_folder_impl(self, models_dir)
+
+        def open_gpu_pack_folder():
+            gpu_pack_dir = _gpu_pack_dir()
+            os.makedirs(gpu_pack_dir, exist_ok=True)
+            open_folder_impl(self, gpu_pack_dir)
+
+        def download_local_model():
+            webbrowser.open(_download_url("LOCAL_MODEL_DOWNLOAD_URL", "https://huggingface.co/google/gemma-2-2b-it-gguf"))
+
+        def download_gpu_pack():
+            webbrowser.open(_download_url("GPU_PACK_DOWNLOAD_URL", "https://github.com/Purfview/whisper-standalone-win/releases/tag/libs"))
+
+        def open_voices_folder():
+            voices_dir = _piper_models_dir()
+            os.makedirs(voices_dir, exist_ok=True)
+            open_folder_impl(self, voices_dir)
+
+        def download_voices():
+            webbrowser.open(_download_url("PIPER_VOICES_DOWNLOAD_URL", "https://huggingface.co/rhasspy/piper-voices"))
 
         provider_combo.currentIndexChanged.connect(update_provider_fields)
         browse_model_btn.clicked.connect(browse_local_model)
         open_models_folder_btn.clicked.connect(open_models_folder)
+        open_gpu_pack_folder_btn.clicked.connect(open_gpu_pack_folder)
+        open_voices_folder_btn.clicked.connect(open_voices_folder)
+        download_model_btn.clicked.connect(download_local_model)
+        download_gpu_pack_btn.clicked.connect(download_gpu_pack)
+        download_voices_btn.clicked.connect(download_voices)
         local_auto_optimize_btn.clicked.connect(lambda: _apply_local_recommended_settings(force_recommended=True))
         local_flash_attn_cb.toggled.connect(lambda _checked: setattr(local_flash_attn_cb, "_manual_override", True))
+        model_edit.textChanged.connect(lambda _text: _update_local_asset_status())
         update_provider_fields()
 
         # Buttons
@@ -3749,7 +3901,7 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.warning(self, "Error", "Translated SRT could not be parsed to segments.")
             return
 
-        out_dir = self.voice_output_folder_edit.text().strip() or os.path.join(os.getcwd(), "output")
+        out_dir = self.voice_output_folder_edit.text().strip() or os.path.join(self.workspace_root, "output")
         bg_path = self.resolve_background_audio_path()
         audio_handling_mode = self.get_audio_handling_mode()
         voice_name = self.get_active_voice_name()
@@ -4127,8 +4279,8 @@ class VideoTranslatorGUI(QMainWindow):
             self.preview_volume_label.setText(label)
         if hasattr(self, "preview_mute_btn"):
             icon_name = "volume_down.svg" if getattr(self, "_preview_muted", False) else "volume_mute.svg"
-            icon_path = os.path.join(self.workspace_root, "assets", "icons", icon_name)
-            self.preview_mute_btn.setIcon(QIcon(icon_path))
+            icon_path = asset_path("icons", icon_name)
+            self.preview_mute_btn.setIcon(load_icon(icon_path, 18))
         if hasattr(self, "play_btn"):
             playing = False
             try:
@@ -4137,7 +4289,7 @@ class VideoTranslatorGUI(QMainWindow):
                 playing = False
             play_icon = "pause.svg" if playing else "play.svg"
             play_tip = "Pause preview" if playing else "Play preview"
-            self.play_btn.setIcon(QIcon(os.path.join(self.workspace_root, "assets", "icons", play_icon)))
+            self.play_btn.setIcon(load_icon(asset_path("icons", play_icon), 18))
             self.play_btn.setToolTip(play_tip)
         if hasattr(self, "blur_area_btn"):
             blur_active = bool(self.blur_area_btn.isChecked())

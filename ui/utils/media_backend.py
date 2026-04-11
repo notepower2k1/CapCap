@@ -1,11 +1,11 @@
 import os
-import os
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
+from runtime_paths import bin_path
 from video_processor import srt_to_ass
 
 
@@ -480,7 +480,16 @@ def create_media_backend(video_view):
 
 
 def get_mpv_bundle_dir():
-    return Path(__file__).resolve().parents[2] / "bin" / "mpv"
+    return Path(bin_path("mpv"))
+
+
+def is_mpv_backend_available():
+    try:
+        prepare_mpv_bundle()
+        import mpv  # noqa: F401
+        return True
+    except Exception:
+        return False
 
 
 def prepare_mpv_bundle():

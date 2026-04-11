@@ -4,12 +4,13 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from runtime_paths import app_path
 from services import EngineRuntime, ProjectService
 
 
 class VoiceWorkflow:
     MAX_TTS_WORKERS = 6
-    PIPER_TTS_WORKERS = 2
+    PIPER_TTS_WORKERS = 1
 
     def __init__(self, workspace_root: str):
         self.workspace_root = workspace_root
@@ -80,7 +81,7 @@ class VoiceWorkflow:
         
         # Try multiple paths to find catalog
         catalog_paths = [
-            os_module.path.join(self.workspace_root, "app", "voice_preview_catalog.json"),
+            app_path("voice_preview_catalog.json"),
             os_module.path.join(os_module.path.dirname(os_module.path.dirname(__file__)), "voice_preview_catalog.json"),
             os_module.path.join(os_module.getcwd(), "app", "voice_preview_catalog.json"),
         ]
@@ -220,7 +221,7 @@ class VoiceWorkflow:
                 except Exception:
                     pass
             elif voice_provider == "edge":
-                worker_count = max(1, min(2, len(pending_jobs)))
+                worker_count = 1
             else:
                 worker_count = max(1, min(self.MAX_TTS_WORKERS, len(pending_jobs)))
             print(
@@ -326,6 +327,7 @@ class VoiceWorkflow:
             tmp_dir=tmp_dir,
             voice_name=voice_name,
             provider_speed=provider_speed,
+            voice_provider=voice_provider,
             on_progress=on_progress,
         )
         wavs = self._apply_segment_speed(

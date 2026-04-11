@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 
+from runtime_paths import app_path, models_path
+
 
 class VoiceCatalogService:
     def __init__(self, workspace_root: str):
         self.workspace_root = workspace_root
-        self.catalog_path = os.path.join(workspace_root, "app", "voice_preview_catalog.json")
-        self.piper_models_dir = os.path.join(workspace_root, "models", "piper")
+        self.catalog_path = app_path("voice_preview_catalog.json")
+        self.piper_models_dir = models_path("piper")
 
     def _read_payload(self) -> dict:
         if not os.path.exists(self.catalog_path):

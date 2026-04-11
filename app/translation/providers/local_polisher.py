@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..errors import TranslationConfigError, TranslationProviderError, TranslationValidationError
 from ..srt_utils import parse_numbered_lines, validate_texts
+from runtime_paths import models_path
 
 
 class LocalPolisherProvider:
@@ -140,7 +141,7 @@ class LocalPolisherProvider:
         return f"CPU-only local AI. Detected {cpu_count} logical CPU threads."
 
     def __init__(self):
-        default_model = os.path.join(os.getcwd(), "models", "ai", "gemma-4-E4B-it-Q4_K_M.gguf")
+        default_model = models_path("ai", "gemma-4-E4B-it-Q4_K_M.gguf")
         self.model_path = os.getenv("LOCAL_TRANSLATOR_MODEL_PATH", default_model).strip()
         self.hardware_info = self.detect_runtime_capabilities()
         recommended = self.recommended_runtime_config(self.hardware_info)

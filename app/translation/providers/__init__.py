@@ -1,6 +1,13 @@
 from .ai_polisher import AIPolisherProvider
 from .gemini_polisher import GeminiPolisherProvider
+from .google_web_translator import GoogleWebTranslatorProvider
 from .local_polisher import LocalPolisherProvider
 from .microsoft_translator import MicrosoftTranslatorProvider
 
-__all__ = ["AIPolisherProvider", "GeminiPolisherProvider", "LocalPolisherProvider", "MicrosoftTranslatorProvider"]
+__all__ = [
+    "AIPolisherProvider",
+    "GeminiPolisherProvider",
+    "GoogleWebTranslatorProvider",
+    "LocalPolisherProvider",
+    "MicrosoftTranslatorProvider",
+]

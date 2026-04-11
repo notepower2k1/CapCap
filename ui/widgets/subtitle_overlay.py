@@ -15,6 +15,8 @@ class SubtitleOverlayItem(QGraphicsItem):
         self.font_name = "Segoe UI"
         self.font_size = 20
         self.font_color = QColor(255, 255, 255)
+        self.outline_width = 2
+        self.outline_color = QColor(0, 0, 0, 220)
         self.alignment = "Bottom Center"
         self.background_box = False
         self.background_color = QColor(0, 0, 0, 170)
@@ -30,7 +32,18 @@ class SubtitleOverlayItem(QGraphicsItem):
             self.current_text = text
             self.update()
 
-    def set_style(self, *, font_name=None, font_size=None, font_color=None, background_box=None, background_color=None, single_line=None):
+    def set_style(
+        self,
+        *,
+        font_name=None,
+        font_size=None,
+        font_color=None,
+        outline_width=None,
+        outline_color=None,
+        background_box=None,
+        background_color=None,
+        single_line=None,
+    ):
         changed = False
         if font_name and font_name != self.font_name:
             self.font_name = font_name
@@ -41,6 +54,12 @@ class SubtitleOverlayItem(QGraphicsItem):
             changed = True
         if font_color and font_color != self.font_color:
             self.font_color = font_color
+            changed = True
+        if outline_width is not None and float(outline_width) != self.outline_width:
+            self.outline_width = max(0.0, float(outline_width))
+            changed = True
+        if outline_color is not None and outline_color != self.outline_color:
+            self.outline_color = outline_color
             changed = True
         if background_box is not None and bool(background_box) != self.background_box:
             self.background_box = bool(background_box)
@@ -102,14 +121,16 @@ class SubtitleOverlayItem(QGraphicsItem):
                 painter.setBrush(self.background_color)
                 painter.drawRoundedRect(QRectF(text_rect), 14, 14)
 
-            # Outline
-            outline_offsets = [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)]
-            painter.setPen(QColor(0, 0, 0, 220))
-            for dx, dy in outline_offsets:
-                painter.drawText(rect.translated(dx, dy), flags, self.current_text)
-
-            painter.setPen(QColor(0, 0, 0, 120))
-            painter.drawText(rect.translated(2, 2), flags, self.current_text)
+            if self.outline_width > 0:
+                w = max(1.0, float(self.outline_width))
+                outline_offsets = [
+                    (-w, 0), (w, 0), (0, -w), (0, w),
+                    (-w * 0.7, -w * 0.7), (w * 0.7, -w * 0.7),
+                    (-w * 0.7, w * 0.7), (w * 0.7, w * 0.7),
+                ]
+                painter.setPen(self.outline_color)
+                for dx, dy in outline_offsets:
+                    painter.drawText(rect.translated(dx, dy), flags, self.current_text)
 
             painter.setPen(self.font_color)
             painter.drawText(rect, flags, self.current_text)

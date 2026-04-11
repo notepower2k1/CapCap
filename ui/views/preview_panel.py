@@ -16,14 +16,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from widgets import MpvVideoView, TimelineWidget
+from runtime_paths import asset_path
+from widgets import MpvVideoView, TimelineWidget, VideoView
+from utils.icon_utils import load_icon
+from utils.media_backend import is_mpv_backend_available
 
 
 def _set_preview_icon_button(button: QPushButton, icon_path: str, tooltip: str):
     button.setText("")
     button.setToolTip(tooltip)
     button.setFixedSize(38, 38)
-    button.setIcon(QIcon(icon_path))
+    button.setIcon(load_icon(icon_path, 18))
     button.setIconSize(QSize(18, 18))
     button.setStyleSheet("QPushButton { padding: 0; }")
 
@@ -47,7 +50,7 @@ def build_preview_panel(gui):
     gui.frame_preview_image_label.setMinimumHeight(170)
     gui.frame_preview_image_label.hide()
 
-    gui.video_view = MpvVideoView()
+    gui.video_view = MpvVideoView() if is_mpv_backend_available() else VideoView()
     gui.video_view.setMinimumHeight(380)
     gui.timeline = TimelineWidget()
     gui.timeline.seekRequested.connect(gui.set_position)
@@ -55,7 +58,7 @@ def build_preview_panel(gui):
     gui.time_label.setStyleSheet("font-weight: bold; min-width: 100px; color: #6ee7d6;")
 
     controls_layout = QHBoxLayout()
-    icons_dir = os.path.join(gui.workspace_root, "assets", "icons")
+    icons_dir = asset_path("icons")
     gui.play_btn = QPushButton()
     gui.stop_btn = QPushButton()
     gui.preview_btn = QPushButton()

@@ -39,11 +39,18 @@ class SubtitleController:
         self.gui.transcription_thread.finished.connect(self.gui.on_transcription_finished)
         self.gui.transcription_thread.start()
 
-    def on_transcription_finished(self, segments):
+    def on_transcription_finished(self, segments, error=""):
         self.gui.transcribe_btn.setEnabled(True)
-        if not segments:
+        if error or not segments:
             self.gui.update_project_step("transcribe", "failed")
-            QMessageBox.warning(self.gui, "Warning", "Transcription failed or returned no results.")
+            if error:
+                self.gui.show_error(
+                    "Transcription Failed",
+                    "Could not transcribe the audio.",
+                    error,
+                )
+            else:
+                QMessageBox.warning(self.gui, "Warning", "Transcription failed or returned no results.")
             self.gui._pipeline_fail("Transcription failed.")
             return
 

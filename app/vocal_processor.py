@@ -3,6 +3,8 @@ import subprocess
 import shutil
 import sys
 
+from runtime_paths import bin_path
+
 
 def _subprocess_run_kwargs() -> dict:
     kwargs = {}
@@ -129,7 +131,7 @@ def separate_vocals(audio_path, output_dir):
     # --two-stems=vocals will give us vocals and 'no_vocals' (music)
     
     # Add our local ffmpeg to PATH so demucs can find it
-    ffmpeg_dir = os.path.join(os.getcwd(), 'bin', 'ffmpeg')
+    ffmpeg_dir = os.path.dirname(bin_path("ffmpeg", "ffmpeg.exe"))
     if os.path.exists(ffmpeg_dir):
         os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
