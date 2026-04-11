@@ -331,7 +331,7 @@ class PreviewController:
             self.gui.media_player.setSource(QUrl.fromLocalFile(output_path))
             self.gui.media_player.setPosition(0)
             self.gui.sync_live_subtitle_preview()
-            self.gui.play_btn.setText("Play")
+            self.gui._refresh_preview_audio_controls()
             # QMessageBox.information(
             #     self.gui,
             #     "Preview Ready",
@@ -364,7 +364,7 @@ class PreviewController:
             try:
                 self.gui.media_player.setSource(QUrl.fromLocalFile(video_path))
                 self.gui.sync_live_subtitle_preview()
-                self.gui.play_btn.setText("Play")
+                self.gui._refresh_preview_audio_controls()
                 self.gui.refresh_ui_state()
             except Exception:
                 pass
@@ -423,7 +423,6 @@ class PreviewController:
         self.gui._styled_preview_running = True
         if hasattr(self.gui, "preview_btn"):
             self.gui.preview_btn.setEnabled(False)
-            self.gui.preview_btn.setText("Preparing...")
         self.gui.progress_bar.setValue(95)
         self.gui.refresh_ui_state()
 
@@ -446,7 +445,6 @@ class PreviewController:
         self.gui._suspend_live_subtitle_sync = False
         if hasattr(self.gui, "preview_btn"):
             self.gui.preview_btn.setEnabled(True)
-            self.gui.preview_btn.setText("Refresh Preview")
         self.gui.progress_bar.setValue(100)
         self.gui.refresh_ui_state()
 
@@ -465,7 +463,7 @@ class PreviewController:
             self.gui.refresh_video_dimensions(preview_path)
             self.gui.media_player.setSource(QUrl.fromLocalFile(preview_path))
             self.gui.sync_live_subtitle_preview()
-            self.gui.play_btn.setText("Play")
+            self.gui._refresh_preview_audio_controls()
             # QMessageBox.information(
             #     self.gui,
             #     "Preview Ready",

@@ -25,6 +25,7 @@ def _set_preview_icon_button(button: QPushButton, icon_path: str, tooltip: str):
     button.setFixedSize(38, 38)
     button.setIcon(QIcon(icon_path))
     button.setIconSize(QSize(18, 18))
+    button.setStyleSheet("QPushButton { padding: 0; }")
 
 
 def build_preview_panel(gui):
