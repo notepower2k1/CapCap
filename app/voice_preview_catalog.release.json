@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "voices": [
+    {
+      "id": "edge_female_default",
+      "name": "Edge Female AI",
+      "provider": "edge",
+      "provider_voice": "vi-VN-HoaiMyNeural",
+      "language": "vi",
+      "gender": "female",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "natural",
+        "general"
+      ]
+    },
+    {
+      "id": "edge_male_default",
+      "name": "Edge Male AI",
+      "provider": "edge",
+      "provider_voice": "vi-VN-NamMinhNeural",
+      "language": "vi",
+      "gender": "male",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "natural",
+        "general"
+      ]
+    },
+    {
+      "id": "vi_VN-vais1000-medium",
+      "name": "Vais1000 Medium (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/vi_VN-vais1000-medium.onnx",
+      "language": "vi",
+      "gender": "male",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper",
+        "fast"
+      ],
+      "preview_audio_url": "",
+      "preview_audio_path": ""
+    }
+  ]
+}
