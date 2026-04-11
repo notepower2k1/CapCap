@@ -1,6 +1,10 @@
-﻿from PySide6.QtCore import Qt
+﻿import os
+
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -13,6 +17,14 @@ from PySide6.QtWidgets import (
 )
 
 from widgets import MpvVideoView, TimelineWidget
+
+
+def _set_preview_icon_button(button: QPushButton, icon_path: str, tooltip: str):
+    button.setText("")
+    button.setToolTip(tooltip)
+    button.setFixedSize(38, 38)
+    button.setIcon(QIcon(icon_path))
+    button.setIconSize(QSize(18, 18))
 
 
 def build_preview_panel(gui):
@@ -42,17 +54,46 @@ def build_preview_panel(gui):
     gui.time_label.setStyleSheet("font-weight: bold; min-width: 100px; color: #6ee7d6;")
 
     controls_layout = QHBoxLayout()
-    gui.play_btn = QPushButton("Play")
-    gui.stop_btn = QPushButton("Reset")
-    gui.preview_btn = QPushButton("Render Preview")
-    gui.blur_area_btn = QPushButton("Blur Area")
+    icons_dir = os.path.join(gui.workspace_root, "assets", "icons")
+    gui.play_btn = QPushButton()
+    gui.stop_btn = QPushButton()
+    gui.preview_btn = QPushButton()
+    gui.blur_area_btn = QPushButton()
     gui.blur_area_btn.setCheckable(True)
+    _set_preview_icon_button(gui.play_btn, os.path.join(icons_dir, "play.svg"), "Play or pause preview")
+    _set_preview_icon_button(gui.stop_btn, os.path.join(icons_dir, "reset.svg"), "Reset preview to the beginning")
+    _set_preview_icon_button(gui.preview_btn, os.path.join(icons_dir, "preview.svg"), "Render a fresh preview using current subtitle and audio")
+    _set_preview_icon_button(gui.blur_area_btn, os.path.join(icons_dir, "blur.svg"), "Toggle blur area editing")
     controls_layout.addWidget(gui.play_btn)
     controls_layout.addWidget(gui.stop_btn)
     controls_layout.addWidget(gui.preview_btn)
     controls_layout.addWidget(gui.blur_area_btn)
     controls_layout.addStretch()
     controls_layout.addWidget(gui.time_label)
+
+    preview_audio_layout = QHBoxLayout()
+    gui.preview_volume_down_btn = QPushButton()
+    gui.preview_mute_btn = QPushButton()
+    gui.preview_volume_up_btn = QPushButton()
+    _set_preview_icon_button(gui.preview_volume_down_btn, os.path.join(icons_dir, "volume_down.svg"), "Lower preview volume")
+    _set_preview_icon_button(gui.preview_mute_btn, os.path.join(icons_dir, "volume_mute.svg"), "Mute preview")
+    _set_preview_icon_button(gui.preview_volume_up_btn, os.path.join(icons_dir, "volume_up.svg"), "Raise preview volume")
+    gui.preview_volume_label = QLabel("100%")
+    gui.preview_volume_label.setObjectName("helperLabel")
+    gui.preview_speed_combo = QComboBox()
+    gui.preview_speed_combo.addItem("0.75x", 0.75)
+    gui.preview_speed_combo.addItem("1.0x", 1.0)
+    gui.preview_speed_combo.addItem("1.25x", 1.25)
+    gui.preview_speed_combo.addItem("1.5x", 1.5)
+    gui.preview_speed_combo.addItem("2.0x", 2.0)
+    gui.preview_speed_combo.setCurrentIndex(1)
+    preview_audio_layout.addWidget(gui.preview_volume_down_btn)
+    preview_audio_layout.addWidget(gui.preview_mute_btn)
+    preview_audio_layout.addWidget(gui.preview_volume_up_btn)
+    preview_audio_layout.addWidget(gui.preview_volume_label)
+    preview_audio_layout.addStretch()
+    preview_audio_layout.addWidget(QLabel("Speed"))
+    preview_audio_layout.addWidget(gui.preview_speed_combo)
 
     gui.progress_bar = QProgressBar()
     gui.progress_bar.setFixedHeight(8)
@@ -105,6 +146,7 @@ def build_preview_panel(gui):
     right_layout.addWidget(gui.video_view, 5)
     right_layout.addWidget(gui.timeline)
     right_layout.addLayout(controls_layout)
+    right_layout.addLayout(preview_audio_layout)
     right_layout.addWidget(gui.progress_bar)
     right_layout.addWidget(editor_card, 4)
     return right_panel

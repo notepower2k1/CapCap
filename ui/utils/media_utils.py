@@ -32,23 +32,24 @@ def toggle_play(gui):
         gui.audio_preview_player.stop()
     if gui.media_player.is_playing():
         gui.media_player.pause()
-        gui.play_btn.setText("Play")
         gui.timeline.set_playing(False)
         gui.schedule_seek_frame_preview()
     else:
         gui.seek_frame_preview_timer.stop()
         gui.media_player.play()
-        gui.play_btn.setText("Pause")
         gui.timeline.set_playing(True)
+    if hasattr(gui, "_refresh_preview_audio_controls"):
+        gui._refresh_preview_audio_controls()
 
 
 def stop_video(gui):
     if hasattr(gui, "audio_preview_player"):
         gui.audio_preview_player.stop()
     gui.media_player.stop()
-    gui.play_btn.setText("Play")
     gui.timeline.set_playing(False)
     gui.schedule_seek_frame_preview()
+    if hasattr(gui, "_refresh_preview_audio_controls"):
+        gui._refresh_preview_audio_controls()
 
 
 def position_changed(gui, position):
@@ -96,7 +97,6 @@ def browse_video(gui):
     gui.video_path_edit.setText(file_path)
     gui.media_player.setSource(QUrl.fromLocalFile(file_path))
     gui.refresh_video_dimensions(file_path)
-    gui.play_btn.setText("Play")
 
     gui.timeline.set_segments([])
     gui.timeline.set_playing(False)
@@ -117,6 +117,8 @@ def browse_video(gui):
     gui.refresh_ui_state()
     gui.sync_live_subtitle_preview()
     gui.schedule_auto_frame_preview()
+    if hasattr(gui, "_refresh_preview_audio_controls"):
+        gui._refresh_preview_audio_controls()
 
 
 def update_frame_preview_thumbnail(gui, image_path: str, qpixmap_cls, qt):

@@ -72,6 +72,31 @@ class QtMediaPlayerBackend(QObject):
     def clear_blur_region(self):
         return None
 
+    def set_volume(self, percent):
+        value = max(0, min(100, int(percent)))
+        self._audio_output.setVolume(value / 100.0)
+
+    def volume(self):
+        return int(round(self._audio_output.volume() * 100.0))
+
+    def set_muted(self, muted):
+        self._audio_output.setMuted(bool(muted))
+
+    def is_muted(self):
+        return bool(self._audio_output.isMuted())
+
+    def set_playback_rate(self, rate):
+        try:
+            self._player.setPlaybackRate(float(rate))
+        except Exception:
+            pass
+
+    def playback_rate(self):
+        try:
+            return float(self._player.playbackRate())
+        except Exception:
+            return 1.0
+
 
 class MpvMediaPlayerBackend(QObject):
     positionChanged = Signal(int)
@@ -409,6 +434,42 @@ class MpvMediaPlayerBackend(QObject):
             self._applied_subtitle_path = self._subtitle_ass_path
         except Exception:
             pass
+
+    def set_volume(self, percent):
+        try:
+            self._player.volume = max(0, min(100, int(percent)))
+        except Exception:
+            pass
+
+    def volume(self):
+        try:
+            return int(float(self._read_property("volume", default=100) or 100))
+        except Exception:
+            return 100
+
+    def set_muted(self, muted):
+        try:
+            self._player.mute = bool(muted)
+        except Exception:
+            pass
+
+    def is_muted(self):
+        try:
+            return bool(self._read_property("mute", default=False))
+        except Exception:
+            return False
+
+    def set_playback_rate(self, rate):
+        try:
+            self._player.speed = float(rate)
+        except Exception:
+            pass
+
+    def playback_rate(self):
+        try:
+            return float(self._read_property("speed", default=1.0) or 1.0)
+        except Exception:
+            return 1.0
 
 
 def create_media_backend(video_view):

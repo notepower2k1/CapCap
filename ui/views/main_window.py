@@ -130,6 +130,14 @@ def _connect_ui_signals(gui):
     if hasattr(gui, "output_quality_combo"):
         gui.output_quality_combo.currentIndexChanged.connect(gui.refresh_ui_state)
     gui.audio_handling_combo.currentTextChanged.connect(gui.refresh_ui_state)
+    if hasattr(gui, "preview_volume_down_btn"):
+        gui.preview_volume_down_btn.clicked.connect(gui.preview_volume_down)
+    if hasattr(gui, "preview_volume_up_btn"):
+        gui.preview_volume_up_btn.clicked.connect(gui.preview_volume_up)
+    if hasattr(gui, "preview_mute_btn"):
+        gui.preview_mute_btn.clicked.connect(gui.toggle_preview_mute)
+    if hasattr(gui, "preview_speed_combo"):
+        gui.preview_speed_combo.currentIndexChanged.connect(gui.on_preview_speed_changed)
     gui.final_output_folder_edit.textChanged.connect(gui.voice_output_folder_edit.setText)
     gui.final_output_folder_edit.textChanged.connect(gui.srt_output_folder_edit.setText)
     gui.video_path_edit.textChanged.connect(gui.refresh_ui_state)

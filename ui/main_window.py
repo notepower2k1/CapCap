@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
                              QScrollArea,
                              QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy, QInputDialog,
                              QRadioButton)
-from PySide6.QtCore import Qt, QUrl, QTimer, QSettings
+from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QSize
 from PySide6.QtGui import QColor, QIcon, QPixmap, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
@@ -2111,8 +2111,11 @@ class VideoTranslatorGUI(QMainWindow):
                 header_layout = QHBoxLayout()
                 timestamp_label = QLabel(f"[{self._format_compact_editor_timestamp(row['start'])}]", card)
                 timestamp_label.setObjectName("sectionTitle")
-                preview_btn = QPushButton("ðŸ”Š", card)
-                preview_btn.setFixedWidth(44)
+                preview_btn = QPushButton("", card)
+                preview_btn.setFixedSize(38, 38)
+                preview_btn.setToolTip("Preview this subtitle line as audio")
+                preview_btn.setIcon(QIcon(os.path.join(self.workspace_root, "assets", "icons", "audio_preview.svg")))
+                preview_btn.setIconSize(QSize(18, 18))
                 preview_btn.clicked.connect(lambda _=False, idx=idx: self.preview_segment_audio(idx))
                 highlight_btn = QPushButton("Highlight", card)
                 highlight_btn.setFixedWidth(88)
@@ -2250,10 +2253,9 @@ class VideoTranslatorGUI(QMainWindow):
             raise FileNotFoundError("Audio preview file was not found.")
         if hasattr(self, "media_player") and self.media_player.is_playing():
             self.media_player.pause()
-            if hasattr(self, "play_btn"):
-                self.play_btn.setText("Play")
             if hasattr(self, "timeline"):
                 self.timeline.set_playing(False)
+            self._refresh_preview_audio_controls()
         self.audio_preview_player.stop()
         self.audio_preview_player.setSource(QUrl.fromLocalFile(audio_path))
         self.audio_preview_player.play()
@@ -2282,7 +2284,7 @@ class VideoTranslatorGUI(QMainWindow):
             return
         self.video_view.set_blur_edit_enabled(checked)
         self.apply_preview_blur_region()
-        self.blur_area_btn.setText("Blur Editing" if checked else "Blur Area")
+        self._refresh_preview_audio_controls()
         if checked:
             self.log("[Blur Area] drag inside the video preview to move or resize the region.")
 
@@ -2535,7 +2537,7 @@ class VideoTranslatorGUI(QMainWindow):
         row = self._segment_editor_rows[index] if index < len(self._segment_editor_rows) else None
         if row:
             row["preview_button"].setEnabled(True)
-            row["preview_button"].setText("ðŸ”Š")
+            row["preview_button"].setIcon(QIcon(os.path.join(self.workspace_root, "assets", "icons", "audio_preview.svg")))
         self._segment_preview_threads.pop(index, None)
 
         if error:
@@ -3669,6 +3671,10 @@ class VideoTranslatorGUI(QMainWindow):
 
     def setup_media_player(self):
         setup_media_player_impl(self)
+        self._preview_volume = 100
+        self._preview_muted = False
+        self._preview_speed = 1.0
+        self._apply_preview_audio_state()
 
     def browse_video(self):
         browse_video_impl(self)
@@ -3777,8 +3783,8 @@ class VideoTranslatorGUI(QMainWindow):
 
         try:
             self.media_player.pause()
-            self.play_btn.setText("Play")
             self.timeline.set_playing(False)
+            self._refresh_preview_audio_controls()
         except Exception:
             pass
 
@@ -4095,6 +4101,79 @@ class VideoTranslatorGUI(QMainWindow):
 
     def update_duration_label(self, current, total):
         update_duration_label_impl(self, current, total)
+
+    def _apply_preview_audio_state(self):
+        if not hasattr(self, "media_player"):
+            return
+        try:
+            self.media_player.set_volume(getattr(self, "_preview_volume", 100))
+        except Exception:
+            pass
+        try:
+            self.media_player.set_muted(getattr(self, "_preview_muted", False))
+        except Exception:
+            pass
+        try:
+            self.media_player.set_playback_rate(getattr(self, "_preview_speed", 1.0))
+        except Exception:
+            pass
+        self._refresh_preview_audio_controls()
+
+    def _refresh_preview_audio_controls(self):
+        if hasattr(self, "preview_volume_label"):
+            label = f"{int(getattr(self, '_preview_volume', 100))}%"
+            if getattr(self, "_preview_muted", False):
+                label += " muted"
+            self.preview_volume_label.setText(label)
+        if hasattr(self, "preview_mute_btn"):
+            icon_name = "volume_down.svg" if getattr(self, "_preview_muted", False) else "volume_mute.svg"
+            icon_path = os.path.join(self.workspace_root, "assets", "icons", icon_name)
+            self.preview_mute_btn.setIcon(QIcon(icon_path))
+        if hasattr(self, "play_btn"):
+            playing = False
+            try:
+                playing = bool(self.media_player.is_playing())
+            except Exception:
+                playing = False
+            play_icon = "pause.svg" if playing else "play.svg"
+            play_tip = "Pause preview" if playing else "Play preview"
+            self.play_btn.setIcon(QIcon(os.path.join(self.workspace_root, "assets", "icons", play_icon)))
+            self.play_btn.setToolTip(play_tip)
+        if hasattr(self, "blur_area_btn"):
+            blur_active = bool(self.blur_area_btn.isChecked())
+            self.blur_area_btn.setToolTip("Blur editing on" if blur_active else "Toggle blur area editing")
+        if hasattr(self, "preview_speed_combo"):
+            target = float(getattr(self, "_preview_speed", 1.0))
+            index = self.preview_speed_combo.findData(target)
+            if index >= 0 and self.preview_speed_combo.currentIndex() != index:
+                self.preview_speed_combo.blockSignals(True)
+                self.preview_speed_combo.setCurrentIndex(index)
+                self.preview_speed_combo.blockSignals(False)
+
+    def preview_volume_down(self):
+        self._preview_volume = max(0, int(getattr(self, "_preview_volume", 100)) - 10)
+        self._preview_muted = self._preview_volume == 0
+        self._apply_preview_audio_state()
+
+    def preview_volume_up(self):
+        self._preview_volume = min(200, int(getattr(self, "_preview_volume", 100)) + 10)
+        if self._preview_volume > 0:
+            self._preview_muted = False
+        self._apply_preview_audio_state()
+
+    def toggle_preview_mute(self):
+        self._preview_muted = not bool(getattr(self, "_preview_muted", False))
+        self._apply_preview_audio_state()
+
+    def on_preview_speed_changed(self, index: int):
+        if not hasattr(self, "preview_speed_combo"):
+            return
+        rate = self.preview_speed_combo.itemData(index)
+        try:
+            self._preview_speed = float(rate or 1.0)
+        except Exception:
+            self._preview_speed = 1.0
+        self._apply_preview_audio_state()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
