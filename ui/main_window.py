@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
                              QScrollArea,
                              QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy, QInputDialog,
                              QRadioButton)
-from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QSize, Signal
+from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QSize
 from PySide6.QtGui import QColor, QIcon, QPixmap, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
@@ -72,6 +72,7 @@ from utils.media_utils import (
 from utils.settings_utils import load_user_settings as load_user_settings_impl, save_user_settings as save_user_settings_impl
 from views import build_main_window_ui
 from widgets import TimelineWidget, VideoView
+from widgets.progress_dialog import BackgroundableProgressDialog
 from translation.providers import LocalPolisherProvider
 from runtime_paths import app_path, asset_path, models_path, workspace_root
 from workers import (
@@ -89,8 +90,6 @@ from video_processor import get_video_dimensions
 
 class VideoTranslatorGUI(QMainWindow):
     VOICE_ENTRY_ID_ROLE = Qt.UserRole + 1
-    log_requested = Signal(str)
-    clear_log_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -330,6 +329,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._voice_signals_bound = False
         self.voice_preview_dialog = None
         self._voice_preview_row_buttons = {}
+        self._tracked_progress_dialogs = []
         # Simple pipeline runner (Run All)
         self._pipeline_active = False
         self._pipeline_step = ""
@@ -340,12 +340,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.last_styled_preview_signature = ""
         self.last_exact_preview_5s_path = ""
 
-        # Log buffer (UI panel)
-        self._log_lines = []
-
         self.setup_ui()
-        self.log_requested.connect(self._append_log_message)
-        self.clear_log_requested.connect(self._clear_log_widget)
         self._configure_local_voice_mode_ui()
         self.setup_media_player()
         self.setup_audio_preview_player()
@@ -951,16 +946,63 @@ class VideoTranslatorGUI(QMainWindow):
     # Logging + error helpers
     # -----------------------------
     def log(self, message: str):
-        self.log_requested.emit("" if message is None else str(message))
-
-    def clear_log(self):
-        self.clear_log_requested.emit()
-
-    def _append_log_message(self, message: str):
         log_message_impl(self, message)
 
-    def _clear_log_widget(self):
+    def clear_log(self):
         clear_log_impl(self)
+
+    def _register_progress_dialog(self, dialog):
+        if dialog is None:
+            return
+        self._tracked_progress_dialogs = [d for d in self._tracked_progress_dialogs if d is not None]
+        if dialog not in self._tracked_progress_dialogs:
+            self._tracked_progress_dialogs.append(dialog)
+            try:
+                dialog.destroyed.connect(lambda *_args, dlg=dialog: self._unregister_progress_dialog(dlg))
+            except Exception:
+                pass
+        self._update_progress_reopen_button()
+
+    def _unregister_progress_dialog(self, dialog):
+        self._tracked_progress_dialogs = [d for d in self._tracked_progress_dialogs if d is not dialog]
+        self._update_progress_reopen_button()
+
+    def _active_progress_dialogs(self):
+        active = []
+        for dialog in list(getattr(self, "_tracked_progress_dialogs", []) or []):
+            if dialog is None:
+                continue
+            try:
+                if dialog.isVisible():
+                    active.append(dialog)
+                    continue
+                if getattr(dialog, "isHidden", None) and not dialog.isHidden():
+                    active.append(dialog)
+            except Exception:
+                continue
+        return active
+
+    def _update_progress_reopen_button(self):
+        button = getattr(self, "show_progress_btn", None)
+        if button is None:
+            return
+        tracked = [d for d in getattr(self, "_tracked_progress_dialogs", []) if d is not None]
+        button.setVisible(bool(tracked))
+        button.setEnabled(bool(tracked))
+
+    def show_active_progress_dialog(self):
+        dialogs = [d for d in getattr(self, "_tracked_progress_dialogs", []) if d is not None]
+        if not dialogs:
+            self._update_progress_reopen_button()
+            return
+        dialog = dialogs[-1]
+        try:
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+        except Exception:
+            pass
+        self._update_progress_reopen_button()
 
     def show_error(self, title: str, short_msg: str, details: str = ""):
         show_error_impl(self, title, short_msg, details)
@@ -3150,6 +3192,7 @@ class VideoTranslatorGUI(QMainWindow):
         try:
             dlg = getattr(self, "export_progress_dialog", None)
             if dlg is not None:
+                self._unregister_progress_dialog(dlg)
                 dlg.hide()
                 dlg.deleteLater()
         finally:
@@ -3159,7 +3202,7 @@ class VideoTranslatorGUI(QMainWindow):
         dlg = getattr(self, "export_progress_dialog", None)
         if dlg is not None:
             return dlg
-        dlg = QProgressDialog("Preparing final export...", "Hide", 0, 100, self)
+        dlg = BackgroundableProgressDialog("Preparing final export...", "Hide", 0, 100, self)
         dlg.setWindowTitle("Exporting Video")
         dlg.setWindowModality(Qt.WindowModal)
         dlg.setMinimumDuration(0)
@@ -3182,6 +3225,7 @@ class VideoTranslatorGUI(QMainWindow):
         except Exception:
             pass
         self.export_progress_dialog = dlg
+        self._register_progress_dialog(dlg)
         dlg.show()
         return dlg
 
@@ -3212,6 +3256,7 @@ class VideoTranslatorGUI(QMainWindow):
         try:
             dlg = getattr(self, "assets_progress_dialog", None)
             if dlg is not None:
+                self._unregister_progress_dialog(dlg)
                 dlg.hide()
                 dlg.deleteLater()
         finally:
@@ -3222,7 +3267,7 @@ class VideoTranslatorGUI(QMainWindow):
             dlg = getattr(self, "assets_progress_dialog", None)
             if dlg is not None:
                 return dlg
-            dlg = QProgressDialog("Preparing runtime assets...", "Hide", 0, 100, self)
+            dlg = BackgroundableProgressDialog("Preparing runtime assets...", "Hide", 0, 100, self)
             dlg.setWindowTitle("Loading Models")
             dlg.setWindowModality(Qt.WindowModal)
             dlg.setMinimumDuration(0)
@@ -3245,6 +3290,7 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception:
                 pass
             self.assets_progress_dialog = dlg
+            self._register_progress_dialog(dlg)
             dlg.show()
             return dlg
         except Exception:

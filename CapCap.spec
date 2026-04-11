@@ -9,17 +9,27 @@ app_root = project_root / "app"
 python_site_packages = Path(r"C:\Users\Thach\AppData\Local\Programs\Python\Python311\Lib\site-packages")
 piper_pkg_root = python_site_packages / "piper"
 faster_whisper_pkg_root = python_site_packages / "faster_whisper"
+default_piper_voice = "vi_VN-vais1000-medium"
+piper_models_dir = project_root / "models" / "piper"
 
 datas = [
     (str(project_root / "assets"), "assets"),
     (str(project_root / "bin" / "ffmpeg"), "bin/ffmpeg"),
     (str(project_root / "bin" / "mpv"), "bin/mpv"),
-    (str(project_root / "app" / "voice_preview_catalog.json"), "app"),
+    (str(project_root / "app" / "voice_preview_catalog.release.json"), "app/voice_preview_catalog.json"),
     (str(project_root / ".env_example"), "."),
 ]
 
-if (project_root / "models" / "piper").exists():
-    datas.append((str(project_root / "models" / "piper"), "models/piper"))
+if piper_models_dir.exists():
+    default_piper_model = piper_models_dir / f"{default_piper_voice}.onnx"
+    default_piper_model_config = piper_models_dir / f"{default_piper_voice}.onnx.json"
+    piper_voice_meta = piper_models_dir / "voices_meta.json"
+    if default_piper_model.exists():
+        datas.append((str(default_piper_model), f"models/piper/{default_piper_model.name}"))
+    if default_piper_model_config.exists():
+        datas.append((str(default_piper_model_config), f"models/piper/{default_piper_model_config.name}"))
+    if piper_voice_meta.exists():
+        datas.append((str(piper_voice_meta), f"models/piper/{piper_voice_meta.name}"))
 
 if (piper_pkg_root / "espeak-ng-data").exists():
     datas.append((str(piper_pkg_root / "espeak-ng-data"), "piper/espeak-ng-data"))

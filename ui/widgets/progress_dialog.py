@@ -1,11 +1,28 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
     QProgressBar, QFrame, QScrollArea, QWidget, 
-    QGraphicsDropShadowEffect, QPushButton
+    QGraphicsDropShadowEffect, QPushButton, QProgressDialog
 )
 import time
 from PySide6.QtCore import Qt, QTimer, Property, QRect
 from PySide6.QtGui import QColor, QFont, QPainter, QLinearGradient, QBrush, QPen
+from PySide6.QtWidgets import QApplication
+
+
+class BackgroundableProgressDialog(QProgressDialog):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._background_only = True
+
+    def set_background_only(self, enabled: bool):
+        self._background_only = bool(enabled)
+
+    def closeEvent(self, event):
+        if self._background_only:
+            self.hide()
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 class StepWidget(QFrame):
     def __init__(self, name, parent=None):
@@ -254,6 +271,10 @@ class PipelineProgressDialog(QDialog):
         """)
         self.dismiss_btn.clicked.connect(self.hide)
         layout.addWidget(self.dismiss_btn)
+
+    def closeEvent(self, event):
+        self.hide()
+        event.ignore()
 
     def add_step(self, step_id, name):
         widget = StepWidget(name)

@@ -1,16 +1,16 @@
 import os
 import sys
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox, QProgressDialog
+from PySide6.QtWidgets import QMessageBox
 from workers import PrepareWorkflowWorker
 
 # Robust import for the progress widget
 try:
-    from widgets.progress_dialog import PipelineProgressDialog
+    from widgets.progress_dialog import BackgroundableProgressDialog, PipelineProgressDialog
 except ImportError:
     # Fallback for different execution contexts
     sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-    from widgets.progress_dialog import PipelineProgressDialog
+    from widgets.progress_dialog import BackgroundableProgressDialog, PipelineProgressDialog
 
 class PipelineController:
     """
@@ -53,7 +53,7 @@ class PipelineController:
             if self.whisper_download_dialog is not None:
                 return
             model_name = getattr(self.gui, "get_whisper_model_name", lambda: "base")()
-            dlg = QProgressDialog(f"Downloading Whisper model: {model_name} ...", "Hide", 0, 0, self.gui)
+            dlg = BackgroundableProgressDialog(f"Downloading Whisper model: {model_name} ...", "Hide", 0, 0, self.gui)
             dlg.setWindowTitle("Downloading models")
             dlg.setWindowModality(Qt.NonModal)
             dlg.setMinimumDuration(0)
@@ -64,6 +64,8 @@ class PipelineController:
             except Exception:
                 pass
             self.whisper_download_dialog = dlg
+            if hasattr(self.gui, "_register_progress_dialog"):
+                self.gui._register_progress_dialog(dlg)
             dlg.show()
         except Exception:
             self.whisper_download_dialog = None
@@ -73,6 +75,8 @@ class PipelineController:
             self.progress_dialog.close()
             
         self.progress_dialog = PipelineProgressDialog(self.gui)
+        if hasattr(self.gui, "_register_progress_dialog"):
+            self.gui._register_progress_dialog(self.progress_dialog)
         self.progress_dialog.add_step("prepare", "Preparing Project")
         self.progress_dialog.add_step("extraction", "Extracting Original Audio")
         if includes_separation:
@@ -245,4 +249,3 @@ class PipelineController:
         self.gui.progress_bar.setRange(0, 100)
         self.gui.progress_bar.setValue(100)
         self.gui.refresh_ui_state()
-
