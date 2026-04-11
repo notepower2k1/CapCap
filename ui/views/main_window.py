@@ -166,8 +166,12 @@ def _connect_ui_signals(gui):
     gui.subtitle_x_offset_spin.valueChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_bottom_offset_spin.valueChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_background_cb.toggled.connect(gui.update_subtitle_preview_style)
+    if hasattr(gui, "subtitle_outline_cb"):
+        gui.subtitle_outline_cb.toggled.connect(gui.update_subtitle_preview_style)
+    if hasattr(gui, "subtitle_bg_alpha_spin"):
+        gui.subtitle_bg_alpha_spin.valueChanged.connect(gui.update_subtitle_preview_style)
 
-    gui.on_advanced_toggled(True)
+    gui.on_advanced_toggled(bool(getattr(gui, "toggle_advanced_btn", None) and gui.toggle_advanced_btn.isChecked()))
 
 
 def _initialize_ui_state(gui):

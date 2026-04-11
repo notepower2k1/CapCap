@@ -56,7 +56,7 @@ def build_advanced_group(gui, left_layout):
 
 
 def _build_audio_mix_controls(gui, advanced_layout):
-    source_title = QLabel("Audio Source")
+    source_title = QLabel("Audio for Preview / Export")
     advanced_layout.addWidget(source_title)
 
     source_mode_row = QHBoxLayout()
@@ -65,15 +65,15 @@ def _build_audio_mix_controls(gui, advanced_layout):
     advanced_layout.addLayout(source_mode_row)
     advanced_layout.addWidget(gui.audio_source_hint_label)
 
-    gui.generated_audio_section_label = QLabel("Generate voice and mix with background")
+    gui.generated_audio_section_label = QLabel("Generate a new Vietnamese voice track")
     advanced_layout.addWidget(gui.generated_audio_section_label)
     gui.generated_audio_section_hint = gui.make_helper_label(
-        "Use this when you want CapCap to generate Vietnamese voice and optionally mix it with your own background audio."
+        "Use this when you want CapCap to create a Vietnamese voice track and optionally mix it with your own background audio."
     )
     gui.generated_audio_section_hint.setParent(gui)
     advanced_layout.addWidget(gui.generated_audio_section_hint)
 
-    bg_label = QLabel("Background audio for mixing")
+    bg_label = QLabel("Background music / ambient audio")
     gui.bg_music_label = bg_label
     advanced_layout.addWidget(gui.bg_music_label)
     bg_row = QHBoxLayout()
@@ -83,15 +83,15 @@ def _build_audio_mix_controls(gui, advanced_layout):
     bg_row.addWidget(gui.browse_bg_music_btn)
     advanced_layout.addLayout(bg_row)
 
-    gui.existing_audio_section_label = QLabel("Use an existing mixed audio file")
+    gui.existing_audio_section_label = QLabel("Use your own finished audio")
     advanced_layout.addWidget(gui.existing_audio_section_label)
     gui.existing_audio_section_hint = gui.make_helper_label(
-        "Use this when you already have a final mixed track and only want preview/export to use that file."
+        "Use this when you already have a final audio track and only want preview/export to use that file."
     )
     gui.existing_audio_section_hint.setParent(gui)
     advanced_layout.addWidget(gui.existing_audio_section_hint)
 
-    existing_label = QLabel("Existing mixed audio")
+    existing_label = QLabel("Finished audio file")
     gui.mixed_audio_label = existing_label
     advanced_layout.addWidget(gui.mixed_audio_label)
     existing_row = QHBoxLayout()
@@ -101,20 +101,26 @@ def _build_audio_mix_controls(gui, advanced_layout):
     existing_row.addWidget(gui.browse_mixed_audio_btn)
     advanced_layout.addLayout(existing_row)
 
-    gain_row = QHBoxLayout()
-    gui.voice_gain_label = QLabel("Voice gain")
-    gain_row.addWidget(gui.voice_gain_label)
-    gain_row.addWidget(gui.voice_gain_spin)
-    gui.bg_gain_label = QLabel("BG gain")
-    gain_row.addWidget(gui.bg_gain_label)
-    gain_row.addWidget(gui.bg_gain_spin)
-    gui.ducking_amount_label = QLabel("BG ducking")
-    gain_row.addWidget(gui.ducking_amount_label)
-    gain_row.addWidget(gui.ducking_amount_spin)
-    advanced_layout.addLayout(gain_row)
+    voice_gain_row = QHBoxLayout()
+    gui.voice_gain_label = QLabel("Voice volume")
+    voice_gain_row.addWidget(gui.voice_gain_label)
+    voice_gain_row.addWidget(gui.voice_gain_spin)
+    advanced_layout.addLayout(voice_gain_row)
+
+    bg_gain_row = QHBoxLayout()
+    gui.bg_gain_label = QLabel("BG volume")
+    bg_gain_row.addWidget(gui.bg_gain_label)
+    bg_gain_row.addWidget(gui.bg_gain_spin)
+    advanced_layout.addLayout(bg_gain_row)
+
+    ducking_row = QHBoxLayout()
+    gui.ducking_amount_label = QLabel("Lower BG during voice")
+    ducking_row.addWidget(gui.ducking_amount_label)
+    ducking_row.addWidget(gui.ducking_amount_spin)
+    advanced_layout.addLayout(ducking_row)
 
     preset_row = QHBoxLayout()
-    gui.audio_mix_preset_label = QLabel("Mix preset")
+    gui.audio_mix_preset_label = QLabel("Mix style")
     preset_row.addWidget(gui.audio_mix_preset_label)
     gui.audio_mix_preset_combo = QComboBox(gui)
     gui.audio_mix_preset_combo.addItem("Custom", "custom")
@@ -126,10 +132,21 @@ def _build_audio_mix_controls(gui, advanced_layout):
     advanced_layout.addLayout(preset_row)
 
     gui.audio_mix_preset_hint = gui.make_helper_label(
-        "Use presets to quickly keep more or less background music under the Vietnamese voice."
+        "Use a preset if you want the voice to stand out more, or keep more of the original background audio."
     )
     gui.audio_mix_preset_hint.setParent(gui)
     advanced_layout.addWidget(gui.audio_mix_preset_hint)
+
+    timing_sync_row = QHBoxLayout()
+    gui.voice_timing_sync_label = QLabel("Voice timing sync")
+    timing_sync_row.addWidget(gui.voice_timing_sync_label)
+    timing_sync_row.addWidget(gui.voice_timing_sync_combo, 1)
+    advanced_layout.addLayout(timing_sync_row)
+    gui.voice_timing_sync_hint_label = gui.make_helper_label(
+        "Smart keeps the voice natural while still trying to fit subtitle timing."
+    )
+    gui.voice_timing_sync_hint_label.setParent(gui)
+    advanced_layout.addWidget(gui.voice_timing_sync_hint_label)
 
     advanced_layout.addWidget(gui.voiceover_btn)
 

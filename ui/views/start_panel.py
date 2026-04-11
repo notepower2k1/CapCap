@@ -68,13 +68,16 @@ def _build_collapsible_section(title: str, start_expanded: bool = True):
 
 def _build_hidden_status_widgets(gui):
     gui.workflow_hint_label = QLabel()
-    gui.workflow_hint_label.hide()
+    gui.workflow_hint_label.setObjectName("helperLabel")
+    gui.workflow_hint_label.setWordWrap(True)
     gui.workflow_status_badge = QLabel("Waiting for video")
-    gui.workflow_status_badge.hide()
+    gui.workflow_status_badge.setObjectName("statusPill")
     gui.next_step_label = QLabel()
-    gui.next_step_label.hide()
+    gui.next_step_label.setObjectName("statusHeadline")
+    gui.next_step_label.setWordWrap(True)
     gui.readiness_label = QLabel()
-    gui.readiness_label.hide()
+    gui.readiness_label.setObjectName("helperLabel")
+    gui.readiness_label.setWordWrap(True)
 
 
 def _build_style_preset_card(title: str, line_one: str, line_two: str, radio: QRadioButton):
@@ -91,20 +94,73 @@ def _build_style_preset_card(title: str, line_one: str, line_two: str, radio: QR
 
     title_label = QLabel(title)
     title_label.setObjectName("sectionTitle")
+    title_label.setAlignment(Qt.AlignCenter)
+
+    style_key = title.strip().lower()
+    preview_frame = QFrame()
+    preview_frame.setFixedHeight(88)
+    preview_frame.setStyleSheet(
+        "QFrame {"
+        "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1d2940, stop:1 #0d1522);"
+        "border:1px solid #2d425d; border-radius: 12px; }"
+    )
+    preview_layout = QVBoxLayout(preview_frame)
+    preview_layout.setContentsMargins(10, 10, 10, 10)
+    preview_layout.setSpacing(2)
+
     preview_top = QLabel(line_one)
-    preview_top.setStyleSheet("font-size: 14px; font-weight: 800; color: #ffffff;")
     preview_bottom = QLabel(line_two)
-    preview_bottom.setStyleSheet("font-size: 13px; color: #dbe5f3;")
     preview_top.setAlignment(Qt.AlignCenter)
     preview_bottom.setAlignment(Qt.AlignCenter)
 
+    if style_key == "tiktok":
+        preview_top.setStyleSheet("font-size: 18px; font-weight: 900; color: #ffffff;")
+        preview_bottom.setStyleSheet("font-size: 16px; font-weight: 900; color: #ffd400;")
+    elif style_key == "youtube":
+        preview_top.setStyleSheet(
+            "font-size: 14px; font-weight: 700; color: #ffffff; "
+            "background-color: rgba(0, 0, 0, 255); padding: 4px 8px; border-radius: 7px;"
+        )
+        preview_bottom.setStyleSheet(
+            "font-size: 14px; font-weight: 700; color: #ffffff; "
+            "background-color: rgba(0, 0, 0, 255); padding: 4px 8px; border-radius: 7px;"
+        )
+    elif style_key == "short":
+        preview_top.setStyleSheet("font-size: 15px; font-weight: 800; color: #ffffff; letter-spacing: 1px;")
+        preview_bottom.setStyleSheet("font-size: 13px; color: #dbe5f3;")
+    else:
+        preview_top.setStyleSheet("font-size: 15px; font-weight: 800; color: #ffffff;")
+        preview_bottom.setStyleSheet(
+            "font-size: 13px; color: #ffffff; background-color: rgba(0, 0, 0, 120); "
+            "padding: 3px 8px; border-radius: 7px;"
+        )
+
+    preview_layout.addStretch(1)
+    preview_layout.addWidget(preview_top)
+    preview_layout.addWidget(preview_bottom)
+    preview_layout.addStretch(1)
+
+    subtitle_hint = QLabel()
+    subtitle_hint.setObjectName("helperLabel")
+    subtitle_hint.setAlignment(Qt.AlignCenter)
+    if style_key == "tiktok":
+        subtitle_hint.setText("Big text, karaoke, keywords")
+    elif style_key == "youtube":
+        subtitle_hint.setText("Solid background box")
+    elif style_key == "short":
+        subtitle_hint.setText("Light and minimal")
+    else:
+        subtitle_hint.setText("Your own settings")
+
     layout.addWidget(title_label, 0, Qt.AlignCenter)
-    layout.addWidget(preview_top)
-    layout.addWidget(preview_bottom)
+    layout.addWidget(preview_frame)
+    layout.addWidget(subtitle_hint)
     return card
 
 
 def build_start_group(gui, left_layout):
+    _build_hidden_status_widgets(gui)
+
     gui.video_path_edit = QLineEdit()
     gui.video_path_edit.setPlaceholderText("Choose one video to process...")
     gui.video_path_edit.hide()
@@ -131,16 +187,16 @@ def build_start_group(gui, left_layout):
     gui.stabilize_button(gui.run_all_btn, min_width=240)
     gui.stabilize_button(gui.export_btn, min_width=180)
 
-    control_group = QGroupBox("Controls")
+    control_group = QGroupBox("")
     control_layout = QVBoxLayout(control_group)
     control_layout.setSpacing(14)
 
-    upload_card, upload_layout = _build_collapsible_section("Section 1: Input")
-    gui.upload_video_btn = QPushButton("Upload Video")
+    upload_card, upload_layout = _build_collapsible_section("1. Choose Video")
+    gui.upload_video_btn = QPushButton("Choose Video")
     gui.upload_video_btn.setObjectName("mainActionBtn")
     gui.upload_video_btn.clicked.connect(gui.browse_video)
     gui.upload_video_btn.setMinimumHeight(46)
-    gui.upload_hint_label = QLabel("Drag & drop or browse")
+    gui.upload_hint_label = QLabel("Drag and drop a video here, or browse from your computer.")
     gui.upload_hint_label.setObjectName("helperLabel")
     gui.upload_hint_label.setAlignment(Qt.AlignCenter)
     gui.upload_status_label = QLabel("No video uploaded yet")
@@ -151,8 +207,8 @@ def build_start_group(gui, left_layout):
     upload_layout.addWidget(gui.upload_status_label)
     control_layout.addWidget(upload_card)
 
-    output_card, output_layout = _build_collapsible_section("Section 2: Output Type")
-    output_layout.addWidget(QLabel("Output:"))
+    output_card, output_layout = _build_collapsible_section("2. Choose Output")
+    output_layout.addWidget(QLabel("Create:"))
     gui.output_mode_combo = QComboBox()
     gui.output_mode_combo.addItems(
         [
@@ -163,9 +219,9 @@ def build_start_group(gui, left_layout):
     )
     gui.output_mode_combo.setCurrentText("Vietnamese subtitles + voice")
     gui.output_mode_combo.hide()
-    gui.output_subtitle_radio = QRadioButton("Subtitle only")
+    gui.output_subtitle_radio = QRadioButton("Subtitles only")
     gui.output_voice_radio = QRadioButton("Voice only")
-    gui.output_both_radio = QRadioButton("Subtitle + Voice")
+    gui.output_both_radio = QRadioButton("Subtitles + voice")
     gui.output_both_radio.setChecked(True)
     gui.output_mode_group = QButtonGroup(gui)
     gui.output_mode_group.addButton(gui.output_subtitle_radio)
@@ -185,7 +241,7 @@ def build_start_group(gui, left_layout):
     output_layout.addWidget(gui.output_both_radio)
 
     output_layout.addSpacing(6)
-    output_layout.addWidget(QLabel("Output Quality:"))
+    output_layout.addWidget(QLabel("Video quality:"))
     gui.output_quality_combo = QComboBox()
     gui.output_quality_combo.addItem("Max (source)", "source")
     gui.output_quality_combo.addItem("720p", "720p")
@@ -195,33 +251,38 @@ def build_start_group(gui, left_layout):
     output_layout.addWidget(gui.output_quality_combo)
     control_layout.addWidget(output_card)
 
-    language_card, language_layout = _build_collapsible_section("Section 3: Language")
+    language_card, language_layout = _build_collapsible_section("3. Language")
     gui.lang_whisper_combo = QComboBox()
     gui.lang_whisper_combo.addItem("Chinese", "zh")
     gui.lang_target_combo = QComboBox()
     gui.lang_target_combo.addItem("Vietnamese", "vi")
     gui.lang_target_combo.setCurrentIndex(0)
     source_row = QVBoxLayout()
-    source_row.addWidget(QLabel("Source Language"))
+    source_row.addWidget(QLabel("Original language"))
     source_row.addWidget(gui.lang_whisper_combo)
     target_row = QVBoxLayout()
-    target_row.addWidget(QLabel("Target Language"))
+    target_row.addWidget(QLabel("Translate to"))
     target_row.addWidget(gui.lang_target_combo)
     language_layout.addLayout(source_row)
     language_layout.addLayout(target_row)
-    gui.translator_ai_cb = QCheckBox("AI Translator (Polish)")
+    gui.translator_ai_cb = QCheckBox("Make subtitles easier to read with AI")
     gui.translator_ai_cb.setChecked(True)
     language_layout.addWidget(gui.translator_ai_cb)
+    gui.translator_ai_hint_label = QLabel("Keeps the meaning, then lightly cleans up the subtitle so it reads better on screen.")
+    gui.translator_ai_hint_label.setObjectName("helperLabel")
+    gui.translator_ai_hint_label.setWordWrap(True)
+    language_layout.addWidget(gui.translator_ai_hint_label)
  
-    gui.translator_style_label = QLabel("Translation Style (Optional):")
+    gui.translator_style_label = QLabel("Extra tone/style (optional):")
     gui.translator_style_label.setObjectName("helperLabel")
     gui.translator_style_edit = QLineEdit()
-    gui.translator_style_edit.setPlaceholderText("e.g. funny, teen slang, formal, etc.")
+    gui.translator_style_edit.setPlaceholderText("e.g. natural, funny, more formal")
     language_layout.addWidget(gui.translator_style_label)
     language_layout.addWidget(gui.translator_style_edit)
  
     # Logic to show/hide style field based on AI checkbox
     def toggle_style_field(checked):
+        gui.translator_ai_hint_label.setVisible(checked)
         gui.translator_style_label.setVisible(checked)
         gui.translator_style_edit.setVisible(checked)
  
@@ -230,7 +291,7 @@ def build_start_group(gui, left_layout):
  
     control_layout.addWidget(language_card)
 
-    voice_card, voice_layout = _build_collapsible_section("Section 4: Voice")
+    voice_card, voice_layout = _build_collapsible_section("4. Voice")
     gui.voice_section_card = voice_card
     gui.free_voice_combo = QComboBox()
     gui.voice_gender_combo = QComboBox()
@@ -243,39 +304,39 @@ def build_start_group(gui, left_layout):
     gui.voice_timing_sync_combo = QComboBox()
     gui.voice_timing_sync_combo.addItems(["Off", "Smart", "Force Fit"])
     gui.voice_timing_sync_combo.setCurrentText("Smart")
-    gui.voice_timing_sync_hint_label = QLabel("Auto sync voice to subtitle timing")
-    gui.voice_timing_sync_hint_label.setObjectName("helperLabel")
     gui.audio_handling_combo = QComboBox()
-    gui.audio_handling_combo.addItem("Fast Mode (Recommended)", "fast")
-    gui.audio_handling_combo.addItem("Clean Voice (Demucs, slower)", "clean")
+    gui.audio_handling_combo.addItem("Fast (recommended)", "fast")
+    gui.audio_handling_combo.addItem("Cleaner voice (slower)", "clean")
     gui.audio_handling_combo.setCurrentIndex(0)
-    gui.audio_handling_hint_label = QLabel("Fast Mode skips Demucs and uses auto ducking. Clean Voice separates background for a cleaner mix.")
+    gui.audio_handling_hint_label = QLabel("Fast keeps things quick. Cleaner voice removes more background noise before voice generation.")
     gui.audio_handling_hint_label.setObjectName("helperLabel")
     gui.audio_handling_hint_label.setWordWrap(True)
     gui.free_voice_combo.currentIndexChanged.connect(gui.on_selected_voice_changed)
-    gui.preview_voice_btn = QPushButton("Preview voice")
+    gui.preview_voice_btn = QPushButton("Preview Selected Voice")
     gui.preview_voice_btn.clicked.connect(gui.preview_selected_voice_sample)
-    gui.voice_preview_meta_label = QLabel("Generate a short preview audio clip with the selected local voice.")
+    gui.voice_preview_meta_label = QLabel("Listen to a short sample before generating the full voice track.")
     gui.voice_preview_meta_label.setObjectName("helperLabel")
     gui.voice_preview_meta_label.setWordWrap(True)
     voice_layout.addWidget(gui.free_voice_combo)
-    voice_layout.addWidget(QLabel("Gender"))
+    voice_layout.addWidget(QLabel("Voice type"))
     voice_layout.addWidget(gui.voice_gender_combo)
-    voice_layout.addWidget(QLabel("Speed"))
+    voice_layout.addWidget(QLabel("Voice speed"))
     voice_layout.addWidget(gui.voice_speed_spin)
-    voice_layout.addWidget(QLabel("Audio Handling"))
+    voice_layout.addWidget(QLabel("Audio cleanup"))
     voice_layout.addWidget(gui.audio_handling_combo)
     voice_layout.addWidget(gui.audio_handling_hint_label)
     voice_layout.addWidget(gui.preview_voice_btn)
     voice_layout.addWidget(gui.voice_preview_meta_label)
-    voice_layout.addWidget(gui.voice_timing_sync_hint_label)
-    voice_layout.addWidget(gui.voice_timing_sync_combo)
     control_layout.addWidget(voice_card)
 
-    subtitle_card, subtitle_layout = _build_collapsible_section("Section 5: Subtitle Style")
-    base_style_label = QLabel("Base style")
+    subtitle_card, subtitle_layout = _build_collapsible_section("5. Subtitle Look")
+    base_style_label = QLabel("Choose a style")
     base_style_label.setObjectName("sectionTitle")
     subtitle_layout.addWidget(base_style_label)
+    subtitle_style_hint = QLabel("Start with a ready-made look, then fine-tune only if you need to.")
+    subtitle_style_hint.setObjectName("helperLabel")
+    subtitle_style_hint.setWordWrap(True)
+    subtitle_layout.addWidget(subtitle_style_hint)
 
     gui.subtitle_preset_tiktok_radio = QRadioButton("TikTok")
     gui.subtitle_preset_youtube_radio = QRadioButton("YouTube")
@@ -291,13 +352,13 @@ def build_start_group(gui, left_layout):
     preset_grid = QGridLayout()
     preset_grid.setHorizontalSpacing(8)
     preset_grid.setVerticalSpacing(8)
-    preset_grid.addWidget(_build_style_preset_card("TikTok", "HELLO", "WORLD", gui.subtitle_preset_tiktok_radio), 0, 0)
-    preset_grid.addWidget(_build_style_preset_card("YouTube", "Hello", "world", gui.subtitle_preset_youtube_radio), 0, 1)
+    preset_grid.addWidget(_build_style_preset_card("TikTok", "TRENDING", "WORDS POP", gui.subtitle_preset_tiktok_radio), 0, 0)
+    preset_grid.addWidget(_build_style_preset_card("YouTube", "Clean subtitle", "with solid box", gui.subtitle_preset_youtube_radio), 0, 1)
     preset_grid.addWidget(_build_style_preset_card("Short", "HELLO", "world", gui.subtitle_preset_minimal_radio), 0, 2)
     preset_grid.addWidget(_build_style_preset_card("Custom", "Aa Bb", "Your style", gui.subtitle_preset_custom_radio), 1, 0)
     subtitle_layout.addLayout(preset_grid)
 
-    gui.save_subtitle_style_btn = QPushButton("+ Save Current Style")
+    gui.save_subtitle_style_btn = QPushButton("+ Save This Style")
     gui.save_subtitle_style_btn.clicked.connect(gui.save_current_subtitle_style_preset)
     gui.saved_subtitle_style_combo = QComboBox()
     gui.saved_subtitle_style_combo.addItem("My Presets")
@@ -310,27 +371,41 @@ def build_start_group(gui, left_layout):
     highlight_divider.setStyleSheet("color: #30425b;")
     subtitle_layout.addWidget(highlight_divider)
 
-    highlight_title = QLabel("Highlight")
-    highlight_title.setObjectName("sectionTitle")
-    subtitle_layout.addWidget(highlight_title)
+    highlight_card, highlight_card_layout = _build_collapsible_section("Keyword Highlight", start_expanded=False)
+    highlight_hint = QLabel("Use this when you want important words to stand out on screen.")
+    highlight_hint.setObjectName("helperLabel")
+    highlight_hint.setWordWrap(True)
+    highlight_card_layout.addWidget(highlight_hint)
 
-    gui.subtitle_keyword_highlight_cb = QCheckBox("Highlight keyword")
+    gui.subtitle_keyword_highlight_cb = QCheckBox("Highlight key words")
     gui.subtitle_keyword_highlight_cb.setChecked(False)
     gui.subtitle_highlight_color_combo = QComboBox()
     gui.subtitle_highlight_color_combo.addItems(["Yellow", "Cyan", "Green", "Pink"])
     gui.subtitle_highlight_mode_combo = QComboBox()
     gui.subtitle_highlight_mode_combo.addItems(["Auto", "Manual", "Auto + Manual"])
-    subtitle_layout.addWidget(gui.subtitle_keyword_highlight_cb)
+    highlight_card_layout.addWidget(gui.subtitle_keyword_highlight_cb)
 
     highlight_color_row = QHBoxLayout()
     highlight_color_row.addWidget(QLabel("Color:"))
     highlight_color_row.addWidget(gui.subtitle_highlight_color_combo, 1)
-    subtitle_layout.addLayout(highlight_color_row)
+    highlight_card_layout.addLayout(highlight_color_row)
 
     highlight_mode_row = QHBoxLayout()
-    highlight_mode_row.addWidget(QLabel("Mode:"))
+    highlight_mode_row.addWidget(QLabel("Source:"))
     highlight_mode_row.addWidget(gui.subtitle_highlight_mode_combo, 1)
-    subtitle_layout.addLayout(highlight_mode_row)
+    highlight_card_layout.addLayout(highlight_mode_row)
+    subtitle_layout.addWidget(highlight_card)
+
+    custom_divider = QFrame()
+    custom_divider.setFrameShape(QFrame.HLine)
+    custom_divider.setStyleSheet("color: #30425b;")
+    subtitle_layout.addWidget(custom_divider)
+
+    custom_title_card, custom_title_layout = _build_collapsible_section("Adjust Details", start_expanded=False)
+    custom_hint = QLabel("Adjust font, placement, background, and animation when the ready-made styles are not enough.")
+    custom_hint.setObjectName("helperLabel")
+    custom_hint.setWordWrap(True)
+    custom_title_layout.addWidget(custom_hint)
 
     custom_wrapper = QFrame()
     custom_wrapper.setObjectName("statusCard")
@@ -365,9 +440,9 @@ def build_start_group(gui, left_layout):
     gui.subtitle_background_color_hex = "#000000"
     gui.subtitle_background_color_btn.clicked.connect(gui.choose_subtitle_background_color)
     gui.subtitle_position_mode_combo = QComboBox()
-    gui.subtitle_position_mode_combo.addItem("Anchor Preset", "anchor")
+    gui.subtitle_position_mode_combo.addItem("Quick placement", "anchor")
     gui.subtitle_position_mode_combo.addItem("Custom X/Y", "custom")
-    gui.subtitle_align_label = QLabel("Anchor:")
+    gui.subtitle_align_label = QLabel("Placement:")
     gui.subtitle_align_combo = QComboBox()
     gui.subtitle_align_combo.addItems(["Bottom", "Bottom Left", "Bottom Right", "Center", "Top"])
     gui.subtitle_align_combo.setCurrentText("Bottom")
@@ -381,7 +456,7 @@ def build_start_group(gui, left_layout):
     gui.subtitle_custom_y_spin.setRange(0, 100)
     gui.subtitle_custom_y_spin.setValue(86)
     gui.subtitle_custom_y_spin.setSuffix(" %")
-    gui.subtitle_background_cb = QCheckBox("Background")
+    gui.subtitle_background_cb = QCheckBox("Background Box")
     gui.subtitle_background_cb.setChecked(False)
     gui.subtitle_outline_cb = QCheckBox("Text Outline")
     gui.subtitle_outline_cb.setChecked(True)
@@ -421,9 +496,9 @@ def build_start_group(gui, left_layout):
     custom_controls_layout.addWidget(gui.subtitle_font_size_spin, 1, 1)
     custom_controls_layout.addWidget(QLabel("Text Color:"), 2, 0)
     custom_controls_layout.addWidget(gui.subtitle_color_btn, 2, 1)
-    custom_controls_layout.addWidget(QLabel("BG Color:"), 3, 0)
+    custom_controls_layout.addWidget(QLabel("Background color:"), 3, 0)
     custom_controls_layout.addWidget(gui.subtitle_background_color_btn, 3, 1)
-    custom_controls_layout.addWidget(QLabel("Position Mode:"), 4, 0)
+    custom_controls_layout.addWidget(QLabel("Placement mode:"), 4, 0)
     custom_controls_layout.addWidget(gui.subtitle_position_mode_combo, 4, 1)
     custom_controls_layout.addWidget(gui.subtitle_align_label, 5, 0)
     custom_controls_layout.addWidget(gui.subtitle_align_combo, 5, 1)
@@ -435,7 +510,7 @@ def build_start_group(gui, left_layout):
     custom_controls_layout.addWidget(gui.subtitle_animation_combo, 8, 1)
     custom_controls_layout.addWidget(gui.subtitle_animation_time_label, 9, 0)
     custom_controls_layout.addWidget(gui.subtitle_animation_time_spin, 9, 1)
-    custom_controls_layout.addWidget(QLabel("BG Alpha:"), 10, 0)
+    custom_controls_layout.addWidget(QLabel("Background opacity:"), 10, 0)
     custom_controls_layout.addWidget(gui.subtitle_bg_alpha_spin, 10, 1)
     custom_controls_layout.addWidget(gui.subtitle_karaoke_timing_label, 11, 0)
     custom_controls_layout.addWidget(gui.subtitle_karaoke_timing_combo, 11, 1)
@@ -443,9 +518,16 @@ def build_start_group(gui, left_layout):
     custom_controls_layout.addWidget(gui.subtitle_outline_cb, 12, 1)
     custom_controls_layout.addWidget(gui.subtitle_bold_cb, 13, 0)
     custom_controls_layout.addWidget(gui.subtitle_single_line_cb, 13, 1)
+    gui.subtitle_single_line_hint_label = QLabel(
+        "Shows one subtitle line at a time by splitting long subtitles into shorter cues."
+    )
+    gui.subtitle_single_line_hint_label.setObjectName("helperLabel")
+    gui.subtitle_single_line_hint_label.setWordWrap(True)
+    custom_controls_layout.addWidget(gui.subtitle_single_line_hint_label, 14, 0, 1, 2)
 
     custom_wrapper_layout.addWidget(gui.custom_settings_content)
-    subtitle_layout.addWidget(custom_wrapper)
+    custom_title_layout.addWidget(custom_wrapper)
+    subtitle_layout.addWidget(custom_title_card)
 
     gui.subtitle_preset_summary_label = QLabel()
     gui.subtitle_preset_summary_label.setObjectName("helperLabel")
@@ -468,20 +550,34 @@ def build_start_group(gui, left_layout):
     gui.custom_settings_toggle_btn.toggled.connect(_toggle_custom_section)
     control_layout.addWidget(subtitle_card)
 
-    action_card, action_layout = _build_collapsible_section("Section 7: Action + Progress")
+    action_card, action_layout = _build_collapsible_section("6. Generate")
     action_layout.addWidget(gui.run_all_btn)
+    gui.generate_hint_label = QLabel(
+        "Generate updates subtitles, voice, and preview using your latest settings."
+    )
+    gui.generate_hint_label.setObjectName("helperLabel")
+    gui.generate_hint_label.setWordWrap(True)
+    action_layout.addWidget(gui.generate_hint_label)
+    guidance_card = QFrame()
+    guidance_card.setObjectName("statusCard")
+    guidance_layout = QVBoxLayout(guidance_card)
+    guidance_layout.setContentsMargins(12, 12, 12, 12)
+    guidance_layout.setSpacing(6)
+    guidance_layout.addWidget(gui.workflow_status_badge, 0, Qt.AlignLeft)
+    guidance_layout.addWidget(gui.next_step_label)
+    guidance_layout.addWidget(gui.readiness_label)
+    guidance_layout.addWidget(gui.workflow_hint_label)
+    action_layout.addWidget(guidance_card)
     action_layout.addWidget(QLabel("Progress:"))
-    gui.progress_audio_label = QLabel("[ ] Audio analyzed")
-    gui.progress_subtitle_label = QLabel("[ ] Subtitle created")
-    gui.progress_translate_label = QLabel("[ ] Translating")
-    gui.progress_voice_label = QLabel("[ ] Generating voice")
+    gui.progress_audio_label = QLabel("[ ] Audio ready")
+    gui.progress_subtitle_label = QLabel("[ ] Original subtitles ready")
+    gui.progress_translate_label = QLabel("[ ] Vietnamese subtitles ready")
+    gui.progress_voice_label = QLabel("[ ] Voice/audio ready")
     action_layout.addWidget(gui.progress_audio_label)
     action_layout.addWidget(gui.progress_subtitle_label)
     action_layout.addWidget(gui.progress_translate_label)
     action_layout.addWidget(gui.progress_voice_label)
     control_layout.addWidget(action_card)
-
-    _build_hidden_status_widgets(gui)
 
     left_layout.addWidget(control_group)
 

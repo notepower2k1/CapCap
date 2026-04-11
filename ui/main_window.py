@@ -364,9 +364,9 @@ class VideoTranslatorGUI(QMainWindow):
             "tiktok": {
                 "label": "TikTok",
                 "font_name": "Montserrat",
-                "font_size": 64,
+                "font_size": 68,
                 "font_color": "#FFFFFF",
-                "highlight_color": "#00E5FF",
+                "highlight_color": "#FFD400",
                 "outline_color": "#000000",
                 "outline_width": 7,
                 "shadow_color": "#000000",
@@ -375,9 +375,11 @@ class VideoTranslatorGUI(QMainWindow):
                 "background_box": False,
                 "background_color": "#000000",
                 "background_alpha": 0.0,
-                "animation": "Pop In",
+                "animation": "Word Highlight Karaoke",
                 "bold": True,
-                "summary": "Bold, large, white subtitle with heavy black stroke and punchy pop-in. Best for short-form, high-energy captions.",
+                "auto_keyword_highlight": True,
+                "highlight_mode": "Auto + Manual",
+                "summary": "Large subtitle with karaoke-style word timing and highlighted keywords for short-form videos.",
             },
             "youtube": {
                 "label": "YouTube",
@@ -392,10 +394,12 @@ class VideoTranslatorGUI(QMainWindow):
                 "shadow_alpha": 0.35,
                 "background_box": True,
                 "background_color": "#000000",
-                "background_alpha": 0.4,
+                "background_alpha": 1.0,
                 "animation": "Fade In",
                 "bold": False,
-                "summary": "Clean white subtitle with subtle box background and soft fade. Built for long-form readability.",
+                "auto_keyword_highlight": False,
+                "highlight_mode": "Manual",
+                "summary": "Clean subtitle with a solid background box for long-form readability.",
             },
             "minimal": {
                 "label": "Short",
@@ -1623,19 +1627,19 @@ class VideoTranslatorGUI(QMainWindow):
         translation_running = steps.get("translate_raw") == "running" or steps.get("refine_translation") == "running"
         voice_running = steps.get("generate_tts") == "running" or steps.get("mix_audio") == "running"
 
-        self.progress_audio_label.setText(("[OK] " if has_audio else "[ ] ") + "Audio analyzed")
-        self.progress_subtitle_label.setText(("[OK] " if has_subtitle else "[ ] ") + "Subtitle created")
+        self.progress_audio_label.setText(("[OK] " if has_audio else "[ ] ") + "Audio ready")
+        self.progress_subtitle_label.setText(("[OK] " if has_subtitle else "[ ] ") + "Original subtitles ready")
         if translation_running:
-            self.progress_translate_label.setText("[...] Translating...")
+            self.progress_translate_label.setText("[...] Preparing Vietnamese subtitles...")
         else:
-            self.progress_translate_label.setText(("[OK] " if has_translation else "[ ] ") + "Translating")
+            self.progress_translate_label.setText(("[OK] " if has_translation else "[ ] ") + "Vietnamese subtitles ready")
 
         if self.get_output_mode_key() == "subtitle":
-            self.progress_voice_label.setText("[ ] Generating voice (not needed)")
+            self.progress_voice_label.setText("[ ] Voice/audio not needed")
         elif voice_running:
-            self.progress_voice_label.setText("[...] Generating voice")
+            self.progress_voice_label.setText("[...] Preparing voice/audio...")
         else:
-            self.progress_voice_label.setText(("[OK] " if has_voice else "[ ] ") + "Generating voice")
+            self.progress_voice_label.setText(("[OK] " if has_voice else "[ ] ") + "Voice/audio ready")
 
     def update_preview_context_label(self, has_subtitles: bool, has_voice_audio: bool):
         subtitle_source = "Vietnamese review track" if self.current_translated_segments else ("original subtitle track" if self.current_segments else "no subtitle track yet")
@@ -1805,6 +1809,13 @@ class VideoTranslatorGUI(QMainWindow):
             if hasattr(self, "subtitle_bg_alpha_spin"):
                 self.subtitle_bg_alpha_spin.setValue(float(preset.get("background_alpha", self.subtitle_bg_alpha_spin.value())))
             self.subtitle_bold_cb.setChecked(bool(preset.get("bold", False)))
+            if hasattr(self, "subtitle_keyword_highlight_cb"):
+                self.subtitle_keyword_highlight_cb.setChecked(bool(preset.get("auto_keyword_highlight", False)))
+            if hasattr(self, "subtitle_highlight_color_combo"):
+                color_name = "Yellow" if preset.get("highlight_color", "").upper() == "#FFD400" else "Cyan"
+                self.subtitle_highlight_color_combo.setCurrentText(color_name)
+            if hasattr(self, "subtitle_highlight_mode_combo"):
+                self.subtitle_highlight_mode_combo.setCurrentText(str(preset.get("highlight_mode", "Auto")))
         self.subtitle_font_combo.setEnabled(is_custom)
         self.subtitle_animation_combo.setEnabled(is_custom)
         self.subtitle_karaoke_timing_combo.setEnabled(is_custom)
