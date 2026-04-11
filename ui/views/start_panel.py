@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSpinBox,
-    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -579,21 +578,6 @@ def build_start_group(gui, left_layout):
     action_layout.addWidget(gui.progress_translate_label)
     action_layout.addWidget(gui.progress_voice_label)
     control_layout.addWidget(action_card)
-
-    log_card, log_layout = _build_collapsible_section("Logs", start_expanded=False)
-    log_hint = QLabel("Use this to inspect runtime details when preview, export, or AI steps behave unexpectedly.")
-    log_hint.setObjectName("helperLabel")
-    log_hint.setWordWrap(True)
-    gui.log_view = QTextEdit()
-    gui.log_view.setReadOnly(True)
-    gui.log_view.setMinimumHeight(180)
-    gui.log_view.setPlaceholderText("Runtime logs will appear here.")
-    clear_log_btn = QPushButton("Clear Logs")
-    clear_log_btn.clicked.connect(gui.clear_log)
-    log_layout.addWidget(log_hint)
-    log_layout.addWidget(gui.log_view)
-    log_layout.addWidget(clear_log_btn)
-    control_layout.addWidget(log_card)
 
     left_layout.addWidget(control_group)
 

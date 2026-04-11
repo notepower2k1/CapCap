@@ -1,43 +1,23 @@
 ﻿import os
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QLabel, QMessageBox, QDialog, QScrollArea, QVBoxLayout
 
 
 def log_message(gui, message: str):
     if not message:
         return
-    message = str(message)
-    gui._log_lines.append(message)
-    trimmed = False
-    if len(gui._log_lines) > 500:
-        gui._log_lines = gui._log_lines[-500:]
-        trimmed = True
-    if not hasattr(gui, "log_view") or gui.log_view is None:
-        return
-    if trimmed or not gui.log_view.toPlainText():
-        gui.log_view.setPlainText("\n".join(gui._log_lines))
-    else:
-        cursor = gui.log_view.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        if gui.log_view.toPlainText():
-            cursor.insertText("\n")
-        cursor.insertText(message)
-        gui.log_view.setTextCursor(cursor)
-    gui.log_view.verticalScrollBar().setValue(gui.log_view.verticalScrollBar().maximum())
+    print(str(message))
 
 
 def clear_log(gui):
-    gui._log_lines = []
-    if hasattr(gui, "log_view"):
-        gui.log_view.setPlainText("")
+    return None
 
 
 def show_error(gui, title: str, short_msg: str, details: str = ""):
     if details:
-        log_message(gui, f"[{title}] {details}")
-        QMessageBox.critical(gui, title, f"{short_msg}\n\n(See LOG tab for details)")
+        print(f"[{title}] {details}")
+        QMessageBox.critical(gui, title, short_msg)
     else:
         QMessageBox.critical(gui, title, short_msg)
 

@@ -2,7 +2,6 @@ import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -13,7 +12,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
-    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -202,14 +200,6 @@ def _build_hidden_runtime_widgets(gui):
     gui.open_temp_btn = QPushButton("Open Temp Folder", gui)
     gui.open_temp_btn.clicked.connect(lambda: gui.open_folder(gui.audio_folder_edit.text()))
 
-    gui.log_view = QTextEdit(gui)
-    gui.log_view.setReadOnly(True)
-    gui.log_view.setPlaceholderText("Errors and detailed logs will appear here...")
-    gui.log_copy_btn = QPushButton("Copy Log", gui)
-    gui.log_copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(gui.log_view.toPlainText()))
-    gui.log_clear_btn = QPushButton("Clear Log", gui)
-    gui.log_clear_btn.clicked.connect(gui.clear_log)
-
     hidden_widgets = [
         gui.audio_folder_edit,
         gui.audio_source_edit,
@@ -224,9 +214,6 @@ def _build_hidden_runtime_widgets(gui):
         gui.auto_preview_frame_cb,
         gui.show_artifacts_btn,
         gui.open_temp_btn,
-        gui.log_view,
-        gui.log_copy_btn,
-        gui.log_clear_btn,
     ]
     for widget in hidden_widgets:
         widget.hide()
