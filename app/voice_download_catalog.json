@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "voices": [
+    {
+      "id": "banmai",
+      "name": "Banmai (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/banmai.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "chieuthanh",
+      "name": "Chieuthanh (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/chieuthanh.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "cuc",
+      "name": "Cuc (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/cuc.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "duyoryx3175",
+      "name": "Duyoryx3175 (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/duyoryx3175.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "lacphi",
+      "name": "Lacphi (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/lacphi.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "maiphuong",
+      "name": "Maiphuong (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/maiphuong.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "manhdung",
+      "name": "Manhdung (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/manhdung.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "minhkhang",
+      "name": "Minhkhang (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/minhkhang.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "minhquang",
+      "name": "Minhquang (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/minhquang.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "ngochuyen",
+      "name": "Ngochuyen (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/ngochuyen.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "ngochuyennew",
+      "name": "Ngochuyennew (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/ngochuyennew.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "phuongtrang",
+      "name": "Phuongtrang (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/phuongtrang.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "taian2",
+      "name": "Taian2 (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/taian2.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "thao",
+      "name": "Thao (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/thao.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "trungkien",
+      "name": "Trungkien (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/trungkien.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "tuananh",
+      "name": "Tuananh (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/tuananh.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper"]
+    },
+    {
+      "id": "vi_VN-vais1000-medium",
+      "name": "Vais1000 Medium (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/vi_VN-vais1000-medium.onnx",
+      "language": "vi",
+      "gender": "male",
+      "tier": "free",
+      "enabled": true,
+      "tags": ["local", "piper", "fast"]
+    }
+  ]
+}

@@ -29,6 +29,7 @@ class TranslationOrchestrator:
         src_lang: str = "zh-Hans",
         target_lang: str = "vi",
         enable_polish: bool = True,
+        optimize_subtitles: bool = True,
         ms_batch_size: int = 50,
         polish_batch_size: int = 25,
         style_instruction: str = "",
@@ -65,16 +66,17 @@ class TranslationOrchestrator:
 
                     print(f"[AI Translation] Success: completed via {', '.join(providers_used) or 'AI'}")
                     final_segments = clone_with_texts(segments, translated_texts, provider=provider_type, polished=True)
-                    final_segments = self._maybe_optimize_subtitle_segments(
-                        polisher=polisher,
-                        provider_type=provider_type,
-                        source_segments=segments,
-                        translated_segments=final_segments,
-                        src_lang=normalized_src,
-                        target_lang=target_lang,
-                        warnings=warnings,
-                        style_instruction=style_instruction,
-                    )
+                    if optimize_subtitles:
+                        final_segments = self._maybe_optimize_subtitle_segments(
+                            polisher=polisher,
+                            provider_type=provider_type,
+                            source_segments=segments,
+                            translated_segments=final_segments,
+                            src_lang=normalized_src,
+                            target_lang=target_lang,
+                            warnings=warnings,
+                            style_instruction=style_instruction,
+                        )
                     return TranslationResult(
                         success=True,
                         segments=final_segments,

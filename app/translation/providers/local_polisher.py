@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..errors import TranslationConfigError, TranslationProviderError, TranslationValidationError
 from ..srt_utils import parse_numbered_lines, validate_texts
-from runtime_paths import models_path
+from runtime_paths import join_root, models_path
 
 
 class LocalPolisherProvider:
@@ -20,6 +20,19 @@ class LocalPolisherProvider:
     @classmethod
     def _candidate_cuda_bin_dirs(cls) -> list[str]:
         candidates = []
+        workspace_cuda_bin = join_root("bin", "cuda12_fw")
+        if os.path.isdir(workspace_cuda_bin):
+            candidates.append(workspace_cuda_bin)
+        try:
+            import site
+
+            site_roots = list(site.getsitepackages()) + [site.getusersitepackages()]
+        except Exception:
+            site_roots = []
+        for site_root in site_roots:
+            llama_lib = os.path.join(str(site_root or "").strip(), "llama_cpp", "lib")
+            if os.path.isdir(llama_lib):
+                candidates.append(llama_lib)
         toolkit_root = str(os.getenv("CUDAToolkit_ROOT", "")).strip()
         if toolkit_root:
             candidates.append(os.path.join(toolkit_root, "bin"))
@@ -267,21 +280,40 @@ class LocalPolisherProvider:
                 from llama_cpp import Llama
             except Exception as exc:
                 raise TranslationConfigError(
-                    "llama-cpp-python is not installed. Run: python -m pip install llama-cpp-python"
+                    "llama-cpp-python could not be loaded. "
+                    "This usually means the package is missing, or its native DLL dependencies "
+                    "(often CUDA/runtime DLLs for a GPU build) are not available."
                 ) from exc
 
-            model = Llama(
-                model_path=self.model_path,
-                n_ctx=self.n_ctx,
-                n_batch=self.n_batch,
-                n_ubatch=self.n_ubatch,
-                n_threads=self.n_threads,
-                n_threads_batch=self.n_threads_batch,
-                n_gpu_layers=self.gpu_layers,
-                flash_attn=self.flash_attn,
-                offload_kqv=True,
-                verbose=False,
-            )
+            gpu_kwargs = {
+                "model_path": self.model_path,
+                "n_ctx": self.n_ctx,
+                "n_batch": self.n_batch,
+                "n_ubatch": self.n_ubatch,
+                "n_threads": self.n_threads,
+                "n_threads_batch": self.n_threads_batch,
+                "n_gpu_layers": self.gpu_layers,
+                "flash_attn": self.flash_attn,
+                "offload_kqv": True,
+                "verbose": False,
+            }
+            try:
+                model = Llama(**gpu_kwargs)
+            except Exception as exc:
+                if self.gpu_layers <= 0 and not self.flash_attn:
+                    raise TranslationConfigError(f"Local GGUF model initialization failed: {exc}") from exc
+                print(f"[Local GGUF] GPU initialization failed, retrying on CPU: {exc}")
+                cpu_kwargs = dict(gpu_kwargs)
+                cpu_kwargs["n_gpu_layers"] = 0
+                cpu_kwargs["flash_attn"] = False
+                cpu_kwargs["offload_kqv"] = False
+                try:
+                    model = Llama(**cpu_kwargs)
+                except Exception as cpu_exc:
+                    raise TranslationConfigError(
+                        "Local GGUF model could not start on either GPU or CPU. "
+                        f"GPU error: {exc} | CPU retry error: {cpu_exc}"
+                    ) from cpu_exc
             self.__class__._cached_model = model
             self.__class__._cached_model_path = self.model_path
             self.__class__._cached_signature = signature

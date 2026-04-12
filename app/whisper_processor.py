@@ -48,7 +48,15 @@ KNOWN_FASTER_WHISPER_MODELS = {
 
 def _resolve_model_name(model_path):
     if not model_path:
-        return "base"
+        local_default = models_path("faster_whisper", "base")
+        return local_default if os.path.isdir(local_default) else "base"
+
+    model_path = str(model_path).strip()
+    if model_path in KNOWN_FASTER_WHISPER_MODELS:
+        local_dir = models_path("faster_whisper", model_path)
+        if os.path.isdir(local_dir):
+            return local_dir
+        return model_path
 
     if os.path.isdir(model_path):
         return model_path
@@ -59,6 +67,9 @@ def _resolve_model_name(model_path):
 
     stem = Path(model_path).stem
     if stem in KNOWN_FASTER_WHISPER_MODELS:
+        local_dir = models_path("faster_whisper", stem)
+        if os.path.isdir(local_dir):
+            return local_dir
         return stem
 
     if model_path in KNOWN_FASTER_WHISPER_MODELS:

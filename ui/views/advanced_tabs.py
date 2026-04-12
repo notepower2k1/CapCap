@@ -54,6 +54,19 @@ def build_advanced_group(gui, left_layout):
 
 
 def _build_audio_mix_controls(gui, advanced_layout):
+    ai_title = QLabel("AI Refinement")
+    advanced_layout.addWidget(ai_title)
+
+    gui.ai_subtitle_optimization_cb = QCheckBox("Enable AI Subtitle Optimization")
+    gui.ai_subtitle_optimization_cb.setChecked(False)
+    advanced_layout.addWidget(gui.ai_subtitle_optimization_cb)
+
+    gui.ai_subtitle_optimization_hint = gui.make_helper_label(
+        "Runs an extra AI pass to refine subtitle readability after translation. Slower, but can improve subtitle phrasing."
+    )
+    gui.ai_subtitle_optimization_hint.setParent(gui)
+    advanced_layout.addWidget(gui.ai_subtitle_optimization_hint)
+
     source_title = QLabel("Audio for Preview / Export")
     advanced_layout.addWidget(source_title)
 

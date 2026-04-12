@@ -3,6 +3,7 @@ from .chunking_service import ChunkingService
 from .engine_runtime import EngineRuntime
 from .gui_project_bridge import GUIProjectBridge
 from .project_service import ProjectService
+from .resource_download_service import ResourceDownloadService
 from .segment_service import SegmentService
 from .segment_regroup_service import SegmentRegroupService
 from .voice_catalog_service import VoiceCatalogService
@@ -14,6 +15,7 @@ __all__ = [
     "EngineRuntime",
     "GUIProjectBridge",
     "ProjectService",
+    "ResourceDownloadService",
     "SegmentRegroupService",
     "SegmentService",
     "VoiceCatalogService",

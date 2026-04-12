@@ -10,7 +10,7 @@ if APP_PATH not in sys.path:
     sys.path.append(APP_PATH)
 
 from runtime_paths import bin_path
-from services import EngineRuntime, WorkflowRuntime
+from services import EngineRuntime, ResourceDownloadService, WorkflowRuntime
 
 
 class VocalSeparationWorker(QThread):
@@ -189,11 +189,42 @@ class RuntimeAssetsWorker(QThread):
             self.finished.emit("", details or str(exc))
 
 
+class ResourceDownloadWorker(QThread):
+    finished = Signal(str, str)
+    progress = Signal(int, str)
+
+    def __init__(self, workspace_root, resource_id):
+        super().__init__()
+        self.workspace_root = workspace_root
+        self.resource_id = resource_id
+
+    def run(self):
+        try:
+            service = ResourceDownloadService(self.workspace_root)
+            service.download_resource(self.resource_id, progress_cb=self.progress.emit)
+            self.finished.emit(self.resource_id, "")
+        except Exception as exc:
+            details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
+            print(f"ResourceDownloadWorker Error:\n{details}")
+            self.finished.emit(self.resource_id, details or str(exc))
+
+
 class PrepareWorkflowWorker(QThread):
     finished = Signal(str, str)
     step_started = Signal(str)
 
-    def __init__(self, workspace_root, video_path, mode, audio_handling_mode, source_language, translator_ai, translator_style, whisper_model_name):
+    def __init__(
+        self,
+        workspace_root,
+        video_path,
+        mode,
+        audio_handling_mode,
+        source_language,
+        translator_ai,
+        optimize_subtitles,
+        translator_style,
+        whisper_model_name,
+    ):
         super().__init__()
         self.workspace_root = workspace_root
         self.video_path = video_path
@@ -201,6 +232,7 @@ class PrepareWorkflowWorker(QThread):
         self.audio_handling_mode = audio_handling_mode
         self.source_language = source_language
         self.translator_ai = translator_ai
+        self.optimize_subtitles = optimize_subtitles
         self.translator_style = translator_style
         self.whisper_model_name = whisper_model_name
 
@@ -214,6 +246,7 @@ class PrepareWorkflowWorker(QThread):
                 mode=self.mode,
                 audio_handling_mode=self.audio_handling_mode,
                 translator_ai=self.translator_ai,
+                optimize_subtitles=self.optimize_subtitles,
                 translator_style=self.translator_style,
                 whisper_model_name=self.whisper_model_name,
                 step_callback=lambda s: self.step_started.emit(s)

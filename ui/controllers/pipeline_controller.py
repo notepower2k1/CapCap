@@ -126,6 +126,7 @@ class PipelineController:
             self.gui.get_audio_handling_mode(),
             self.gui.get_source_language_code(),
             self.gui.is_ai_polish_enabled(),
+            self.gui.is_ai_subtitle_optimization_enabled(),
             self.gui.get_ai_style_instruction(),
             self.gui.get_whisper_model_path(),
         )

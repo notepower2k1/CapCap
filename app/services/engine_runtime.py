@@ -39,6 +39,7 @@ class EngineRuntime:
         model_path=None,
         src_lang: str = "auto",
         enable_polish: bool = True,
+        optimize_subtitles: bool = True,
         style_instruction: str = "",
     ) -> str:
         return self.translator.translate_srt(
@@ -46,6 +47,7 @@ class EngineRuntime:
             model_path=model_path,
             src_lang=src_lang,
             enable_polish=enable_polish,
+            optimize_subtitles=optimize_subtitles,
             style_instruction=style_instruction,
         )
 
@@ -56,6 +58,7 @@ class EngineRuntime:
         model_path=None,
         src_lang: str = "auto",
         enable_polish: bool = True,
+        optimize_subtitles: bool = True,
         style_instruction: str = "",
     ):
         return self.translator.translate_segments(
@@ -63,6 +66,7 @@ class EngineRuntime:
             model_path=model_path,
             src_lang=src_lang,
             enable_polish=enable_polish,
+            optimize_subtitles=optimize_subtitles,
             style_instruction=style_instruction,
         )
 

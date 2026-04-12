@@ -126,6 +126,7 @@ class PrepareWorkflow:
         mode: str = "subtitle",
         audio_handling_mode: str = "fast",
         translator_ai: bool = True,
+        optimize_subtitles: bool = False,
         translator_style: str = "",
         whisper_model_name: str = "ggml-base.bin",
         step_callback=None,
@@ -272,6 +273,7 @@ class PrepareWorkflow:
                 raw_segments,
                 src_lang=source_language,
                 enable_polish=translator_ai,
+                optimize_subtitles=optimize_subtitles,
                 style_instruction=project_state.translator_style,
             )
             segment_models = self.segment_service.apply_translations(segment_models, translated_segments)
@@ -282,16 +284,12 @@ class PrepareWorkflow:
                 segment_models,
             )
             project_state.set_step_status("translate_raw", "done")
-            if translator_ai:
-                project_state.set_step_status("refine_translation", "done")
-            else:
-                project_state.set_step_status("refine_translation", "skipped")
+            project_state.set_step_status("refine_translation", "done" if optimize_subtitles else "skipped")
             self.project_service.save_project(project_state)
         except Exception as e:
             print(f"[AI Translation] Error: {e}")
             project_state.set_step_status("translate_raw", "failed")
-            if translator_ai:
-                project_state.set_step_status("refine_translation", "failed")
+            project_state.set_step_status("refine_translation", "skipped")
             self.project_service.save_project(project_state)
             raise
         translate_elapsed = time.perf_counter() - translate_started

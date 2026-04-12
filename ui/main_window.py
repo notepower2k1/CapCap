@@ -22,7 +22,7 @@ APP_PATH = os.path.join(os.path.dirname(__file__), '..', 'app')
 if APP_PATH not in sys.path:
     sys.path.append(APP_PATH)
 
-from services import GUIProjectBridge, ProjectService, VoiceCatalogService
+from services import GUIProjectBridge, ProjectService, ResourceDownloadService, VoiceCatalogService
 from controllers import PipelineController, PreviewController, SubtitleController
 from helpers import (
     build_guidance_state,
@@ -77,7 +77,7 @@ from translation.providers import LocalPolisherProvider
 from runtime_paths import app_path, asset_path, models_path, workspace_root
 from workers import (
     ExtractionWorker,
-    RuntimeAssetsWorker,
+    ResourceDownloadWorker,
     SegmentAudioPreviewWorker,
     VoiceSamplePreviewWorker,
     VocalSeparationWorker,
@@ -330,6 +330,12 @@ class VideoTranslatorGUI(QMainWindow):
         self.voice_preview_dialog = None
         self._voice_preview_row_buttons = {}
         self._tracked_progress_dialogs = []
+        self._resource_download_state = {
+            "resource_id": "",
+            "percent": 0,
+            "message": "",
+            "running": False,
+        }
         # Simple pipeline runner (Run All)
         self._pipeline_active = False
         self._pipeline_step = ""
@@ -602,6 +608,23 @@ class VideoTranslatorGUI(QMainWindow):
             return ""
         return raw
 
+    def _voice_gender_sort_rank(self, value: str) -> int:
+        normalized = self._normalize_gender_value(value)
+        if normalized == "female":
+            return 0
+        if normalized == "male":
+            return 1
+        return 2
+
+    def _voice_entry_sort_key(self, entry: dict) -> tuple:
+        provider = str(entry.get("provider", "")).strip().lower()
+        name = str(entry.get("name", entry.get("id", ""))).strip().lower()
+        return (
+            self._voice_gender_sort_rank(str(entry.get("gender", ""))),
+            0 if provider == "edge" else 1,
+            name,
+        )
+
     def _apply_piper_voice_meta_overrides(self):
         voices_meta = self._load_piper_voice_meta()
         if not voices_meta:
@@ -808,6 +831,7 @@ class VideoTranslatorGUI(QMainWindow):
             if provider not in {"piper", "edge"}:
                 continue
             self.voice_catalog_entries.append(entry)
+        self.voice_catalog_entries.sort(key=self._voice_entry_sort_key)
         self.voice_catalog_map = {entry.get("id", ""): entry for entry in self.voice_catalog_entries if entry.get("id")}
         if not hasattr(self, "free_voice_combo"):
             return
@@ -1003,6 +1027,301 @@ class VideoTranslatorGUI(QMainWindow):
         except Exception:
             pass
         self._update_progress_reopen_button()
+
+    def _resource_service(self) -> ResourceDownloadService:
+        return ResourceDownloadService(self.workspace_root)
+
+    def _refresh_resource_manager_dialog(self, dialog):
+        rows = getattr(dialog, "_resource_rows", {})
+        if not rows:
+            return
+        resources = {item["id"]: item for item in self._resource_service().list_resources()}
+        state = dict(getattr(self, "_resource_download_state", {}) or {})
+        active_resource_id = str(state.get("resource_id", "") or "")
+        worker_running = bool(state.get("running"))
+        for resource_id, row in rows.items():
+            item = resources.get(resource_id, row.get("item", {}))
+            row["item"] = item
+            status = str(item.get("status", "missing")).strip().lower()
+            target_dir = str(item.get("target_dir", "")).strip()
+            description = str(item.get("description", "")).strip()
+            status_label = row.get("status_label")
+            if status_label is not None:
+                lines = [status.title()]
+                if description:
+                    lines.append(description)
+                if target_dir:
+                    lines.append(target_dir)
+                status_label.setText("\n".join(lines))
+            button = row.get("button")
+            if button is not None:
+                if worker_running and resource_id == active_resource_id:
+                    button.setText("Downloading...")
+                    button.setEnabled(False)
+                elif status == "installed":
+                    button.setText("Installed")
+                    button.setEnabled(False)
+                elif resource_id == "voice:pack" and status == "partial":
+                    button.setText("Complete Pack")
+                    button.setEnabled(not worker_running)
+                else:
+                    button.setText("Download")
+                    button.setEnabled(not worker_running)
+
+        footer_text = str(state.get("message", "") or "").strip() or "Select a resource to download."
+        if hasattr(dialog, "_resource_footer"):
+            dialog._resource_footer.setText(footer_text)
+        if hasattr(dialog, "_resource_progress_bar"):
+            try:
+                value = int(state.get("percent", 0))
+            except Exception:
+                value = 0
+            if worker_running and value < 0:
+                dialog._resource_progress_bar.setRange(0, 0)
+            else:
+                dialog._resource_progress_bar.setRange(0, 100)
+                dialog._resource_progress_bar.setValue(max(0, min(100, value)))
+
+    def _on_resource_download_progress(self, percent: int, message: str):
+        try:
+            value = int(percent)
+        except Exception:
+            value = -1
+        self._resource_download_state = {
+            "resource_id": str(getattr(self, "_resource_download_resource_id", "") or ""),
+            "percent": value,
+            "message": str(message or "").strip() or "Downloading resource...",
+            "running": True,
+        }
+        dialog = getattr(self, "_resource_download_dialog", None)
+        if dialog is not None and hasattr(dialog, "_resource_footer"):
+            dialog._resource_footer.setText(str(message or "").strip() or "Downloading resource...")
+        if dialog is not None and hasattr(dialog, "_resource_progress_bar"):
+            if value < 0:
+                dialog._resource_progress_bar.setRange(0, 0)
+            else:
+                if dialog._resource_progress_bar.maximum() == 0:
+                    dialog._resource_progress_bar.setRange(0, 100)
+                dialog._resource_progress_bar.setValue(max(0, min(100, value)))
+
+    def _on_resource_download_finished(self, resource_id: str, error: str):
+        worker = getattr(self, "resource_download_worker", None)
+        self.resource_download_worker = None
+        self._resource_download_resource_id = ""
+        self._resource_download_state = {
+            "resource_id": "",
+            "percent": 0 if error else 100,
+            "message": "Download failed." if error else "Download completed.",
+            "running": False,
+        }
+        dialog = getattr(self, "_resource_download_dialog", None)
+        if dialog is not None and hasattr(dialog, "_resource_footer"):
+            dialog._resource_footer.setText("Download failed." if error else "Download completed.")
+            self._refresh_resource_manager_dialog(dialog)
+        if dialog is not None and hasattr(dialog, "_resource_progress_bar"):
+            dialog._resource_progress_bar.setRange(0, 100)
+            dialog._resource_progress_bar.setValue(100 if not error else 0)
+        if not error:
+            try:
+                self.load_voice_preview_catalog()
+            except Exception:
+                pass
+            self.refresh_ui_state()
+            return
+        self.show_error("Download Failed", f"Could not download resource '{resource_id}'.", error)
+
+    def _start_resource_download(self, dialog, resource_id: str):
+        worker = getattr(self, "resource_download_worker", None)
+        if worker is not None and worker.isRunning():
+            QMessageBox.information(self, "Download in Progress", "A resource is already downloading.")
+            return
+        self._resource_download_dialog = dialog
+        self._resource_download_resource_id = str(resource_id or "").strip()
+        self._resource_download_state = {
+            "resource_id": self._resource_download_resource_id,
+            "percent": 0,
+            "message": f"Preparing download: {resource_id}",
+            "running": True,
+        }
+        if hasattr(dialog, "_resource_footer"):
+            dialog._resource_footer.setText(f"Preparing download: {resource_id}")
+        if hasattr(dialog, "_resource_progress_bar"):
+            dialog._resource_progress_bar.setRange(0, 100)
+            dialog._resource_progress_bar.setValue(0)
+        worker = ResourceDownloadWorker(self.workspace_root, resource_id)
+        worker.progress.connect(self._on_resource_download_progress)
+        worker.finished.connect(self._on_resource_download_finished)
+        self.resource_download_worker = worker
+        self._refresh_resource_manager_dialog(dialog)
+        worker.start()
+
+    def _missing_resource_entries(self, *, include_whisper: bool = False, include_voice: bool = False) -> list[tuple[str, str]]:
+        service = self._resource_service()
+        missing: list[tuple[str, str]] = []
+
+        if include_whisper:
+            model_name = self.get_whisper_model_name()
+            resource_id = f"whisper:{model_name}"
+            if not service.is_resource_installed(resource_id):
+                missing.append((resource_id, f"Whisper {model_name.title()} model"))
+
+        if include_voice:
+            voice_name = self.get_active_voice_name()
+            if voice_name and not str(voice_name).startswith("edge:"):
+                resource_id = f"voice:{voice_name}"
+                if not service.is_resource_installed(resource_id):
+                    voice_label = voice_name
+                    voice_entry = self.voice_catalog_map.get(voice_name) if hasattr(self, "voice_catalog_map") else None
+                    if isinstance(voice_entry, dict):
+                        voice_label = str(voice_entry.get("name", voice_name)).strip() or voice_name
+                    missing.append((resource_id, f"Local voice: {voice_label}"))
+
+        deduped: list[tuple[str, str]] = []
+        seen = set()
+        for item in missing:
+            if item[0] in seen:
+                continue
+            seen.add(item[0])
+            deduped.append(item)
+        return deduped
+
+    def ensure_required_resources(self, action_label: str, *, include_whisper: bool = False, include_voice: bool = False) -> bool:
+        missing = self._missing_resource_entries(include_whisper=include_whisper, include_voice=include_voice)
+        if not missing:
+            return True
+
+        missing_lines = "\n".join(f"- {label}" for _resource_id, label in missing)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Missing Resources")
+        box.setText(f"{action_label} cannot start because some required resources are missing.")
+        box.setInformativeText(
+            "Open Manage Resources and download the missing items:\n\n"
+            f"{missing_lines}"
+        )
+        open_btn = box.addButton("Manage Resources", QMessageBox.AcceptRole)
+        box.addButton("Close", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_btn:
+            self.open_resource_manager_dialog()
+        return False
+
+    def open_resource_manager_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Manage Resources")
+        dialog.setModal(True)
+        dialog.resize(760, 620)
+        dialog.setStyleSheet(
+            """
+            QDialog { background-color: #0f1724; }
+            QLabel { color: #d7e3f4; background-color: transparent; }
+            QLabel#resourceTitle { color: #f8fbff; font-size: 16px; font-weight: 700; }
+            QLabel#resourceHint { color: #9fb3ca; font-size: 12px; }
+            QWidget#resourceContent { background-color: transparent; }
+            QScrollArea { border: none; background-color: #0f1724; }
+            QFrame#resourceCard { background-color: #132033; border: 1px solid #2f4868; border-radius: 12px; }
+            QPushButton {
+                background-color: #22344d; color: #f8fbff; border: 1px solid #34506f;
+                border-radius: 10px; padding: 8px 16px; font-weight: 600; min-width: 84px;
+            }
+            QPushButton:hover { background-color: #29405d; }
+            QPushButton:disabled { color: #8ea3bb; background-color: #182636; border-color: #29405d; }
+            """
+        )
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("Download runtime resources from Hugging Face", dialog)
+        title.setObjectName("resourceTitle")
+        layout.addWidget(title)
+
+        hint = QLabel(
+            f"Whisper models use faster-whisper download/cache. Extra runtime files come from: {self._resource_service().repo_id} @ {self._resource_service().revision}\n"
+            "Use this screen to install Whisper, GPU runtime, and local Piper voices separately.",
+            dialog,
+        )
+        hint.setObjectName("resourceHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        layout.addWidget(scroll, 1)
+
+        content = QWidget(dialog)
+        content.setObjectName("resourceContent")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(10)
+        scroll.setWidget(content)
+
+        dialog._resource_rows = {}
+        groups = [
+            ("AI Models", "ai"),
+            ("Whisper Models", "whisper"),
+            ("GPU Runtime", "cuda"),
+            ("Local Voices", "voice"),
+        ]
+        resources = self._resource_service().list_resources()
+        for group_title, group_kind in groups:
+            items = [item for item in resources if item.get("kind") == group_kind]
+            if not items:
+                continue
+            group_label = QLabel(group_title, dialog)
+            group_label.setObjectName("resourceTitle")
+            group_label.setStyleSheet("color: #f8fbff; background-color: transparent;")
+            content_layout.addWidget(group_label)
+            for item in items:
+                card = QFrame(dialog)
+                card.setObjectName("resourceCard")
+                card_layout = QHBoxLayout(card)
+                card_layout.setContentsMargins(12, 12, 12, 12)
+                card_layout.setSpacing(12)
+
+                text_layout = QVBoxLayout()
+                name_label = QLabel(str(item.get("name", item.get("id", "Resource"))), dialog)
+                name_label.setStyleSheet("color: #f8fbff; font-weight: 700; background-color: transparent;")
+                status_label = QLabel("", dialog)
+                status_label.setObjectName("resourceHint")
+                status_label.setStyleSheet("color: #9fb3ca; background-color: transparent;")
+                status_label.setWordWrap(True)
+                text_layout.addWidget(name_label)
+                text_layout.addWidget(status_label)
+                card_layout.addLayout(text_layout, 1)
+
+                button = QPushButton("Download", dialog)
+                button.clicked.connect(lambda _checked=False, rid=item["id"], dlg=dialog: self._start_resource_download(dlg, rid))
+                card_layout.addWidget(button)
+
+                content_layout.addWidget(card)
+                dialog._resource_rows[item["id"]] = {
+                    "item": item,
+                    "status_label": status_label,
+                    "button": button,
+                }
+
+        dialog._resource_footer = QLabel("Select a resource to download.", dialog)
+        dialog._resource_footer.setObjectName("resourceHint")
+        dialog._resource_footer.setWordWrap(True)
+        layout.addWidget(dialog._resource_footer)
+
+        dialog._resource_progress_bar = QProgressBar(dialog)
+        dialog._resource_progress_bar.setRange(0, 100)
+        dialog._resource_progress_bar.setValue(0)
+        dialog._resource_progress_bar.setTextVisible(True)
+        layout.addWidget(dialog._resource_progress_bar)
+
+        close_row = QHBoxLayout()
+        close_row.addStretch()
+        close_btn = QPushButton("Close", dialog)
+        close_btn.clicked.connect(dialog.accept)
+        close_row.addWidget(close_btn)
+        layout.addLayout(close_row)
+
+        self._refresh_resource_manager_dialog(dialog)
+        dialog.exec()
 
     def show_error(self, title: str, short_msg: str, details: str = ""):
         show_error_impl(self, title, short_msg, details)
@@ -1592,6 +1911,9 @@ class VideoTranslatorGUI(QMainWindow):
 
     def is_ai_polish_enabled(self):
         return getattr(self, "translator_ai_cb", None) and self.translator_ai_cb.isChecked()
+
+    def is_ai_subtitle_optimization_enabled(self):
+        return bool(getattr(self, "ai_subtitle_optimization_cb", None) and self.ai_subtitle_optimization_cb.isChecked())
 
     def get_ai_style_instruction(self):
         style_parts = []
@@ -2545,6 +2867,9 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.information(self, "Preview voice", "No local voices are available yet. Please add Piper models to models/piper first.")
             return
 
+        if not self.ensure_required_resources("Voice preview", include_voice=True):
+            return
+
         if self._voice_sample_preview_thread is not None:
             QMessageBox.information(self, "Preview voice", "A preview is already being generated. Please wait a moment.")
             return
@@ -2584,6 +2909,9 @@ class VideoTranslatorGUI(QMainWindow):
     def preview_segment_audio(self, index: int):
         if index < 0 or index >= len(self.current_translated_segments or self.current_segments):
             QMessageBox.warning(self, "Missing Subtitle", "This subtitle line is not ready yet.")
+            return
+
+        if not self.ensure_required_resources("Subtitle audio preview", include_voice=True):
             return
 
         source_segments = self.current_translated_segments or self.current_segments
@@ -3171,6 +3499,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.refresh_ui_state()
 
     def run_transcription(self):
+        if not self.ensure_required_resources("Transcription", include_whisper=True):
+            return
         self.subtitle_controller.run_transcription()
 
     def on_transcription_finished(self, segments, error=""):
@@ -3251,121 +3581,6 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception:
                 pass
         dlg.show()
-
-    def _close_assets_progress_dialog(self):
-        try:
-            dlg = getattr(self, "assets_progress_dialog", None)
-            if dlg is not None:
-                self._unregister_progress_dialog(dlg)
-                dlg.hide()
-                dlg.deleteLater()
-        finally:
-            self.assets_progress_dialog = None
-
-    def _ensure_assets_progress_dialog(self):
-        try:
-            dlg = getattr(self, "assets_progress_dialog", None)
-            if dlg is not None:
-                return dlg
-            dlg = BackgroundableProgressDialog("Preparing runtime assets...", "Hide", 0, 100, self)
-            dlg.setWindowTitle("Loading Models")
-            dlg.setWindowModality(Qt.WindowModal)
-            dlg.setMinimumDuration(0)
-            dlg.setAutoReset(False)
-            dlg.setAutoClose(False)
-            dlg.setMinimumWidth(520)
-            dlg.setValue(0)
-            dlg.setLabelText("Preparing runtime assets...\n\nWaiting to start...")
-            dlg.setStyleSheet(
-                "QProgressDialog { background-color: #101826; color: #e6eef9; }"
-                "QLabel { color: #e6eef9; background: transparent; }"
-                "QPushButton { background-color: #24364f; color: #ffffff; border: 1px solid #335171; border-radius: 10px; padding: 8px 14px; font-weight: 700; }"
-                "QPushButton:hover { background-color: #2d4665; border-color: #4575a8; }"
-                "QProgressBar { border: 1px solid #2a3a50; border-radius: 10px; text-align: center; background-color: #111927; color: white; min-height: 16px; }"
-                "QProgressBar::chunk { background-color: #4ed0b3; border-radius: 10px; }"
-            )
-            try:
-                dlg.setCancelButtonText("Run in background")
-                dlg.canceled.connect(dlg.hide)
-            except Exception:
-                pass
-            self.assets_progress_dialog = dlg
-            self._register_progress_dialog(dlg)
-            dlg.show()
-            return dlg
-        except Exception:
-            return None
-
-    def on_runtime_assets_progress(self, percent: int, message: str):
-        dlg = self._ensure_assets_progress_dialog()
-        if dlg is None:
-            return
-        try:
-            message_text = str(message or "Preparing runtime assets...").strip() or "Preparing runtime assets..."
-            history = list(getattr(self, "_assets_progress_messages", []) or [])
-            if not history or history[-1] != message_text:
-                history.append(message_text)
-            self._assets_progress_messages = history[-4:]
-            label_lines = ["Preparing required models and runtime files:", ""] + self._assets_progress_messages
-            dlg.setLabelText("\n".join(label_lines))
-            if percent is None or int(percent) < 0:
-                dlg.setRange(0, 0)
-            else:
-                if dlg.maximum() == 0:
-                    dlg.setRange(0, 100)
-                dlg.setValue(max(0, min(100, int(percent))))
-        except Exception:
-            return
-
-    def load_runtime_assets(self):
-        if getattr(self, "runtime_assets_thread", None) is not None and self.runtime_assets_thread.isRunning():
-            dlg = self._ensure_assets_progress_dialog()
-            if dlg is not None:
-                dlg.show()
-                dlg.raise_()
-                dlg.activateWindow()
-            return
-        if hasattr(self, "load_models_btn"):
-            self.load_models_btn.setEnabled(False)
-            self.load_models_btn.setText("Loading...")
-        self._assets_progress_messages = ["Checking bundled runtime assets..."]
-        dlg = self._ensure_assets_progress_dialog()
-        if dlg is not None:
-            dlg.setRange(0, 100)
-            dlg.setValue(0)
-            dlg.setLabelText("Preparing required models and runtime files...\n\nChecking bundled runtime assets...")
-            dlg.show()
-            dlg.raise_()
-            dlg.activateWindow()
-        self.log("[Assets] Preloading required models and runtime files...")
-        self.runtime_assets_thread = RuntimeAssetsWorker(
-            self.workspace_root,
-            whisper_model_name=self.get_whisper_model_name(),
-        )
-        self.runtime_assets_thread.finished.connect(self.on_runtime_assets_loaded)
-        self.runtime_assets_thread.progress.connect(self.on_runtime_assets_progress)
-        self.runtime_assets_thread.start()
-
-    def on_runtime_assets_loaded(self, details, error):
-        self._close_assets_progress_dialog()
-        if hasattr(self, "load_models_btn"):
-            self.load_models_btn.setEnabled(True)
-            self.load_models_btn.setText("Load Models")
-        self.runtime_assets_thread = None
-        if error:
-            self.log(f"[Assets] Failed\n{error}")
-            self.show_error(
-                "Load Models Failed",
-                "Could not finish loading required models and runtime assets.",
-                error,
-            )
-            return
-        self.log(f"[Assets] Ready\n{details}")
-        QMessageBox.information(
-            self,
-            "Models Ready",
-            "Required models and runtime files are ready to use.",
-        )
 
     def get_whisper_model_name(self) -> str:
         value = str(getattr(self, "selected_whisper_model_name", "base") or "base").strip().lower()
@@ -3507,18 +3722,11 @@ class VideoTranslatorGUI(QMainWindow):
         layout.addLayout(local_actions_layout)
 
         local_download_layout = QHBoxLayout()
-        download_model_btn = QPushButton("Download Local AI Model", dialog)
-        download_gpu_pack_btn = QPushButton("Download GPU Pack", dialog)
-        local_download_layout.addWidget(download_model_btn)
-        local_download_layout.addWidget(download_gpu_pack_btn)
-        layout.addLayout(local_download_layout)
-
-        voice_assets_layout = QHBoxLayout()
+        manage_resources_btn = QPushButton("Manage Resources", dialog)
         open_voices_folder_btn = QPushButton("Open Voices Folder", dialog)
-        download_voices_btn = QPushButton("Download Voices", dialog)
-        voice_assets_layout.addWidget(open_voices_folder_btn)
-        voice_assets_layout.addWidget(download_voices_btn)
-        layout.addLayout(voice_assets_layout)
+        local_download_layout.addWidget(manage_resources_btn)
+        local_download_layout.addWidget(open_voices_folder_btn)
+        layout.addLayout(local_download_layout)
 
         provider_hint = QLabel("")
         provider_hint.setObjectName("helperLabel")
@@ -3602,9 +3810,6 @@ class VideoTranslatorGUI(QMainWindow):
         def _piper_models_dir() -> str:
             return models_path("piper")
 
-        def _download_url(env_key: str, default_url: str) -> str:
-            return (os.getenv(env_key, "") or "").strip() or default_url
-
         def _update_local_asset_status():
             model_path = model_edit.text().strip() or _default_local_model_path()
             model_ready = os.path.exists(model_path)
@@ -3669,9 +3874,7 @@ class VideoTranslatorGUI(QMainWindow):
                 open_models_folder_btn.setVisible(True)
                 open_gpu_pack_folder_btn.setVisible(True)
                 open_voices_folder_btn.setVisible(True)
-                download_model_btn.setVisible(True)
-                download_gpu_pack_btn.setVisible(True)
-                download_voices_btn.setVisible(True)
+                manage_resources_btn.setVisible(True)
                 provider_hint.setText("Use the local GGUF translator by default. Gemini is optional if you want faster cloud performance.")
                 local_status_label.setVisible(True)
                 local_model_status_label.setVisible(True)
@@ -3701,9 +3904,7 @@ class VideoTranslatorGUI(QMainWindow):
                 open_models_folder_btn.setVisible(False)
                 open_gpu_pack_folder_btn.setVisible(False)
                 open_voices_folder_btn.setVisible(False)
-                download_model_btn.setVisible(False)
-                download_gpu_pack_btn.setVisible(False)
-                download_voices_btn.setVisible(False)
+                manage_resources_btn.setVisible(False)
                 provider_hint.setText("Use Gemini for AI translation and rewrite.")
                 local_status_label.setVisible(False)
                 local_model_status_label.setVisible(False)
@@ -3725,9 +3926,7 @@ class VideoTranslatorGUI(QMainWindow):
                 open_models_folder_btn.setVisible(False)
                 open_gpu_pack_folder_btn.setVisible(False)
                 open_voices_folder_btn.setVisible(False)
-                download_model_btn.setVisible(False)
-                download_gpu_pack_btn.setVisible(False)
-                download_voices_btn.setVisible(False)
+                manage_resources_btn.setVisible(False)
                 provider_hint.setText("Use Gemini as the optional cloud provider when you want higher speed than local GGUF.")
                 local_status_label.setVisible(False)
                 local_model_status_label.setVisible(False)
@@ -3760,28 +3959,17 @@ class VideoTranslatorGUI(QMainWindow):
             os.makedirs(gpu_pack_dir, exist_ok=True)
             open_folder_impl(self, gpu_pack_dir)
 
-        def download_local_model():
-            webbrowser.open(_download_url("LOCAL_MODEL_DOWNLOAD_URL", "https://huggingface.co/google/gemma-2-2b-it-gguf"))
-
-        def download_gpu_pack():
-            webbrowser.open(_download_url("GPU_PACK_DOWNLOAD_URL", "https://github.com/Purfview/whisper-standalone-win/releases/tag/libs"))
-
         def open_voices_folder():
             voices_dir = _piper_models_dir()
             os.makedirs(voices_dir, exist_ok=True)
             open_folder_impl(self, voices_dir)
-
-        def download_voices():
-            webbrowser.open(_download_url("PIPER_VOICES_DOWNLOAD_URL", "https://huggingface.co/rhasspy/piper-voices"))
 
         provider_combo.currentIndexChanged.connect(update_provider_fields)
         browse_model_btn.clicked.connect(browse_local_model)
         open_models_folder_btn.clicked.connect(open_models_folder)
         open_gpu_pack_folder_btn.clicked.connect(open_gpu_pack_folder)
         open_voices_folder_btn.clicked.connect(open_voices_folder)
-        download_model_btn.clicked.connect(download_local_model)
-        download_gpu_pack_btn.clicked.connect(download_gpu_pack)
-        download_voices_btn.clicked.connect(download_voices)
+        manage_resources_btn.clicked.connect(self.open_resource_manager_dialog)
         local_auto_optimize_btn.clicked.connect(lambda: _apply_local_recommended_settings(force_recommended=True))
         local_flash_attn_cb.toggled.connect(lambda _checked: setattr(local_flash_attn_cb, "_manual_override", True))
         model_edit.textChanged.connect(lambda _text: _update_local_asset_status())
@@ -3933,6 +4121,8 @@ class VideoTranslatorGUI(QMainWindow):
         return grouped_segments
 
     def run_voiceover(self):
+        if not self.ensure_required_resources("Voice generation", include_voice=True):
+            return
         state = self.ensure_current_project()
         if state and not self.translated_text.toPlainText().strip():
             self.load_project_context(state)
@@ -4058,6 +4248,10 @@ class VideoTranslatorGUI(QMainWindow):
         self.preview_controller.on_preview_ready(preview_path, error, styled_signature)
 
     def run_all_pipeline(self):
+        mode = self.get_output_mode_key()
+        include_voice = mode in ("voice", "both")
+        if not self.ensure_required_resources("Generate", include_whisper=True, include_voice=include_voice):
+            return
         self.pipeline_controller.run_all_pipeline()
 
     def on_prepare_workflow_finished(self, project_state_path, error):

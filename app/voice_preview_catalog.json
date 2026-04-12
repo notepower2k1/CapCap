@@ -43,7 +43,223 @@
       "provider": "piper",
       "provider_voice": "models/piper/banmai.onnx",
       "language": "vi",
-      "gender": "",
+      "gender": "female",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "chieuthanh",
+      "name": "Chieuthanh (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/chieuthanh.onnx",
+      "language": "vi",
+      "gender": "male",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "cuc",
+      "name": "Cuc (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/cuc.onnx",
+      "language": "vi",
+      "gender": "female",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "duyoryx3175",
+      "name": "duyoryx3175 (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/duyoryx3175.onnx",
+      "language": "vi",
+      "gender": "male",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "lacphi",
+      "name": "Lacphi (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/lacphi.onnx",
+      "language": "vi",
+      "gender": "male",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "maiphuong",
+      "name": "Maiphuong (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/maiphuong.onnx",
+      "language": "vi",
+      "gender": "female",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "manhdung",
+      "name": "Manhdung (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/manhdung.onnx",
+      "language": "vi",
+      "gender": "male",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "minhkhang",
+      "name": "Minhkhang (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/minhkhang.onnx",
+      "language": "vi",
+      "gender": "male",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "minhquang",
+      "name": "Minhquang (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/minhquang.onnx",
+      "language": "vi",
+      "gender": "male",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "ngochuyen",
+      "name": "Ngochuyen (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/ngochuyen.onnx",
+      "language": "vi",
+      "gender": "female",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "ngochuyennew",
+      "name": "Ngochuyennew (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/ngochuyennew.onnx",
+      "language": "vi",
+      "gender": "female",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "phuongtrang",
+      "name": "Phuongtrang (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/phuongtrang.onnx",
+      "language": "vi",
+      "gender": "female",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
+    },
+    {
+      "id": "taian2",
+      "name": "taian2 (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/taian2.onnx",
+      "language": "vi",
+      "gender": "male",
       "tier": "free",
       "preview_video_url": "",
       "preview_video_path": "",
@@ -54,6 +270,24 @@
       ],
       "preview_audio_url": "",
       "preview_audio_path": ""
+    },
+    {
+      "id": "vi_VN-vais1000-medium",
+      "name": "Vais1000 Medium (Local)",
+      "provider": "piper",
+      "provider_voice": "models/piper/vi_VN-vais1000-medium.onnx",
+      "language": "vi",
+      "gender": "",
+      "tier": "free",
+      "preview_video_url": "",
+      "preview_video_path": "",
+      "preview_audio_url": "",
+      "preview_audio_path": "",
+      "enabled": true,
+      "tags": [
+        "local",
+        "piper"
+      ]
     }
   ]
 }

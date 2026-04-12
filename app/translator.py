@@ -12,13 +12,14 @@ env_path = os.path.join(base_dir, ".env")
 load_dotenv(env_path)
 
 
-def translate_segments_to_srt(srt_text, model_path=None, src_lang="auto", enable_polish=True, style_instruction=""):
+def translate_segments_to_srt(srt_text, model_path=None, src_lang="auto", enable_polish=True, optimize_subtitles=True, style_instruction=""):
     orchestrator = TranslationOrchestrator()
     result = orchestrator.translate_srt(
         srt_text,
         src_lang=src_lang,
         target_lang="vi",
         enable_polish=enable_polish,
+        optimize_subtitles=optimize_subtitles,
         style_instruction=style_instruction,
     )
     if not result.success:
@@ -26,13 +27,14 @@ def translate_segments_to_srt(srt_text, model_path=None, src_lang="auto", enable
     return orchestrator.result_to_srt(result)
 
 
-def translate_segments(segments, model_path=None, src_lang="auto", enable_polish=True, style_instruction=""):
+def translate_segments(segments, model_path=None, src_lang="auto", enable_polish=True, optimize_subtitles=True, style_instruction=""):
     orchestrator = TranslationOrchestrator()
     result = orchestrator.translate_segments(
         segments=segments,
         src_lang=src_lang,
         target_lang="vi",
         enable_polish=enable_polish,
+        optimize_subtitles=optimize_subtitles,
         style_instruction=style_instruction,
     )
     if not result.success:

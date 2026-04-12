@@ -47,6 +47,8 @@
     s.setValue("voice_gain", gui.voice_gain_spin.value())
     s.setValue("bg_gain", gui.bg_gain_spin.value())
     s.setValue("ducking_amount", gui.ducking_amount_spin.value())
+    if hasattr(gui, "ai_subtitle_optimization_cb"):
+        s.setValue("ai_subtitle_optimization", gui.ai_subtitle_optimization_cb.isChecked())
     if hasattr(gui, "audio_mix_preset_combo"):
         s.setValue("audio_mix_preset", gui.audio_mix_preset_combo.currentData())
     if hasattr(gui, "toggle_advanced_btn"):
@@ -133,6 +135,8 @@ def load_user_settings(gui):
     gui.voice_gain_spin.setValue(float(s.value("voice_gain", gui.voice_gain_spin.value())))
     gui.bg_gain_spin.setValue(float(s.value("bg_gain", gui.bg_gain_spin.value())))
     gui.ducking_amount_spin.setValue(float(s.value("ducking_amount", gui.ducking_amount_spin.value())))
+    if hasattr(gui, "ai_subtitle_optimization_cb"):
+        gui.ai_subtitle_optimization_cb.setChecked(str(s.value("ai_subtitle_optimization", "false")).lower() == "true")
     if hasattr(gui, "audio_mix_preset_combo"):
         preset_value = str(s.value("audio_mix_preset", gui.audio_mix_preset_combo.currentData() or "custom")).strip().lower()
         preset_index = gui.audio_mix_preset_combo.findData(preset_value)
