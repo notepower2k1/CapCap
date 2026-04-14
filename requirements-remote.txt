@@ -1,0 +1,4 @@
+-r requirements-base.txt
+
+soundfile
+numpy

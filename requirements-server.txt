@@ -1,0 +1,6 @@
+requests
+python-dotenv
+numpy
+huggingface_hub
+faster-whisper
+llama-cpp-python

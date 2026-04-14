@@ -1,286 +1,279 @@
 # CapCap
 
-Language: [Tiếng Việt](#tiếng-việt) | [English](#english)
-
 ![CapCap Preview](assets/preview.jpg)
 
-## Tiếng Việt
+CapCap là ứng dụng desktop trên Windows để Việt hóa video theo workflow khép kín: tách audio, nhận diện giọng nói, dịch phụ đề, chỉnh sửa subtitle, tạo voice tiếng Việt, preview và export. Dự án hiện hỗ trợ cả `Local mode` và `Remote mode` để bạn có thể chạy toàn bộ trên một máy, hoặc dùng laptop làm client và PC mạnh hơn làm server xử lý `Whisper + AI`.
 
-CapCap là desktop app chạy local trên Windows để Việt hóa video: tách audio, nhận diện giọng nói, dịch phụ đề, chỉnh sửa subtitle, tạo voice tiếng Việt, preview và export trong một workflow thống nhất.
-
-### Quick Start
-
-```bash
-git clone https://github.com/notepower2k1/CapCap.git
-cd CapCap
-pip install -r requirements.txt
-python ui/gui.py
-```
-
-Build release:
-
-```bash
-python -m PyInstaller D:\CodingTime\CapCap\CapCap.spec --noconfirm --clean
-```
-
-### Mục tiêu
-
-1. chọn video nguồn
-2. extract audio
-3. nhận diện lời nói
-4. dịch sang tiếng Việt
-5. chỉnh và polish subtitle
-6. tạo voice tiếng Việt hoặc dùng audio có sẵn
-7. preview subtitle và audio
-8. export video hoàn chỉnh
-
-### Tính năng chính
+## Tính năng chính
 
 - workflow theo project, có thể resume
 - hỗ trợ `subtitle only`, `voice only`, `subtitle + voice`
 - transcribe bằng `faster-whisper`
-- dịch cơ bản bằng Google web fallback hoặc Microsoft Translator khi có cấu hình
-- AI polish/rewrite bằng local LLM hoặc OpenRouter khi có cấu hình
-- subtitle editor tích hợp trong app
-- preview frame, preview 5 giây, preview audio
-- generate voice bằng `Edge TTS` hoặc `Piper`
+- dịch phụ đề bằng Google web fallback, Microsoft Translator hoặc AI provider khi có cấu hình
+- AI polish/rewrite bằng local GGUF qua `llama-cpp-python`
+- tạo voice bằng `Piper` hoặc `edge-tts`
 - mix voice và background audio bằng `FFmpeg`
-- render subtitle bằng ASS
-- export video hoàn chỉnh trong app
-- build release/debug bằng `PyInstaller`
+- preview bằng `libmpv`
+- export video có subtitle/voice trực tiếp trong app
+- `Remote mode` để gửi `Whisper + AI translation` sang PC server nội bộ
 
-### Kỹ thuật sử dụng
+## Kiến trúc kỹ thuật
 
 - `PySide6` cho desktop UI
-- kiến trúc `ui -> controllers -> services -> workflows -> engines`
-- `QThread` cho background worker
+- cấu trúc `ui -> controllers -> services -> workflows -> engines`
+- `QThread` cho background workers
 - `faster-whisper` cho speech-to-text local
-- `onnxruntime` gián tiếp qua `faster-whisper` và `piper`
-- `Demucs` cho vocal/background separation
-- `FFmpeg` cho extract audio, convert, mix, mux, export
+- `onnxruntime` được dùng gián tiếp qua `faster-whisper` và `Piper`
+- `Demucs` cho tách vocal/background
+- `FFmpeg` cho extract, convert, mix, mux và export
 - `libmpv` qua `python-mpv` cho preview video/audio
 - `Piper TTS` cho local Vietnamese voice
 - `edge-tts` cho cloud TTS miễn phí
-- `llama-cpp-python` cho local AI polish/rewrite
-- `requests` cho translator/API integration
+- `llama-cpp-python` cho local AI translate/rewrite
+- `requests` cho remote API và translator integration
 - `PyInstaller` để đóng gói Windows app
-- project-state persistence để resume workflow
-- subtitle styling bằng `SRT -> ASS`
+- state project lưu trên đĩa để resume workflow
+- subtitle styling qua `SRT -> ASS`
 
-### Cài đặt
+## Chế độ chạy
+
+### Local mode
+
+Toàn bộ pipeline chạy trên một máy:
+
+- extract audio
+- `Whisper`
+- AI translation / rewrite
+- `Piper` / `edge-tts`
+- preview
+- export
+
+Phù hợp khi máy chính có đủ tài nguyên hoặc bạn muốn dùng hoàn toàn local.
+
+### Remote mode
+
+Laptop hoặc máy nhẹ chỉ chạy UI/client. Các tác vụ nặng được đẩy sang PC server:
+
+- `Whisper`
+- AI translation / rewrite
+
+Hiện tại các bước sau vẫn chạy local trên client:
+
+- extract audio
+- preview
+- export
+- voice/TTS
+
+Remote mode phù hợp khi bạn có một PC mạnh hơn để xử lý ASR và AI, còn laptop chỉ dùng để thao tác UI.
+
+### PC server mode
+
+PC chạy service HTTP nội bộ để nhận request từ client:
+
+- `/health`
+- `/v1/transcribe`
+- `/v1/translate-segments`
+- `/v1/translate-srt`
+- `/v1/rewrite-segments`
+- `/v1/rewrite-srt`
+
+Server này dùng local runtime của PC, nên `Whisper` và local GGUF vẫn tận dụng đúng môi trường trên PC.
+
+## Cài đặt
 
 ```bash
 git clone https://github.com/notepower2k1/CapCap.git
 cd CapCap
+```
+
+Tạo `.env` từ [./.env_example](./.env_example) nếu cần cấu hình translator, AI provider hoặc remote API.
+
+## Dependencies theo profile
+
+### Local
+
+```bash
+pip install -r requirements-local.txt
+```
+
+Bao gồm toàn bộ stack local:
+
+- `faster-whisper`
+- `demucs`
+- `llama-cpp-python`
+- `Piper`
+- `edge-tts`
+
+### Remote client
+
+```bash
+pip install -r requirements-remote.txt
+```
+
+Profile này nhẹ hơn, không kéo toàn bộ local AI / Whisper stack.
+
+### Server
+
+```bash
+pip install -r requirements-server.txt
+```
+
+Dùng cho PC server chạy `Whisper + AI translation`.
+
+### Mặc định
+
+```bash
 pip install -r requirements.txt
 ```
 
-Tạo `.env` từ [D:\CodingTime\CapCap\.env_example](D:/CodingTime/CapCap/.env_example) nếu cần cấu hình translator hoặc AI provider.
+Hiện tại `requirements.txt` trỏ tới `requirements-local.txt`.
 
-### Chạy từ source
+## Chạy từ source
+
+### Local mode
 
 ```bash
 python ui/gui.py
 ```
 
-Hoặc:
+### Remote client mode
 
 ```bash
-python ui/main_window.py
+python ui/gui_remote.py
 ```
 
-### Build
+Trong app remote, vào `Settings` để nhập:
 
-Release:
+- `PC API URL`
+- `API Token` nếu có dùng token
+
+Bạn cũng có thể bấm `Test Connection` để kiểm tra kết nối tới PC server trước khi chạy pipeline.
+
+### Server mode trên PC
+
+```bash
+python app/remote_api_server.py
+```
+
+Biến môi trường liên quan:
+
+- `CAPCAP_REMOTE_API_URL`
+- `CAPCAP_REMOTE_API_TOKEN`
+- `CAPCAP_REMOTE_API_HOST`
+- `CAPCAP_REMOTE_API_PORT`
+- `CAPCAP_REMOTE_API_TIMEOUT`
+
+## Build bằng PyInstaller
+
+### Release local
 
 ```bash
 python -m PyInstaller D:\CodingTime\CapCap\CapCap.spec --noconfirm --clean
 ```
 
-Debug:
+### Debug local
 
 ```bash
 python -m PyInstaller D:\CodingTime\CapCap\CapCap.debug.spec --noconfirm --clean
 ```
 
-Ghi chú:
+### Remote client
 
-- release chỉ bundle `voice_preview_catalog.release.json` dưới tên `app/voice_preview_catalog.json`
-- release chỉ bundle 1 local voice mặc định: `vi_VN-vais1000-medium`
+```bash
+python -m PyInstaller D:\CodingTime\CapCap\CapCap.remote.spec --noconfirm --clean
+```
+
+### PC server
+
+```bash
+python -m PyInstaller D:\CodingTime\CapCap\CapCap.server.spec --noconfirm --clean
+```
+
+## Resource và packaging hiện tại
+
+- release local chỉ bundle `voice_preview_catalog.release.json` dưới tên `app/voice_preview_catalog.json`
+- release local chỉ bundle 1 local voice mặc định: `vi_VN-vais1000-medium`
 - các local voice khác người dùng tự tải vào `models/piper`
-- debug build giữ console để kiểm tra runtime khi cần
+- `Manage Resources` hỗ trợ tải:
+  - `Whisper`
+  - `Local AI GGUF`
+  - `Voice Pack`
+  - `Whisper GPU Runtime`
+- bản debug giữ console để kiểm tra runtime khi cần
 
-### Giới hạn hiện tại
+## Quy trình dùng đề xuất
+
+### Dùng một máy
+
+1. cài `requirements-local.txt`
+2. chạy `python ui/gui.py`
+3. tải thêm resource nếu cần trong `Manage Resources`
+4. generate và export trực tiếp
+
+### Dùng laptop + PC
+
+1. trên PC: cài `requirements-server.txt`
+2. trên PC: chạy `python app/remote_api_server.py`
+3. trên laptop: cài `requirements-remote.txt`
+4. trên laptop: chạy `python ui/gui_remote.py`
+5. vào `Settings` trên laptop, nhập `PC API URL`
+6. bấm `Test Connection`
+7. chạy workflow từ laptop, `Whisper + AI` sẽ xử lý trên PC
+
+## Giới hạn hiện tại
 
 - tối ưu cho Windows
-- cần Internet nếu phải tải model hoặc dùng translator/TTS online
+- cần Internet nếu tải model/resource hoặc dùng provider online
+- remote mode hiện mới remote hóa:
+  - `Whisper`
+  - AI translation / rewrite
+- `TTS`, preview, export vẫn chạy local trên client
+- local AI hiện mặc định an toàn theo hướng `CPU-safe`
+- `Whisper GPU` có thể tăng tốc nếu có runtime CUDA tương thích
 - release không bundle toàn bộ local Piper voices
 - một số bước AI hoặc stem separation có thể chậm trên máy yếu hoặc khi chạy CPU
-- chất lượng subtitle, translation và voice còn phụ thuộc model, dữ liệu đầu vào và cấu hình máy
 
-### Troubleshooting
+## Troubleshooting
 
-- `FFmpeg not found`:
-  - kiểm tra `bin/ffmpeg/ffmpeg.exe` và `ffprobe.exe`
-- local voice báo không tồn tại:
-  - kiểm tra file `.onnx` và `.onnx.json` trong `models/piper`
-  - release mặc định chỉ có `vi_VN-vais1000-medium`
-- Whisper fallback về CPU:
-  - thường do thiếu CUDA runtime tương thích, app vẫn có thể chạy nhưng chậm hơn
-- `Demucs preload skipped`:
-  - đây có thể chỉ là warning preload, không phải lúc nào cũng chặn workflow
-- cần xem runtime log:
-  - dùng bản debug `CapCapDebug.exe` để xem console trực tiếp
+### `FFmpeg not found`
 
-### Repo và nguồn tham khảo
+Kiểm tra:
 
-- `faster-whisper`: [https://github.com/SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-- `whisper`: [https://github.com/openai/whisper](https://github.com/openai/whisper)
-- `demucs`: [https://github.com/facebookresearch/demucs](https://github.com/facebookresearch/demucs)
-- `ffmpeg`: [https://github.com/FFmpeg/FFmpeg](https://github.com/FFmpeg/FFmpeg)
-- `mpv`: [https://github.com/mpv-player/mpv](https://github.com/mpv-player/mpv)
-- `python-mpv`: [https://github.com/jaseg/python-mpv](https://github.com/jaseg/python-mpv)
-- `piper`: [https://github.com/rhasspy/piper](https://github.com/rhasspy/piper)
-- `piper voices`: [https://github.com/rhasspy/piper-voices](https://github.com/rhasspy/piper-voices)
-- `edge-tts`: [https://github.com/rany2/edge-tts](https://github.com/rany2/edge-tts)
-- `llama.cpp`: [https://github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp)
-- `llama-cpp-python`: [https://github.com/abetlen/llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
-- `PySide`: [https://github.com/pyside/pyside-setup](https://github.com/pyside/pyside-setup)
-- `PyInstaller`: [https://github.com/pyinstaller/pyinstaller](https://github.com/pyinstaller/pyinstaller)
+- `bin/ffmpeg/ffmpeg.exe`
+- `bin/ffmpeg/ffprobe.exe`
 
-### Cam kết và miễn trừ trách nhiệm
+### Local voice báo không tồn tại
 
-Tool này được làm với mục đích học tập, nghiên cứu và thử nghiệm kỹ thuật. Tác giả không cam kết độ chính xác tuyệt đối của subtitle, translation hoặc voice output, và không chịu trách nhiệm cho mọi hậu quả phát sinh từ việc sử dụng tool này. Người dùng tự chịu trách nhiệm với dữ liệu, nội dung và cách sử dụng tool.
+Kiểm tra:
 
-## English
+- file `.onnx`
+- file `.onnx.json`
 
-CapCap is a local Windows desktop app for Vietnamese video localization. It combines audio extraction, speech recognition, subtitle translation, subtitle editing, Vietnamese voice generation, preview, and export in one workflow.
+trong `models/piper`
 
-### Quick Start
+### Whisper fallback về CPU
 
-```bash
-git clone https://github.com/notepower2k1/CapCap.git
-cd CapCap
-pip install -r requirements.txt
-python ui/gui.py
-```
+Thường do thiếu CUDA runtime tương thích. App vẫn có thể chạy nhưng chậm hơn.
 
-Build release:
+### `Demucs preload skipped`
 
-```bash
-python -m PyInstaller D:\CodingTime\CapCap\CapCap.spec --noconfirm --clean
-```
+Đây có thể chỉ là preload warning, không phải lúc nào cũng chặn workflow.
 
-### Goal
+### Remote mode không kết nối được
 
-1. select a source video
-2. extract audio
-3. transcribe speech
-4. translate into Vietnamese
-5. polish and edit subtitles
-6. generate Vietnamese voice or use existing audio
-7. preview subtitle and audio output
-8. export the final video
+Kiểm tra:
 
-### Main features
+- PC server đã chạy chưa
+- `CAPCAP_REMOTE_API_HOST` / `PORT`
+- firewall của Windows
+- `PC API URL` trong app remote
+- token có khớp giữa client và server không
 
-- project-based workflow with resume support
-- `subtitle only`, `voice only`, and `subtitle + voice`
-- transcription with `faster-whisper`
-- translation via Google web fallback or Microsoft Translator when configured
-- AI rewrite/polish via local LLM or OpenRouter when configured
-- built-in subtitle editor
-- exact frame preview, 5-second preview, and audio preview
-- Vietnamese voice generation via `Edge TTS` or `Piper`
-- voice and background mixing via `FFmpeg`
-- ASS subtitle rendering
-- full in-app export
-- release and debug packaging with `PyInstaller`
+### Cần xem runtime log
 
-### Technical stack
+Dùng bản debug để xem console trực tiếp.
 
-- `PySide6` for desktop UI
-- layered structure: `ui -> controllers -> services -> workflows -> engines`
-- `QThread` background workers
-- `faster-whisper` for local speech-to-text
-- `onnxruntime` used indirectly by `faster-whisper` and `piper`
-- `Demucs` for vocal/background separation
-- `FFmpeg` for extraction, conversion, mixing, muxing, and export
-- `libmpv` through `python-mpv` for preview playback
-- `Piper TTS` for local Vietnamese voices
-- `edge-tts` for free cloud TTS
-- `llama-cpp-python` for local AI rewrite/polish
-- `requests` for translator and API integration
-- `PyInstaller` for Windows packaging
-- project-state persistence for resumable workflows
-- subtitle styling through `SRT -> ASS`
-
-### Installation
-
-```bash
-git clone https://github.com/notepower2k1/CapCap.git
-cd CapCap
-pip install -r requirements.txt
-```
-
-Create `.env` from [D:\CodingTime\CapCap\.env_example](D:/CodingTime/CapCap/.env_example) if you want to configure translators or AI providers.
-
-### Run from source
-
-```bash
-python ui/gui.py
-```
-
-Or:
-
-```bash
-python ui/main_window.py
-```
-
-### Build
-
-Release:
-
-```bash
-python -m PyInstaller D:\CodingTime\CapCap\CapCap.spec --noconfirm --clean
-```
-
-Debug:
-
-```bash
-python -m PyInstaller D:\CodingTime\CapCap\CapCap.debug.spec --noconfirm --clean
-```
-
-Notes:
-
-- release bundles `voice_preview_catalog.release.json` as `app/voice_preview_catalog.json`
-- release bundles only one default local Piper voice: `vi_VN-vais1000-medium`
-- other local voices are expected to be downloaded by the user into `models/piper`
-- debug build keeps a visible console for runtime inspection
-
-### Known Limitations
-
-- optimized for Windows
-- Internet is required when models need to be downloaded or when online translator/TTS providers are used
-- release does not bundle all local Piper voices
-- some AI or stem-separation stages may be slow on weaker machines or CPU-only setups
-- subtitle, translation, and voice quality still depend on model choice, input quality, and runtime configuration
-
-### Troubleshooting
-
-- `FFmpeg not found`:
-  - verify `bin/ffmpeg/ffmpeg.exe` and `ffprobe.exe`
-- local voice says model not found:
-  - verify the `.onnx` and `.onnx.json` files in `models/piper`
-  - release includes only `vi_VN-vais1000-medium` by default
-- Whisper falls back to CPU:
-  - this usually means the required CUDA runtime is missing or incompatible; the app can still work but will be slower
-- `Demucs preload skipped`:
-  - this can be a preload warning and does not always block the actual workflow
-- need runtime logs:
-  - use `CapCapDebug.exe` to inspect the console directly
-
-### Reference repositories
+## Repo và nguồn tham khảo
 
 - `faster-whisper`: [https://github.com/SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 - `whisper`: [https://github.com/openai/whisper](https://github.com/openai/whisper)
@@ -296,6 +289,6 @@ Notes:
 - `PySide`: [https://github.com/pyside/pyside-setup](https://github.com/pyside/pyside-setup)
 - `PyInstaller`: [https://github.com/pyinstaller/pyinstaller](https://github.com/pyinstaller/pyinstaller)
 
-### Disclaimer
+## Cam kết và miễn trừ trách nhiệm
 
-This tool is created for learning, experimentation, and technical research purposes only. The author does not guarantee absolute accuracy of subtitles, translations, or generated voice output, and does not accept responsibility for any consequences resulting from the use of this tool. Users are solely responsible for their data, content, and usage of the software.
+Tool này được làm với mục đích học tập, nghiên cứu và thử nghiệm kỹ thuật. Tác giả không cam kết độ chính xác tuyệt đối của subtitle, translation, voice output hoặc kết quả xử lý video, và không chịu trách nhiệm cho bất kỳ hậu quả nào phát sinh từ việc sử dụng tool. Người dùng tự chịu trách nhiệm với dữ liệu, nội dung và cách sử dụng phần mềm.

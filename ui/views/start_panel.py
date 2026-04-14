@@ -253,7 +253,11 @@ def build_start_group(gui, left_layout):
 
     language_card, language_layout = _build_collapsible_section("3. Language")
     gui.lang_whisper_combo = QComboBox()
+    gui.lang_whisper_combo.addItem("Auto Detect", "auto")
     gui.lang_whisper_combo.addItem("Chinese", "zh")
+    gui.lang_whisper_combo.addItem("Japanese", "ja")
+    gui.lang_whisper_combo.addItem("Korean", "ko")
+    gui.lang_whisper_combo.addItem("English", "en")
     gui.lang_target_combo = QComboBox()
     gui.lang_target_combo.addItem("Vietnamese", "vi")
     gui.lang_target_combo.setCurrentIndex(0)

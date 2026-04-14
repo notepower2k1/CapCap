@@ -1,27 +1,72 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-from engines import (
-    AudioMixAdapter,
-    DemucsAdapter,
-    FFmpegAdapter,
-    PreviewAdapter,
-    SubtitleAdapter,
-    TranslatorAdapter,
-    TTSAdapter,
-    WhisperAdapter,
-)
+from importlib import import_module
+from runtime_profile import is_remote_profile
 
 
 class EngineRuntime:
+    _ADAPTERS = {
+        "ffmpeg": ("engines.ffmpeg_adapter", "FFmpegAdapter"),
+        "whisper": ("engines.whisper_adapter", "WhisperAdapter"),
+        "translator": ("engines.translator_adapter", "TranslatorAdapter"),
+        "demucs": ("engines.demucs_adapter", "DemucsAdapter"),
+        "preview": ("engines.preview_adapter", "PreviewAdapter"),
+        "tts": ("engines.tts_adapter", "TTSAdapter"),
+        "audio_mix": ("engines.audio_mix_adapter", "AudioMixAdapter"),
+        "subtitle": ("engines.subtitle_adapter", "SubtitleAdapter"),
+    }
+
     def __init__(self):
-        self.ffmpeg = FFmpegAdapter()
-        self.whisper = WhisperAdapter()
-        self.translator = TranslatorAdapter()
-        self.demucs = DemucsAdapter()
-        self.preview = PreviewAdapter()
-        self.tts = TTSAdapter()
-        self.audio_mix = AudioMixAdapter()
-        self.subtitle = SubtitleAdapter()
+        self._instances = {}
+        self._remote_profile = is_remote_profile()
+
+    def _adapter(self, key: str):
+        instance = self._instances.get(key)
+        if instance is not None:
+            return instance
+        module_name, class_name = self._ADAPTERS[key]
+        if self._remote_profile and key == "whisper":
+            module_name, class_name = ("engines.remote_whisper_adapter", "RemoteWhisperAdapter")
+        elif self._remote_profile and key == "translator":
+            module_name, class_name = ("engines.remote_translator_adapter", "RemoteTranslatorAdapter")
+        elif self._remote_profile and key == "tts":
+            module_name, class_name = ("engines.remote_tts_adapter", "RemoteTTSAdapter")
+        module = import_module(module_name)
+        instance = getattr(module, class_name)()
+        self._instances[key] = instance
+        return instance
+
+    @property
+    def ffmpeg(self):
+        return self._adapter("ffmpeg")
+
+    @property
+    def whisper(self):
+        return self._adapter("whisper")
+
+    @property
+    def translator(self):
+        return self._adapter("translator")
+
+    @property
+    def demucs(self):
+        return self._adapter("demucs")
+
+    @property
+    def preview(self):
+        return self._adapter("preview")
+
+    @property
+    def tts(self):
+        return self._adapter("tts")
+
+    @property
+    def audio_mix(self):
+        return self._adapter("audio_mix")
+
+    @property
+    def subtitle(self):
+        return self._adapter("subtitle")
 
     def extract_audio(self, video_path: str, audio_output_path: str) -> bool:
         return self.ffmpeg.extract_audio(video_path, audio_output_path)
@@ -78,6 +123,7 @@ class EngineRuntime:
             src_lang=src_lang,
             style_instruction=style_instruction,
         )
+
     def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, target_width=None, target_height=None) -> bool:
         return self.ffmpeg.embed_subtitles(
             video_path,
@@ -206,4 +252,3 @@ class EngineRuntime:
             timestamp_seconds,
             subtitle_style=subtitle_style,
         )
-

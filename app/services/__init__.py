@@ -1,13 +1,4 @@
-from .asr_merge_service import AsrMergeService
-from .chunking_service import ChunkingService
-from .engine_runtime import EngineRuntime
-from .gui_project_bridge import GUIProjectBridge
-from .project_service import ProjectService
-from .resource_download_service import ResourceDownloadService
-from .segment_service import SegmentService
-from .segment_regroup_service import SegmentRegroupService
-from .voice_catalog_service import VoiceCatalogService
-from .workflow_runtime import WorkflowRuntime
+from importlib import import_module
 
 __all__ = [
     "AsrMergeService",
@@ -21,3 +12,26 @@ __all__ = [
     "VoiceCatalogService",
     "WorkflowRuntime",
 ]
+
+_MODULE_MAP = {
+    "AsrMergeService": ".asr_merge_service",
+    "ChunkingService": ".chunking_service",
+    "EngineRuntime": ".engine_runtime",
+    "GUIProjectBridge": ".gui_project_bridge",
+    "ProjectService": ".project_service",
+    "ResourceDownloadService": ".resource_download_service",
+    "SegmentRegroupService": ".segment_regroup_service",
+    "SegmentService": ".segment_service",
+    "VoiceCatalogService": ".voice_catalog_service",
+    "WorkflowRuntime": ".workflow_runtime",
+}
+
+
+def __getattr__(name):
+    module_name = _MODULE_MAP.get(name)
+    if not module_name:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_name, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value

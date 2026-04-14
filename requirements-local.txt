@@ -1,0 +1,13 @@
+-r requirements-base.txt
+
+edge-tts
+demucs
+soundfile
+numpy
+torch
+huggingface_hub
+faster-whisper
+llama-cpp-python
+vietnormalizer
+piper-tts
+torchcodec

@@ -1,6 +1,7 @@
 import os
 import time
 
+from runtime_profile import is_remote_profile
 from services import AsrMergeService, ChunkingService, EngineRuntime, ProjectService, SegmentRegroupService, SegmentService
 
 
@@ -212,7 +213,14 @@ class PrepareWorkflow:
         self.project_service.save_project(project_state)
         audio_duration = self.chunking_service.probe_wav_duration(working_audio_path)
         print(f"[ASR] Working audio duration: {audio_duration:.2f}s")
-        if audio_duration >= self.CHUNKED_ASR_MIN_DURATION_SECONDS:
+        if is_remote_profile():
+            print("[ASR] Remote API mode: using single-pass transcription and sending full working audio to the PC server.")
+            raw_segments = self.engine_runtime.transcribe_audio(
+                working_audio_path,
+                whisper_model,
+                language=source_language,
+            )
+        elif audio_duration >= self.CHUNKED_ASR_MIN_DURATION_SECONDS:
             raw_segments = self._transcribe_long_audio_chunked(
                 audio_path=working_audio_path,
                 project_state=project_state,

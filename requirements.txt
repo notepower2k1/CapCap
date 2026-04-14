@@ -1,16 +1,1 @@
-﻿PySide6
-requests
-python-dotenv
-pydub
-edge-tts
-demucs
-soundfile
-numpy
-torch
-huggingface_hub
-faster-whisper
-llama-cpp-python
-python-mpv
-vietnormalizer
-piper-tts
-torchcodec
+-r requirements-local.txt

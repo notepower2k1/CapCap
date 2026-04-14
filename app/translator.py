@@ -2,7 +2,6 @@ import os
 
 from dotenv import load_dotenv
 
-from translation import TranslationOrchestrator
 from translation.errors import TranslationError
 from translation.srt_utils import to_srt
 
@@ -13,6 +12,8 @@ load_dotenv(env_path)
 
 
 def translate_segments_to_srt(srt_text, model_path=None, src_lang="auto", enable_polish=True, optimize_subtitles=True, style_instruction=""):
+    from translation import TranslationOrchestrator
+
     orchestrator = TranslationOrchestrator()
     result = orchestrator.translate_srt(
         srt_text,
@@ -28,6 +29,8 @@ def translate_segments_to_srt(srt_text, model_path=None, src_lang="auto", enable
 
 
 def translate_segments(segments, model_path=None, src_lang="auto", enable_polish=True, optimize_subtitles=True, style_instruction=""):
+    from translation import TranslationOrchestrator
+
     orchestrator = TranslationOrchestrator()
     result = orchestrator.translate_segments(
         segments=segments,
@@ -43,6 +46,8 @@ def translate_segments(segments, model_path=None, src_lang="auto", enable_polish
 
 
 def rewrite_translated_segments(source_segments, translated_segments, model_path=None, src_lang="auto", style_instruction=""):
+    from translation import TranslationOrchestrator
+
     orchestrator = TranslationOrchestrator()
     result = orchestrator.rewrite_segments(
         source_segments,

@@ -37,7 +37,6 @@ from helpers import (
     validate_srt_text,
 )
 from video_processor import srt_to_ass
-from tts_processor import preload_tts_voice
 from utils.display_utils import (
     cleanup_temp_preview_files as cleanup_temp_preview_files_impl,
     clear_log as clear_log_impl,
@@ -73,8 +72,8 @@ from utils.settings_utils import load_user_settings as load_user_settings_impl, 
 from views import build_main_window_ui
 from widgets import TimelineWidget, VideoView
 from widgets.progress_dialog import BackgroundableProgressDialog
-from translation.providers import LocalPolisherProvider
 from runtime_paths import app_path, asset_path, models_path, workspace_root
+from runtime_profile import is_remote_profile
 from workers import (
     ExtractionWorker,
     ResourceDownloadWorker,
@@ -93,7 +92,10 @@ class VideoTranslatorGUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CapCap Video Translator")
+        title = "CapCap Video Translator"
+        if is_remote_profile():
+            title += " (Remote)"
+        self.setWindowTitle(title)
         self.settings = QSettings("CapCap", "VideoTranslatorGUI")
         self.setAcceptDrops(True)
         self.logo_path = asset_path("capcap.png")
@@ -886,7 +888,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         def _worker(expected_voice: str):
             try:
-                preload_tts_voice(expected_voice)
+                self._preload_tts_voice_impl(expected_voice)
                 def _mark_ready():
                     if getattr(self, '_voice_preload_inflight', '') == expected_voice:
                         self._voice_preload_inflight = ''
@@ -1486,8 +1488,7 @@ class VideoTranslatorGUI(QMainWindow):
         if all(str(os.getenv(key) or "").strip() for key in managed_keys):
             return
 
-        from translation.providers.local_polisher import LocalPolisherProvider
-
+        LocalPolisherProvider = self._local_polisher_provider_cls()
         hardware_info = LocalPolisherProvider.detect_runtime_capabilities()
         recommended = LocalPolisherProvider.recommended_runtime_config(hardware_info)
         updates = {
@@ -1529,6 +1530,41 @@ class VideoTranslatorGUI(QMainWindow):
 
         if hasattr(self, "log"):
             self.log(f"[Local AI] Auto-optimized for this machine: {LocalPolisherProvider.runtime_status_summary(hardware_info)}")
+
+    @staticmethod
+    def _local_polisher_provider_cls():
+        from translation.providers.local_polisher import LocalPolisherProvider
+
+        return LocalPolisherProvider
+
+    @staticmethod
+    def _preload_tts_voice_impl(voice_name: str):
+        from tts_processor import preload_tts_voice
+
+        return preload_tts_voice(voice_name)
+
+    @staticmethod
+    def _test_remote_api_connection(base_url: str, token: str) -> dict:
+        previous_url = os.environ.get("CAPCAP_REMOTE_API_URL", "")
+        previous_token = os.environ.get("CAPCAP_REMOTE_API_TOKEN", "")
+        try:
+            os.environ["CAPCAP_REMOTE_API_URL"] = (base_url or "").strip()
+            if token:
+                os.environ["CAPCAP_REMOTE_API_TOKEN"] = token.strip()
+            else:
+                os.environ.pop("CAPCAP_REMOTE_API_TOKEN", None)
+            from remote_api import remote_api_get
+
+            return remote_api_get("/health", timeout=10)
+        finally:
+            if previous_url:
+                os.environ["CAPCAP_REMOTE_API_URL"] = previous_url
+            else:
+                os.environ.pop("CAPCAP_REMOTE_API_URL", None)
+            if previous_token:
+                os.environ["CAPCAP_REMOTE_API_TOKEN"] = previous_token
+            else:
+                os.environ.pop("CAPCAP_REMOTE_API_TOKEN", None)
 
     def _highlight_color_hex(self) -> str:
         mapping = {
@@ -2303,7 +2339,7 @@ class VideoTranslatorGUI(QMainWindow):
         if not hasattr(self, "subtitle_highlight_mode_combo") or self.subtitle_highlight_mode_combo.currentText().strip() not in ("Auto", "Auto + Manual"):
             return
 
-        provider = LocalPolisherProvider()
+        provider = self._local_polisher_provider_cls()()
         if not provider.is_configured():
             self.log("[AI Keyword Highlight] Local provider is not configured, keeping fallback highlight behavior.")
             return
@@ -3656,8 +3692,8 @@ class VideoTranslatorGUI(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
 
-        from translation.providers.local_polisher import LocalPolisherProvider
-
+        remote_mode = is_remote_profile()
+        LocalPolisherProvider = self._local_polisher_provider_cls() if not remote_mode else None
         # Whisper Section
         whisper_title = QLabel("Whisper model")
         whisper_title.setObjectName("statusHeadline")
@@ -3676,13 +3712,64 @@ class VideoTranslatorGUI(QMainWindow):
         divider.setStyleSheet("color: #2f4868;")
         layout.addWidget(divider)
 
+        remote_title = QLabel("Remote API")
+        remote_title.setObjectName("statusHeadline")
+        remote_title.setVisible(remote_mode)
+        layout.addWidget(remote_title)
+
+        remote_url_layout = QVBoxLayout()
+        remote_url_label = QLabel("PC API URL:")
+        remote_url_edit = QLineEdit(dialog)
+        remote_url_edit.setText(os.getenv("CAPCAP_REMOTE_API_URL", "http://127.0.0.1:8765"))
+        remote_url_layout.addWidget(remote_url_label)
+        remote_url_layout.addWidget(remote_url_edit)
+        remote_url_label.setVisible(remote_mode)
+        remote_url_edit.setVisible(remote_mode)
+        layout.addLayout(remote_url_layout)
+
+        remote_token_layout = QVBoxLayout()
+        remote_token_label = QLabel("API Token (optional):")
+        remote_token_edit = QLineEdit(dialog)
+        remote_token_edit.setEchoMode(QLineEdit.Password)
+        remote_token_edit.setText(os.getenv("CAPCAP_REMOTE_API_TOKEN", ""))
+        remote_token_layout.addWidget(remote_token_label)
+        remote_token_layout.addWidget(remote_token_edit)
+        remote_token_label.setVisible(remote_mode)
+        remote_token_edit.setVisible(remote_mode)
+        layout.addLayout(remote_token_layout)
+
+        remote_actions_layout = QHBoxLayout()
+        test_remote_btn = QPushButton("Test Connection", dialog)
+        test_remote_btn.setVisible(remote_mode)
+        remote_actions_layout.addWidget(test_remote_btn)
+        remote_actions_layout.addStretch()
+        layout.addLayout(remote_actions_layout)
+
+        remote_hint_label = QLabel(
+            "Remote mode keeps Whisper and AI translation on your PC server. "
+            "This laptop build only sends extracted audio and subtitle segments over HTTP."
+        )
+        remote_hint_label.setObjectName("helperLabel")
+        remote_hint_label.setWordWrap(True)
+        remote_hint_label.setVisible(remote_mode)
+        layout.addWidget(remote_hint_label)
+
+        remote_divider = QFrame()
+        remote_divider.setFrameShape(QFrame.HLine)
+        remote_divider.setStyleSheet("color: #2f4868;")
+        remote_divider.setVisible(remote_mode)
+        layout.addWidget(remote_divider)
+
         # AI Translation Section
         ai_title = QLabel("AI Polish Settings")
         ai_title.setObjectName("statusHeadline")
+        ai_title.setVisible(not remote_mode)
         layout.addWidget(ai_title)
 
         provider_layout = QHBoxLayout()
-        provider_layout.addWidget(QLabel("Provider:"))
+        provider_label = QLabel("Provider:")
+        provider_label.setVisible(not remote_mode)
+        provider_layout.addWidget(provider_label)
         provider_combo = QComboBox(dialog)
         provider_combo.addItem("Local (GGUF)", "local")
         provider_combo.addItem("Gemini", "gemini")
@@ -3692,6 +3779,7 @@ class VideoTranslatorGUI(QMainWindow):
         current_provider_index = provider_combo.findData(current_provider)
         if current_provider_index >= 0:
             provider_combo.setCurrentIndex(current_provider_index)
+        provider_combo.setVisible(not remote_mode)
         provider_layout.addWidget(provider_combo, 1)
         layout.addLayout(provider_layout)
 
@@ -3703,6 +3791,7 @@ class VideoTranslatorGUI(QMainWindow):
         key_edit.setEchoMode(QLineEdit.Password)
         key_layout.addWidget(key_label)
         key_layout.addWidget(key_edit)
+        key_section_widget.setVisible(not remote_mode)
         layout.addWidget(key_section_widget)
 
         model_layout = QVBoxLayout()
@@ -3710,6 +3799,8 @@ class VideoTranslatorGUI(QMainWindow):
         model_edit = QLineEdit(dialog)
         model_layout.addWidget(model_label)
         model_layout.addWidget(model_edit)
+        model_label.setVisible(not remote_mode)
+        model_edit.setVisible(not remote_mode)
         layout.addLayout(model_layout)
 
         local_actions_layout = QHBoxLayout()
@@ -3719,6 +3810,9 @@ class VideoTranslatorGUI(QMainWindow):
         local_actions_layout.addWidget(browse_model_btn)
         local_actions_layout.addWidget(open_models_folder_btn)
         local_actions_layout.addWidget(open_gpu_pack_folder_btn)
+        browse_model_btn.setVisible(not remote_mode)
+        open_models_folder_btn.setVisible(not remote_mode)
+        open_gpu_pack_folder_btn.setVisible(not remote_mode)
         layout.addLayout(local_actions_layout)
 
         local_download_layout = QHBoxLayout()
@@ -3726,31 +3820,38 @@ class VideoTranslatorGUI(QMainWindow):
         open_voices_folder_btn = QPushButton("Open Voices Folder", dialog)
         local_download_layout.addWidget(manage_resources_btn)
         local_download_layout.addWidget(open_voices_folder_btn)
+        manage_resources_btn.setVisible(not remote_mode)
+        open_voices_folder_btn.setVisible(not remote_mode)
         layout.addLayout(local_download_layout)
 
         provider_hint = QLabel("")
         provider_hint.setObjectName("helperLabel")
         provider_hint.setWordWrap(True)
+        provider_hint.setVisible(not remote_mode)
         layout.addWidget(provider_hint)
 
         local_status_label = QLabel("")
         local_status_label.setObjectName("helperLabel")
         local_status_label.setWordWrap(True)
+        local_status_label.setVisible(not remote_mode)
         layout.addWidget(local_status_label)
 
         local_model_status_label = QLabel("")
         local_model_status_label.setObjectName("helperLabel")
         local_model_status_label.setWordWrap(True)
+        local_model_status_label.setVisible(not remote_mode)
         layout.addWidget(local_model_status_label)
 
         local_gpu_pack_status_label = QLabel("")
         local_gpu_pack_status_label.setObjectName("helperLabel")
         local_gpu_pack_status_label.setWordWrap(True)
+        local_gpu_pack_status_label.setVisible(not remote_mode)
         layout.addWidget(local_gpu_pack_status_label)
 
         local_voices_status_label = QLabel("")
         local_voices_status_label.setObjectName("helperLabel")
         local_voices_status_label.setWordWrap(True)
+        local_voices_status_label.setVisible(not remote_mode)
         layout.addWidget(local_voices_status_label)
 
         local_perf_row_1_widget = QWidget(dialog)
@@ -3766,6 +3867,7 @@ class VideoTranslatorGUI(QMainWindow):
         local_perf_row_1.addWidget(local_n_ctx_edit)
         local_perf_row_1.addWidget(local_threads_label)
         local_perf_row_1.addWidget(local_threads_edit)
+        local_perf_row_1_widget.setVisible(not remote_mode)
         layout.addWidget(local_perf_row_1_widget)
 
         local_perf_row_2_widget = QWidget(dialog)
@@ -3781,6 +3883,7 @@ class VideoTranslatorGUI(QMainWindow):
         local_perf_row_2.addWidget(local_gpu_layers_edit)
         local_perf_row_2.addWidget(local_batch_label)
         local_perf_row_2.addWidget(local_batch_edit)
+        local_perf_row_2_widget.setVisible(not remote_mode)
         layout.addWidget(local_perf_row_2_widget)
 
         local_perf_row_3_widget = QWidget(dialog)
@@ -3796,6 +3899,7 @@ class VideoTranslatorGUI(QMainWindow):
         local_perf_row_3.addWidget(local_ubatch_edit)
         local_perf_row_3.addWidget(local_flash_attn_cb)
         local_perf_row_3.addWidget(local_auto_optimize_btn)
+        local_perf_row_3_widget.setVisible(not remote_mode)
         layout.addWidget(local_perf_row_3_widget)
 
         def _default_local_model_path() -> str:
@@ -3973,7 +4077,28 @@ class VideoTranslatorGUI(QMainWindow):
         local_auto_optimize_btn.clicked.connect(lambda: _apply_local_recommended_settings(force_recommended=True))
         local_flash_attn_cb.toggled.connect(lambda _checked: setattr(local_flash_attn_cb, "_manual_override", True))
         model_edit.textChanged.connect(lambda _text: _update_local_asset_status())
-        update_provider_fields()
+        def _test_remote_connection():
+            try:
+                payload = self._test_remote_api_connection(
+                    remote_url_edit.text().strip(),
+                    remote_token_edit.text().strip(),
+                )
+                service_name = str(payload.get("service", "capcap-remote-api") or "capcap-remote-api")
+                profile_name = str(payload.get("profile", "local") or "local")
+                QMessageBox.information(
+                    dialog,
+                    "Remote API",
+                    f"Connected successfully.\n\nService: {service_name}\nProfile: {profile_name}",
+                )
+            except Exception as exc:
+                QMessageBox.warning(
+                    dialog,
+                    "Remote API",
+                    f"Could not connect to the PC server.\n\n{exc}",
+                )
+        test_remote_btn.clicked.connect(_test_remote_connection)
+        if not remote_mode:
+            update_provider_fields()
 
         # Buttons
         button_row = QHBoxLayout()
@@ -4007,7 +4132,12 @@ class VideoTranslatorGUI(QMainWindow):
         updates = {
             "AI_POLISHER_PROVIDER": new_provider
         }
-        if new_provider == "gemini":
+        if remote_mode:
+            updates = {
+                "CAPCAP_REMOTE_API_URL": remote_url_edit.text().strip() or "http://127.0.0.1:8765",
+                "CAPCAP_REMOTE_API_TOKEN": remote_token_edit.text().strip(),
+            }
+        elif new_provider == "gemini":
             updates["GEMINI_API_KEY"] = new_key
             updates["GEMINI_MODEL"] = new_model
         else:

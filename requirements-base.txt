@@ -1,0 +1,5 @@
+PySide6
+requests
+python-dotenv
+pydub
+python-mpv
