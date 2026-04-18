@@ -28,18 +28,35 @@ def refresh_video_dimensions(gui, path: str, get_video_dimensions):
 
 
 def toggle_play(gui):
-    if hasattr(gui, "audio_preview_player"):
-        gui.audio_preview_player.stop()
-    if gui.media_player.is_playing():
-        gui.media_player.pause()
-        gui.timeline.set_playing(False)
-        gui.schedule_seek_frame_preview()
-    else:
-        gui.seek_frame_preview_timer.stop()
-        gui.media_player.play()
-        gui.timeline.set_playing(True)
-    if hasattr(gui, "_refresh_preview_audio_controls"):
-        gui._refresh_preview_audio_controls()
+    try:
+        if hasattr(gui, "audio_preview_player"):
+            gui.audio_preview_player.stop()
+
+        video_path = ""
+        if hasattr(gui, "video_path_edit"):
+            video_path = gui.video_path_edit.text().strip()
+
+        # If the backend lost its loaded source after UI/state changes, restore it lazily.
+        if video_path and os.path.exists(video_path):
+            source_path = str(getattr(gui.media_player, "_source_path", "") or "")
+            if not source_path:
+                gui.media_player.setSource(QUrl.fromLocalFile(video_path))
+
+        if gui.media_player.is_playing():
+            gui.media_player.pause()
+            gui.timeline.set_playing(False)
+            gui.schedule_seek_frame_preview()
+        else:
+            gui.seek_frame_preview_timer.stop()
+            gui.media_player.play()
+            gui.timeline.set_playing(True)
+        if hasattr(gui, "_refresh_preview_audio_controls"):
+            gui._refresh_preview_audio_controls()
+    except Exception as exc:
+        if hasattr(gui, "log"):
+            gui.log(f"[Preview] toggle play failed: {exc}")
+        if hasattr(gui, "show_error"):
+            gui.show_error("Preview Playback Failed", "Could not start or pause video preview.", str(exc))
 
 
 def stop_video(gui):

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -24,18 +25,57 @@ from utils.media_backend import is_mpv_backend_available
 
 def _set_preview_icon_button(button: QPushButton, icon_path: str, tooltip: str):
     button.setText("")
-    button.setToolTip(tooltip)
     button.setFixedSize(38, 38)
     button.setIcon(load_icon(icon_path, 18))
     button.setIconSize(QSize(18, 18))
     button.setStyleSheet("QPushButton { padding: 0; }")
 
 
+def _build_timeline_track_labels():
+    column = QFrame()
+    column.setObjectName("timelineTrackLabels")
+    column.setFixedWidth(112)
+    layout = QVBoxLayout(column)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+
+    header = QLabel("Tracks")
+    header.setFixedHeight(28)
+    header.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+    header.setContentsMargins(14, 0, 0, 0)
+    header.setObjectName("helperLabel")
+    layout.addWidget(header)
+
+    track_specs = [
+        ("Video", 52),
+        ("Audio", 52),
+        ("Subtitle", 88),
+    ]
+    for title, height in track_specs:
+        row = QFrame()
+        row.setFixedHeight(height)
+        row_layout = QVBoxLayout(row)
+        row_layout.setContentsMargins(14, 8, 10, 8)
+        row_layout.setSpacing(1)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("statusHeadline")
+        title_label.setStyleSheet("font-size: 12px; font-weight: 700;")
+        row_layout.addStretch()
+        row_layout.addWidget(title_label)
+        row_layout.addStretch()
+        layout.addWidget(row)
+
+    layout.addStretch()
+    return column
+
+
 def build_preview_panel(gui):
     right_panel = QWidget()
     right_panel.setObjectName("rightPanel")
     right_layout = QVBoxLayout(right_panel)
-    right_layout.setSpacing(12)
+    right_layout.setContentsMargins(0, 0, 0, 0)
+    right_layout.setSpacing(10)
 
     gui.preview_context_label = QLabel("Choose a video to start previewing. Subtitle and voice status will appear here as you work.")
     gui.preview_context_label.setWordWrap(True)
@@ -51,13 +91,53 @@ def build_preview_panel(gui):
     gui.frame_preview_image_label.hide()
 
     gui.video_view = MpvVideoView() if is_mpv_backend_available() else VideoView()
-    gui.video_view.setMinimumHeight(380)
+    gui.video_view.setMinimumHeight(320)
+    gui.video_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     gui.timeline = TimelineWidget()
     gui.timeline.seekRequested.connect(gui.set_position)
+    gui.timeline.segmentSelected.connect(gui.on_timeline_segment_selected)
+    gui.timeline.segmentTimingChanged.connect(gui.on_timeline_segment_timing_changed)
     gui.time_label = QLabel("00:00 / 00:00")
     gui.time_label.setStyleSheet("font-weight: bold; min-width: 100px; color: #6ee7d6;")
 
+    preview_card = QFrame()
+    preview_card.setObjectName("statusCard")
+    preview_card_layout = QVBoxLayout(preview_card)
+    preview_card_layout.setContentsMargins(12, 12, 12, 10)
+    preview_card_layout.setSpacing(8)
+    preview_card_layout.addWidget(gui.preview_context_label)
+    preview_card_layout.addWidget(gui.frame_preview_status_label)
+    preview_card_layout.addWidget(gui.frame_preview_image_label)
+    preview_card_layout.addWidget(gui.video_view, 1)
+
+    timeline_card = QFrame()
+    timeline_card.setObjectName("statusCard")
+    timeline_layout = QVBoxLayout(timeline_card)
+    timeline_layout.setContentsMargins(12, 10, 12, 10)
+    timeline_layout.setSpacing(8)
+
+    timeline_header_layout = QHBoxLayout()
+    timeline_header_layout.setSpacing(10)
+    timeline_copy_layout = QVBoxLayout()
+    timeline_copy_layout.setSpacing(1)
+    timeline_title = QLabel("Timeline")
+    timeline_title.setObjectName("statusHeadline")
+    timeline_meta = QLabel("Editor-first layout with dedicated video, audio, and subtitle lanes.")
+    timeline_meta.setObjectName("helperLabel")
+    timeline_copy_layout.addWidget(timeline_title)
+    timeline_copy_layout.addWidget(timeline_meta)
+    timeline_header_layout.addLayout(timeline_copy_layout, 1)
+    timeline_header_layout.addWidget(gui.time_label)
+    timeline_layout.addLayout(timeline_header_layout)
+
+    timeline_body_layout = QHBoxLayout()
+    timeline_body_layout.setSpacing(0)
+    timeline_body_layout.addWidget(_build_timeline_track_labels())
+    timeline_body_layout.addWidget(gui.timeline, 1)
+    timeline_layout.addLayout(timeline_body_layout)
+
     controls_layout = QHBoxLayout()
+    controls_layout.setSpacing(10)
     icons_dir = asset_path("icons")
     gui.play_btn = QPushButton()
     gui.stop_btn = QPushButton()
@@ -72,10 +152,9 @@ def build_preview_panel(gui):
     controls_layout.addWidget(gui.stop_btn)
     controls_layout.addWidget(gui.preview_btn)
     controls_layout.addWidget(gui.blur_area_btn)
-    controls_layout.addStretch()
-    controls_layout.addWidget(gui.time_label)
 
     preview_audio_layout = QHBoxLayout()
+    preview_audio_layout.setSpacing(10)
     gui.preview_volume_down_btn = QPushButton()
     gui.preview_mute_btn = QPushButton()
     gui.preview_volume_up_btn = QPushButton()
@@ -95,13 +174,22 @@ def build_preview_panel(gui):
     preview_audio_layout.addWidget(gui.preview_mute_btn)
     preview_audio_layout.addWidget(gui.preview_volume_up_btn)
     preview_audio_layout.addWidget(gui.preview_volume_label)
-    preview_audio_layout.addStretch()
+    preview_audio_layout.addStretch(1)
     preview_audio_layout.addWidget(QLabel("Speed"))
     preview_audio_layout.addWidget(gui.preview_speed_combo)
+
+    controls_bar = QFrame()
+    controls_bar.setObjectName("timelineControlsBar")
+    controls_bar_layout = QHBoxLayout(controls_bar)
+    controls_bar_layout.setContentsMargins(12, 10, 12, 10)
+    controls_bar_layout.setSpacing(18)
+    controls_bar_layout.addLayout(controls_layout)
+    controls_bar_layout.addLayout(preview_audio_layout, 1)
 
     gui.progress_bar = QProgressBar()
     gui.progress_bar.setFixedHeight(8)
     gui.progress_bar.setTextVisible(False)
+    timeline_layout.addWidget(gui.progress_bar)
 
     gui.translated_text = QTextEdit()
     gui.translated_text.setPlaceholderText("Vietnamese subtitle text will appear here. You can edit it before export.")
@@ -110,49 +198,73 @@ def build_preview_panel(gui):
     gui.transcript_text.setPlaceholderText("The original subtitle transcript will appear here...")
     gui.transcript_text.hide()
 
-    editor_card = QFrame()
-    editor_card.setObjectName("statusCard")
-    editor_layout = QVBoxLayout(editor_card)
-    editor_layout.setContentsMargins(14, 14, 14, 14)
-    editor_layout.setSpacing(10)
+    inspector_card = QFrame()
+    inspector_card.setObjectName("statusCard")
+    inspector_card.setMinimumWidth(320)
+    inspector_card.setMaximumWidth(380)
+    inspector_layout = QVBoxLayout(inspector_card)
+    inspector_layout.setContentsMargins(14, 14, 14, 14)
+    inspector_layout.setSpacing(10)
 
-    editor_top = QHBoxLayout()
-    editor_title = QLabel("Subtitle Editor")
-    editor_title.setObjectName("statusHeadline")
-    gui.show_original_subtitle_cb = QCheckBox("Show original script")
-    gui.show_original_subtitle_cb.setChecked(True)
+    inspector_header = QHBoxLayout()
+    inspector_header.setSpacing(8)
+    inspector_copy = QVBoxLayout()
+    inspector_copy.setSpacing(2)
+    inspector_title = QLabel("Subtitle Inspector")
+    inspector_title.setObjectName("statusHeadline")
+    inspector_copy.addWidget(inspector_title)
+    inspector_header.addLayout(inspector_copy, 1)
+    inspector_layout.addLayout(inspector_header)
+
+    inspector_actions_row = QHBoxLayout()
+    inspector_actions_row.setSpacing(8)
     gui.rewrite_translation_btn = QPushButton("Rewrite")
     gui.import_translation_btn = QPushButton("Import SRT")
-    editor_top.addWidget(editor_title)
-    editor_top.addStretch()
-    editor_top.addWidget(gui.rewrite_translation_btn)
-    editor_top.addWidget(gui.import_translation_btn)
-    editor_top.addWidget(gui.keep_timeline_cb)
-    editor_top.addWidget(gui.show_original_subtitle_cb)
+    inspector_actions_row.addWidget(gui.rewrite_translation_btn)
+    inspector_actions_row.addWidget(gui.import_translation_btn)
+    inspector_layout.addLayout(inspector_actions_row)
 
-    editor_hint = QLabel("Edit Vietnamese lines directly below. Original lines can be shown or hidden while you review timing.")
-    editor_hint.setObjectName("helperLabel")
-    editor_hint.setWordWrap(True)
+    gui.show_original_subtitle_cb = QCheckBox("Show original")
+    gui.show_original_subtitle_cb.setChecked(True)
+    inspector_toggle_row = QHBoxLayout()
+    inspector_toggle_row.setSpacing(10)
+    inspector_toggle_row.addWidget(gui.show_original_subtitle_cb)
+    inspector_toggle_row.addStretch(1)
+    inspector_layout.addLayout(inspector_toggle_row)
+
+    inspector_nav_row = QHBoxLayout()
+    inspector_nav_row.setSpacing(8)
+    gui.segment_prev_btn = QPushButton("Prev")
+    gui.segment_prev_btn.clicked.connect(lambda: gui.step_selected_segment(-1))
+    gui.segment_next_btn = QPushButton("Next")
+    gui.segment_next_btn.clicked.connect(lambda: gui.step_selected_segment(1))
+    gui.segment_selection_label = QLabel("No subtitle selected")
+    gui.segment_selection_label.setObjectName("helperLabel")
+    inspector_nav_row.addWidget(gui.segment_prev_btn)
+    inspector_nav_row.addWidget(gui.segment_next_btn)
+    inspector_nav_row.addWidget(gui.segment_selection_label, 1)
+    inspector_layout.addLayout(inspector_nav_row)
 
     gui.segment_editor_scroll = QScrollArea()
+    gui.segment_editor_scroll.setObjectName("segmentEditorScroll")
     gui.segment_editor_scroll.setWidgetResizable(True)
     gui.segment_editor_scroll.setFrameShape(QFrame.NoFrame)
     gui.segment_editor_container = QWidget()
+    gui.segment_editor_container.setObjectName("segmentEditorContainer")
     gui.segment_editor_layout = QVBoxLayout(gui.segment_editor_container)
     gui.segment_editor_layout.setContentsMargins(0, 0, 0, 0)
     gui.segment_editor_layout.setSpacing(10)
     gui.segment_editor_scroll.setWidget(gui.segment_editor_container)
+    inspector_layout.addWidget(gui.segment_editor_scroll, 1)
 
-    editor_layout.addLayout(editor_top)
-    editor_layout.addWidget(editor_hint)
-    editor_layout.addWidget(gui.segment_editor_scroll, 1)
+    workspace_row = QHBoxLayout()
+    workspace_row.setSpacing(10)
+    workspace_row.addWidget(preview_card, 1)
+    workspace_row.addWidget(inspector_card, 0)
 
-    right_layout.addWidget(gui.video_view, 5)
-    right_layout.addWidget(gui.timeline)
-    right_layout.addLayout(controls_layout)
-    right_layout.addLayout(preview_audio_layout)
-    right_layout.addWidget(gui.progress_bar)
-    right_layout.addWidget(editor_card, 4)
+    right_layout.addLayout(workspace_row, 5)
+    right_layout.addWidget(controls_bar, 0)
+    right_layout.addWidget(timeline_card, 0)
     return right_panel
 
 

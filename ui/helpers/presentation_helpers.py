@@ -14,21 +14,20 @@ def get_output_mode_key(value):
 
 def build_workflow_hint(mode: str, ai_polish_enabled: bool):
     hints = {
-        "subtitle": "This mode will create Vietnamese subtitles first. You can review the subtitle text, then export a subtitled video.",
-        "voice": "This mode will create a Vietnamese voice track, keep or reuse background audio, then export a video with new audio.",
-        "both": "This mode will create both Vietnamese subtitles and Vietnamese voice, then combine them into one final video.",
+        "subtitle": "Create Vietnamese subtitles, review them, then export.",
+        "voice": "Create a Vietnamese voice track, then export.",
+        "both": "Create subtitles and voice, then export.",
     }
-    polish_hint = " Use 'Rewrite with AI' in the subtitle editor whenever you want to refine the Vietnamese wording."
-    return hints.get(mode, "Choose an output mode to begin.") + polish_hint
+    return hints.get(mode, "Choose an output mode to begin.")
 
 
 def get_export_button_label(mode: str):
     labels = {
-        "subtitle": "Export Subtitled Video",
-        "voice": "Export Vietnamese Voice Video",
-        "both": "Export Final Video",
+        "subtitle": "Export",
+        "voice": "Export",
+        "both": "Export",
     }
-    return labels.get(mode, "Export Final Video")
+    return labels.get(mode, "Export")
 
 
 def build_guidance_state(
@@ -50,32 +49,32 @@ def build_guidance_state(
 
     if not video_ready:
         badge = "Waiting for video"
-        headline = "Step 1: choose the source video."
+        headline = "Choose a source video to begin."
     elif not has_original:
         badge = "Ready to process"
-        headline = "Next best step: create the original subtitle track."
+        headline = "Create the original subtitle track next."
     elif mode in ("subtitle", "both") and not has_translated:
         badge = "Subtitle review"
-        headline = "Original subtitles are ready. Translate them to Vietnamese next."
+        headline = "Translate the subtitles to Vietnamese."
     elif mode in ("voice", "both") and not has_voice_audio:
         badge = "Voice step"
-        headline = "Subtitles are ready. Generate voice/mix when you want dubbed output."
+        headline = "Generate voice or mix for dubbed output."
     else:
         badge = "Ready to preview/export"
-        headline = "The core assets are ready. Preview the result, then export when it looks right."
+        headline = "Preview the result, then export when it looks right."
 
     if pipeline_active:
         badge = "Processing"
-        headline = "CapCap is running the guided pipeline for you."
+        headline = "CapCap is processing the current pipeline."
 
-    readiness = " | ".join(
+    readiness = " • ".join(
         [
-            f"Video: {'Ready' if video_ready else 'Missing'}",
-            f"Original subtitles: {'Ready' if has_original else 'Pending'}",
-            f"Vietnamese subtitles: {'Ready' if has_applied_subtitles or has_translated else 'Pending'}",
-            f"Vietnamese voice: {'Ready' if has_voice_audio else 'Optional / Pending'}",
+            f"Video {'Ready' if video_ready else 'Missing'}",
+            f"Original {'Ready' if has_original else 'Pending'}",
+            f"Vietnamese {'Ready' if has_applied_subtitles or has_translated else 'Pending'}",
+            f"Voice {'Ready' if has_voice_audio else 'Optional'}",
         ]
-    ) + f"\nMode: {mode_label}"
+    )
 
     return {
         "badge": badge,

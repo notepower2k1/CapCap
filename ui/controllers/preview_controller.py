@@ -14,6 +14,27 @@ class PreviewController:
     def __init__(self, gui):
         self.gui = gui
 
+    def _prepare_current_export_srt(self) -> str:
+        segments = list(self.gui.get_active_segments() or [])
+        if not segments:
+            return str(self.gui.last_translated_srt_path or "").strip()
+
+        out_path = str(self.gui.last_translated_srt_path or "").strip()
+        if not out_path:
+            video_path = self.gui.video_path_edit.text().strip()
+            video_name = os.path.splitext(os.path.basename(video_path or "subtitle"))[0]
+            out_dir = self.gui.srt_output_folder_edit.text().strip() or os.path.join(self.gui.workspace_root, "output")
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"{video_name}_vi.srt")
+
+        from subtitle_builder import generate_srt
+
+        generate_srt(segments, out_path)
+        self.gui.last_translated_srt_path = out_path
+        self.gui.processed_artifacts["srt_translated"] = out_path
+        self.gui.persist_translation_project_data(self.gui.current_translated_segments, out_path)
+        return out_path
+
     def _file_signature(self, path: str) -> dict:
         if not path or not os.path.exists(path):
             return {"path": "", "size": 0, "mtime_ns": 0}
@@ -59,6 +80,11 @@ class PreviewController:
         translated_srt_path = self.gui.last_translated_srt_path
         translated_ass_path = self.gui.live_preview_ass_path
         chosen_audio = self.gui.resolve_selected_audio_path()
+
+        if mode in ("subtitle", "both"):
+            translated_srt_path = self._prepare_current_export_srt()
+            # Force export to rebuild styled subtitles from the latest SRT instead of a stale ASS preview cache.
+            translated_ass_path = ""
 
         if mode in ("subtitle", "both") and (not translated_srt_path or not os.path.exists(translated_srt_path)):
             QMessageBox.warning(self.gui, "Error", "Vietnamese subtitle file not found. Please run translation first.")

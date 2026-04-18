@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
                              QScrollArea,
                              QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy, QInputDialog,
                              QRadioButton)
-from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QSize
+from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QSize, QEvent
 from PySide6.QtGui import QColor, QIcon, QPixmap, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
@@ -123,22 +123,22 @@ class VideoTranslatorGUI(QMainWindow):
                 background-color: #101826;
             }
             #leftPanelArea {
-                background-color: #162133;
-                border-right: 1px solid #28364c;
+                background-color: #121b2b;
+                border-right: 1px solid #223248;
             }
             #leftPanelContainer {
-                background-color: #162133;
+                background-color: #121b2b;
             }
             #rightPanel {
                 background-color: #101826;
             }
             QGroupBox {
-                border: 1px solid #30425b;
-                border-radius: 14px;
-                margin-top: 25px;
+                border: none;
+                border-radius: 0px;
+                margin-top: 0px;
                 font-weight: bold;
                 color: #f3f7fb;
-                background-color: #1b273a;
+                background-color: transparent;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -147,8 +147,8 @@ class VideoTranslatorGUI(QMainWindow):
                 color: #8ad7ff;
             }
             QFrame#heroCard, QFrame#statusCard, QFrame#sideInfoCard {
-                background-color: #0f1724;
-                border: 1px solid #2d425d;
+                background-color: #0d1624;
+                border: 1px solid #24384f;
                 border-radius: 14px;
             }
             QLabel#heroTitle {
@@ -165,6 +165,15 @@ class VideoTranslatorGUI(QMainWindow):
                 font-weight: 700;
                 color: #8ad7ff;
             }
+            QLabel#timingChip {
+                background-color: #173049;
+                color: #9fe5ff;
+                border: 1px solid #356081;
+                border-radius: 999px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 700;
+            }
             QLabel#statusHeadline {
                 font-size: 16px;
                 font-weight: 700;
@@ -179,12 +188,41 @@ class VideoTranslatorGUI(QMainWindow):
                 font-size: 11px;
                 font-weight: 700;
             }
+            QLabel#statusChip {
+                background-color: #152537;
+                color: #dbe5f3;
+                border: 1px solid #2e4764;
+                border-radius: 999px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QLabel#statusChip[state="ok"] {
+                background-color: #153528;
+                color: #c8f7df;
+                border: 1px solid #2f7a55;
+            }
+            QLabel#statusChip[state="running"] {
+                background-color: #3a2d12;
+                color: #ffe29a;
+                border: 1px solid #9b7530;
+            }
+            QLabel#statusChip[state="na"] {
+                background-color: #1c2430;
+                color: #9fb3ca;
+                border: 1px solid #3a4a5f;
+            }
+            QLabel#statusChip[state="pending"] {
+                background-color: #152537;
+                color: #dbe5f3;
+                border: 1px solid #2e4764;
+            }
             QPushButton {
-                background-color: #24364f;
+                background-color: #213248;
                 color: #ffffff;
-                border: 1px solid #335171;
+                border: 1px solid #304b69;
                 border-radius: 10px;
-                padding: 10px 18px;
+                padding: 8px 14px;
                 font-weight: bold;
                 font-size: 11px;
             }
@@ -202,12 +240,92 @@ class VideoTranslatorGUI(QMainWindow):
             QPushButton#mainActionBtn:hover {
                 background-color: #66ddc2;
             }
+            QPushButton#secondaryActionBtn {
+                background-color: #18314a;
+                color: #dff4ff;
+                border: 1px solid #4f88b4;
+                font-size: 13px;
+                font-weight: 700;
+                padding: 8px 14px;
+            }
+            QPushButton#secondaryActionBtn:hover {
+                background-color: #21405f;
+                border-color: #69a9dc;
+            }
+            QPushButton#secondaryActionBtn::menu-indicator {
+                width: 0px;
+                image: none;
+            }
+            QMenu#headerMoreMenu {
+                background-color: #0f1724;
+                color: #e6eef9;
+                border: 1px solid #30425b;
+                padding: 6px;
+            }
+            QMenu#headerMoreMenu::item {
+                background-color: transparent;
+                color: #e6eef9;
+                padding: 8px 14px;
+                border-radius: 8px;
+            }
+            QMenu#headerMoreMenu::item:selected {
+                background-color: #213248;
+                color: #ffffff;
+            }
+            QMenu#headerMoreMenu::separator {
+                height: 1px;
+                background: #2b425c;
+                margin: 6px 8px;
+            }
+            QPushButton#workflowTabBtn {
+                background-color: #162638;
+                color: #9fb3ca;
+                border: 1px solid #2b425c;
+                border-radius: 10px;
+                padding: 5px 9px;
+                font-size: 10px;
+                font-weight: 700;
+            }
+            QPushButton#workflowTabBtn:hover {
+                background-color: #1c3047;
+                border-color: #44698f;
+            }
+            QPushButton#workflowTabBtn:checked {
+                background-color: #24425f;
+                color: #f8fbff;
+                border-color: #5fb9ff;
+            }
+            QStackedWidget#leftPanelStack {
+                background: transparent;
+            }
             QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
                 background-color: #111927;
                 border: 1px solid #31445d;
                 border-radius: 10px;
                 color: #ffffff;
                 padding: 8px;
+            }
+            QScrollArea#segmentEditorScroll {
+                background-color: transparent;
+                border: none;
+            }
+            QWidget#segmentEditorContainer {
+                background-color: transparent;
+            }
+            QFrame#segmentInspectorCard {
+                background-color: #0d1624;
+                border: 1px solid #24384f;
+                border-radius: 0px;
+            }
+            QTextEdit#segmentInspectorEditor {
+                background-color: #111b2b;
+                border: 1px solid #35506f;
+                border-radius: 10px;
+                padding: 10px 12px;
+            }
+            QTextEdit#segmentInspectorEditor:focus {
+                border: 1px solid #5fb9ff;
+                background-color: #122033;
             }
             QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
                 border: 1px solid #8ad7ff;
@@ -246,7 +364,7 @@ class VideoTranslatorGUI(QMainWindow):
             }
             QScrollArea {
                 border: none;
-                background-color: #162133;
+                background-color: #121b2b;
             }
             QScrollBar:vertical {
                 border: none;
@@ -1428,6 +1546,8 @@ class VideoTranslatorGUI(QMainWindow):
     def on_advanced_toggled(self, checked: bool):
         if hasattr(self, "tabs"):
             self.tabs.setVisible(True)
+        if hasattr(self, "workflow_advanced_layout"):
+            checked = True
         if hasattr(self, "toggle_advanced_btn"):
             self.toggle_advanced_btn.setText(("▼ " if checked else "▶ ") + "Advanced Settings")
         if hasattr(self, "advanced_section_content"):
@@ -1986,17 +2106,12 @@ class VideoTranslatorGUI(QMainWindow):
             self.use_generated_audio_radio.setVisible(show_voice)
         if hasattr(self, "use_existing_audio_radio"):
             self.use_existing_audio_radio.setVisible(show_voice)
-        if hasattr(self, "audio_source_hint_label"):
-            self.audio_source_hint_label.setVisible(show_voice)
         if hasattr(self, "browse_bg_music_btn"):
             self.browse_bg_music_btn.setVisible(show_voice)
         if hasattr(self, "browse_mixed_audio_btn"):
             self.browse_mixed_audio_btn.setVisible(show_voice)
         if hasattr(self, "audio_handling_combo"):
             self.audio_handling_combo.setVisible(show_voice)
-        if hasattr(self, "audio_handling_hint_label"):
-            self.audio_handling_hint_label.setVisible(show_voice)
-
         if hasattr(self, "output_subtitle_radio"):
             self.output_subtitle_radio.setChecked(mode == "subtitle")
             self.output_voice_radio.setChecked(mode == "voice")
@@ -2019,6 +2134,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.workflow_status_badge.setText(guidance["badge"])
         self.next_step_label.setText(guidance["headline"])
         self.readiness_label.setText(guidance["readiness"])
+        self.readiness_label.hide()
         self.update_progress_checklist()
         self.update_preview_context_label(guidance["has_subtitles"], guidance["has_voice_audio"])
 
@@ -2032,6 +2148,25 @@ class VideoTranslatorGUI(QMainWindow):
             self.project_title_label.setText("Project: No video selected")
             self.upload_status_label.setText("No video uploaded yet")
 
+    def sync_left_panel_container_width(self):
+        scroll_area = getattr(self, "left_panel_scroll_area", None)
+        container = getattr(self, "left_panel_container", None)
+        if not scroll_area or not container:
+            return
+        viewport_width = max(0, scroll_area.viewport().width())
+        if viewport_width <= 0:
+            return
+        gutter = 10
+        target_width = max(320, viewport_width - gutter)
+        container.setMaximumWidth(target_width)
+
+    def eventFilter(self, watched, event):
+        if event.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest):
+            scroll_area = getattr(self, "left_panel_scroll_area", None)
+            if scroll_area and watched in (scroll_area, scroll_area.viewport(), scroll_area.verticalScrollBar()):
+                QTimer.singleShot(0, self.sync_left_panel_container_width)
+        return super().eventFilter(watched, event)
+
     def toggle_controls_panel(self):
         currently_visible = bool(getattr(self, "left_panel_scroll_area", None) and self.left_panel_scroll_area.isVisible())
         self.set_controls_panel_visible(not currently_visible)
@@ -2039,11 +2174,19 @@ class VideoTranslatorGUI(QMainWindow):
     def set_controls_panel_visible(self, visible: bool):
         if hasattr(self, "left_panel_scroll_area"):
             self.left_panel_scroll_area.setVisible(visible)
-        if hasattr(self, "toggle_controls_btn"):
-            self.toggle_controls_btn.setText("Hide Controls" if visible else "Show Controls")
+        if hasattr(self, "toggle_controls_action"):
+            self.toggle_controls_action.setText("Hide Controls" if visible else "Show Controls")
 
     def update_progress_checklist(self):
         steps = getattr(getattr(self, "current_project_state", None), "steps", {}) or {}
+
+        def set_status_chip_state(label, state: str):
+            if not label:
+                return
+            label.setProperty("state", state)
+            label.style().unpolish(label)
+            label.style().polish(label)
+            label.update()
 
         has_audio = bool(
             (self.last_extracted_audio and os.path.exists(self.last_extracted_audio))
@@ -2056,19 +2199,26 @@ class VideoTranslatorGUI(QMainWindow):
         translation_running = steps.get("translate_raw") == "running" or steps.get("refine_translation") == "running"
         voice_running = steps.get("generate_tts") == "running" or steps.get("mix_audio") == "running"
 
-        self.progress_audio_label.setText(("[OK] " if has_audio else "[ ] ") + "Audio ready")
-        self.progress_subtitle_label.setText(("[OK] " if has_subtitle else "[ ] ") + "Original subtitles ready")
+        self.progress_audio_label.setText(("[OK] " if has_audio else "[ ] ") + "Audio")
+        set_status_chip_state(self.progress_audio_label, "ok" if has_audio else "pending")
+        self.progress_subtitle_label.setText(("[OK] " if has_subtitle else "[ ] ") + "Original")
+        set_status_chip_state(self.progress_subtitle_label, "ok" if has_subtitle else "pending")
         if translation_running:
-            self.progress_translate_label.setText("[...] Preparing Vietnamese subtitles...")
+            self.progress_translate_label.setText("[...] Vietnamese")
+            set_status_chip_state(self.progress_translate_label, "running")
         else:
-            self.progress_translate_label.setText(("[OK] " if has_translation else "[ ] ") + "Vietnamese subtitles ready")
+            self.progress_translate_label.setText(("[OK] " if has_translation else "[ ] ") + "Vietnamese")
+            set_status_chip_state(self.progress_translate_label, "ok" if has_translation else "pending")
 
         if self.get_output_mode_key() == "subtitle":
-            self.progress_voice_label.setText("[ ] Voice/audio not needed")
+            self.progress_voice_label.setText("[ ] Voice N/A")
+            set_status_chip_state(self.progress_voice_label, "na")
         elif voice_running:
-            self.progress_voice_label.setText("[...] Preparing voice/audio...")
+            self.progress_voice_label.setText("[...] Voice")
+            set_status_chip_state(self.progress_voice_label, "running")
         else:
-            self.progress_voice_label.setText(("[OK] " if has_voice else "[ ] ") + "Voice/audio ready")
+            self.progress_voice_label.setText(("[OK] " if has_voice else "[ ] ") + "Voice")
+            set_status_chip_state(self.progress_voice_label, "ok" if has_voice else "pending")
 
     def update_preview_context_label(self, has_subtitles: bool, has_voice_audio: bool):
         subtitle_source = "Vietnamese review track" if self.current_translated_segments else ("original subtitle track" if self.current_segments else "no subtitle track yet")
@@ -2319,6 +2469,7 @@ class VideoTranslatorGUI(QMainWindow):
             reference = translated or base
             rows.append(
                 {
+                    "segment_index": idx,
                     "start": float(reference.get("start", 0.0)),
                     "end": float(reference.get("end", 0.0)),
                     "original": str(base.get("text", "")),
@@ -2405,9 +2556,9 @@ class VideoTranslatorGUI(QMainWindow):
         segment["manual_highlights"] = cleaned
 
     def _sync_segment_highlight_chip_row(self, index: int):
-        if index < 0 or index >= len(getattr(self, "_segment_editor_rows", [])):
+        row = self._find_segment_editor_row(index)
+        if not row:
             return
-        row = self._segment_editor_rows[index]
         chip_layout = row.get("highlight_chip_layout")
         placeholder = row.get("highlight_placeholder")
         if chip_layout is None:
@@ -2474,6 +2625,16 @@ class VideoTranslatorGUI(QMainWindow):
         self.schedule_live_subtitle_preview_refresh()
         self.refresh_ui_state()
 
+    def _update_segment_highlight_button_state(self, index: int, editor: QTextEdit):
+        row = self._find_segment_editor_row(index)
+        if not row:
+            return
+        button = row.get("highlight_button")
+        if button is None:
+            return
+        has_selection = bool(self._normalize_manual_highlight(editor.textCursor().selectedText()))
+        button.setEnabled(has_selection)
+
     def _clear_segment_editor_rows(self):
         if not hasattr(self, "segment_editor_layout"):
             return
@@ -2495,6 +2656,91 @@ class VideoTranslatorGUI(QMainWindow):
         for row in getattr(self, "_segment_editor_rows", []):
             row["original_label"].setVisible(show_original and bool(row["original_label"].text().strip()))
 
+    def _get_effective_selected_segment_index(self, rows=None) -> int:
+        rows = rows if rows is not None else self._segment_editor_display_rows()
+        if not rows:
+            return -1
+        selected = int(getattr(self, "_selected_segment_index", -1))
+        valid_indexes = [int(row.get("segment_index", idx)) for idx, row in enumerate(rows)]
+        if selected in valid_indexes:
+            return selected
+        active_index = self._find_active_segment_index(self.media_player.position(), self.live_preview_segments or self.get_active_segments())
+        if active_index in valid_indexes:
+            return active_index
+        return valid_indexes[0]
+
+    def set_selected_segment_index(self, index: int, *, sync_ui: bool = True):
+        rows = self._segment_editor_display_rows()
+        valid_indexes = [int(row.get("segment_index", idx)) for idx, row in enumerate(rows)]
+        if not valid_indexes:
+            self._selected_segment_index = -1
+        elif index in valid_indexes:
+            self._selected_segment_index = int(index)
+        else:
+            self._selected_segment_index = valid_indexes[0]
+        if sync_ui:
+            self.sync_segment_editor_rows()
+
+    def on_timeline_segment_selected(self, index: int):
+        self.set_selected_segment_index(index, sync_ui=True)
+        if hasattr(self, "timeline"):
+            self.timeline.set_active_segment_index(index)
+
+    def _sync_hidden_transcript_text_from_segments(self):
+        if getattr(self, "_syncing_segment_editor", False):
+            return
+        self._syncing_hidden_editor_text = True
+        try:
+            self.transcript_text.setText(self.format_to_srt(self.current_segments))
+        finally:
+            self._syncing_hidden_editor_text = False
+
+    def _apply_segment_timing(self, segment: dict, start: float, end: float):
+        segment["start"] = float(start)
+        segment["end"] = float(end)
+        if "tts_group_start" in segment or "tts_group_end" in segment:
+            segment["tts_group_start"] = float(start)
+            segment["tts_group_end"] = float(end)
+
+    def on_timeline_segment_timing_changed(self, index: int, start: float, end: float):
+        updated = False
+        if 0 <= index < len(self.current_segments or []):
+            self._apply_segment_timing(self.current_segments[index], start, end)
+            self.current_segment_models = self._dict_segments_to_models(self.current_segments, translated=False)
+            self._sync_hidden_transcript_text_from_segments()
+            updated = True
+        if 0 <= index < len(self.current_translated_segments or []):
+            self._apply_segment_timing(self.current_translated_segments[index], start, end)
+            self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+            self._sync_hidden_translated_text_from_segments()
+            updated = True
+        if not updated:
+            return
+        self.set_selected_segment_index(index, sync_ui=True)
+        self.apply_segments_to_timeline()
+        self.schedule_live_subtitle_preview_refresh()
+        self.refresh_ui_state()
+
+    def step_selected_segment(self, direction: int):
+        rows = self._segment_editor_display_rows()
+        valid_indexes = [int(row.get("segment_index", idx)) for idx, row in enumerate(rows)]
+        if not valid_indexes:
+            self.set_selected_segment_index(-1)
+            return
+        current = self._get_effective_selected_segment_index(rows)
+        try:
+            current_pos = valid_indexes.index(current)
+        except ValueError:
+            current_pos = 0
+        target_pos = max(0, min(len(valid_indexes) - 1, current_pos + int(direction)))
+        self.set_selected_segment_index(valid_indexes[target_pos], sync_ui=True)
+
+    def _find_segment_editor_row(self, segment_index: int):
+        for row in getattr(self, "_segment_editor_rows", []):
+            if int(row.get("segment_index", -1)) == int(segment_index):
+                return row
+        return None
+
     def sync_segment_editor_rows(self):
         if not hasattr(self, "segment_editor_layout") or getattr(self, "_syncing_segment_editor", False):
             return
@@ -2505,9 +2751,17 @@ class VideoTranslatorGUI(QMainWindow):
             self._segment_editor_rows = []
             rows = self._segment_editor_display_rows()
             if not rows:
+                self._selected_segment_index = -1
+                if hasattr(self, "segment_selection_label"):
+                    self.segment_selection_label.setText("No subtitle selected")
+                if hasattr(self, "segment_prev_btn"):
+                    self.segment_prev_btn.setEnabled(False)
+                if hasattr(self, "segment_next_btn"):
+                    self.segment_next_btn.setEnabled(False)
                 empty_state = QFrame(self.segment_editor_container if hasattr(self, "segment_editor_container") else None)
                 empty_state.setObjectName("statusCard")
                 empty_state.setMinimumHeight(180)
+                empty_state.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
                 empty_state.setStyleSheet(
                     "QFrame#statusCard { background-color: #132132; border: 1px dashed #35506f; border-radius: 16px; }"
                 )
@@ -2525,33 +2779,43 @@ class VideoTranslatorGUI(QMainWindow):
                 empty_layout.addWidget(empty_title)
                 empty_layout.addWidget(empty_body)
                 empty_layout.addStretch()
-                self.segment_editor_layout.addWidget(empty_state)
-                self.segment_editor_layout.addStretch()
+                self.segment_editor_layout.addWidget(empty_state, 1)
                 return
 
+            selected_index = self._get_effective_selected_segment_index(rows)
+            visible_rows = [row for row in rows if int(row.get("segment_index", -1)) == selected_index]
+            if not visible_rows:
+                visible_rows = [rows[0]]
+                selected_index = int(visible_rows[0].get("segment_index", 0))
+            self._selected_segment_index = selected_index
+
+            if hasattr(self, "segment_selection_label"):
+                self.segment_selection_label.setText(f"Block {selected_index + 1} / {len(rows)}")
+            if hasattr(self, "segment_prev_btn"):
+                self.segment_prev_btn.setEnabled(selected_index > 0)
+            if hasattr(self, "segment_next_btn"):
+                self.segment_next_btn.setEnabled(selected_index < len(rows) - 1)
+
             show_original = bool(getattr(self, "show_original_subtitle_cb", None) and self.show_original_subtitle_cb.isChecked())
-            for idx, row in enumerate(rows):
+            for row in visible_rows:
+                idx = int(row.get("segment_index", 0))
                 card = QFrame(self.segment_editor_container if hasattr(self, "segment_editor_container") else None)
-                card.setObjectName("statusCard")
+                card.setObjectName("segmentInspectorCard")
                 card_layout = QVBoxLayout(card)
                 card_layout.setContentsMargins(12, 12, 12, 12)
                 card_layout.setSpacing(6)
 
-                header_layout = QHBoxLayout()
-                timestamp_label = QLabel(f"[{self._format_compact_editor_timestamp(row['start'])}]", card)
-                timestamp_label.setObjectName("sectionTitle")
-                preview_btn = QPushButton("", card)
-                preview_btn.setFixedSize(38, 38)
-                preview_btn.setToolTip("Preview this subtitle line as audio")
-                preview_btn.setIcon(load_icon(asset_path("icons", "audio_preview.svg"), 18))
-                preview_btn.setIconSize(QSize(18, 18))
-                preview_btn.clicked.connect(lambda _=False, idx=idx: self.preview_segment_audio(idx))
-                highlight_btn = QPushButton("Highlight", card)
-                highlight_btn.setFixedWidth(88)
-                header_layout.addWidget(timestamp_label)
-                header_layout.addStretch()
-                header_layout.addWidget(highlight_btn)
-                header_layout.addWidget(preview_btn)
+                timing_meta_layout = QHBoxLayout()
+                timing_meta_layout.setContentsMargins(0, 0, 0, 0)
+                timing_meta_layout.setSpacing(12)
+                start_label = QLabel(f"Start  {self.format_timestamp(row['start'])}")
+                start_label.setObjectName("timingChip")
+                end_label = QLabel(f"End  {self.format_timestamp(row['end'])}")
+                end_label.setObjectName("timingChip")
+                timing_meta_layout.addWidget(start_label)
+                timing_meta_layout.addWidget(end_label)
+                timing_meta_layout.addStretch()
+
                 original_label = QLabel(row["original"] or "", card)
                 original_label.setWordWrap(True)
                 original_label.setObjectName("helperLabel")
@@ -2560,21 +2824,34 @@ class VideoTranslatorGUI(QMainWindow):
                 arrow_label = QLabel("→", card)
                 arrow_label.setStyleSheet("font-size: 16px; font-weight: 700; color: #8ad7ff;")
                 translated_editor = QTextEdit(card)
+                translated_editor.setObjectName("segmentInspectorEditor")
                 translated_editor.setAcceptRichText(False)
                 translated_editor.setPlainText(row["translated"])
-                translated_editor.setMinimumHeight(60)
-                translated_editor.setMaximumHeight(92)
+                translated_editor.setMinimumHeight(96)
+                translated_editor.setMaximumHeight(120)
+                translated_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
                 translated_editor.textChanged.connect(
                     lambda idx=idx, editor=translated_editor: self.on_segment_translation_edited(idx, editor)
                 )
+                translated_editor.selectionChanged.connect(
+                    lambda idx=idx, editor=translated_editor: self._update_segment_highlight_button_state(idx, editor)
+                )
+                highlight_btn = QPushButton("Add highlight from selection", card)
+                highlight_btn.setEnabled(False)
                 highlight_btn.clicked.connect(
                     lambda _=False, idx=idx, editor=translated_editor: self.add_segment_manual_highlight(idx, editor)
                 )
 
+                highlight_action_layout = QHBoxLayout()
+                highlight_action_layout.setContentsMargins(0, 0, 0, 0)
+                highlight_action_layout.setSpacing(8)
+                highlight_action_layout.addStretch()
+                highlight_action_layout.addWidget(highlight_btn)
+
                 highlight_meta_layout = QHBoxLayout()
                 highlight_meta_layout.setContentsMargins(0, 0, 0, 0)
                 highlight_meta_layout.setSpacing(6)
-                highlight_placeholder = QLabel("[ Suggest highlight ]", card)
+                highlight_placeholder = QLabel("", card)
                 highlight_placeholder.setObjectName("helperLabel")
                 highlight_chip_container = QWidget(card)
                 highlight_chip_layout = QHBoxLayout(highlight_chip_container)
@@ -2583,27 +2860,34 @@ class VideoTranslatorGUI(QMainWindow):
                 highlight_meta_layout.addWidget(highlight_placeholder)
                 highlight_meta_layout.addWidget(highlight_chip_container, 1)
 
-                card_layout.addLayout(header_layout)
+                card_layout.addLayout(timing_meta_layout)
                 card_layout.addWidget(original_label)
-                card_layout.addWidget(arrow_label)
-                card_layout.addWidget(translated_editor)
+                divider = QFrame(card)
+                divider.setFrameShape(QFrame.HLine)
+                divider.setStyleSheet("color: #27425d;")
+                card_layout.addWidget(divider)
+                card_layout.addWidget(translated_editor, 0)
+                card_layout.addLayout(highlight_action_layout)
                 card_layout.addLayout(highlight_meta_layout)
-                self.segment_editor_layout.addWidget(card)
+                for label in card.findChildren(QLabel):
+                    if label.text().strip() in {"→", "â†’"}:
+                        label.hide()
+                self.segment_editor_layout.addWidget(card, 0)
                 self._segment_editor_rows.append(
                     {
+                        "segment_index": idx,
                         "frame": card,
                         "original_label": original_label,
                         "translated_editor": translated_editor,
-                        "preview_button": preview_btn,
                         "highlight_button": highlight_btn,
                         "highlight_placeholder": highlight_placeholder,
                         "highlight_chip_layout": highlight_chip_layout,
                     }
                 )
+                self._update_segment_highlight_button_state(idx, translated_editor)
                 self._sync_segment_highlight_chip_row(idx)
 
-            self.segment_editor_layout.addStretch()
-            self._set_segment_editor_highlight(self._find_active_segment_index(self.media_player.position(), self.live_preview_segments or self.get_active_segments()))
+            self._set_segment_editor_highlight(selected_index)
         finally:
             self._syncing_segment_editor = False
 
@@ -2670,8 +2954,9 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _set_segment_editor_highlight(self, active_index: int):
         rows = getattr(self, "_segment_editor_rows", [])
-        for idx, row in enumerate(rows):
-            if idx == active_index:
+        for row in rows:
+            row_index = int(row.get("segment_index", -1))
+            if row_index == active_index:
                 row["frame"].setStyleSheet("QFrame#statusCard { background-color: #153149; border: 1px solid #5fb9ff; border-radius: 14px; }")
                 self.segment_editor_scroll.ensureWidgetVisible(row["frame"], 0, 36)
             else:
@@ -2958,7 +3243,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         voice_name = self.get_active_voice_name()
         voice_speed = self._parse_voice_speed_value()
-        row = self._segment_editor_rows[index] if index < len(self._segment_editor_rows) else None
+        row = self._find_segment_editor_row(index)
         if row:
             row["preview_button"].setEnabled(False)
             row["preview_button"].setText("...")
@@ -2969,7 +3254,7 @@ class VideoTranslatorGUI(QMainWindow):
         worker.start()
 
     def on_segment_audio_preview_ready(self, index: int, audio_path: str, error: str):
-        row = self._segment_editor_rows[index] if index < len(self._segment_editor_rows) else None
+        row = self._find_segment_editor_row(index)
         if row:
             row["preview_button"].setEnabled(True)
             row["preview_button"].setIcon(load_icon(asset_path("icons", "audio_preview.svg"), 18))
@@ -3274,6 +3559,8 @@ class VideoTranslatorGUI(QMainWindow):
             segments = self.live_preview_segments or self.get_active_segments()
             active_index = self._find_active_segment_index(position_ms, segments)
             self.timeline.set_active_segment_index(active_index)
+            if active_index >= 0 and active_index != getattr(self, "_selected_segment_index", -1):
+                self.set_selected_segment_index(active_index, sync_ui=True)
 
             target_editor = None
             if self.live_preview_editor_name == "translated":
@@ -3382,16 +3669,16 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setVisible(mode in ("voice", "both"))
             self.preview_voice_btn.setEnabled(bool(self.voice_catalog_entries_all))
-        if hasattr(self, "clean_project_btn"):
-            self.clean_project_btn.setEnabled(self._has_cleanable_project_data())
+        if hasattr(self, "clean_project_action"):
+            self.clean_project_action.setEnabled(self._has_cleanable_project_data())
         self.run_all_btn.setEnabled(v_ok and not self._pipeline_active)
         self.preview_frame_btn.setEnabled(v_ok and bool(self.get_active_segments()))
         self.preview_5s_btn.setEnabled(v_ok)
         self.export_btn.setEnabled(can_export)
-        if hasattr(self, "download_subtitle_btn"):
-            self.download_subtitle_btn.setEnabled(bool(self.translated_text.toPlainText().strip()))
-        if hasattr(self, "download_original_btn"):
-            self.download_original_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()))
+        if hasattr(self, "download_subtitle_action"):
+            self.download_subtitle_action.setEnabled(bool(self.translated_text.toPlainText().strip()))
+        if hasattr(self, "download_original_action"):
+            self.download_original_action.setEnabled(bool(self.transcript_text.toPlainText().strip()))
         if hasattr(self, "tabs"):
             self.tabs.setTabEnabled(1, v_ok)
             self.tabs.setTabEnabled(2, v_ok and mode in ("voice", "both"))

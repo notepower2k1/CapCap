@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QImage, QPixmap
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from .advanced_tabs import build_advanced_group
 from .preview_panel import build_preview_panel
@@ -30,6 +30,7 @@ def build_main_window_ui(gui):
 
     _connect_ui_signals(gui)
     _initialize_ui_state(gui)
+    QTimer.singleShot(0, gui.sync_left_panel_container_width)
 
 
 def _build_header_bar(gui):
@@ -57,27 +58,39 @@ def _build_header_bar(gui):
     gui.project_title_label = QLabel("Project: No video selected")
     gui.project_title_label.setObjectName("statusHeadline")
     layout.addWidget(gui.project_title_label, 1)
-    gui.toggle_controls_btn = QPushButton("Hide Controls")
-    gui.toggle_controls_btn.clicked.connect(gui.toggle_controls_panel)
-    layout.addWidget(gui.toggle_controls_btn)
-    gui.settings_btn = QPushButton("Settings")
-    gui.settings_btn.clicked.connect(gui.open_model_settings_dialog)
-    layout.addWidget(gui.settings_btn)
+    gui.run_all_btn.setMinimumHeight(42)
+    layout.addWidget(gui.run_all_btn)
+    gui.export_btn.setObjectName("secondaryActionBtn")
+    gui.export_btn.setMinimumHeight(42)
     gui.show_progress_btn = QPushButton("Show Progress")
     gui.show_progress_btn.clicked.connect(gui.show_active_progress_dialog)
     gui.show_progress_btn.setVisible(False)
     gui.show_progress_btn.setEnabled(False)
     layout.addWidget(gui.show_progress_btn)
-    gui.clean_project_btn = QPushButton("Clean Project")
-    gui.clean_project_btn.clicked.connect(gui.clean_current_project)
-    layout.addWidget(gui.clean_project_btn)
-    gui.download_original_btn = QPushButton("Download Original Script")
-    gui.download_original_btn.clicked.connect(gui.download_original_script)
-    gui.download_subtitle_btn = QPushButton("Download Subtitle")
-    gui.download_subtitle_btn.clicked.connect(gui.download_subtitle)
-    layout.addWidget(gui.download_original_btn)
-    layout.addWidget(gui.download_subtitle_btn)
     layout.addWidget(gui.export_btn)
+    layout.addSpacing(8)
+
+    gui.more_actions_btn = QPushButton("More")
+    gui.more_actions_btn.setObjectName("secondaryActionBtn")
+    gui.more_actions_btn.setMinimumHeight(42)
+    gui.more_actions_btn.setMinimumWidth(180)
+    more_menu = QMenu(gui.more_actions_btn)
+    more_menu.setObjectName("headerMoreMenu")
+
+    gui.download_subtitle_action = more_menu.addAction("Subtitle")
+    gui.download_subtitle_action.triggered.connect(gui.download_subtitle)
+    gui.download_original_action = more_menu.addAction("Original Script")
+    gui.download_original_action.triggered.connect(gui.download_original_script)
+    more_menu.addSeparator()
+    gui.clean_project_action = more_menu.addAction("Clean")
+    gui.clean_project_action.triggered.connect(gui.clean_current_project)
+    gui.toggle_controls_action = more_menu.addAction("Hide Controls")
+    gui.toggle_controls_action.triggered.connect(gui.toggle_controls_panel)
+    gui.settings_action = more_menu.addAction("Settings")
+    gui.settings_action.triggered.connect(gui.open_model_settings_dialog)
+
+    gui.more_actions_btn.setMenu(more_menu)
+    layout.addWidget(gui.more_actions_btn)
     return header
 
 
@@ -105,14 +118,21 @@ def _build_left_panel(gui):
     gui.left_panel_scroll_area = scroll_area
     scroll_area.setObjectName("leftPanelArea")
     scroll_area.setWidgetResizable(True)
-    scroll_area.setFixedWidth(560)
+    scroll_area.setFixedWidth(420)
+    scroll_area.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+    scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     scroll_area.setFrameShape(QFrame.NoFrame)
 
     left_panel_container = QWidget()
     left_panel_container.setObjectName("leftPanelContainer")
+    gui.left_panel_container = left_panel_container
     left_layout = QVBoxLayout(left_panel_container)
-    left_layout.setSpacing(15)
+    left_layout.setContentsMargins(10, 0, 10, 0)
+    left_layout.setSpacing(12)
     scroll_area.setWidget(left_panel_container)
+    scroll_area.installEventFilter(gui)
+    scroll_area.viewport().installEventFilter(gui)
+    scroll_area.verticalScrollBar().installEventFilter(gui)
 
     build_start_group(gui, left_layout)
     build_advanced_group(gui, left_layout)
@@ -227,6 +247,7 @@ def _initialize_ui_state(gui):
     gui._syncing_segment_editor = False
     gui._syncing_hidden_editor_text = False
     gui._segment_editor_rows = []
+    gui._selected_segment_index = -1
     gui.subtitle_export_font_scale = 1.3
     gui.use_exact_subtitle_preview = True
 

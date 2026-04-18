@@ -18,6 +18,19 @@ from PySide6.QtWidgets import (
 )
 
 
+def _advanced_block(title: str):
+    card = QFrame()
+    card.setObjectName("statusCard")
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(12, 12, 12, 12)
+    layout.setSpacing(10)
+
+    heading = QLabel(title)
+    heading.setObjectName("sectionTitle")
+    layout.addWidget(heading)
+    return card, layout
+
+
 def build_advanced_group(gui, left_layout):
     gui.advanced_section = QFrame()
     gui.advanced_section.setObjectName("statusCard")
@@ -33,10 +46,10 @@ def build_advanced_group(gui, left_layout):
         "QToolButton { text-align: left; font-weight: 700; color: #8ad7ff; border: none; padding: 0; }"
     )
     gui.toggle_advanced_btn.toggled.connect(gui.on_advanced_toggled)
-    section_layout.addWidget(gui.toggle_advanced_btn)
+    gui.toggle_advanced_btn.hide()
 
     gui.advanced_section_content = QWidget()
-    gui.advanced_section_content.setVisible(False)
+    gui.advanced_section_content.setVisible(True)
     section_layout.addWidget(gui.advanced_section_content)
 
     gui.advanced_group = QGroupBox("")
@@ -47,88 +60,74 @@ def build_advanced_group(gui, left_layout):
 
     group_layout = QVBoxLayout(gui.advanced_group)
     group_layout.setSpacing(12)
+    group_layout.setContentsMargins(0, 0, 0, 0)
 
     _build_hidden_runtime_widgets(gui)
     _build_audio_mix_controls(gui, group_layout)
-    left_layout.addWidget(gui.advanced_section, 1)
+    target_layout = getattr(gui, "workflow_advanced_layout", None) or left_layout
+    target_layout.addWidget(gui.advanced_section, 1)
 
 
 def _build_audio_mix_controls(gui, advanced_layout):
-    ai_title = QLabel("AI Refinement")
-    advanced_layout.addWidget(ai_title)
-
+    ai_card, ai_layout = _advanced_block("AI")
     gui.ai_subtitle_optimization_cb = QCheckBox("Enable AI Subtitle Optimization")
     gui.ai_subtitle_optimization_cb.setChecked(False)
-    advanced_layout.addWidget(gui.ai_subtitle_optimization_cb)
+    ai_layout.addWidget(gui.ai_subtitle_optimization_cb)
+    gui.keep_timeline_cb.setText("Keep subtitle timings when editing text")
+    ai_layout.addWidget(gui.keep_timeline_cb)
+    advanced_layout.addWidget(ai_card)
 
-    gui.ai_subtitle_optimization_hint = gui.make_helper_label(
-        "Runs an extra AI pass to refine subtitle readability after translation. Slower, but can improve subtitle phrasing."
-    )
-    gui.ai_subtitle_optimization_hint.setParent(gui)
-    advanced_layout.addWidget(gui.ai_subtitle_optimization_hint)
-
-    source_title = QLabel("Audio for Preview / Export")
-    advanced_layout.addWidget(source_title)
-
+    source_card, source_layout = _advanced_block("Audio Source")
     source_mode_row = QHBoxLayout()
     source_mode_row.addWidget(gui.use_generated_audio_radio)
     source_mode_row.addWidget(gui.use_existing_audio_radio)
-    advanced_layout.addLayout(source_mode_row)
-    advanced_layout.addWidget(gui.audio_source_hint_label)
+    source_layout.addLayout(source_mode_row)
 
     gui.generated_audio_section_label = QLabel("Generate a new Vietnamese voice track")
-    advanced_layout.addWidget(gui.generated_audio_section_label)
-    gui.generated_audio_section_hint = gui.make_helper_label(
-        "Use this when you want CapCap to create a Vietnamese voice track and optionally mix it with your own background audio."
-    )
-    gui.generated_audio_section_hint.setParent(gui)
-    advanced_layout.addWidget(gui.generated_audio_section_hint)
+    source_layout.addWidget(gui.generated_audio_section_label)
 
     bg_label = QLabel("Background music / ambient audio")
     gui.bg_music_label = bg_label
-    advanced_layout.addWidget(gui.bg_music_label)
+    source_layout.addWidget(gui.bg_music_label)
     bg_row = QHBoxLayout()
     bg_row.addWidget(gui.bg_music_edit, 1)
     gui.browse_bg_music_btn = QPushButton("Browse")
     gui.browse_bg_music_btn.clicked.connect(gui.browse_background_audio)
     bg_row.addWidget(gui.browse_bg_music_btn)
-    advanced_layout.addLayout(bg_row)
+    source_layout.addLayout(bg_row)
 
     gui.existing_audio_section_label = QLabel("Use your own finished audio")
-    advanced_layout.addWidget(gui.existing_audio_section_label)
-    gui.existing_audio_section_hint = gui.make_helper_label(
-        "Use this when you already have a final audio track and only want preview/export to use that file."
-    )
-    gui.existing_audio_section_hint.setParent(gui)
-    advanced_layout.addWidget(gui.existing_audio_section_hint)
+    source_layout.addWidget(gui.existing_audio_section_label)
 
     existing_label = QLabel("Finished audio file")
     gui.mixed_audio_label = existing_label
-    advanced_layout.addWidget(gui.mixed_audio_label)
+    source_layout.addWidget(gui.mixed_audio_label)
     existing_row = QHBoxLayout()
     existing_row.addWidget(gui.mixed_audio_edit, 1)
     gui.browse_mixed_audio_btn = QPushButton("Browse")
     gui.browse_mixed_audio_btn.clicked.connect(gui.browse_existing_mixed_audio)
     existing_row.addWidget(gui.browse_mixed_audio_btn)
-    advanced_layout.addLayout(existing_row)
+    source_layout.addLayout(existing_row)
+    advanced_layout.addWidget(source_card)
 
+    mix_card, mix_layout = _advanced_block("Mix")
     voice_gain_row = QHBoxLayout()
     gui.voice_gain_label = QLabel("Voice volume")
     voice_gain_row.addWidget(gui.voice_gain_label)
     voice_gain_row.addWidget(gui.voice_gain_spin)
-    advanced_layout.addLayout(voice_gain_row)
+    mix_layout.addLayout(voice_gain_row)
 
     bg_gain_row = QHBoxLayout()
     gui.bg_gain_label = QLabel("BG volume")
     bg_gain_row.addWidget(gui.bg_gain_label)
     bg_gain_row.addWidget(gui.bg_gain_spin)
-    advanced_layout.addLayout(bg_gain_row)
+    mix_layout.addLayout(bg_gain_row)
 
     ducking_row = QHBoxLayout()
     gui.ducking_amount_label = QLabel("Lower BG during voice")
     ducking_row.addWidget(gui.ducking_amount_label)
     ducking_row.addWidget(gui.ducking_amount_spin)
-    advanced_layout.addLayout(ducking_row)
+    mix_layout.addLayout(ducking_row)
 
     preset_row = QHBoxLayout()
     gui.audio_mix_preset_label = QLabel("Mix style")
@@ -140,26 +139,17 @@ def _build_audio_mix_controls(gui, advanced_layout):
     gui.audio_mix_preset_combo.addItem("Music Forward", "music_forward")
     gui.audio_mix_preset_combo.currentIndexChanged.connect(gui.on_audio_mix_preset_changed)
     preset_row.addWidget(gui.audio_mix_preset_combo, 1)
-    advanced_layout.addLayout(preset_row)
+    mix_layout.addLayout(preset_row)
+    advanced_layout.addWidget(mix_card)
 
-    gui.audio_mix_preset_hint = gui.make_helper_label(
-        "Use a preset if you want the voice to stand out more, or keep more of the original background audio."
-    )
-    gui.audio_mix_preset_hint.setParent(gui)
-    advanced_layout.addWidget(gui.audio_mix_preset_hint)
-
+    timing_card, timing_layout = _advanced_block("Timing")
     timing_sync_row = QHBoxLayout()
     gui.voice_timing_sync_label = QLabel("Voice timing sync")
     timing_sync_row.addWidget(gui.voice_timing_sync_label)
     timing_sync_row.addWidget(gui.voice_timing_sync_combo, 1)
-    advanced_layout.addLayout(timing_sync_row)
-    gui.voice_timing_sync_hint_label = gui.make_helper_label(
-        "Smart keeps the voice natural while still trying to fit subtitle timing."
-    )
-    gui.voice_timing_sync_hint_label.setParent(gui)
-    advanced_layout.addWidget(gui.voice_timing_sync_hint_label)
-
-    advanced_layout.addWidget(gui.voiceover_btn)
+    timing_layout.addLayout(timing_sync_row)
+    timing_layout.addWidget(gui.voiceover_btn)
+    advanced_layout.addWidget(timing_card)
 
 
 def _build_hidden_runtime_widgets(gui):
@@ -183,6 +173,7 @@ def _build_hidden_runtime_widgets(gui):
         "Preview and export will use the generated voice or voice+background mix by default."
     )
     gui.audio_source_hint_label.setParent(gui)
+    gui.audio_source_hint_label.hide()
     gui.voice_output_folder_edit = QLineEdit(os.path.join(gui.workspace_root, "output"), gui)
 
     gui.voice_gain_spin = QDoubleSpinBox(gui)
