@@ -31,43 +31,52 @@ def _set_preview_icon_button(button: QPushButton, icon_path: str, tooltip: str):
     button.setStyleSheet("QPushButton { padding: 0; }")
 
 
-def _build_timeline_track_labels():
-    column = QFrame()
-    column.setObjectName("timelineTrackLabels")
-    column.setFixedWidth(112)
-    layout = QVBoxLayout(column)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(0)
+class TimelineTrackLabels(QFrame):
+    def __init__(self, timeline, parent=None):
+        super().__init__(parent)
+        self._timeline = timeline
+        self.setObjectName("timelineTrackLabels")
+        self.setFixedWidth(112)
+        self._rows = {}
 
-    header = QLabel("Tracks")
-    header.setFixedHeight(28)
-    header.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-    header.setContentsMargins(14, 0, 0, 0)
-    header.setObjectName("helperLabel")
-    layout.addWidget(header)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-    track_specs = [
-        ("Video", 52),
-        ("Audio", 52),
-        ("Subtitle", 88),
-    ]
-    for title, height in track_specs:
-        row = QFrame()
-        row.setFixedHeight(height)
-        row_layout = QVBoxLayout(row)
-        row_layout.setContentsMargins(14, 8, 10, 8)
-        row_layout.setSpacing(1)
+        self.header = QLabel("Tracks")
+        self.header.setFixedHeight(28)
+        self.header.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.header.setContentsMargins(14, 0, 0, 0)
+        self.header.setObjectName("helperLabel")
+        layout.addWidget(self.header)
 
-        title_label = QLabel(title)
-        title_label.setObjectName("statusHeadline")
-        title_label.setStyleSheet("font-size: 12px; font-weight: 700;")
-        row_layout.addStretch()
-        row_layout.addWidget(title_label)
-        row_layout.addStretch()
-        layout.addWidget(row)
+        for key, title in (("subtitle", "Subtitle"), ("audio", "Audio"), ("video", "Video")):
+            row = QFrame()
+            row_layout = QVBoxLayout(row)
+            row_layout.setContentsMargins(14, 8, 10, 8)
+            row_layout.setSpacing(1)
+            title_label = QLabel(title)
+            title_label.setObjectName("statusHeadline")
+            title_label.setStyleSheet("font-size: 12px; font-weight: 700;")
+            row_layout.addStretch()
+            row_layout.addWidget(title_label)
+            row_layout.addStretch()
+            layout.addWidget(row)
+            self._rows[key] = row
+        layout.addStretch()
+        self.sync_to_timeline()
 
-    layout.addStretch()
-    return column
+    def sync_to_timeline(self):
+        for key, row in self._rows.items():
+            visible = self._timeline.is_track_visible(key)
+            row.setVisible(visible)
+            layout = getattr(self._timeline, "_layout", {})
+            row_height = int(layout.get(key, {}).get("h", 0)) if visible else 0
+            row.setFixedHeight(row_height)
+
+
+def _build_timeline_track_labels(timeline):
+    return TimelineTrackLabels(timeline)
 
 
 def build_preview_panel(gui):
@@ -129,6 +138,26 @@ def build_preview_panel(gui):
     timeline_copy_layout.addWidget(timeline_title)
     timeline_copy_layout.addWidget(timeline_meta)
     timeline_header_layout.addLayout(timeline_copy_layout, 1)
+    gui.timeline_video_toggle_btn = QPushButton("Video")
+    gui.timeline_video_toggle_btn.setCheckable(True)
+    gui.timeline_video_toggle_btn.setChecked(True)
+    gui.timeline_video_toggle_btn.setFixedWidth(62)
+    gui.timeline_audio_toggle_btn = QPushButton("Audio")
+    gui.timeline_audio_toggle_btn.setCheckable(True)
+    gui.timeline_audio_toggle_btn.setChecked(True)
+    gui.timeline_audio_toggle_btn.setFixedWidth(62)
+    gui.timeline_subtitle_toggle_btn = QPushButton("Subtitle")
+    gui.timeline_subtitle_toggle_btn.setCheckable(True)
+    gui.timeline_subtitle_toggle_btn.setChecked(True)
+    gui.timeline_subtitle_toggle_btn.setFixedWidth(72)
+    for btn in (gui.timeline_video_toggle_btn, gui.timeline_audio_toggle_btn, gui.timeline_subtitle_toggle_btn):
+        btn.setObjectName("workflowTabBtn")
+    gui.timeline_video_toggle_btn.toggled.connect(lambda checked: gui.timeline.set_track_visibility("video", checked))
+    gui.timeline_audio_toggle_btn.toggled.connect(lambda checked: gui.timeline.set_track_visibility("audio", checked))
+    gui.timeline_subtitle_toggle_btn.toggled.connect(lambda checked: gui.timeline.set_track_visibility("subtitle", checked))
+    timeline_header_layout.addWidget(gui.timeline_subtitle_toggle_btn)
+    timeline_header_layout.addWidget(gui.timeline_audio_toggle_btn)
+    timeline_header_layout.addWidget(gui.timeline_video_toggle_btn)
     gui.timeline_undo_btn = QPushButton("Undo")
     gui.timeline_undo_btn.setFixedWidth(58)
     gui.timeline_undo_btn.setEnabled(False)
@@ -191,7 +220,9 @@ def build_preview_panel(gui):
 
     timeline_body_layout = QHBoxLayout()
     timeline_body_layout.setSpacing(0)
-    timeline_body_layout.addWidget(_build_timeline_track_labels())
+    gui.timeline_track_labels = _build_timeline_track_labels(gui.timeline)
+    gui.timeline.layoutChanged.connect(gui.timeline_track_labels.sync_to_timeline)
+    timeline_body_layout.addWidget(gui.timeline_track_labels)
     timeline_body_layout.addWidget(gui.timeline, 1)
     timeline_layout.addLayout(timeline_body_layout)
 

@@ -4,7 +4,9 @@ import re
 import time
 import json
 import copy
+import hashlib
 import shutil
+import subprocess
 import threading
 import webbrowser
 from PySide6.QtWidgets import (
@@ -73,7 +75,7 @@ from utils.settings_utils import load_user_settings as load_user_settings_impl, 
 from views import build_main_window_ui
 from widgets import TimelineWidget, VideoView
 from widgets.progress_dialog import BackgroundableProgressDialog
-from runtime_paths import app_path, asset_path, models_path, workspace_root
+from runtime_paths import app_path, asset_path, bin_path, models_path, temp_path, workspace_root
 from runtime_profile import is_remote_profile
 from workers import (
     ExtractionWorker,
@@ -460,6 +462,13 @@ class VideoTranslatorGUI(QMainWindow):
         self._timeline_timing_undo_stack = []
         self._timeline_timing_redo_stack = []
         self._suspend_timeline_undo = False
+        self._timeline_waveform_cache_key = None
+        self._timeline_waveform_samples = []
+        self._timeline_waveform_duration_s = 0.0
+        self._timeline_video_thumb_cache_key = None
+        self._timeline_video_thumbnails = []
+        self._pending_timeline_waveform_refresh = False
+        self._pending_timeline_thumbnail_refresh = False
         # Simple pipeline runner (Run All)
         self._pipeline_active = False
         self._pipeline_step = ""
@@ -474,6 +483,9 @@ class VideoTranslatorGUI(QMainWindow):
         self._configure_local_voice_mode_ui()
         self.setup_media_player()
         self.setup_audio_preview_player()
+        self._timeline_visual_refresh_timer = QTimer(self)
+        self._timeline_visual_refresh_timer.setSingleShot(True)
+        self._timeline_visual_refresh_timer.timeout.connect(self._run_pending_timeline_visual_refresh)
         if hasattr(self, "video_view") and hasattr(self.video_view, "blurRegionChanged"):
             self.video_view.blurRegionChanged.connect(self.apply_preview_blur_region)
         self.load_voice_preview_catalog()
@@ -1506,6 +1518,231 @@ class VideoTranslatorGUI(QMainWindow):
                 return normalized
         return ""
 
+    def resolve_timeline_audio_visualization_path(self) -> str:
+        selected_audio = self.resolve_selected_audio_path()
+        if selected_audio and os.path.exists(selected_audio):
+            return selected_audio
+
+        candidates = [
+            self.audio_source_edit.text().strip() if hasattr(self, "audio_source_edit") else "",
+            self.processed_artifacts.get("vocals"),
+            self.processed_artifacts.get("audio_extracted"),
+            self.last_vocals_path,
+            self.last_extracted_audio,
+        ]
+        for candidate in candidates:
+            normalized = self._normalize_local_file_path(candidate)
+            if normalized and os.path.exists(normalized):
+                return normalized
+        return ""
+
+    def refresh_timeline_waveform(self):
+        if not hasattr(self, "timeline"):
+            return
+        audio_path = self.resolve_timeline_audio_visualization_path()
+        if not audio_path or not os.path.exists(audio_path):
+            self._timeline_waveform_cache_key = None
+            self._timeline_waveform_samples = []
+            self._timeline_waveform_duration_s = 0.0
+            self.timeline.set_waveform_data([], 0.0)
+            return
+
+        try:
+            stat = os.stat(audio_path)
+            cache_key = (
+                os.path.abspath(audio_path),
+                int(stat.st_size),
+                int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+            )
+        except Exception:
+            cache_key = (os.path.abspath(audio_path), 0, 0)
+
+        if cache_key != self._timeline_waveform_cache_key:
+            try:
+                from audio_mixer import _require_pydub
+                _require_pydub()
+                from pydub import AudioSegment
+                import numpy as np
+
+                audio = AudioSegment.from_file(audio_path).set_channels(1)
+                samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
+                duration_s = max(0.0, len(audio) / 1000.0)
+                if samples.size:
+                    sample_rate = max(8000, int(audio.frame_rate or 16000))
+                    samples = samples.astype(np.float32)
+                    samples /= max(1.0, float(np.max(np.abs(samples))) or 1.0)
+                    bucket_count = int(min(2400, max(600, duration_s * 40)))
+                    chunk_size = max(256, int(np.ceil(samples.size / max(1, bucket_count))))
+                    band_count = 8
+                    spectrum = []
+                    for start in range(0, samples.size, chunk_size):
+                        chunk = samples[start:start + chunk_size]
+                        if chunk.size < 32:
+                            spectrum.append([0.0] * band_count)
+                            continue
+                        if chunk.size < chunk_size:
+                            chunk = np.pad(chunk, (0, chunk_size - chunk.size))
+                        window = np.hanning(chunk.size)
+                        fft = np.fft.rfft(chunk * window)
+                        magnitudes = np.abs(fft)
+                        if magnitudes.size <= 1:
+                            spectrum.append([0.0] * band_count)
+                            continue
+                        freqs = np.fft.rfftfreq(chunk.size, d=1.0 / sample_rate)
+                        band_edges = np.geomspace(40.0, min(8000.0, sample_rate / 2.0), num=band_count + 1)
+                        band_values = []
+                        for band_idx in range(band_count):
+                            mask = (freqs >= band_edges[band_idx]) & (freqs < band_edges[band_idx + 1])
+                            band_mag = magnitudes[mask]
+                            if band_mag.size:
+                                band_values.append(float(np.mean(band_mag)))
+                            else:
+                                band_values.append(0.0)
+                        spectrum.append(band_values)
+
+                    if spectrum:
+                        band_max = [max(column[idx] for column in spectrum) or 1.0 for idx in range(len(spectrum[0]))]
+                        waveform = []
+                        for column in spectrum:
+                            waveform.append(
+                                [
+                                    min(1.0, (float(value) / float(band_max[idx])) ** 0.75)
+                                    for idx, value in enumerate(column)
+                                ]
+                            )
+                    else:
+                        waveform = []
+                else:
+                    waveform = []
+                    duration_s = 0.0
+                self._timeline_waveform_cache_key = cache_key
+                self._timeline_waveform_samples = waveform
+                self._timeline_waveform_duration_s = duration_s
+            except Exception:
+                self._timeline_waveform_cache_key = cache_key
+                self._timeline_waveform_samples = []
+                self._timeline_waveform_duration_s = 0.0
+
+        self.timeline.set_waveform_data(self._timeline_waveform_samples, self._timeline_waveform_duration_s)
+
+    def schedule_timeline_visual_refresh(self, *, waveform: bool = True, thumbnails: bool = True, delay_ms: int = 40):
+        if waveform:
+            self._pending_timeline_waveform_refresh = True
+        if thumbnails:
+            self._pending_timeline_thumbnail_refresh = True
+        timer = getattr(self, "_timeline_visual_refresh_timer", None)
+        if timer is None:
+            self._run_pending_timeline_visual_refresh()
+            return
+        timer.start(max(0, int(delay_ms)))
+
+    def _run_pending_timeline_visual_refresh(self):
+        refresh_waveform = bool(getattr(self, "_pending_timeline_waveform_refresh", False))
+        refresh_thumbnails = bool(getattr(self, "_pending_timeline_thumbnail_refresh", False))
+        self._pending_timeline_waveform_refresh = False
+        self._pending_timeline_thumbnail_refresh = False
+        if refresh_waveform:
+            self.refresh_timeline_waveform()
+        if refresh_thumbnails:
+            self.refresh_timeline_video_thumbnails()
+
+    def refresh_timeline_video_thumbnails(self):
+        if not hasattr(self, "timeline"):
+            return
+
+        video_path = self._normalize_local_file_path(self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else "")
+        duration_s = max(0.0, float(getattr(self.timeline, "duration", 0) or 0) / 1000.0)
+        if not video_path or not os.path.exists(video_path) or duration_s <= 0.0:
+            self._timeline_video_thumb_cache_key = None
+            self._timeline_video_thumbnails = []
+            self.timeline.set_video_thumbnails([])
+            return
+
+        try:
+            stat = os.stat(video_path)
+            cache_key = (
+                os.path.abspath(video_path),
+                int(stat.st_size),
+                int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+                int(round(duration_s)),
+            )
+        except Exception:
+            cache_key = (os.path.abspath(video_path), 0, 0, int(round(duration_s)))
+
+        if cache_key != self._timeline_video_thumb_cache_key:
+            thumbnails = []
+            ffmpeg_candidates = [
+                bin_path("ffmpeg", "ffmpeg.exe"),
+                bin_path("ffmpeg.exe"),
+                shutil.which("ffmpeg"),
+                shutil.which("ffmpeg.exe"),
+            ]
+            ffmpeg_path = ""
+            for candidate in ffmpeg_candidates:
+                if candidate and os.path.isfile(candidate):
+                    ffmpeg_path = candidate
+                    break
+
+            if ffmpeg_path and os.path.isfile(ffmpeg_path):
+                thumb_count = max(4, min(10, int(round(duration_s / 3.0)) or 6))
+                if duration_s <= 1.0:
+                    timestamps = [0.0]
+                else:
+                    timestamps = [
+                        min(duration_s - 0.05, max(0.0, ((idx + 0.5) * duration_s) / thumb_count))
+                        for idx in range(thumb_count)
+                    ]
+
+                thumb_dir = temp_path("timeline_video_thumbs")
+                os.makedirs(thumb_dir, exist_ok=True)
+                digest = hashlib.md5(f"{video_path}|{cache_key[1]}|{cache_key[2]}|{cache_key[3]}".encode("utf-8")).hexdigest()[:16]
+
+                startupinfo = None
+                creationflags = 0
+                if os.name == "nt":
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+                for idx, timestamp_s in enumerate(timestamps):
+                    output_path = os.path.join(thumb_dir, f"{digest}_{idx:02d}.jpg")
+                    if not os.path.exists(output_path):
+                        cmd = [
+                            ffmpeg_path,
+                            "-y",
+                            "-ss",
+                            f"{timestamp_s:.3f}",
+                            "-i",
+                            video_path,
+                            "-frames:v",
+                            "1",
+                            "-q:v",
+                            "4",
+                            "-vf",
+                            "scale=180:-1:force_original_aspect_ratio=decrease",
+                            output_path,
+                        ]
+                        try:
+                            subprocess.run(
+                                cmd,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=False,
+                                timeout=20,
+                                startupinfo=startupinfo,
+                                creationflags=creationflags,
+                            )
+                        except Exception:
+                            continue
+                    pixmap = QPixmap(output_path)
+                    if not pixmap.isNull():
+                        thumbnails.append((float(timestamp_s), pixmap))
+
+            self._timeline_video_thumb_cache_key = cache_key
+            self._timeline_video_thumbnails = thumbnails
+
+        self.timeline.set_video_thumbnails(self._timeline_video_thumbnails)
+
     def on_audio_source_mode_changed(self):
         if not hasattr(self, "audio_source_hint_label"):
             return
@@ -1545,6 +1782,7 @@ class VideoTranslatorGUI(QMainWindow):
             widget = getattr(self, name, None)
             if widget:
                 widget.setEnabled(using_existing)
+        self.schedule_timeline_visual_refresh(waveform=True, thumbnails=False)
         self.refresh_ui_state()
 
     def on_advanced_toggled(self, checked: bool):
@@ -1915,7 +2153,10 @@ class VideoTranslatorGUI(QMainWindow):
             self.translated_text.clear()
         if hasattr(self, "timeline"):
             self.timeline.set_segments([])
+            self.timeline.set_video_thumbnails([])
             self.timeline.set_playing(False)
+        self._timeline_video_thumb_cache_key = None
+        self._timeline_video_thumbnails = []
         self.processed_artifacts.update(context["artifacts"])
         self.last_original_srt_path = self._normalize_local_file_path(context["last_original_srt_path"] or self.last_original_srt_path)
         self.last_translated_srt_path = self._normalize_local_file_path(context["last_translated_srt_path"] or self.last_translated_srt_path)
@@ -3765,6 +4006,7 @@ class VideoTranslatorGUI(QMainWindow):
     def apply_segments_to_timeline(self):
         segs = self.get_active_segments()
         self.timeline.set_segments(segs if segs else [])
+        self.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
         self.video_view.subtitle_item.hide()
         self.sync_live_subtitle_preview()
 
@@ -5058,6 +5300,7 @@ class VideoTranslatorGUI(QMainWindow):
         else:
             self.log(f"[Voiceover] Generated Vietnamese voice track: {voice_track} (No background mix created.)")
 
+        self.schedule_timeline_visual_refresh(waveform=True, thumbnails=False)
         self.refresh_ui_state()
         self._pipeline_advance("voiceover")
 
@@ -5307,6 +5550,7 @@ class VideoTranslatorGUI(QMainWindow):
 
     def duration_changed(self, duration):
         duration_changed_impl(self, duration)
+        self.schedule_timeline_visual_refresh(waveform=False, thumbnails=True)
 
     def set_position(self, position):
         set_position_impl(self, position)

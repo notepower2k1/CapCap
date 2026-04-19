@@ -135,10 +135,4 @@ class SubtitleOverlayItem(QGraphicsItem):
             painter.setPen(self.font_color)
             painter.drawText(rect, flags, self.current_text)
         else:
-            # Placeholder for preview mode
-            painter.setPen(QPen(self.font_color, 1, Qt.DashLine))
-            painter.drawRoundedRect(rect, 10, 10)
-            placeholder_font = QFont(self.font_name)
-            placeholder_font.setPixelSize(12)
-            painter.setFont(placeholder_font)
-            painter.drawText(rect, Qt.AlignCenter, "(Subtitle Preview)")
+            return

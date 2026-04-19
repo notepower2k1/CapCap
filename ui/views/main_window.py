@@ -62,11 +62,6 @@ def _build_header_bar(gui):
     layout.addWidget(gui.run_all_btn)
     gui.export_btn.setObjectName("secondaryActionBtn")
     gui.export_btn.setMinimumHeight(42)
-    gui.show_progress_btn = QPushButton("Show Progress")
-    gui.show_progress_btn.clicked.connect(gui.show_active_progress_dialog)
-    gui.show_progress_btn.setVisible(False)
-    gui.show_progress_btn.setEnabled(False)
-    layout.addWidget(gui.show_progress_btn)
     layout.addWidget(gui.export_btn)
     layout.addSpacing(8)
 
