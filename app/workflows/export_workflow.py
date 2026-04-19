@@ -73,6 +73,16 @@ class ExportWorkflow:
             return None, None
         return base_w, base_h
 
+    def _resolve_target_fps(self, output_fps: str):
+        key = str(output_fps or "source").strip().lower()
+        if key in ("", "source", "same", "original", "auto"):
+            return None
+        try:
+            fps = int(float(key))
+        except Exception:
+            return None
+        return fps if fps > 0 else None
+
     def _build_temp_mux_path(self) -> str:
         tmp_dir = os.path.join(self.workspace_root, "temp")
         os.makedirs(tmp_dir, exist_ok=True)
@@ -88,6 +98,7 @@ class ExportWorkflow:
         subtitle_style,
         target_width=None,
         target_height=None,
+        output_fps=None,
     ):
         if ass_path and os.path.exists(ass_path):
             ok = self.engine_runtime.embed_ass_subtitles(
@@ -97,6 +108,7 @@ class ExportWorkflow:
                 blur_region=subtitle_style.get("blur_region"),
                 target_width=target_width,
                 target_height=target_height,
+                output_fps=output_fps,
             )
         else:
             ok = self.engine_runtime.embed_subtitles(
@@ -106,6 +118,7 @@ class ExportWorkflow:
                 subtitle_style=self._subtitle_options(subtitle_style),
                 target_width=target_width,
                 target_height=target_height,
+                output_fps=output_fps,
             )
         if not ok:
             raise RuntimeError("Failed to burn subtitles into the output video.")
@@ -121,11 +134,13 @@ class ExportWorkflow:
         audio_path: str = "",
         subtitle_style=None,
         output_quality: str = "source",
+        output_fps: str = "source",
         project_state_path: str = "",
         on_progress=None,
     ) -> str:
         subtitle_style = subtitle_style or {}
         target_w, target_h = self._resolve_target_dimensions(video_path, output_quality)
+        target_fps = self._resolve_target_fps(output_fps)
 
         state = self._load_state(project_state_path)
         self._mark_started(state)
@@ -143,6 +158,7 @@ class ExportWorkflow:
                     subtitle_style=subtitle_style,
                     target_width=target_w,
                     target_height=target_h,
+                    output_fps=target_fps,
                 )
             elif mode == "voice":
                 self._emit_progress(on_progress, 25, "Muxing Vietnamese audio into the video...")
@@ -152,12 +168,13 @@ class ExportWorkflow:
                     output_path,
                     target_width=target_w,
                     target_height=target_h,
+                    output_fps=target_fps,
                 )
             elif mode == "both":
                 tmp_mux_path = self._build_temp_mux_path()
                 self._emit_progress(on_progress, 18, "Muxing Vietnamese audio with the source video...")
                 # Keep this mux fast (no scaling). Scaling happens in the subtitle-burn step.
-                self.engine_runtime.mux_audio_for_preview(video_path, audio_path, tmp_mux_path)
+                self.engine_runtime.mux_audio_for_preview(video_path, audio_path, tmp_mux_path, output_fps=target_fps)
                 self._emit_progress(on_progress, 62, "Burning styled subtitles into the final video...")
                 self._export_subtitle_video(
                     video_path=tmp_mux_path,
@@ -167,6 +184,7 @@ class ExportWorkflow:
                     subtitle_style=subtitle_style,
                     target_width=target_w,
                     target_height=target_h,
+                    output_fps=target_fps,
                 )
             else:
                 raise ValueError(f"Unsupported export mode: {mode}")

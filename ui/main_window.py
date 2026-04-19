@@ -2283,6 +2283,14 @@ class VideoTranslatorGUI(QMainWindow):
             return str(value).strip().lower()
         return str(self.output_quality_combo.currentText() or "source").strip().lower() or "source"
 
+    def get_output_fps_key(self):
+        if not hasattr(self, "output_fps_combo"):
+            return "source"
+        value = self.output_fps_combo.currentData()
+        if value:
+            return str(value).strip().lower()
+        return str(self.output_fps_combo.currentText() or "source").strip().lower() or "source"
+
     def get_audio_handling_mode(self):
         if not hasattr(self, "audio_handling_combo"):
             return "fast"

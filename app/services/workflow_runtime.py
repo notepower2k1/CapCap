@@ -87,6 +87,7 @@ class WorkflowRuntime:
         audio_path: str = "",
         subtitle_style=None,
         output_quality: str = "source",
+        output_fps: str = "source",
         project_state_path: str = "",
         on_progress: callable = None,
     ) -> str:
@@ -99,6 +100,7 @@ class WorkflowRuntime:
             audio_path=audio_path,
             subtitle_style=subtitle_style,
             output_quality=output_quality,
+            output_fps=output_fps,
             project_state_path=project_state_path,
             on_progress=on_progress,
         )

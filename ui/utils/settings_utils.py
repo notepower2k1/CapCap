@@ -2,6 +2,8 @@
     s = gui.settings
     s.setValue("output_mode", gui.output_mode_combo.currentText())
     s.setValue("output_quality", gui.get_output_quality_key())
+    if hasattr(gui, "output_fps_combo"):
+        s.setValue("output_fps", gui.output_fps_combo.currentData())
     s.setValue("source_lang", gui.lang_whisper_combo.currentText())
     s.setValue("whisper_model_name", gui.get_whisper_model_name())
     s.setValue("final_output_folder", gui.final_output_folder_edit.text())
@@ -63,6 +65,11 @@ def load_user_settings(gui):
         idx = gui.output_quality_combo.findData(output_quality)
         if idx >= 0:
             gui.output_quality_combo.setCurrentIndex(idx)
+    output_fps = str(s.value("output_fps", "source") or "source").strip().lower()
+    if hasattr(gui, "output_fps_combo"):
+        idx = gui.output_fps_combo.findData(output_fps)
+        if idx >= 0:
+            gui.output_fps_combo.setCurrentIndex(idx)
     source_lang = s.value("source_lang", gui.lang_whisper_combo.currentText())
     gui.selected_whisper_model_name = str(s.value("whisper_model_name", getattr(gui, "selected_whisper_model_name", "base")) or "base").strip().lower()
     source_index = gui.lang_whisper_combo.findText(source_lang)

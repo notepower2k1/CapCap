@@ -64,6 +64,7 @@ def mux_audio_into_video_for_preview(
     *,
     target_width=None,
     target_height=None,
+    output_fps=None,
 ) -> str:
     """Create a video by replacing audio.
 
@@ -94,6 +95,14 @@ def mux_audio_into_video_for_preview(
                 )
     except Exception:
         vf = ""
+    fps_value = None
+    try:
+        if output_fps:
+            parsed_fps = int(float(output_fps))
+            if parsed_fps > 0:
+                fps_value = parsed_fps
+    except Exception:
+        fps_value = None
 
     cmd = [
         ffmpeg,
@@ -125,7 +134,22 @@ def mux_audio_into_video_for_preview(
             "yuv420p",
         ]
     else:
-        cmd += ["-c:v", "copy"]
+        if fps_value:
+            cmd += [
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+            ]
+        else:
+            cmd += ["-c:v", "copy"]
+
+    if fps_value:
+        cmd += ["-r", str(fps_value)]
 
     cmd += [
         "-c:a",

@@ -706,7 +706,7 @@ def srt_to_ass(srt_path: str,
     return ass_path
 
 
-def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, target_width=None, target_height=None):
+def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, target_width=None, target_height=None, output_fps=None):
     """Burn subtitles into video using an already-prepared ASS file."""
     ffmpeg = _ffmpeg_path(ffmpeg_path)
     if not os.path.exists(ffmpeg):
@@ -752,8 +752,15 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
         *video_encoder_args,
         '-c:a', 'aac', '-b:a', '128k',
         '-movflags', '+faststart',
-        output_path,
     ]
+    try:
+        if output_fps:
+            parsed_fps = int(float(output_fps))
+            if parsed_fps > 0:
+                command += ['-r', str(parsed_fps)]
+    except Exception:
+        pass
+    command += [output_path]
     encoder_name = video_encoder_args[1] if len(video_encoder_args) > 1 else 'unknown'
     print(f"Executing ({encoder_name}): {' '.join(command)}")
 
@@ -777,8 +784,15 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
                 *fallback_args,
                 '-c:a', 'aac', '-b:a', '128k',
                 '-movflags', '+faststart',
-                output_path,
             ]
+            try:
+                if output_fps:
+                    parsed_fps = int(float(output_fps))
+                    if parsed_fps > 0:
+                        fallback_command += ['-r', str(parsed_fps)]
+            except Exception:
+                pass
+            fallback_command += [output_path]
             print(f"NVENC subtitle burn failed, retrying with libx264. Error:\n{e.stderr}")
             try:
                 subprocess.run(fallback_command, capture_output=True, text=True, check=True, **_subprocess_run_kwargs())
@@ -842,6 +856,7 @@ def embed_subtitles(video_path, srt_path, output_path,
                     blur_region=None,
                      target_width=None,
                      target_height=None,
+                     output_fps=None,
                      ffmpeg_path=None):
     """Burn subtitles into video using a properly-styled ASS file.
 
@@ -893,7 +908,7 @@ def embed_subtitles(video_path, srt_path, output_path,
         single_line=single_line,
     )
 
-    success = embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=ffmpeg, blur_region=blur_region, target_width=target_width, target_height=target_height)
+    success = embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=ffmpeg, blur_region=blur_region, target_width=target_width, target_height=target_height, output_fps=output_fps)
 
     # Step 4: clean up temp ASS
     if os.path.exists(ass_path):

@@ -1,18 +1,170 @@
 ﻿import os
 import hashlib
 import json
+import shutil
+import subprocess
 import time
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+from runtime_paths import bin_path
 from workers import ExactFramePreviewWorker, FinalExportWorker, PreviewMuxWorker, QuickPreviewWorker
 
 
 class PreviewController:
     def __init__(self, gui):
         self.gui = gui
+
+    @staticmethod
+    def _format_duration_ms(duration_ms: int) -> str:
+        total_seconds = max(0, int(round(float(duration_ms or 0) / 1000.0)))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
+
+    @staticmethod
+    def _format_bytes(num_bytes: int) -> str:
+        value = float(max(0, int(num_bytes or 0)))
+        units = ["B", "KB", "MB", "GB", "TB"]
+        unit_idx = 0
+        while value >= 1024.0 and unit_idx < len(units) - 1:
+            value /= 1024.0
+            unit_idx += 1
+        return f"{value:.1f} {units[unit_idx]}"
+
+    def _probe_source_fps(self, video_path: str) -> str:
+        ffprobe_candidates = [
+            bin_path("ffmpeg", "ffprobe.exe"),
+            bin_path("ffprobe.exe"),
+            shutil.which("ffprobe"),
+            shutil.which("ffprobe.exe"),
+        ]
+        ffprobe_path = ""
+        for candidate in ffprobe_candidates:
+            if candidate and os.path.isfile(candidate):
+                ffprobe_path = candidate
+                break
+        if not ffprobe_path:
+            return "Unknown"
+        try:
+            startupinfo = None
+            creationflags = 0
+            if os.name == "nt":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            result = subprocess.run(
+                [
+                    ffprobe_path,
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=r_frame_rate",
+                    "-of",
+                    "default=nw=1:nk=1",
+                    video_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+                check=False,
+            )
+            raw = str(result.stdout or "").strip()
+            if not raw:
+                return "Unknown"
+            if "/" in raw:
+                num, den = raw.split("/", 1)
+                fps = float(num) / max(1.0, float(den))
+            else:
+                fps = float(raw)
+            return f"{fps:.2f}".rstrip("0").rstrip(".")
+        except Exception:
+            return "Unknown"
+
+    def _resolve_export_resolution_label(self, video_path: str, output_quality: str) -> str:
+        try:
+            from video_processor import get_video_dimensions
+
+            src_w, src_h = get_video_dimensions(video_path)
+        except Exception:
+            src_w, src_h = 0, 0
+
+        if not src_w or not src_h:
+            return "Unknown"
+
+        key = str(output_quality or "source").strip().lower()
+        if key in ("", "source", "same", "original", "auto"):
+            return f"{src_w}x{src_h} (Source)"
+
+        portrait = src_h > src_w
+        if key in ("720", "720p", "hd"):
+            base_w, base_h = (720, 1280) if portrait else (1280, 720)
+        elif key in ("1080", "1080p", "fullhd", "fhd", "full hd", "full"):
+            base_w, base_h = (1080, 1920) if portrait else (1920, 1080)
+        elif key in ("1440", "1440p", "2k", "qhd"):
+            base_w, base_h = (1440, 2560) if portrait else (2560, 1440)
+        elif key in ("2160", "2160p", "4k", "uhd"):
+            base_w, base_h = (2160, 3840) if portrait else (3840, 2160)
+        else:
+            return f"{src_w}x{src_h}"
+
+        if src_w <= base_w and src_h <= base_h:
+            return f"{src_w}x{src_h} (Source)"
+        return f"{base_w}x{base_h}"
+
+    def _confirm_export_summary(self, *, video_path: str, output_path: str, mode: str, audio_path: str):
+        output_quality = self.gui.get_output_quality_key()
+        output_fps = self.gui.get_output_fps_key()
+        source_fps = self._probe_source_fps(video_path)
+        duration_ms = 0
+        try:
+            duration_ms = int(getattr(self.gui.media_player, "duration", lambda: 0)() or 0)
+        except Exception:
+            duration_ms = int(getattr(self.gui.timeline, "duration", 0) or 0)
+
+        try:
+            source_size = self._format_bytes(os.path.getsize(video_path))
+        except Exception:
+            source_size = "Unknown"
+
+        mode_label = {
+            "subtitle": "Subtitle only",
+            "voice": "Voice only",
+            "both": "Subtitle + voice",
+        }.get(str(mode or "").strip().lower(), str(mode or "Unknown"))
+        fps_label = f"{source_fps} FPS (Source)" if output_fps == "source" else f"{output_fps} FPS"
+        audio_label = "None"
+        if mode in ("voice", "both"):
+            audio_label = os.path.basename(audio_path) if audio_path else "Selected audio"
+
+        summary_lines = [
+            f"Name: {os.path.basename(output_path)}",
+            f"Folder: {os.path.dirname(output_path)}",
+            f"Mode: {mode_label}",
+            f"Duration: {self._format_duration_ms(duration_ms)}",
+            f"Resolution: {self._resolve_export_resolution_label(video_path, output_quality)}",
+            f"FPS: {fps_label}",
+            f"Source Size: {source_size}",
+            f"Audio: {audio_label}",
+        ]
+
+        box = QMessageBox(self.gui)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle("Export Summary")
+        box.setText("Review export details before starting.")
+        box.setInformativeText("\n".join(summary_lines))
+        start_btn = box.addButton("Start Export", QMessageBox.AcceptRole)
+        box.addButton("Cancel", QMessageBox.RejectRole)
+        box.exec()
+        return box.clickedButton() is start_btn
 
     def _prepare_current_export_srt(self) -> str:
         segments = list(self.gui.get_active_segments() or [])
@@ -123,6 +275,14 @@ class PreviewController:
         if chosen_dir:
             self.gui.final_output_folder_edit.setText(chosen_dir)
 
+        if not self._confirm_export_summary(
+            video_path=video_path,
+            output_path=output_path,
+            mode=mode,
+            audio_path=chosen_audio,
+        ):
+            return
+
         self.gui.export_btn.setEnabled(False)
         self.gui.export_btn.setText("Exporting...")
         self.gui.progress_bar.setValue(96)
@@ -141,6 +301,7 @@ class PreviewController:
             audio_path=chosen_audio,
             subtitle_style=self.gui.get_subtitle_export_style(segments=self.gui.get_active_segments()),
             output_quality=self.gui.get_output_quality_key(),
+            output_fps=self.gui.get_output_fps_key(),
             project_state_path=project_state_path,
         )
         self.gui.export_thread.progress.connect(self.gui.on_export_progress)
