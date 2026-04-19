@@ -38,3 +38,4 @@ dist_debug/
 build_debug/
 
 voice_temp/
+*.gguf

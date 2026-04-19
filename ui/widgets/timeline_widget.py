@@ -8,7 +8,9 @@ class TimelineWidget(QGraphicsView):
 
     seekRequested = Signal(int)
     segmentSelected = Signal(int)
+    segmentTimingEditStarted = Signal(int, float, float)
     segmentTimingChanged = Signal(int, float, float)
+    zoomChanged = Signal(int)
     RULER_HEIGHT = 28
     VIDEO_ROW_Y = 36
     VIDEO_ROW_H = 46
@@ -19,8 +21,11 @@ class TimelineWidget(QGraphicsView):
     SCENE_HEIGHT = 232
     RESIZE_HANDLE_PX = 10
     MIN_SEGMENT_DURATION = 0.1
-    SEGMENT_GAP = 0.03
+    SEGMENT_GAP = 0.0
     SNAP_THRESHOLD = 0.05
+    DEFAULT_PX_PER_SECOND = 100
+    MIN_PX_PER_SECOND = 40
+    MAX_PX_PER_SECOND = 260
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,7 +58,7 @@ class TimelineWidget(QGraphicsView):
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
 
-        self.pixels_per_second = 100
+        self.pixels_per_second = self.DEFAULT_PX_PER_SECOND
         self.duration = 0
         self.segments = []
         self.playhead = None
@@ -63,6 +68,9 @@ class TimelineWidget(QGraphicsView):
         self._last_position_ms = 0
         self._drag_mode = ""
         self._drag_segment_index = -1
+        self._drag_offset_seconds = 0.0
+        self._drag_feedback_start = 0.0
+        self._drag_feedback_end = 0.0
 
     def _segment_index_at_scene_pos(self, scene_pos):
         x_pos = float(scene_pos.x())
@@ -108,6 +116,27 @@ class TimelineWidget(QGraphicsView):
 
     def set_playing(self, playing):
         self._playing = playing
+
+    def zoom_percent(self) -> int:
+        return int(round((self.pixels_per_second / self.DEFAULT_PX_PER_SECOND) * 100))
+
+    def set_zoom(self, pixels_per_second):
+        target = max(self.MIN_PX_PER_SECOND, min(int(pixels_per_second), self.MAX_PX_PER_SECOND))
+        if target == int(self.pixels_per_second):
+            return
+        self.pixels_per_second = target
+        self.refresh()
+        self.center_on_position(self._last_position_ms)
+        self.zoomChanged.emit(self.zoom_percent())
+
+    def zoom_in(self):
+        self.set_zoom(self.pixels_per_second + 20)
+
+    def zoom_out(self):
+        self.set_zoom(self.pixels_per_second - 20)
+
+    def reset_zoom(self):
+        self.set_zoom(self.DEFAULT_PX_PER_SECOND)
 
     def set_duration(self, ms):
         self.duration = ms
@@ -207,6 +236,22 @@ class TimelineWidget(QGraphicsView):
             waveform_item = self._scene.addText("▁▂▃▄▅▃▂▁ ▁▃▅▃▁", QFont("Segoe UI Symbol", 7))
             waveform_item.setDefaultTextColor(QColor("#b9faf6"))
             waveform_item.setPos(start_x + 6, self.AUDIO_ROW_Y + 14)
+            if is_active and self._drag_mode and idx == self._drag_segment_index:
+                badge_text = f"{self._format_time(self._drag_feedback_start)} - {self._format_time(self._drag_feedback_end)}"
+                badge_width = max(124, len(badge_text) * 7)
+                badge = self._scene.addRect(
+                    start_x,
+                    self.AUDIO_ROW_Y - 20,
+                    badge_width,
+                    18,
+                    QPen(QColor("#5fb9ff"), 1),
+                    QColor(17, 33, 51, 220),
+                )
+                badge.setZValue(15)
+                badge_label = self._scene.addText(badge_text, QFont("Segoe UI", 7, QFont.Bold))
+                badge_label.setDefaultTextColor(QColor("#dff7ff"))
+                badge_label.setPos(start_x + 8, self.AUDIO_ROW_Y - 19)
+                badge_label.setZValue(16)
 
             start_x = seg["start"] * self.pixels_per_second
             end_x = seg["end"] * self.pixels_per_second
@@ -228,6 +273,12 @@ class TimelineWidget(QGraphicsView):
             self.playhead.setZValue(1000)
             self.set_position(self._last_position_ms)
 
+    def center_on_position(self, ms):
+        if self.duration <= 0:
+            return
+        x_pos = (float(ms) / 1000.0) * self.pixels_per_second
+        self.centerOn(x_pos, self.SCENE_HEIGHT / 2)
+
     def set_position(self, ms):
         self._last_position_ms = int(ms)
         if not self.playhead:
@@ -247,10 +298,20 @@ class TimelineWidget(QGraphicsView):
             segment_index = self._segment_index_at_scene_pos(scene_pos)
             if segment_index >= 0:
                 self.segmentSelected.emit(segment_index)
-                resize_edge = self._resize_edge_at_scene_pos(scene_pos, segment_index)
-                if resize_edge:
-                    self._drag_mode = resize_edge
+                if self._in_audio_lane(scene_pos):
+                    resize_edge = self._resize_edge_at_scene_pos(scene_pos, segment_index)
+                    self._drag_mode = resize_edge or "move"
                     self._drag_segment_index = segment_index
+                    segment = self.segments[segment_index]
+                    self.segmentTimingEditStarted.emit(
+                        segment_index,
+                        float(segment.get("start", 0.0)),
+                        float(segment.get("end", 0.0)),
+                    )
+                    self._drag_feedback_start = float(segment.get("start", 0.0))
+                    self._drag_feedback_end = float(segment.get("end", 0.0))
+                    cursor_seconds = max(0.0, float(scene_pos.x()) / self.pixels_per_second)
+                    self._drag_offset_seconds = cursor_seconds - float(segment.get("start", 0.0))
                     return
             self.is_moving_playhead = True
             self.handle_seek(event.position().toPoint())
@@ -278,9 +339,22 @@ class TimelineWidget(QGraphicsView):
                 end = min(max(cursor_seconds, min_end), max_end)
                 if self._drag_segment_index + 1 < len(self.segments) and abs(end - max_end) <= self.SNAP_THRESHOLD:
                     end = max_end
+            elif self._drag_mode == "move":
+                duration = max(self.MIN_SEGMENT_DURATION, end - start)
+                min_start = max(0.0, prev_end + self.SEGMENT_GAP)
+                max_start = max(min_start, next_start - self.SEGMENT_GAP - duration) if self._drag_segment_index + 1 < len(self.segments) else max(0.0, (self.duration / 1000.0) - duration)
+                start = cursor_seconds - self._drag_offset_seconds
+                start = min(max(start, min_start), max_start)
+                if abs(start - min_start) <= self.SNAP_THRESHOLD:
+                    start = min_start
+                if abs(start - max_start) <= self.SNAP_THRESHOLD:
+                    start = max_start
+                end = start + duration
             max_duration = max(0.0, self.duration / 1000.0)
             start = max(0.0, min(start, max_duration if max_duration > 0 else start))
             end = max(start + self.MIN_SEGMENT_DURATION, min(end, max_duration if max_duration > 0 else end))
+            self._drag_feedback_start = start
+            self._drag_feedback_end = end
             self.segmentTimingChanged.emit(self._drag_segment_index, start, end)
         elif self.is_moving_playhead:
             self.handle_seek(event.position().toPoint())
@@ -290,6 +364,10 @@ class TimelineWidget(QGraphicsView):
         self.is_moving_playhead = False
         self._drag_mode = ""
         self._drag_segment_index = -1
+        self._drag_offset_seconds = 0.0
+        self._drag_feedback_start = 0.0
+        self._drag_feedback_end = 0.0
+        self.refresh()
         super().mouseReleaseEvent(event)
 
     def handle_seek(self, pos):
@@ -297,3 +375,20 @@ class TimelineWidget(QGraphicsView):
         ms = int((scene_pos.x() / self.pixels_per_second) * 1000)
         ms = max(0, min(ms, self.duration))
         self.seekRequested.emit(ms)
+
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            if event.angleDelta().y() > 0:
+                self.zoom_in()
+            else:
+                self.zoom_out()
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    @staticmethod
+    def _format_time(seconds):
+        total_ms = max(0, int(round(float(seconds) * 1000)))
+        mins, rem_ms = divmod(total_ms, 60000)
+        secs, ms = divmod(rem_ms, 1000)
+        return f"{mins:02d}:{secs:02d}.{ms:03d}"

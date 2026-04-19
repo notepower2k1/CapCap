@@ -3,6 +3,7 @@ import os
 import re
 import time
 import json
+import copy
 import shutil
 import threading
 import webbrowser
@@ -15,7 +16,7 @@ from PySide6.QtWidgets import (
                              QSpinBox, QColorDialog, QDoubleSpinBox, QTabWidget, QDialog, QSizePolicy, QInputDialog,
                              QRadioButton)
 from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QSize, QEvent
-from PySide6.QtGui import QColor, QIcon, QPixmap, QTextCursor
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
 APP_PATH = os.path.join(os.path.dirname(__file__), '..', 'app')
@@ -456,6 +457,9 @@ class VideoTranslatorGUI(QMainWindow):
             "message": "",
             "running": False,
         }
+        self._timeline_timing_undo_stack = []
+        self._timeline_timing_redo_stack = []
+        self._suspend_timeline_undo = False
         # Simple pipeline runner (Run All)
         self._pipeline_active = False
         self._pipeline_step = ""
@@ -2167,6 +2171,25 @@ class VideoTranslatorGUI(QMainWindow):
                 QTimer.singleShot(0, self.sync_left_panel_container_width)
         return super().eventFilter(watched, event)
 
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.Undo):
+            focused = self.focusWidget()
+            if isinstance(focused, (QTextEdit, QLineEdit)):
+                super().keyPressEvent(event)
+                return
+            if self.undo_last_timeline_timing_edit():
+                event.accept()
+                return
+        if event.matches(QKeySequence.Redo):
+            focused = self.focusWidget()
+            if isinstance(focused, (QTextEdit, QLineEdit)):
+                super().keyPressEvent(event)
+                return
+            if self.redo_last_timeline_timing_edit():
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
     def toggle_controls_panel(self):
         currently_visible = bool(getattr(self, "left_panel_scroll_area", None) and self.left_panel_scroll_area.isVisible())
         self.set_controls_panel_visible(not currently_visible)
@@ -2681,6 +2704,26 @@ class VideoTranslatorGUI(QMainWindow):
         if sync_ui:
             self.sync_segment_editor_rows()
 
+    def on_timeline_segment_timing_edit_started(self, index: int, start: float, end: float):
+        if self._suspend_timeline_undo:
+            return
+        last_entry = self._timeline_timing_undo_stack[-1] if self._timeline_timing_undo_stack else None
+        if last_entry and str(last_entry.get("type", "timing")) == "timing" and int(last_entry.get("index", -1)) == int(index):
+            if abs(float(last_entry.get("start", 0.0)) - float(start)) < 0.0001 and abs(float(last_entry.get("end", 0.0)) - float(end)) < 0.0001:
+                return
+        self._timeline_timing_undo_stack.append(
+            {
+                "type": "timing",
+                "index": int(index),
+                "start": float(start),
+                "end": float(end),
+            }
+        )
+        self._timeline_timing_redo_stack = []
+        if len(self._timeline_timing_undo_stack) > 100:
+            self._timeline_timing_undo_stack = self._timeline_timing_undo_stack[-100:]
+        self._refresh_timeline_history_buttons()
+
     def on_timeline_segment_selected(self, index: int):
         self.set_selected_segment_index(index, sync_ui=True)
         if hasattr(self, "timeline"):
@@ -2702,6 +2745,283 @@ class VideoTranslatorGUI(QMainWindow):
             segment["tts_group_start"] = float(start)
             segment["tts_group_end"] = float(end)
 
+    def _build_split_segment_pair(self, segment: dict, split_time: float):
+        first = dict(segment or {})
+        second = dict(segment or {})
+
+        first["start"] = float(segment.get("start", 0.0))
+        first["end"] = float(split_time)
+        second["start"] = float(split_time)
+        second["end"] = float(segment.get("end", split_time))
+
+        # Keep clip content unchanged on split; only timing is divided.
+        first["text"] = str(segment.get("text", "") or "")
+        second["text"] = str(segment.get("text", "") or "")
+        first["tts_text"] = str(segment.get("tts_text", segment.get("text", "")) or "")
+        second["tts_text"] = str(segment.get("tts_text", segment.get("text", "")) or "")
+        first["words"] = []
+        second["words"] = []
+        first["manual_highlights"] = list(segment.get("manual_highlights", []))
+        second["manual_highlights"] = list(segment.get("manual_highlights", []))
+        if "tts_group_start" in first or "tts_group_end" in first:
+            first["tts_group_start"] = float(first["start"])
+            first["tts_group_end"] = float(first["end"])
+            second["tts_group_start"] = float(second["start"])
+            second["tts_group_end"] = float(second["end"])
+        return first, second
+
+    def _timeline_neighbor_bounds(self, index: int):
+        active_segments = list(self.get_active_segments() or [])
+        prev_end = 0.0
+        next_start = max(0.0, float(getattr(self.timeline, "duration", 0)) / 1000.0)
+        if index > 0 and index - 1 < len(active_segments):
+            prev_end = float(active_segments[index - 1].get("end", 0.0))
+        if index + 1 < len(active_segments):
+            next_start = float(active_segments[index + 1].get("start", next_start))
+        return prev_end, next_start
+
+    def nudge_selected_timeline_segment(self, delta_seconds: float):
+        segments = list(self.get_active_segments() or [])
+        if not segments:
+            return
+        index = int(getattr(self, "_selected_segment_index", -1))
+        if not (0 <= index < len(segments)):
+            index = self._find_active_segment_index(self.media_player.position(), segments)
+        if not (0 <= index < len(segments)):
+            return
+
+        target = segments[index]
+        start = float(target.get("start", 0.0))
+        end = float(target.get("end", 0.0))
+        duration = max(0.0, end - start)
+        gap = float(getattr(self.timeline, "SEGMENT_GAP", 0.03))
+        prev_end, next_start = self._timeline_neighbor_bounds(index)
+        max_timeline = max(0.0, float(getattr(self.timeline, "duration", 0)) / 1000.0)
+        min_start = max(0.0, prev_end + gap)
+        if index + 1 < len(segments):
+            max_start = max(min_start, next_start - gap - duration)
+        else:
+            max_start = max(0.0, max_timeline - duration)
+        new_start = min(max(start + float(delta_seconds), min_start), max_start)
+        if abs(new_start - start) < 0.0001:
+            return
+        new_end = new_start + duration
+        self.on_timeline_segment_timing_edit_started(index, start, end)
+        self.on_timeline_segment_timing_changed(index, new_start, new_end)
+
+    def ripple_nudge_selected_timeline_segment(self, delta_seconds: float):
+        segments = list(self.get_active_segments() or [])
+        if not segments:
+            return
+        index = int(getattr(self, "_selected_segment_index", -1))
+        if not (0 <= index < len(segments)):
+            index = self._find_active_segment_index(self.media_player.position(), segments)
+        if not (0 <= index < len(segments)):
+            return
+
+        gap = float(getattr(self.timeline, "SEGMENT_GAP", 0.0))
+        max_timeline = max(0.0, float(getattr(self.timeline, "duration", 0)) / 1000.0)
+        prev_end, _next_start = self._timeline_neighbor_bounds(index)
+        first_start = float(segments[index].get("start", 0.0))
+        last_end = float(segments[-1].get("end", 0.0))
+        min_delta = max(0.0, prev_end + gap) - first_start
+        max_delta = max_timeline - last_end
+        actual_delta = min(max(float(delta_seconds), min_delta), max_delta)
+        if abs(actual_delta) < 0.0001:
+            return
+
+        history_entry = {
+            "type": "batch_timing",
+            "index": int(index),
+            "selected_before": int(index),
+            "selected_after": int(index),
+            "current_before": [],
+            "current_after": [],
+            "translated_before": [],
+            "translated_after": [],
+        }
+
+        if 0 <= index < len(self.current_segments or []):
+            history_entry["current_before"] = [copy.deepcopy(seg) for seg in self.current_segments[index:]]
+            for seg in self.current_segments[index:]:
+                self._apply_segment_timing(
+                    seg,
+                    float(seg.get("start", 0.0)) + actual_delta,
+                    float(seg.get("end", 0.0)) + actual_delta,
+                )
+            history_entry["current_after"] = [copy.deepcopy(seg) for seg in self.current_segments[index:]]
+            self.current_segment_models = self._dict_segments_to_models(self.current_segments, translated=False)
+            self._sync_hidden_transcript_text_from_segments()
+
+        if 0 <= index < len(self.current_translated_segments or []):
+            history_entry["translated_before"] = [copy.deepcopy(seg) for seg in self.current_translated_segments[index:]]
+            for seg in self.current_translated_segments[index:]:
+                self._apply_segment_timing(
+                    seg,
+                    float(seg.get("start", 0.0)) + actual_delta,
+                    float(seg.get("end", 0.0)) + actual_delta,
+                )
+            history_entry["translated_after"] = [copy.deepcopy(seg) for seg in self.current_translated_segments[index:]]
+            self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+            self._sync_hidden_translated_text_from_segments()
+
+        self._timeline_timing_undo_stack.append(history_entry)
+        self._timeline_timing_redo_stack = []
+        if len(self._timeline_timing_undo_stack) > 100:
+            self._timeline_timing_undo_stack = self._timeline_timing_undo_stack[-100:]
+        self._refresh_timeline_history_buttons()
+
+        self.set_selected_segment_index(index, sync_ui=True)
+        if hasattr(self, "timeline"):
+            self.timeline.set_active_segment_index(index)
+        self.apply_segments_to_timeline()
+        self.schedule_live_subtitle_preview_refresh()
+        self.refresh_ui_state()
+
+    def _apply_timeline_structure_history_entry(self, entry: dict, *, use_after: bool):
+        index = int(entry.get("index", -1))
+        current_before = [copy.deepcopy(seg) for seg in list(entry.get("current_before", []) or [])]
+        current_after = [copy.deepcopy(seg) for seg in list(entry.get("current_after", []) or [])]
+        translated_before = [copy.deepcopy(seg) for seg in list(entry.get("translated_before", []) or [])]
+        translated_after = [copy.deepcopy(seg) for seg in list(entry.get("translated_after", []) or [])]
+
+        if self.current_segments is not None:
+            replace_with = current_after if use_after else current_before
+            replace_count = len(current_before if use_after else current_after)
+            if current_before or current_after:
+                self.current_segments[index:index + replace_count] = replace_with
+                self.current_segment_models = self._dict_segments_to_models(self.current_segments, translated=False)
+                self._sync_hidden_transcript_text_from_segments()
+
+        if self.current_translated_segments is not None:
+            replace_with = translated_after if use_after else translated_before
+            replace_count = len(translated_before if use_after else translated_after)
+            if translated_before or translated_after:
+                self.current_translated_segments[index:index + replace_count] = replace_with
+                self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+                self._sync_hidden_translated_text_from_segments()
+
+        target_index = int(entry.get("selected_after" if use_after else "selected_before", index))
+        self.set_selected_segment_index(target_index, sync_ui=True)
+        if hasattr(self, "timeline"):
+            self.timeline.set_active_segment_index(target_index)
+        self.apply_segments_to_timeline()
+        self.schedule_live_subtitle_preview_refresh()
+        self.refresh_ui_state()
+
+    def split_selected_timeline_segment(self):
+        segments = list(self.get_active_segments() or [])
+        if not segments:
+            return
+        index = int(getattr(self, "_selected_segment_index", -1))
+        if not (0 <= index < len(segments)):
+            index = self._find_active_segment_index(self.media_player.position(), segments)
+        if not (0 <= index < len(segments)):
+            QMessageBox.information(self, "Split Segment", "Please select an audio/subtitle block first.")
+            return
+
+        target = segments[index]
+        split_time = float(self.media_player.position()) / 1000.0
+        start = float(target.get("start", 0.0))
+        end = float(target.get("end", 0.0))
+        min_gap = max(0.12, getattr(self.timeline, "MIN_SEGMENT_DURATION", 0.1))
+        if not (start + min_gap < split_time < end - min_gap):
+            QMessageBox.information(
+                self,
+                "Split Segment",
+                "Move the playhead inside the selected block before splitting.",
+            )
+            return
+
+        split_history_entry = {
+            "type": "split",
+            "index": int(index),
+            "selected_before": int(index),
+            "selected_after": int(index + 1),
+            "current_before": [],
+            "current_after": [],
+            "translated_before": [],
+            "translated_after": [],
+        }
+
+        if 0 <= index < len(self.current_segments or []):
+            split_history_entry["current_before"] = [copy.deepcopy(self.current_segments[index])]
+            first, second = self._build_split_segment_pair(self.current_segments[index], split_time)
+            self.current_segments[index:index + 1] = [first, second]
+            split_history_entry["current_after"] = [copy.deepcopy(first), copy.deepcopy(second)]
+            self.current_segment_models = self._dict_segments_to_models(self.current_segments, translated=False)
+            self._sync_hidden_transcript_text_from_segments()
+
+        if 0 <= index < len(self.current_translated_segments or []):
+            split_history_entry["translated_before"] = [copy.deepcopy(self.current_translated_segments[index])]
+            first, second = self._build_split_segment_pair(self.current_translated_segments[index], split_time)
+            self.current_translated_segments[index:index + 1] = [first, second]
+            split_history_entry["translated_after"] = [copy.deepcopy(first), copy.deepcopy(second)]
+            self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+            self._sync_hidden_translated_text_from_segments()
+
+        self._timeline_timing_undo_stack.append(split_history_entry)
+        self._timeline_timing_redo_stack = []
+        if len(self._timeline_timing_undo_stack) > 100:
+            self._timeline_timing_undo_stack = self._timeline_timing_undo_stack[-100:]
+        self._refresh_timeline_history_buttons()
+
+        self.set_selected_segment_index(index + 1, sync_ui=True)
+        if hasattr(self, "timeline"):
+            self.timeline.set_active_segment_index(index + 1)
+        self.apply_segments_to_timeline()
+        self.schedule_live_subtitle_preview_refresh()
+        self.refresh_ui_state()
+
+    def delete_selected_timeline_segment(self):
+        segments = list(self.get_active_segments() or [])
+        if not segments:
+            return
+        index = int(getattr(self, "_selected_segment_index", -1))
+        if not (0 <= index < len(segments)):
+            index = self._find_active_segment_index(self.media_player.position(), segments)
+        if not (0 <= index < len(segments)):
+            QMessageBox.information(self, "Delete Segment", "Please select an audio/subtitle block first.")
+            return
+
+        remaining_count = max(0, len(segments) - 1)
+        target_selection = min(index, max(0, remaining_count - 1)) if remaining_count else -1
+        delete_history_entry = {
+            "type": "delete",
+            "index": int(index),
+            "selected_before": int(index),
+            "selected_after": int(target_selection),
+            "current_before": [],
+            "current_after": [],
+            "translated_before": [],
+            "translated_after": [],
+        }
+
+        if 0 <= index < len(self.current_segments or []):
+            delete_history_entry["current_before"] = [copy.deepcopy(self.current_segments[index])]
+            self.current_segments[index:index + 1] = []
+            self.current_segment_models = self._dict_segments_to_models(self.current_segments, translated=False)
+            self._sync_hidden_transcript_text_from_segments()
+
+        if 0 <= index < len(self.current_translated_segments or []):
+            delete_history_entry["translated_before"] = [copy.deepcopy(self.current_translated_segments[index])]
+            self.current_translated_segments[index:index + 1] = []
+            self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+            self._sync_hidden_translated_text_from_segments()
+
+        self._timeline_timing_undo_stack.append(delete_history_entry)
+        self._timeline_timing_redo_stack = []
+        if len(self._timeline_timing_undo_stack) > 100:
+            self._timeline_timing_undo_stack = self._timeline_timing_undo_stack[-100:]
+        self._refresh_timeline_history_buttons()
+
+        self.set_selected_segment_index(target_selection, sync_ui=True)
+        if hasattr(self, "timeline"):
+            self.timeline.set_active_segment_index(target_selection)
+        self.apply_segments_to_timeline()
+        self.schedule_live_subtitle_preview_refresh()
+        self.refresh_ui_state()
+
     def on_timeline_segment_timing_changed(self, index: int, start: float, end: float):
         updated = False
         if 0 <= index < len(self.current_segments or []):
@@ -2720,6 +3040,76 @@ class VideoTranslatorGUI(QMainWindow):
         self.apply_segments_to_timeline()
         self.schedule_live_subtitle_preview_refresh()
         self.refresh_ui_state()
+
+    def _refresh_timeline_history_buttons(self):
+        if hasattr(self, "timeline_undo_btn"):
+            self.timeline_undo_btn.setEnabled(bool(self._timeline_timing_undo_stack))
+        if hasattr(self, "timeline_redo_btn"):
+            self.timeline_redo_btn.setEnabled(bool(self._timeline_timing_redo_stack))
+
+    def undo_last_timeline_timing_edit(self):
+        if not self._timeline_timing_undo_stack:
+            return False
+        entry = self._timeline_timing_undo_stack.pop()
+        if str(entry.get("type", "timing")) in {"split", "delete", "batch_timing"}:
+            self._apply_timeline_structure_history_entry(entry, use_after=False)
+            self._timeline_timing_redo_stack.append(entry)
+            self._refresh_timeline_history_buttons()
+            return True
+        current_entry = None
+        active_segments = self.get_active_segments()
+        index = int(entry.get("index", -1))
+        if 0 <= index < len(active_segments):
+            current_entry = {
+                "index": index,
+                "start": float(active_segments[index].get("start", 0.0)),
+                "end": float(active_segments[index].get("end", 0.0)),
+            }
+        self._suspend_timeline_undo = True
+        try:
+            self.on_timeline_segment_timing_changed(
+                index,
+                float(entry.get("start", 0.0)),
+                float(entry.get("end", 0.0)),
+            )
+        finally:
+            self._suspend_timeline_undo = False
+        if current_entry:
+            self._timeline_timing_redo_stack.append(current_entry)
+        self._refresh_timeline_history_buttons()
+        return True
+
+    def redo_last_timeline_timing_edit(self):
+        if not self._timeline_timing_redo_stack:
+            return False
+        entry = self._timeline_timing_redo_stack.pop()
+        if str(entry.get("type", "timing")) in {"split", "delete", "batch_timing"}:
+            self._apply_timeline_structure_history_entry(entry, use_after=True)
+            self._timeline_timing_undo_stack.append(entry)
+            self._refresh_timeline_history_buttons()
+            return True
+        current_entry = None
+        active_segments = self.get_active_segments()
+        index = int(entry.get("index", -1))
+        if 0 <= index < len(active_segments):
+            current_entry = {
+                "index": index,
+                "start": float(active_segments[index].get("start", 0.0)),
+                "end": float(active_segments[index].get("end", 0.0)),
+            }
+        self._suspend_timeline_undo = True
+        try:
+            self.on_timeline_segment_timing_changed(
+                index,
+                float(entry.get("start", 0.0)),
+                float(entry.get("end", 0.0)),
+            )
+        finally:
+            self._suspend_timeline_undo = False
+        if current_entry:
+            self._timeline_timing_undo_stack.append(current_entry)
+        self._refresh_timeline_history_buttons()
+        return True
 
     def step_selected_segment(self, direction: int):
         rows = self._segment_editor_display_rows()
@@ -3669,6 +4059,19 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setVisible(mode in ("voice", "both"))
             self.preview_voice_btn.setEnabled(bool(self.voice_catalog_entries_all))
+        has_timeline_segments = bool(self.get_active_segments())
+        if hasattr(self, "timeline_split_btn"):
+            self.timeline_split_btn.setEnabled(has_timeline_segments)
+        if hasattr(self, "timeline_delete_btn"):
+            self.timeline_delete_btn.setEnabled(has_timeline_segments)
+        if hasattr(self, "timeline_nudge_left_btn"):
+            self.timeline_nudge_left_btn.setEnabled(has_timeline_segments)
+        if hasattr(self, "timeline_nudge_right_btn"):
+            self.timeline_nudge_right_btn.setEnabled(has_timeline_segments)
+        if hasattr(self, "timeline_ripple_left_btn"):
+            self.timeline_ripple_left_btn.setEnabled(has_timeline_segments)
+        if hasattr(self, "timeline_ripple_right_btn"):
+            self.timeline_ripple_right_btn.setEnabled(has_timeline_segments)
         if hasattr(self, "clean_project_action"):
             self.clean_project_action.setEnabled(self._has_cleanable_project_data())
         self.run_all_btn.setEnabled(v_ok and not self._pipeline_active)
