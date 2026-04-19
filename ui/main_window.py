@@ -2291,6 +2291,20 @@ class VideoTranslatorGUI(QMainWindow):
             return str(value).strip().lower()
         return str(self.output_fps_combo.currentText() or "source").strip().lower() or "source"
 
+    def get_output_ratio_key(self):
+        if not hasattr(self, "output_ratio_combo"):
+            return "source"
+        value = self.output_ratio_combo.currentData()
+        if value:
+            return str(value).strip().lower()
+        return str(self.output_ratio_combo.currentText() or "source").strip().lower() or "source"
+
+    def on_output_ratio_changed(self, *_args):
+        if hasattr(self, "video_view") and hasattr(self.video_view, "set_preview_aspect_ratio"):
+            self.video_view.set_preview_aspect_ratio(self.get_output_ratio_key())
+        self.update_subtitle_preview_style()
+        self.apply_preview_blur_region()
+
     def get_audio_handling_mode(self):
         if not hasattr(self, "audio_handling_combo"):
             return "fast"
@@ -2528,7 +2542,7 @@ class VideoTranslatorGUI(QMainWindow):
             return
         item = self.video_view.subtitle_item
         source_h = max(1, getattr(self.video_view, "video_source_height", 0) or 1080)
-        preview_rect = self.video_view.get_video_content_rect()
+        preview_rect = self.video_view.get_preview_canvas_rect() if hasattr(self.video_view, "get_preview_canvas_rect") else self.video_view.get_video_content_rect()
         preview_h = max(1.0, preview_rect.height() or float(self.video_view.height()) or 1.0)
         preset = self.get_subtitle_preset_config()
         export_font_size = int(self.subtitle_font_size_spin.value())
@@ -4255,19 +4269,20 @@ class VideoTranslatorGUI(QMainWindow):
         has_translated_text = bool(self.translated_text.toPlainText().strip())
         selected_audio_path = self.resolve_selected_audio_path()
         has_voice_audio = bool(selected_audio_path and os.path.exists(selected_audio_path))
+        has_subtitle_track = bool(self.last_translated_srt_path and os.path.exists(self.last_translated_srt_path))
         mode = self.get_output_mode_key()
         steps = getattr(getattr(self, "current_project_state", None), "steps", {}) or {}
         voice_running = steps.get("generate_tts") == "running" or steps.get("mix_audio") == "running"
         can_export = False
         if mode == "subtitle":
-            can_export = v_ok and bool(self.last_translated_srt_path and os.path.exists(self.last_translated_srt_path))
+            can_export = v_ok and has_subtitle_track
         elif mode == "voice":
             can_export = v_ok and has_voice_audio
         else:
             can_export = (
                 v_ok
                 and has_voice_audio
-                and bool(self.last_translated_srt_path and os.path.exists(self.last_translated_srt_path))
+                and has_subtitle_track
             )
 
         self.extract_btn.setEnabled(v_ok)
@@ -4279,13 +4294,13 @@ class VideoTranslatorGUI(QMainWindow):
             self.rewrite_translation_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()) and has_translated_text)
         generated_mode = not self.using_existing_audio_source()
         self.voiceover_btn.setEnabled(has_translated_text and generated_mode and mode in ("voice", "both"))
-        preview_enabled = v_ok and has_voice_audio and mode in ("voice", "both") and not voice_running
+        preview_enabled = v_ok and not voice_running
         if hasattr(self, "quick_preview_btn"):
             self.quick_preview_btn.setEnabled(preview_enabled)
         if hasattr(self, "styled_preview_btn"):
             self.styled_preview_btn.setEnabled(preview_enabled)
         if hasattr(self, "preview_btn"):
-            self.preview_btn.setVisible(mode in ("voice", "both"))
+            self.preview_btn.setVisible(True)
             self.preview_btn.setEnabled(preview_enabled and not getattr(self, "_styled_preview_running", False))
         if hasattr(self, "play_btn"):
             self.play_btn.setEnabled(v_ok and not voice_running and not getattr(self, "_styled_preview_running", False))

@@ -100,6 +100,10 @@ class PreviewController:
         if not src_w or not src_h:
             return "Unknown"
 
+        target_w, target_h = self._resolve_output_canvas_dimensions(video_path)
+        if target_w and target_h:
+            return f"{target_w}x{target_h}"
+
         key = str(output_quality or "source").strip().lower()
         if key in ("", "source", "same", "original", "auto"):
             return f"{src_w}x{src_h} (Source)"
@@ -119,6 +123,67 @@ class PreviewController:
         if src_w <= base_w and src_h <= base_h:
             return f"{src_w}x{src_h} (Source)"
         return f"{base_w}x{base_h}"
+
+    def _resolve_output_canvas_dimensions(self, video_path: str):
+        try:
+            from video_processor import get_video_dimensions
+            src_w, src_h = get_video_dimensions(video_path)
+        except Exception:
+            return None, None
+        if not src_w or not src_h:
+            return None, None
+
+        output_quality = self.gui.get_output_quality_key()
+        output_ratio = self.gui.get_output_ratio_key()
+        ratio_map = {
+            "16:9": (16, 9),
+            "9:16": (9, 16),
+            "1:1": (1, 1),
+            "4:3": (4, 3),
+        }
+        ratio = ratio_map.get(str(output_ratio or "source").strip().lower())
+        quality_key = str(output_quality or "source").strip().lower()
+
+        if quality_key in ("", "source", "same", "original", "auto"):
+            if not ratio:
+                return None, None
+            src_ratio = src_w / src_h
+            target_ratio = ratio[0] / ratio[1]
+            if abs(src_ratio - target_ratio) < 0.001:
+                return None, None
+            fit_scale = min(src_w / ratio[0], src_h / ratio[1])
+            return (
+                max(2, int((ratio[0] * fit_scale) // 2 * 2)),
+                max(2, int((ratio[1] * fit_scale) // 2 * 2)),
+            )
+
+        if quality_key in ("720", "720p", "hd"):
+            short_edge = 720
+        elif quality_key in ("1080", "1080p", "fullhd", "fhd", "full hd", "full"):
+            short_edge = 1080
+        elif quality_key in ("1440", "1440p", "2k", "qhd"):
+            short_edge = 1440
+        elif quality_key in ("2160", "2160p", "4k", "uhd"):
+            short_edge = 2160
+        else:
+            return None, None
+
+        if ratio:
+            scale = short_edge / min(ratio)
+            target_w = max(2, int((ratio[0] * scale) // 2 * 2))
+            target_h = max(2, int((ratio[1] * scale) // 2 * 2))
+            if src_w <= target_w and src_h <= target_h:
+                fit_scale = min(src_w / ratio[0], src_h / ratio[1])
+                target_w = max(2, int((ratio[0] * fit_scale) // 2 * 2))
+                target_h = max(2, int((ratio[1] * fit_scale) // 2 * 2))
+            return target_w, target_h
+
+        portrait = src_h > src_w
+        target_w = short_edge if portrait else int(round(short_edge * 16 / 9))
+        target_h = int(round(short_edge * 16 / 9)) if portrait else short_edge
+        if src_w <= target_w and src_h <= target_h:
+            return None, None
+        return target_w, target_h
 
     def _confirm_export_summary(self, *, video_path: str, output_path: str, mode: str, audio_path: str):
         output_quality = self.gui.get_output_quality_key()
@@ -218,6 +283,9 @@ class PreviewController:
             "subtitle_path": os.path.abspath(srt_path) if srt_path and os.path.exists(srt_path) else "",
             "subtitle_hash": self._text_file_hash(srt_path),
             "subtitle_style": subtitle_style or {},
+            "output_quality": self.gui.get_output_quality_key(),
+            "output_ratio": self.gui.get_output_ratio_key(),
+            "output_fps": self.gui.get_output_fps_key(),
         }
         return hashlib.sha1(json.dumps(payload, ensure_ascii=True, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -302,6 +370,7 @@ class PreviewController:
             subtitle_style=self.gui.get_subtitle_export_style(segments=self.gui.get_active_segments()),
             output_quality=self.gui.get_output_quality_key(),
             output_fps=self.gui.get_output_fps_key(),
+            output_ratio=self.gui.get_output_ratio_key(),
             project_state_path=project_state_path,
         )
         self.gui.export_thread.progress.connect(self.gui.on_export_progress)
@@ -335,6 +404,7 @@ class PreviewController:
 
         start_seconds = max(0.0, self.gui.media_player.position() / 1000.0)
         duration_seconds = 5.0
+        target_width, target_height = self._resolve_output_canvas_dimensions(video_path)
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         if self.gui.last_preview_video_path and self.gui.last_preview_video_path != self.gui.last_exact_preview_5s_path:
             try:
@@ -375,7 +445,8 @@ class PreviewController:
             srt_path=preview_srt_path,
             audio_path=chosen_audio,
             subtitle_style=self.gui.get_subtitle_export_style(segments=preview_segments),
-            render_subtitles=False,
+            target_width=target_width,
+            target_height=target_height,
         )
         self.gui.quick_preview_thread.finished.connect(self.gui.on_quick_preview_ready)
         self.gui.quick_preview_thread.start()
@@ -549,6 +620,8 @@ class PreviewController:
         # Subtitle-only preview uses mpv's live subtitle overlay; avoid copying the full video into temp.
         if mode == "subtitle":
             try:
+                if hasattr(self.gui.video_view, "set_preview_aspect_ratio"):
+                    self.gui.video_view.set_preview_aspect_ratio(self.gui.get_output_ratio_key())
                 self.gui.media_player.setSource(QUrl.fromLocalFile(video_path))
                 self.gui.sync_live_subtitle_preview()
                 self.gui._refresh_preview_audio_controls()
@@ -612,6 +685,7 @@ class PreviewController:
             self.gui.preview_btn.setEnabled(False)
         self.gui.progress_bar.setValue(95)
         self.gui.refresh_ui_state()
+        target_width, target_height = self._resolve_output_canvas_dimensions(video_path)
 
         self.gui.preview_thread = PreviewMuxWorker(
             video_path,
@@ -621,6 +695,8 @@ class PreviewController:
             srt_path=preview_srt_path,
             subtitle_style=subtitle_style,
             render_subtitles=False,
+            target_width=target_width,
+            target_height=target_height,
         )
         self.gui.preview_thread.finished.connect(
             lambda preview_path, error: self.gui.on_preview_ready(preview_path, error, styled_signature)

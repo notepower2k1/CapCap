@@ -15,7 +15,7 @@ from services import EngineRuntime
 class PreviewMuxWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None, render_subtitles=True):
+    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None, render_subtitles=True, target_width=None, target_height=None):
         super().__init__()
         self.video_path = video_path
         self.audio_path = audio_path
@@ -24,6 +24,8 @@ class PreviewMuxWorker(QThread):
         self.srt_path = srt_path
         self.subtitle_style = subtitle_style or {}
         self.render_subtitles = bool(render_subtitles)
+        self.target_width = target_width
+        self.target_height = target_height
 
     def run(self):
         temp_mux_path = ""
@@ -35,7 +37,13 @@ class PreviewMuxWorker(QThread):
                 temp_dir = os.path.join(os.getcwd(), "temp")
                 os.makedirs(temp_dir, exist_ok=True)
                 temp_mux_path = os.path.normpath(os.path.join(temp_dir, f"preview_mux_{int(time.time())}.mp4"))
-                current_video = mux_audio_into_video_for_preview(self.video_path, self.audio_path, temp_mux_path)
+                current_video = mux_audio_into_video_for_preview(
+                    self.video_path,
+                    self.audio_path,
+                    temp_mux_path,
+                    target_width=self.target_width,
+                    target_height=self.target_height,
+                )
 
             if self.render_subtitles and self.mode in ("subtitle", "both") and self.srt_path and os.path.exists(self.srt_path):
                 engine = EngineRuntime()
@@ -44,6 +52,8 @@ class PreviewMuxWorker(QThread):
                     self.srt_path,
                     self.output_path,
                     subtitle_style=self.subtitle_style,
+                    target_width=self.target_width,
+                    target_height=self.target_height,
                 )
                 if not ok:
                     raise RuntimeError("Failed to render subtitle preview video.")
@@ -67,7 +77,7 @@ class PreviewMuxWorker(QThread):
 class QuickPreviewWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", audio_path="", subtitle_style=None):
+    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", audio_path="", subtitle_style=None, target_width=None, target_height=None):
         super().__init__()
         self.video_path = video_path
         self.output_path = output_path
@@ -77,6 +87,8 @@ class QuickPreviewWorker(QThread):
         self.srt_path = srt_path
         self.audio_path = audio_path
         self.subtitle_style = subtitle_style or {}
+        self.target_width = target_width
+        self.target_height = target_height
 
     def run(self):
         temp_paths = []
@@ -100,6 +112,8 @@ class QuickPreviewWorker(QThread):
                     voice_clip,
                     self.start_seconds,
                     self.duration_seconds,
+                    target_width=self.target_width,
+                    target_height=self.target_height,
                 )
                 current_video = voice_clip
 
@@ -110,6 +124,8 @@ class QuickPreviewWorker(QThread):
                     self.srt_path,
                     self.output_path,
                     subtitle_style=self.subtitle_style,
+                    target_width=self.target_width,
+                    target_height=self.target_height,
                 )
                 if not ok:
                     raise RuntimeError("Failed to render subtitle preview clip.")

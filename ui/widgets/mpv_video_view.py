@@ -333,6 +333,7 @@ class MpvVideoView(QWidget):
         self.setMinimumSize(320, 180)
         self.video_source_width = 0
         self.video_source_height = 0
+        self.preview_aspect_key = "source"
         self.subtitle_item = _SubtitleOverlayWidget(self)
         self.video_surface = QWidget(self)
         self.video_surface.setAttribute(Qt.WA_NativeWindow, True)
@@ -349,14 +350,20 @@ class MpvVideoView(QWidget):
     def set_video_dimensions(self, width: int, height: int):
         self.video_source_width = max(0, int(width or 0))
         self.video_source_height = max(0, int(height or 0))
+        content_rect = self.get_video_content_rect().toRect()
+        self.video_surface.setGeometry(content_rect)
+        self.video_surface.lower()
+        self.subtitle_item.raise_()
+        self.reposition_subtitle()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.video_surface.setGeometry(self.rect())
+        self.video_surface.setGeometry(self.get_video_content_rect().toRect())
         self.video_surface.lower()
         self.subtitle_item.raise_()
         self.reposition_subtitle()
         self.blur_overlay.sync_to_view()
+        self.update()
 
     def moveEvent(self, event):
         super().moveEvent(event)
@@ -373,35 +380,79 @@ class MpvVideoView(QWidget):
         super().hideEvent(event)
         self.blur_overlay.hide()
 
-    def get_video_content_rect(self) -> QRectF:
+    def set_preview_aspect_ratio(self, aspect_key: str):
+        self.preview_aspect_key = str(aspect_key or "source").strip().lower() or "source"
+        self.video_surface.setGeometry(self.get_video_content_rect().toRect())
+        self.video_surface.lower()
+        self.subtitle_item.raise_()
+        self.reposition_subtitle()
+        self.blur_overlay.sync_to_view()
+        self.update()
+
+    def _resolve_canvas_aspect_ratio(self) -> float | None:
+        aspect_key = str(getattr(self, "preview_aspect_key", "source") or "source").strip().lower()
+        aspect_map = {
+            "16:9": 16.0 / 9.0,
+            "9:16": 9.0 / 16.0,
+            "1:1": 1.0,
+            "4:3": 4.0 / 3.0,
+        }
+        if aspect_key in aspect_map:
+            return aspect_map[aspect_key]
+        if self.video_source_width and self.video_source_height:
+            return self.video_source_width / self.video_source_height
+        return None
+
+    def get_preview_canvas_rect(self) -> QRectF:
         view_w, view_h = float(self.width()), float(self.height())
         if view_w <= 0 or view_h <= 0:
             return QRectF(0, 0, 0, 0)
-        if not self.video_source_width or not self.video_source_height:
+        canvas_ratio = self._resolve_canvas_aspect_ratio()
+        if not canvas_ratio:
             return QRectF(0, 0, view_w, view_h)
 
-        source_ratio = self.video_source_width / self.video_source_height
-        view_ratio = view_w / view_h if view_h else source_ratio
-        if source_ratio > view_ratio:
+        view_ratio = view_w / view_h if view_h else canvas_ratio
+        if canvas_ratio > view_ratio:
             content_w = view_w
-            content_h = view_w / source_ratio
+            content_h = view_w / canvas_ratio
             offset_x = 0.0
             offset_y = (view_h - content_h) / 2.0
         else:
             content_h = view_h
-            content_w = view_h * source_ratio
+            content_w = view_h * canvas_ratio
             offset_x = (view_w - content_w) / 2.0
             offset_y = 0.0
         return QRectF(offset_x, offset_y, content_w, content_h)
 
+    def get_video_content_rect(self) -> QRectF:
+        canvas_rect = self.get_preview_canvas_rect()
+        if canvas_rect.width() <= 0 or canvas_rect.height() <= 0:
+            return QRectF(0, 0, 0, 0)
+        if not self.video_source_width or not self.video_source_height:
+            return canvas_rect
+
+        source_ratio = self.video_source_width / self.video_source_height
+        canvas_ratio = canvas_rect.width() / canvas_rect.height() if canvas_rect.height() else source_ratio
+        if source_ratio > canvas_ratio:
+            content_w = canvas_rect.width()
+            content_h = content_w / source_ratio
+            offset_x = canvas_rect.left()
+            offset_y = canvas_rect.top() + (canvas_rect.height() - content_h) / 2.0
+        else:
+            content_h = canvas_rect.height()
+            content_w = content_h * source_ratio
+            offset_x = canvas_rect.left() + (canvas_rect.width() - content_w) / 2.0
+            offset_y = canvas_rect.top()
+        return QRectF(offset_x, offset_y, content_w, content_h)
+
     def reposition_subtitle(self):
         item = self.subtitle_item
-        rect = self.get_video_content_rect()
+        rect = self.get_preview_canvas_rect()
         if rect.width() <= 0 or rect.height() <= 0:
             return
 
-        source_w = max(1, self.video_source_width or int(rect.width()))
-        source_h = max(1, self.video_source_height or int(rect.height()))
+        source_w = max(1, int(rect.width()))
+        source_h = max(1, int(rect.height()))
         scale_x = rect.width() / source_w
         scale_y = rect.height() / source_h
         side_margin_px = 60 * scale_x
@@ -441,6 +492,42 @@ class MpvVideoView(QWidget):
         item.move(int(x_pos), int(y_pos))
         item.setFixedSize(int(item_w), int(item_h))
         item.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        canvas_rect = self.get_preview_canvas_rect()
+        if canvas_rect.width() <= 0 or canvas_rect.height() <= 0:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        outer = QPainterPath()
+        outer.addRect(QRectF(self.rect()))
+        inner = QPainterPath()
+        inner.addRoundedRect(canvas_rect, 12, 12)
+        matte = outer.subtracted(inner)
+        painter.fillPath(matte, QColor(2, 8, 16, 190))
+        painter.setPen(QPen(QColor(78, 117, 158, 180), 1.5))
+        painter.drawRoundedRect(canvas_rect, 12, 12)
+
+        aspect_key = str(getattr(self, "preview_aspect_key", "source") or "source").strip().lower()
+        if aspect_key != "source":
+            label = aspect_key.upper()
+            metrics = painter.fontMetrics()
+            text_w = metrics.horizontalAdvance(label) + 18
+            text_h = metrics.height() + 8
+            chip_rect = QRectF(
+                canvas_rect.right() - text_w - 10,
+                canvas_rect.top() + 10,
+                text_w,
+                text_h,
+            )
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(12, 24, 38, 210))
+            painter.drawRoundedRect(chip_rect, 9, 9)
+            painter.setPen(QColor(183, 227, 255))
+            painter.drawText(chip_rect, Qt.AlignCenter, label)
 
     def set_blur_edit_enabled(self, enabled: bool):
         if enabled:

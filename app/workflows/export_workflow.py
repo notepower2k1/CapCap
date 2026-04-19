@@ -47,28 +47,50 @@ class ExportWorkflow:
             "blur_region": subtitle_style.get("blur_region"),
         }
 
-    def _resolve_target_dimensions(self, video_path: str, output_quality: str):
+    def _resolve_target_dimensions(self, video_path: str, output_quality: str, output_ratio: str = "source"):
         key = str(output_quality or "source").strip().lower()
-        if key in ("", "source", "same", "original", "auto"):
-            return None, None
+        ratio = self._resolve_target_ratio(output_ratio)
 
         src_w, src_h = self.engine_runtime.get_video_dimensions(video_path)
         if not src_w or not src_h:
             return None, None
 
-        portrait = src_h > src_w
+        if key in ("", "source", "same", "original", "auto"):
+            if not ratio:
+                return None, None
+            src_ratio = src_w / src_h
+            target_ratio = ratio[0] / ratio[1]
+            if abs(src_ratio - target_ratio) < 0.001:
+                return None, None
+            fit_scale = min(src_w / ratio[0], src_h / ratio[1])
+            return (
+                max(2, int((ratio[0] * fit_scale) // 2 * 2)),
+                max(2, int((ratio[1] * fit_scale) // 2 * 2)),
+            )
+
         if key in ("720", "720p", "hd"):
-            base_w, base_h = (720, 1280) if portrait else (1280, 720)
+            short_edge = 720
         elif key in ("1080", "1080p", "fullhd", "fhd", "full hd", "full"):
-            base_w, base_h = (1080, 1920) if portrait else (1920, 1080)
+            short_edge = 1080
         elif key in ("1440", "1440p", "2k", "qhd"):
-            base_w, base_h = (1440, 2560) if portrait else (2560, 1440)
+            short_edge = 1440
         elif key in ("2160", "2160p", "4k", "uhd"):
-            base_w, base_h = (2160, 3840) if portrait else (3840, 2160)
+            short_edge = 2160
         else:
             return None, None
 
-        # Avoid upscaling: only scale if source is larger than the target.
+        if ratio:
+            target_scale = short_edge / min(ratio)
+            base_w = max(2, int((ratio[0] * target_scale) // 2 * 2))
+            base_h = max(2, int((ratio[1] * target_scale) // 2 * 2))
+            if src_w <= base_w and src_h <= base_h:
+                fit_scale = min(src_w / ratio[0], src_h / ratio[1])
+                base_w = max(2, int((ratio[0] * fit_scale) // 2 * 2))
+                base_h = max(2, int((ratio[1] * fit_scale) // 2 * 2))
+            return base_w, base_h
+
+        portrait = src_h > src_w
+        base_w, base_h = (short_edge, int(round(short_edge * 16 / 9))) if portrait else (int(round(short_edge * 16 / 9)), short_edge)
         if src_w <= base_w and src_h <= base_h:
             return None, None
         return base_w, base_h
@@ -82,6 +104,16 @@ class ExportWorkflow:
         except Exception:
             return None
         return fps if fps > 0 else None
+
+    def _resolve_target_ratio(self, output_ratio: str):
+        key = str(output_ratio or "source").strip().lower()
+        ratio_map = {
+            "16:9": (16, 9),
+            "9:16": (9, 16),
+            "1:1": (1, 1),
+            "4:3": (4, 3),
+        }
+        return ratio_map.get(key)
 
     def _build_temp_mux_path(self) -> str:
         tmp_dir = os.path.join(self.workspace_root, "temp")
@@ -135,11 +167,12 @@ class ExportWorkflow:
         subtitle_style=None,
         output_quality: str = "source",
         output_fps: str = "source",
+        output_ratio: str = "source",
         project_state_path: str = "",
         on_progress=None,
     ) -> str:
         subtitle_style = subtitle_style or {}
-        target_w, target_h = self._resolve_target_dimensions(video_path, output_quality)
+        target_w, target_h = self._resolve_target_dimensions(video_path, output_quality, output_ratio)
         target_fps = self._resolve_target_fps(output_fps)
 
         state = self._load_state(project_state_path)

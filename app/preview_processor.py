@@ -173,6 +173,8 @@ def mux_audio_into_video_clip_for_preview(
     output_video_path: str,
     start_seconds: float,
     duration_seconds: float,
+    target_width=None,
+    target_height=None,
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -183,6 +185,19 @@ def mux_audio_into_video_clip_for_preview(
         raise FileNotFoundError(f"Audio not found: {audio_path}")
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
+
+    vf = ""
+    try:
+        if target_width and target_height:
+            tw = int(target_width)
+            th = int(target_height)
+            if tw > 0 and th > 0:
+                vf = (
+                    f"scale=w={tw}:h={th}:force_original_aspect_ratio=decrease,"
+                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
+                )
+    except Exception:
+        vf = ""
 
     cmd = [
         ffmpeg,
@@ -206,6 +221,13 @@ def mux_audio_into_video_clip_for_preview(
         "0:v:0",
         "-map",
         "1:a:0",
+    ]
+    if vf:
+        cmd += [
+            "-vf",
+            vf,
+        ]
+    cmd += [
         "-c:v",
         "libx264",
         "-preset",

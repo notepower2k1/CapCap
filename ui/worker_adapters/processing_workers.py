@@ -305,7 +305,7 @@ class FinalExportWorker(QThread):
     finished = Signal(str, str)
     progress = Signal(int, str)
 
-    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", project_state_path=""):
+    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", output_ratio="source", project_state_path=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.video_path = video_path
@@ -317,6 +317,7 @@ class FinalExportWorker(QThread):
         self.subtitle_style = subtitle_style or {}
         self.output_quality = output_quality
         self.output_fps = output_fps
+        self.output_ratio = output_ratio
         self.project_state_path = project_state_path
 
     def run(self):
@@ -332,6 +333,7 @@ class FinalExportWorker(QThread):
                 subtitle_style=self.subtitle_style,
                 output_quality=self.output_quality,
                 output_fps=self.output_fps,
+                output_ratio=self.output_ratio,
                 project_state_path=self.project_state_path,
                 on_progress=self.progress.emit,
             )
