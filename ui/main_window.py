@@ -2123,6 +2123,74 @@ class VideoTranslatorGUI(QMainWindow):
             translated_segments,
             srt_path,
         )
+        signature = self.build_current_translation_signature()
+        if signature:
+            state.set_setting("translation_signature", signature)
+            self.project_service.save_project(state)
+
+    def build_current_translation_signature(self, source_segments=None):
+        base_segments = list(source_segments or self.current_segments or [])
+        if not base_segments:
+            transcript_text = self.transcript_text.toPlainText().strip() if hasattr(self, "transcript_text") else ""
+            if transcript_text:
+                base_segments = self.parse_srt_to_segments(transcript_text)
+        if not base_segments:
+            return ""
+        return self.project_service.build_translation_signature(
+            base_segments,
+            src_lang=self.get_source_language_code(),
+            target_lang=self.get_target_language_code(),
+            enable_polish=self.is_ai_polish_enabled(),
+            optimize_subtitles=self.is_ai_subtitle_optimization_enabled(),
+            style_instruction=self.get_ai_style_instruction(),
+        )
+
+    def build_current_voice_signature(self, segments=None, background_path=""):
+        voice_segments = list(segments or [])
+        if not voice_segments:
+            voice_segments = self._get_voiceover_segments()
+        if not voice_segments:
+            return ""
+        return self.project_service.build_voice_signature(
+            voice_segments,
+            audio_handling_mode=self.get_audio_handling_mode(),
+            voice_name=self.get_active_voice_name(),
+            voice_speed=self._parse_voice_speed_value(),
+            timing_sync_mode=str(self.voice_timing_sync_combo.currentText()).strip(),
+            background_path=background_path,
+            voice_gain_db=float(self.voice_gain_spin.value()),
+            bg_gain_db=float(self.bg_gain_spin.value()),
+            ducking_amount_db=float(self.ducking_amount_spin.value()) if hasattr(self, "ducking_amount_spin") else -6.0,
+        )
+
+    def persist_current_timeline_project_data(self):
+        state = self.ensure_current_project()
+        if not state:
+            return
+        if self.current_segments:
+            self.current_segment_models = self.project_bridge.persist_transcription(
+                state,
+                self.current_segments,
+                self.last_original_srt_path,
+            )
+        if self.current_translated_segments:
+            self.current_translated_segment_models = self.project_bridge.persist_translation(
+                state,
+                self.current_segment_models,
+                self.current_translated_segments,
+                self.last_translated_srt_path,
+            )
+            signature = self.build_current_translation_signature()
+            if signature:
+                state.set_setting("translation_signature", signature)
+        if self.current_project_state:
+            voice_signature = self.build_current_voice_signature(
+                segments=self._get_voiceover_segments(),
+                background_path=self.resolve_background_audio_path(),
+            )
+            if voice_signature:
+                state.set_setting("voice_signature", voice_signature)
+        self.project_service.save_project(state)
 
     def load_project_context(self, state):
         if not state:
@@ -3171,6 +3239,7 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "timeline"):
             self.timeline.set_active_segment_index(index)
         self.apply_segments_to_timeline()
+        self.persist_current_timeline_project_data()
         self.schedule_live_subtitle_preview_refresh()
         self.refresh_ui_state()
 
@@ -3202,6 +3271,7 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "timeline"):
             self.timeline.set_active_segment_index(target_index)
         self.apply_segments_to_timeline()
+        self.persist_current_timeline_project_data()
         self.schedule_live_subtitle_preview_refresh()
         self.refresh_ui_state()
 
@@ -3266,6 +3336,7 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "timeline"):
             self.timeline.set_active_segment_index(index + 1)
         self.apply_segments_to_timeline()
+        self.persist_current_timeline_project_data()
         self.schedule_live_subtitle_preview_refresh()
         self.refresh_ui_state()
 
@@ -3315,6 +3386,7 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "timeline"):
             self.timeline.set_active_segment_index(target_selection)
         self.apply_segments_to_timeline()
+        self.persist_current_timeline_project_data()
         self.schedule_live_subtitle_preview_refresh()
         self.refresh_ui_state()
 
@@ -3334,6 +3406,7 @@ class VideoTranslatorGUI(QMainWindow):
             return
         self.set_selected_segment_index(index, sync_ui=True)
         self.apply_segments_to_timeline()
+        self.persist_current_timeline_project_data()
         self.schedule_live_subtitle_preview_refresh()
         self.refresh_ui_state()
 
@@ -3444,6 +3517,8 @@ class VideoTranslatorGUI(QMainWindow):
                     self.segment_prev_btn.setEnabled(False)
                 if hasattr(self, "segment_next_btn"):
                     self.segment_next_btn.setEnabled(False)
+                if hasattr(self, "rewrite_selected_segment_btn"):
+                    self.rewrite_selected_segment_btn.setEnabled(False)
                 empty_state = QFrame(self.segment_editor_container if hasattr(self, "segment_editor_container") else None)
                 empty_state.setObjectName("statusCard")
                 empty_state.setMinimumHeight(180)
@@ -3481,6 +3556,8 @@ class VideoTranslatorGUI(QMainWindow):
                 self.segment_prev_btn.setEnabled(selected_index > 0)
             if hasattr(self, "segment_next_btn"):
                 self.segment_next_btn.setEnabled(selected_index < len(rows) - 1)
+            if hasattr(self, "rewrite_selected_segment_btn"):
+                self.rewrite_selected_segment_btn.setEnabled(True)
 
             show_original = bool(getattr(self, "show_original_subtitle_cb", None) and self.show_original_subtitle_cb.isChecked())
             for row in visible_rows:
@@ -4325,6 +4402,11 @@ class VideoTranslatorGUI(QMainWindow):
         self.apply_translated_btn.setEnabled(has_translated_text)
         if hasattr(self, "rewrite_translation_btn"):
             self.rewrite_translation_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()) and has_translated_text)
+        if hasattr(self, "rewrite_selected_segment_btn"):
+            has_selected_segment = 0 <= int(getattr(self, "_selected_segment_index", -1)) < len(self.current_translated_segments or [])
+            self.rewrite_selected_segment_btn.setEnabled(
+                bool(self.transcript_text.toPlainText().strip()) and has_translated_text and has_selected_segment
+            )
         generated_mode = not self.using_existing_audio_source()
         self.voiceover_btn.setEnabled(has_translated_text and generated_mode and mode in ("voice", "both"))
         preview_enabled = v_ok and not voice_running
@@ -4545,8 +4627,14 @@ class VideoTranslatorGUI(QMainWindow):
     def run_rewrite_translation(self):
         self.subtitle_controller.run_rewrite_translation()
 
+    def run_rewrite_selected_segment(self):
+        self.subtitle_controller.run_rewrite_selected_segment()
+
     def on_rewrite_translation_finished(self, translated_srt, error):
         self.subtitle_controller.on_rewrite_translation_finished(translated_srt, error)
+
+    def on_rewrite_selected_segment_finished(self, translated_srt, error):
+        self.subtitle_controller.on_rewrite_selected_segment_finished(translated_srt, error)
 
     def _close_export_progress_dialog(self):
         try:
@@ -5270,6 +5358,32 @@ class VideoTranslatorGUI(QMainWindow):
         voice_gain = float(self.voice_gain_spin.value())
         bg_gain = float(self.bg_gain_spin.value())
         ducking_amount = float(self.ducking_amount_spin.value()) if hasattr(self, "ducking_amount_spin") else -6.0
+        voice_signature = self.build_current_voice_signature(segments=segments, background_path=bg_path)
+        if state and voice_signature:
+            cached_voice_signature = str(state.settings.get("voice_signature", "") or "").strip()
+            cached_voice_track = self._normalize_local_file_path(state.artifacts.get("voice_vi", "") or self.last_voice_vi_path)
+            cached_mixed_track = self._normalize_local_file_path(state.artifacts.get("mixed_vi", "") or self.last_mixed_vi_path)
+            required_output = cached_mixed_track if bg_path else cached_voice_track
+            if cached_voice_signature == voice_signature and required_output and os.path.exists(required_output):
+                self.last_voice_vi_path = cached_voice_track if cached_voice_track and os.path.exists(cached_voice_track) else self.last_voice_vi_path
+                self.last_mixed_vi_path = cached_mixed_track if cached_mixed_track and os.path.exists(cached_mixed_track) else ""
+                if self.last_voice_vi_path:
+                    self.processed_artifacts["voice_vi"] = self.last_voice_vi_path
+                    self.update_project_artifact("voice_vi", self.last_voice_vi_path)
+                    self.update_project_step("generate_tts", "done")
+                if bg_path:
+                    if self.last_mixed_vi_path:
+                        self.processed_artifacts["mixed_vi"] = self.last_mixed_vi_path
+                        self.update_project_artifact("mixed_vi", self.last_mixed_vi_path)
+                        self.update_project_step("mix_audio", "done")
+                    else:
+                        self.update_project_step("mix_audio", "skipped")
+                self.log("[Voiceover] Reusing existing generated audio. Generate did not call TTS again.")
+                self.progress_bar.setValue(100)
+                self.schedule_timeline_visual_refresh(waveform=True, thumbnails=False)
+                self.refresh_ui_state()
+                self._pipeline_advance("voiceover")
+                return
         
         combo_text = self.free_voice_combo.currentText() if hasattr(self, "free_voice_combo") else ""
         combo_data = self.free_voice_combo.currentData() if hasattr(self, "free_voice_combo") else ""
@@ -5311,6 +5425,7 @@ class VideoTranslatorGUI(QMainWindow):
             QApplication.processEvents()
         except Exception:
             pass
+        self._pending_voice_signature = voice_signature
 
         project_state_path = self.project_service.project_file(self.current_project_state.project_root) if self.current_project_state else ""
         self.voice_thread = VoiceOverWorker(
@@ -5336,6 +5451,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.progress_bar.setValue(100)
 
         if error:
+            self._pending_voice_signature = ""
             self.update_project_step("generate_tts", "failed")
             if self.bg_music_edit.text().strip():
                 self.update_project_step("mix_audio", "failed")
@@ -5356,6 +5472,12 @@ class VideoTranslatorGUI(QMainWindow):
             self.update_project_step("mix_audio", "done")
         elif self.bg_music_edit.text().strip():
             self.update_project_step("mix_audio", "skipped")
+        if self.current_project_state:
+            voice_signature = str(getattr(self, "_pending_voice_signature", "") or "").strip()
+            if voice_signature:
+                self.current_project_state.set_setting("voice_signature", voice_signature)
+                self.project_service.save_project(self.current_project_state)
+        self._pending_voice_signature = ""
 
         if mixed:
             self.log(f"[Voiceover] Generated Vietnamese voice and mixed audio: Voice={voice_track}, Mixed={mixed}")

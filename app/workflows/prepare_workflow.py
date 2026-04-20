@@ -150,16 +150,29 @@ class PrepareWorkflow:
         audio_output_path = self.project_service.build_path(project_state, "source", "extracted_audio.wav")
         srt_original_path = self.project_service.build_path(project_state, "subtitle", "original.srt")
         srt_translated_path = self.project_service.build_path(project_state, "subtitle", "subtitle.srt")
+        extraction_signature = self.project_service.build_extraction_signature(video_path)
+        cached_extraction_signature = str(project_state.settings.get("extraction_signature", "") or "").strip()
+        cached_extracted_audio = project_state.artifacts.get("extracted_audio", "")
 
         print("--- Step 1: Extracting audio ---")
         if step_callback: step_callback("extraction")
         extract_started = time.perf_counter()
         project_state.set_step_status("extract_audio", "running")
         self.project_service.save_project(project_state)
-        if not self.engine_runtime.extract_audio(video_path, audio_output_path):
-            project_state.set_step_status("extract_audio", "failed")
-            self.project_service.save_project(project_state)
-            raise RuntimeError("Audio extraction failed.")
+        reused_extraction = (
+            cached_extraction_signature == extraction_signature
+            and cached_extracted_audio
+            and os.path.exists(cached_extracted_audio)
+        )
+        if reused_extraction:
+            audio_output_path = cached_extracted_audio
+            print(f"[Prepare Workflow] Reusing cached extracted audio: {audio_output_path}")
+        else:
+            if not self.engine_runtime.extract_audio(video_path, audio_output_path):
+                project_state.set_step_status("extract_audio", "failed")
+                self.project_service.save_project(project_state)
+                raise RuntimeError("Audio extraction failed.")
+            project_state.set_setting("extraction_signature", extraction_signature)
         extract_elapsed = time.perf_counter() - extract_started
         print(f"Success: Audio saved to {audio_output_path}")
         print(f"[Timing] Extract audio: {extract_elapsed:.2f}s")
@@ -178,16 +191,34 @@ class PrepareWorkflow:
             project_state.set_step_status("separate_audio", "running")
             self.project_service.save_project(project_state)
             separated_root = self.project_service.build_path(project_state, "audio", "separated")
-            try:
-                vocal_path, music_path = self.engine_runtime.separate_vocals(audio_output_path, separated_root)
-            except Exception as exc:
-                project_state.set_step_status("separate_audio", "failed")
-                self.project_service.save_project(project_state)
-                raise RuntimeError(f"Audio separation failed: {exc}") from exc
-            if not vocal_path or not music_path:
-                project_state.set_step_status("separate_audio", "failed")
-                self.project_service.save_project(project_state)
-                raise RuntimeError("Audio separation failed: Demucs did not return vocals/background stems.")
+            separation_signature = self.project_service.build_separation_signature(
+                audio_output_path,
+                audio_handling_mode=audio_mode_key,
+            )
+            cached_separation_signature = str(project_state.settings.get("separation_signature", "") or "").strip()
+            cached_vocal_path = project_state.artifacts.get("vocals", "")
+            cached_music_path = project_state.artifacts.get("music", "")
+            if (
+                cached_separation_signature == separation_signature
+                and cached_vocal_path
+                and cached_music_path
+                and os.path.exists(cached_vocal_path)
+                and os.path.exists(cached_music_path)
+            ):
+                vocal_path, music_path = cached_vocal_path, cached_music_path
+                print("[Prepare Workflow] Reusing cached separated stems.")
+            else:
+                try:
+                    vocal_path, music_path = self.engine_runtime.separate_vocals(audio_output_path, separated_root)
+                except Exception as exc:
+                    project_state.set_step_status("separate_audio", "failed")
+                    self.project_service.save_project(project_state)
+                    raise RuntimeError(f"Audio separation failed: {exc}") from exc
+                if not vocal_path or not music_path:
+                    project_state.set_step_status("separate_audio", "failed")
+                    self.project_service.save_project(project_state)
+                    raise RuntimeError("Audio separation failed: Demucs did not return vocals/background stems.")
+                project_state.set_setting("separation_signature", separation_signature)
             separation_elapsed = time.perf_counter() - separation_started
             working_audio_path = vocal_path
             print(f"[Audio Handling] Using separated vocals for Whisper: {working_audio_path}")
@@ -211,35 +242,54 @@ class PrepareWorkflow:
         transcribe_started = time.perf_counter()
         project_state.set_step_status("transcribe", "running")
         self.project_service.save_project(project_state)
-        audio_duration = self.chunking_service.probe_wav_duration(working_audio_path)
-        print(f"[ASR] Working audio duration: {audio_duration:.2f}s")
-        if is_remote_profile():
-            print("[ASR] Remote API mode: using single-pass transcription and sending full working audio to the PC server.")
-            raw_segments = self.engine_runtime.transcribe_audio(
-                working_audio_path,
-                whisper_model,
-                language=source_language,
-            )
-        elif audio_duration >= self.CHUNKED_ASR_MIN_DURATION_SECONDS:
-            raw_segments = self._transcribe_long_audio_chunked(
-                audio_path=working_audio_path,
-                project_state=project_state,
-                model_path=whisper_model,
-                language=source_language,
-            )
+        transcription_signature = self.project_service.build_transcription_signature(
+            working_audio_path,
+            whisper_model=whisper_model,
+            source_language=source_language,
+            audio_handling_mode=audio_mode_key,
+        )
+        cached_transcription_signature = str(project_state.settings.get("transcription_signature", "") or "").strip()
+        cached_transcript_path = project_state.artifacts.get("transcript_segments", "")
+        reused_transcript = (
+            cached_transcription_signature == transcription_signature
+            and cached_transcript_path
+            and os.path.exists(cached_transcript_path)
+        )
+        if reused_transcript:
+            segment_models = self.project_service.load_segment_artifact(project_state, "transcript_segments")
+            raw_segments = [segment.to_original_subtitle_dict() for segment in segment_models]
+            print("[Prepare Workflow] Reusing cached Whisper transcript. Generate did not transcribe again.")
         else:
-            print("[ASR] Using standard single-pass transcription for short audio.")
-            raw_segments = self.engine_runtime.transcribe_audio(
-                working_audio_path,
-                whisper_model,
-                language=source_language,
-            )
+            audio_duration = self.chunking_service.probe_wav_duration(working_audio_path)
+            print(f"[ASR] Working audio duration: {audio_duration:.2f}s")
+            if is_remote_profile():
+                print("[ASR] Remote API mode: using single-pass transcription and sending full working audio to the PC server.")
+                raw_segments = self.engine_runtime.transcribe_audio(
+                    working_audio_path,
+                    whisper_model,
+                    language=source_language,
+                )
+            elif audio_duration >= self.CHUNKED_ASR_MIN_DURATION_SECONDS:
+                raw_segments = self._transcribe_long_audio_chunked(
+                    audio_path=working_audio_path,
+                    project_state=project_state,
+                    model_path=whisper_model,
+                    language=source_language,
+                )
+            else:
+                print("[ASR] Using standard single-pass transcription for short audio.")
+                raw_segments = self.engine_runtime.transcribe_audio(
+                    working_audio_path,
+                    whisper_model,
+                    language=source_language,
+                )
+            if not raw_segments:
+                project_state.set_step_status("transcribe", "failed")
+                self.project_service.save_project(project_state)
+                raise RuntimeError("Transcription failed.")
+            segment_models = self.segment_service.transcript_dicts_to_models(raw_segments)
+            project_state.set_setting("transcription_signature", transcription_signature)
         transcribe_elapsed = time.perf_counter() - transcribe_started
-        if not raw_segments:
-            project_state.set_step_status("transcribe", "failed")
-            self.project_service.save_project(project_state)
-            raise RuntimeError("Transcription failed.")
-        segment_models = self.segment_service.transcript_dicts_to_models(raw_segments)
         print(f"Success: Generated {len(segment_models)} segments.")
         print(f"[Timing] Transcribe step: {transcribe_elapsed:.2f}s")
         self.project_service.save_json_artifact(
@@ -276,21 +326,53 @@ class PrepareWorkflow:
         translate_started = time.perf_counter()
         project_state.set_step_status("translate_raw", "running")
         self.project_service.save_project(project_state)
+        translation_signature = self.project_service.build_translation_signature(
+            [segment.to_original_subtitle_dict() for segment in segment_models],
+            src_lang=source_language,
+            target_lang=target_language,
+            enable_polish=translator_ai,
+            optimize_subtitles=optimize_subtitles,
+            style_instruction=project_state.translator_style,
+        )
+        cached_translation_path = project_state.artifacts.get("translation_final", "")
+        cached_translation_signature = str(project_state.settings.get("translation_signature", "") or "").strip()
         try:
-            translated_segments = self.engine_runtime.translate_segments(
-                raw_segments,
-                src_lang=source_language,
-                enable_polish=translator_ai,
-                optimize_subtitles=optimize_subtitles,
-                style_instruction=project_state.translator_style,
-            )
-            segment_models = self.segment_service.apply_translations(segment_models, translated_segments)
-            self.project_service.save_segment_artifact(
-                project_state,
-                "translation_final",
-                os.path.join("translation", "translation_final.json"),
-                segment_models,
-            )
+            if cached_translation_signature == translation_signature and cached_translation_path and os.path.exists(cached_translation_path):
+                cached_models = self.project_service.load_segment_artifact(project_state, "translation_final")
+                if cached_models:
+                    segment_models = cached_models
+                    print("[Prepare Workflow] Reusing cached Vietnamese subtitles. Generate did not call AI again.")
+                else:
+                    translated_segments = self.engine_runtime.translate_segments(
+                        raw_segments,
+                        src_lang=source_language,
+                        enable_polish=translator_ai,
+                        optimize_subtitles=optimize_subtitles,
+                        style_instruction=project_state.translator_style,
+                    )
+                    segment_models = self.segment_service.apply_translations(segment_models, translated_segments)
+                    self.project_service.save_segment_artifact(
+                        project_state,
+                        "translation_final",
+                        os.path.join("translation", "translation_final.json"),
+                        segment_models,
+                    )
+            else:
+                translated_segments = self.engine_runtime.translate_segments(
+                    raw_segments,
+                    src_lang=source_language,
+                    enable_polish=translator_ai,
+                    optimize_subtitles=optimize_subtitles,
+                    style_instruction=project_state.translator_style,
+                )
+                segment_models = self.segment_service.apply_translations(segment_models, translated_segments)
+                self.project_service.save_segment_artifact(
+                    project_state,
+                    "translation_final",
+                    os.path.join("translation", "translation_final.json"),
+                    segment_models,
+                )
+            project_state.set_setting("translation_signature", translation_signature)
             project_state.set_step_status("translate_raw", "done")
             project_state.set_step_status("refine_translation", "done" if optimize_subtitles else "skipped")
             self.project_service.save_project(project_state)

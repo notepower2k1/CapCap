@@ -90,6 +90,23 @@ class SubtitleController:
             QMessageBox.warning(self.gui, "Error", "No transcription available to translate!")
             return
 
+        state = self.gui.ensure_current_project()
+        translation_signature = self.gui.build_current_translation_signature()
+        if state and translation_signature:
+            cached_signature = str(state.settings.get("translation_signature", "") or "").strip()
+            cached_translation_path = str(state.artifacts.get("translation_final", "") or "").strip()
+            if cached_signature == translation_signature and cached_translation_path and os.path.exists(cached_translation_path):
+                if not (self.gui.current_translated_segments or self.gui.translated_text.toPlainText().strip()):
+                    self.gui.load_project_context(state)
+                self.gui.progress_bar.setValue(100)
+                self.gui.refresh_ui_state()
+                QMessageBox.information(
+                    self.gui,
+                    "Using Existing Translation",
+                    "Vietnamese subtitles are unchanged, so CapCap reused the existing generated result instead of calling AI again.",
+                )
+                return
+
         model_path = None
         src_lang = self.gui.get_source_language_code()
         enable_polish = False
@@ -226,6 +243,41 @@ class SubtitleController:
         self.gui._rewrite_base_translated_segments = rewrite_segments
         self._open_rewrite_dialog(source_segments, rewrite_segments)
 
+    def run_rewrite_selected_segment(self):
+        source_segments = list(self.gui.current_segments or [])
+        translated_segments = list(self.gui.current_translated_segments or [])
+        if not source_segments:
+            QMessageBox.warning(self.gui, "Rewrite Unavailable", "Original subtitles are missing. Please create or load the original subtitle track first.")
+            return
+        if not translated_segments:
+            QMessageBox.warning(self.gui, "Rewrite Unavailable", "Vietnamese subtitles are missing. Please translate or load them first.")
+            return
+        index = int(getattr(self.gui, "_selected_segment_index", -1))
+        if not (0 <= index < len(translated_segments) and index < len(source_segments)):
+            QMessageBox.warning(self.gui, "Rewrite Unavailable", "Please select a subtitle block in the inspector first.")
+            return
+
+        style_instruction = (self.gui.get_ai_style_instruction() or "").strip()
+        selected_source = [dict(source_segments[index])]
+        selected_translation = [dict(translated_segments[index])]
+        self.gui._rewrite_source_segments = selected_source
+        self.gui._rewrite_base_translated_segments = selected_translation
+        self.gui._rewrite_selected_segment_index = index
+        self.gui._rewrite_selected_segment_original_label = self.gui.rewrite_selected_segment_btn.text()
+        self.gui.rewrite_selected_segment_btn.setEnabled(False)
+        self.gui.rewrite_selected_segment_btn.setText("Rewriting...")
+        self.gui.progress_bar.setValue(90)
+        self.gui.update_project_step("refine_translation", "running")
+
+        self.gui.rewrite_selected_segment_thread = RewriteTranslationWorker(
+            selected_source,
+            selected_translation,
+            self.gui.get_source_language_code(),
+            style_instruction=style_instruction,
+        )
+        self.gui.rewrite_selected_segment_thread.finished.connect(self.gui.on_rewrite_selected_segment_finished)
+        self.gui.rewrite_selected_segment_thread.start()
+
     def _validate_rewrite_srt(self, srt_text: str):
         normalized_text = str(srt_text or "").strip()
         expected_segments = getattr(self.gui, "_rewrite_base_translated_segments", None) or self.gui.current_translated_segments or self.gui.current_segments or []
@@ -260,6 +312,69 @@ class SubtitleController:
             self.gui._rewrite_status_label.setStyleSheet("color: #8ad7ff; font-size: 12px; font-weight: 700;")
         self.gui.update_project_step("refine_translation", "done")
         self.gui.refresh_ui_state()
+
+    def on_rewrite_selected_segment_finished(self, translated_srt, error):
+        def _cleanup_selected_rewrite_state():
+            for attr in (
+                "_rewrite_source_segments",
+                "_rewrite_base_translated_segments",
+                "_rewrite_selected_segment_index",
+                "_rewrite_selected_segment_original_label",
+            ):
+                if hasattr(self.gui, attr):
+                    delattr(self.gui, attr)
+
+        original_label = str(getattr(self.gui, "_rewrite_selected_segment_original_label", "") or "Rewrite Selected Subtitle")
+        if hasattr(self.gui, "rewrite_selected_segment_btn"):
+            self.gui.rewrite_selected_segment_btn.setEnabled(True)
+            self.gui.rewrite_selected_segment_btn.setText(original_label)
+
+        index = int(getattr(self.gui, "_rewrite_selected_segment_index", -1))
+        if error or not translated_srt:
+            self.gui.update_project_step("refine_translation", "failed")
+            self.gui.show_error(
+                "Rewrite Failed",
+                "Could not rewrite the selected subtitle block with AI.",
+                error or "The AI rewrite service returned an empty result.",
+            )
+            self.gui.refresh_ui_state()
+            _cleanup_selected_rewrite_state()
+            return
+
+        if not (0 <= index < len(self.gui.current_translated_segments or [])):
+            self.gui.refresh_ui_state()
+            _cleanup_selected_rewrite_state()
+            return
+
+        is_valid_srt, parsed_segments, _mode, validation_error = self._validate_rewrite_srt(translated_srt)
+        if not is_valid_srt or not parsed_segments:
+            self.gui.show_error(
+                "Rewrite Failed",
+                "The AI rewrite result for this block was not in valid SRT format.",
+                validation_error or translated_srt,
+            )
+            self.gui.update_project_step("refine_translation", "failed")
+            self.gui.refresh_ui_state()
+            _cleanup_selected_rewrite_state()
+            return
+
+        rewritten_text = str(parsed_segments[0].get("text", "") or "").strip()
+        target_segment = self.gui.current_translated_segments[index]
+        target_segment["text"] = rewritten_text
+        target_segment["tts_text"] = rewritten_text
+        target_segment.setdefault("manual_highlights", [])
+        self.gui._reconcile_manual_highlights(target_segment)
+        self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(self.gui.current_translated_segments, translated=True)
+        self.gui._sync_hidden_translated_text_from_segments()
+        self.gui.apply_segments_to_timeline()
+        self.gui.persist_current_timeline_project_data()
+        self.gui.refresh_ai_keyword_highlights(force=True)
+        self.gui.schedule_live_subtitle_preview_refresh()
+        self.gui.schedule_auto_frame_preview()
+        self.gui.update_project_step("refine_translation", "done")
+        self.gui.sync_segment_editor_rows()
+        self.gui.refresh_ui_state()
+        _cleanup_selected_rewrite_state()
 
     def apply_rewrite_preview(self):
         preview_edit = getattr(self.gui, "_rewrite_preview_edit", None)

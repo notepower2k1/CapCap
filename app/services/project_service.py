@@ -144,3 +144,115 @@ class ProjectService:
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", video_name).strip("_").lower() or "project"
         digest = hashlib.sha1(os.path.abspath(video_path).encode("utf-8")).hexdigest()[:8]
         return f"{slug}_{digest}"
+
+    def _hash_payload(self, payload: Any) -> str:
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha1(serialized.encode("utf-8")).hexdigest()
+
+    def _file_signature(self, path: str) -> dict[str, Any]:
+        normalized = str(path or "").strip()
+        if not normalized:
+            return {"path": "", "exists": False}
+        try:
+            stat = os.stat(normalized)
+            return {
+                "path": os.path.abspath(normalized),
+                "exists": True,
+                "size": int(stat.st_size),
+                "mtime_ns": int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+            }
+        except OSError:
+            return {"path": os.path.abspath(normalized), "exists": False}
+
+    def build_translation_signature(
+        self,
+        source_segments,
+        *,
+        src_lang: str = "auto",
+        target_lang: str = "vi",
+        enable_polish: bool = True,
+        optimize_subtitles: bool = True,
+        style_instruction: str = "",
+    ) -> str:
+        payload = {
+            "src_lang": str(src_lang or "auto").strip().lower(),
+            "target_lang": str(target_lang or "vi").strip().lower(),
+            "enable_polish": bool(enable_polish),
+            "optimize_subtitles": bool(optimize_subtitles),
+            "style_instruction": str(style_instruction or "").strip(),
+            "segments": [
+                {
+                    "start": round(float((seg or {}).get("start", 0.0) or 0.0), 3),
+                    "end": round(float((seg or {}).get("end", 0.0) or 0.0), 3),
+                    "text": str((seg or {}).get("source_text") or (seg or {}).get("text") or "").strip(),
+                }
+                for seg in list(source_segments or [])
+            ],
+        }
+        return self._hash_payload(payload)
+
+    def build_voice_signature(
+        self,
+        segments,
+        *,
+        audio_handling_mode: str = "fast",
+        voice_name: str = "",
+        voice_speed: float = 1.0,
+        timing_sync_mode: str = "off",
+        background_path: str = "",
+        voice_gain_db: float = 0.0,
+        bg_gain_db: float = 0.0,
+        ducking_amount_db: float = -6.0,
+    ) -> str:
+        payload = {
+            "audio_handling_mode": str(audio_handling_mode or "fast").strip().lower(),
+            "voice_name": str(voice_name or "").strip(),
+            "voice_speed": round(float(voice_speed or 1.0), 3),
+            "timing_sync_mode": str(timing_sync_mode or "off").strip().lower(),
+            "background": self._file_signature(background_path),
+            "voice_gain_db": round(float(voice_gain_db or 0.0), 3),
+            "bg_gain_db": round(float(bg_gain_db or 0.0), 3),
+            "ducking_amount_db": round(float(ducking_amount_db or 0.0), 3),
+            "segments": [
+                {
+                    "start": round(float((seg or {}).get("start", 0.0) or 0.0), 3),
+                    "end": round(float((seg or {}).get("end", 0.0) or 0.0), 3),
+                    "text": str((seg or {}).get("tts_text") or (seg or {}).get("text") or "").strip(),
+                    "group_id": str((seg or {}).get("tts_group_id") or "").strip(),
+                }
+                for seg in list(segments or [])
+            ],
+        }
+        return self._hash_payload(payload)
+
+    def build_extraction_signature(self, video_path: str) -> str:
+        return self._hash_payload(
+            {
+                "video": self._file_signature(video_path),
+            }
+        )
+
+    def build_separation_signature(self, extracted_audio_path: str, *, audio_handling_mode: str = "fast") -> str:
+        return self._hash_payload(
+            {
+                "audio_handling_mode": str(audio_handling_mode or "fast").strip().lower(),
+                "extracted_audio": self._file_signature(extracted_audio_path),
+            }
+        )
+
+    def build_transcription_signature(
+        self,
+        audio_path: str,
+        *,
+        whisper_model: str,
+        source_language: str = "auto",
+        audio_handling_mode: str = "fast",
+    ) -> str:
+        return self._hash_payload(
+            {
+                "audio": self._file_signature(audio_path),
+                "whisper_model": str(whisper_model or "").strip(),
+                "source_language": str(source_language or "auto").strip().lower(),
+                "audio_handling_mode": str(audio_handling_mode or "fast").strip().lower(),
+            }
+        )

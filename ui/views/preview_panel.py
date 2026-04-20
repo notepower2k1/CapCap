@@ -311,8 +311,11 @@ def build_preview_panel(gui):
     inspector_actions_row = QHBoxLayout()
     inspector_actions_row.setSpacing(8)
     gui.rewrite_translation_btn = QPushButton("Rewrite")
+    gui.rewrite_selected_segment_btn = QPushButton("Rewrite Selected Subtitle")
     gui.import_translation_btn = QPushButton("Import SRT")
+    gui.rewrite_selected_segment_btn.clicked.connect(gui.run_rewrite_selected_segment)
     inspector_actions_row.addWidget(gui.rewrite_translation_btn)
+    inspector_actions_row.addWidget(gui.rewrite_selected_segment_btn)
     inspector_actions_row.addWidget(gui.import_translation_btn)
     inspector_layout.addLayout(inspector_actions_row)
 
