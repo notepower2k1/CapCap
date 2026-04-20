@@ -15,7 +15,7 @@ from services import EngineRuntime
 class PreviewMuxWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None, render_subtitles=True, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5):
+    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None, render_subtitles=True, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None):
         super().__init__()
         self.video_path = video_path
         self.audio_path = audio_path
@@ -29,6 +29,7 @@ class PreviewMuxWorker(QThread):
         self.output_scale_mode = output_scale_mode
         self.output_fill_focus_x = output_fill_focus_x
         self.output_fill_focus_y = output_fill_focus_y
+        self.video_filter_state = video_filter_state or {}
 
     def run(self):
         temp_mux_path = ""
@@ -49,6 +50,7 @@ class PreviewMuxWorker(QThread):
                     scale_mode=self.output_scale_mode,
                     focus_x=self.output_fill_focus_x,
                     focus_y=self.output_fill_focus_y,
+                    video_filter_state=self.video_filter_state,
                 )
 
             if self.render_subtitles and self.mode in ("subtitle", "both") and self.srt_path and os.path.exists(self.srt_path):
@@ -63,6 +65,7 @@ class PreviewMuxWorker(QThread):
                     output_scale_mode=self.output_scale_mode,
                     output_fill_focus_x=self.output_fill_focus_x,
                     output_fill_focus_y=self.output_fill_focus_y,
+                    video_filter_state=self.video_filter_state,
                 )
                 if not ok:
                     raise RuntimeError("Failed to render subtitle preview video.")
@@ -86,7 +89,7 @@ class PreviewMuxWorker(QThread):
 class QuickPreviewWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", audio_path="", subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5):
+    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", audio_path="", subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None):
         super().__init__()
         self.video_path = video_path
         self.output_path = output_path
@@ -101,6 +104,7 @@ class QuickPreviewWorker(QThread):
         self.output_scale_mode = output_scale_mode
         self.output_fill_focus_x = output_fill_focus_x
         self.output_fill_focus_y = output_fill_focus_y
+        self.video_filter_state = video_filter_state or {}
 
     def run(self):
         temp_paths = []
@@ -129,6 +133,7 @@ class QuickPreviewWorker(QThread):
                     scale_mode=self.output_scale_mode,
                     focus_x=self.output_fill_focus_x,
                     focus_y=self.output_fill_focus_y,
+                    video_filter_state=self.video_filter_state if self.mode == "voice" else {},
                 )
                 current_video = voice_clip
 
@@ -144,6 +149,7 @@ class QuickPreviewWorker(QThread):
                     output_scale_mode=self.output_scale_mode,
                     output_fill_focus_x=self.output_fill_focus_x,
                     output_fill_focus_y=self.output_fill_focus_y,
+                    video_filter_state=self.video_filter_state,
                 )
                 if not ok:
                     raise RuntimeError("Failed to render subtitle preview clip.")
@@ -165,13 +171,19 @@ class QuickPreviewWorker(QThread):
 class ExactFramePreviewWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, output_path, timestamp_seconds, srt_path, subtitle_style=None):
+    def __init__(self, video_path, output_path, timestamp_seconds, srt_path="", subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None):
         super().__init__()
         self.video_path = video_path
         self.output_path = output_path
         self.timestamp_seconds = timestamp_seconds
         self.srt_path = srt_path
         self.subtitle_style = subtitle_style or {}
+        self.target_width = target_width
+        self.target_height = target_height
+        self.output_scale_mode = output_scale_mode
+        self.output_fill_focus_x = output_fill_focus_x
+        self.output_fill_focus_y = output_fill_focus_y
+        self.video_filter_state = video_filter_state or {}
 
     def run(self):
         try:
@@ -206,6 +218,12 @@ class ExactFramePreviewWorker(QThread):
                 custom_position_enabled=self.subtitle_style.get("custom_position_enabled", False),
                 custom_position_x=self.subtitle_style.get("custom_position_x", 50),
                 custom_position_y=self.subtitle_style.get("custom_position_y", 86),
+                target_width=self.target_width,
+                target_height=self.target_height,
+                scale_mode=self.output_scale_mode,
+                focus_x=self.output_fill_focus_x,
+                focus_y=self.output_fill_focus_y,
+                video_filter_state=self.video_filter_state,
             )
             self.finished.emit(output, "")
         except Exception as exc:

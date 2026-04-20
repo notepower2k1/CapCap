@@ -92,6 +92,7 @@ class WorkflowRuntime:
         output_scale_mode: str = "fit",
         output_fill_focus_x: float = 0.5,
         output_fill_focus_y: float = 0.5,
+        video_filter_state=None,
         project_state_path: str = "",
         on_progress: callable = None,
     ) -> str:
@@ -109,6 +110,7 @@ class WorkflowRuntime:
             output_scale_mode=output_scale_mode,
             output_fill_focus_x=output_fill_focus_x,
             output_fill_focus_y=output_fill_focus_y,
+            video_filter_state=video_filter_state,
             project_state_path=project_state_path,
             on_progress=on_progress,
         )

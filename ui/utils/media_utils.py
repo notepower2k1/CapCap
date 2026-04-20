@@ -42,12 +42,44 @@ def toggle_play(gui):
             if not source_path:
                 gui.media_player.setSource(QUrl.fromLocalFile(video_path))
 
+        has_active_video_filters = bool(hasattr(gui, "has_active_video_filters") and gui.has_active_video_filters())
+        filter_workflow_active = bool(hasattr(gui, "is_filter_workflow_active") and gui.is_filter_workflow_active())
+
         if gui.media_player.is_playing():
             gui.media_player.pause()
             gui.timeline.set_playing(False)
-            gui.schedule_seek_frame_preview()
+            if (
+                has_active_video_filters
+                and filter_workflow_active
+                and hasattr(gui, "schedule_live_video_filter_preview")
+            ):
+                gui.schedule_live_video_filter_preview()
+            else:
+                gui.schedule_seek_frame_preview()
         else:
+            current_source = str(getattr(gui.media_player, "_source_path", "") or "")
+            preview_source = str(getattr(gui, "last_preview_video_path", "") or "")
+            if has_active_video_filters and filter_workflow_active:
+                if filter_workflow_active and bool(getattr(gui, "_video_filter_preview_dirty", False)):
+                    gui._play_video_filter_preview_when_ready = False
+                    if hasattr(gui, "video_filter_render_status_label") and gui.video_filter_render_status_label is not None:
+                        gui.video_filter_render_status_label.setText("Filter changes are pending. Click Apply Filter before playing.")
+                        gui.video_filter_render_status_label.setVisible(True)
+                    if hasattr(gui, "video_filter_render_progress") and gui.video_filter_render_progress is not None:
+                        gui.video_filter_render_progress.setVisible(False)
+                    if hasattr(gui, "refresh_ui_state"):
+                        gui.refresh_ui_state()
+                    return
+                if not (current_source and preview_source and os.path.exists(preview_source) and os.path.abspath(current_source) == os.path.abspath(preview_source)):
+                    gui.seek_frame_preview_timer.stop()
+                    gui._play_video_filter_preview_when_ready = True
+                    if hasattr(gui, "hide_filter_thumbnail_preview"):
+                        gui.hide_filter_thumbnail_preview()
+                    gui.preview_video()
+                    return
             gui.seek_frame_preview_timer.stop()
+            if hasattr(gui, "hide_filter_thumbnail_preview"):
+                gui.hide_filter_thumbnail_preview()
             gui.media_player.play()
             gui.timeline.set_playing(True)
         if hasattr(gui, "_refresh_preview_audio_controls"):
@@ -92,7 +124,17 @@ def set_position(gui, position):
     except Exception as exc:
         if hasattr(gui, "log"):
             gui.log(f"[Preview] seek highlight error: {exc}")
-    gui.schedule_seek_frame_preview()
+    if (
+        hasattr(gui, "has_active_video_filters")
+        and gui.has_active_video_filters()
+        and hasattr(gui, "is_filter_workflow_active")
+        and gui.is_filter_workflow_active()
+        and not gui.media_player.is_playing()
+    ):
+        if hasattr(gui, "schedule_live_video_filter_preview"):
+            gui.schedule_live_video_filter_preview()
+    else:
+        gui.schedule_seek_frame_preview()
 
 
 def update_duration_label(gui, current, total):
@@ -144,7 +186,19 @@ def update_frame_preview_thumbnail(gui, image_path: str, qpixmap_cls, qt):
         gui.frame_preview_image_label.setText("Could not load frame preview")
         gui.frame_preview_image_label.setPixmap(qpixmap_cls())
         return
-    scaled = pixmap.scaled(320, 220, qt.KeepAspectRatio, qt.SmoothTransformation)
+    target_width = 0
+    target_height = 0
+    if hasattr(gui, "video_view") and gui.video_view is not None:
+        target_width = int(gui.video_view.width() or 0)
+        target_height = int(gui.video_view.height() or 0)
+    if target_width <= 0 or target_height <= 0:
+        target_width = int(gui.frame_preview_image_label.width() or 0)
+        target_height = int(gui.frame_preview_image_label.height() or 0)
+    if target_width <= 0:
+        target_width = 960
+    if target_height <= 0:
+        target_height = 540
+    scaled = pixmap.scaled(target_width, target_height, qt.KeepAspectRatio, qt.SmoothTransformation)
     gui.frame_preview_image_label.setPixmap(scaled)
     gui.frame_preview_image_label.setText("")
     gui.frame_preview_status_label.setText(f"Exact frame preview synced at {time.strftime('%H:%M:%S')}.")

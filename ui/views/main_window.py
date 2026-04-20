@@ -145,6 +145,8 @@ def _connect_ui_signals(gui):
     gui.preview_btn.clicked.connect(gui.preview_video)
     if hasattr(gui, "reset_framing_btn"):
         gui.reset_framing_btn.clicked.connect(gui.reset_preview_framing)
+    if hasattr(gui, "left_panel_stack"):
+        gui.left_panel_stack.currentChanged.connect(gui.on_left_panel_workflow_changed)
     gui.output_mode_combo.currentTextChanged.connect(gui.on_output_mode_changed)
     if hasattr(gui, "output_quality_combo"):
         gui.output_quality_combo.currentIndexChanged.connect(gui.refresh_ui_state)
@@ -223,6 +225,10 @@ def _initialize_ui_state(gui):
     gui.live_subtitle_preview_timer.setSingleShot(True)
     gui.live_subtitle_preview_timer.setInterval(250)
     gui.live_subtitle_preview_timer.timeout.connect(gui.refresh_live_subtitle_preview)
+    gui.video_filter_preview_timer = QTimer(gui)
+    gui.video_filter_preview_timer.setSingleShot(True)
+    gui.video_filter_preview_timer.setInterval(350)
+    gui.video_filter_preview_timer.timeout.connect(gui.run_live_video_filter_preview)
     gui.last_extracted_audio = ""
     gui.last_vocals_path = ""
     gui.last_music_path = ""
@@ -236,6 +242,7 @@ def _initialize_ui_state(gui):
     gui.last_exported_video_path = ""
     gui.last_exact_preview_5s_path = ""
     gui.last_exact_preview_frame_path = ""
+    gui._preview_video_has_burned_subtitles = False
     gui.live_preview_subtitle_path = ""
     gui.live_preview_ass_path = ""
     gui.live_preview_segments = []

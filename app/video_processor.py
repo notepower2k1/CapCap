@@ -109,6 +109,61 @@ def _build_canvas_filter_chain(target_width=None, target_height=None, scale_mode
     return ""
 
 
+def _normalize_video_filter_state(video_filter_state) -> dict:
+    if not isinstance(video_filter_state, dict):
+        return {}
+    final_values = video_filter_state.get("final", video_filter_state)
+    if not isinstance(final_values, dict):
+        return {}
+    normalized = {}
+    for field in ("brightness", "contrast", "saturation", "temperature", "highlights", "shadows"):
+        try:
+            normalized[field] = max(-100.0, min(100.0, float(final_values.get(field, 0.0))))
+        except Exception:
+            normalized[field] = 0.0
+    return normalized
+
+
+def _build_video_filter_chain(video_filter_state=None):
+    values = _normalize_video_filter_state(video_filter_state)
+    if not values or not any(abs(value) > 0.01 for value in values.values()):
+        return ""
+
+    brightness = values.get("brightness", 0.0)
+    contrast = values.get("contrast", 0.0)
+    saturation = values.get("saturation", 0.0)
+    temperature = values.get("temperature", 0.0)
+    highlights = values.get("highlights", 0.0)
+    shadows = values.get("shadows", 0.0)
+
+    chain = []
+    eq_parts = []
+    if abs(brightness) > 0.01:
+        eq_parts.append(f"brightness={max(-1.0, min(1.0, brightness / 100.0 * 0.35)):.4f}")
+    if abs(contrast) > 0.01:
+        eq_parts.append(f"contrast={max(0.4, min(1.8, 1.0 + contrast / 100.0 * 0.65)):.4f}")
+    if abs(saturation) > 0.01:
+        eq_parts.append(f"saturation={max(0.0, min(2.2, 1.0 + saturation / 100.0 * 1.2)):.4f}")
+    if eq_parts:
+        chain.append("eq=" + ":".join(eq_parts))
+
+    if abs(temperature) > 0.01:
+        temp_norm = max(-0.35, min(0.35, temperature / 100.0 * 0.35))
+        chain.append(
+            f"colorbalance=rs={temp_norm:.4f}:gs={temp_norm * 0.2:.4f}:bs={-temp_norm:.4f}"
+        )
+
+    if abs(highlights) > 0.01 or abs(shadows) > 0.01:
+        shadow_point = max(0.0, min(0.45, 0.25 + shadows / 100.0 * 0.18))
+        highlight_point = max(0.55, min(1.0, 0.75 + highlights / 100.0 * 0.18))
+        chain.append(
+            "curves=master="
+            f"'0/0 0.25/{shadow_point:.3f} 0.75/{highlight_point:.3f} 1/1'"
+        )
+
+    return ",".join(part for part in chain if part)
+
+
 def get_video_dimensions(video_path):
     """Return (width, height) of the first video stream using ffprobe.
     Falls back to (1920, 1080) if ffprobe is unavailable or fails.
@@ -723,7 +778,7 @@ def srt_to_ass(srt_path: str,
     return ass_path
 
 
-def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None):
+def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None):
     """Burn subtitles into video using an already-prepared ASS file."""
     ffmpeg = _ffmpeg_path(ffmpeg_path)
     if not os.path.exists(ffmpeg):
@@ -745,11 +800,16 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
         pass
 
     blur_chain = _build_blur_filter_chain(blur_region, video_w, video_h)
-    prefix = f"{scale_chain}," if scale_chain else ""
+    filter_parts = []
+    if scale_chain:
+        filter_parts.append(scale_chain)
+    filter_video_chain = _build_video_filter_chain(video_filter_state)
+    if filter_video_chain:
+        filter_parts.append(filter_video_chain)
     if blur_chain:
-        filter_complex = f"{prefix}{blur_chain},ass='{escaped_ass}'"
-    else:
-        filter_complex = f"{prefix}ass='{escaped_ass}'"
+        filter_parts.append(blur_chain)
+    filter_parts.append(f"ass='{escaped_ass}'")
+    filter_complex = ",".join(part for part in filter_parts if part)
     video_encoder_args = _preferred_h264_encoder_args(ffmpeg)
 
     command = [
@@ -873,7 +933,8 @@ def embed_subtitles(video_path, srt_path, output_path,
                      output_fill_focus_x=0.5,
                      output_fill_focus_y=0.5,
                      output_fps=None,
-                     ffmpeg_path=None):
+                     ffmpeg_path=None,
+                     video_filter_state=None):
     """Burn subtitles into video using a properly-styled ASS file.
 
     Workflow:
@@ -936,6 +997,7 @@ def embed_subtitles(video_path, srt_path, output_path,
         output_fill_focus_x=output_fill_focus_x,
         output_fill_focus_y=output_fill_focus_y,
         output_fps=output_fps,
+        video_filter_state=video_filter_state,
     )
 
     # Step 4: clean up temp ASS

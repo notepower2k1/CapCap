@@ -124,7 +124,7 @@ class EngineRuntime:
             style_instruction=style_instruction,
         )
 
-    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None) -> bool:
+    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None) -> bool:
         return self.ffmpeg.embed_subtitles(
             video_path,
             srt_path,
@@ -136,9 +136,10 @@ class EngineRuntime:
             output_fill_focus_x=output_fill_focus_x,
             output_fill_focus_y=output_fill_focus_y,
             output_fps=output_fps,
+            video_filter_state=video_filter_state,
         )
 
-    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None) -> bool:
+    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None) -> bool:
         return self.ffmpeg.embed_ass_subtitles(
             video_path,
             ass_path,
@@ -150,6 +151,7 @@ class EngineRuntime:
             output_fill_focus_x=output_fill_focus_x,
             output_fill_focus_y=output_fill_focus_y,
             output_fps=output_fps,
+            video_filter_state=video_filter_state,
         )
 
     def get_video_dimensions(self, video_path: str):
@@ -229,7 +231,7 @@ class EngineRuntime:
             ducking_amount_db=ducking_amount_db,
         )
 
-    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_scale_mode="fit", focus_x=0.5, focus_y=0.5, output_fps=None) -> str:
+    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_scale_mode="fit", focus_x=0.5, focus_y=0.5, output_fps=None, video_filter_state=None) -> str:
         return self.preview.mux_audio_for_preview(
             video_path,
             audio_path,
@@ -240,6 +242,7 @@ class EngineRuntime:
             focus_x=focus_x,
             focus_y=focus_y,
             output_fps=output_fps,
+            video_filter_state=video_filter_state,
         )
 
     def trim_video_clip(self, video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:

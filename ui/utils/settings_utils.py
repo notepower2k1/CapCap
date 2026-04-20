@@ -1,4 +1,7 @@
-﻿def save_user_settings(gui):
+import json
+
+
+def save_user_settings(gui):
     s = gui.settings
     s.setValue("output_mode", gui.output_mode_combo.currentText())
     s.setValue("output_quality", gui.get_output_quality_key())
@@ -8,6 +11,18 @@
         s.setValue("output_ratio", gui.output_ratio_combo.currentData())
     if hasattr(gui, "output_scale_mode_combo"):
         s.setValue("output_scale_mode", gui.output_scale_mode_combo.currentData())
+    if hasattr(gui, "get_video_filter_state"):
+        filter_state = gui.get_video_filter_state()
+        s.setValue("video_filter_preset", filter_state.get("preset", "original"))
+        s.setValue("video_filter_intensity", int(filter_state.get("intensity", 75)))
+        s.setValue(
+            "video_filter_overrides",
+            json.dumps(filter_state.get("overrides", {}), ensure_ascii=True, sort_keys=True),
+        )
+        s.setValue(
+            "video_filter_modified",
+            json.dumps(filter_state.get("modified", {}), ensure_ascii=True, sort_keys=True),
+        )
     s.setValue("source_lang", gui.lang_whisper_combo.currentText())
     s.setValue("whisper_model_name", gui.get_whisper_model_name())
     s.setValue("final_output_folder", gui.final_output_folder_edit.text())
@@ -40,8 +55,14 @@
     s.setValue("subtitle_color", gui.subtitle_color_hex)
     s.setValue("subtitle_background_color", getattr(gui, "subtitle_background_color_hex", "#000000"))
     s.setValue("subtitle_background", gui.subtitle_background_cb.isChecked())
-    s.setValue("subtitle_outline", getattr(gui, "subtitle_outline_cb", None).isChecked() if hasattr(gui, "subtitle_outline_cb") else True)
-    s.setValue("subtitle_background_alpha", getattr(gui, "subtitle_bg_alpha_spin", None).value() if hasattr(gui, "subtitle_bg_alpha_spin") else 0.6)
+    s.setValue(
+        "subtitle_outline",
+        getattr(gui, "subtitle_outline_cb", None).isChecked() if hasattr(gui, "subtitle_outline_cb") else True,
+    )
+    s.setValue(
+        "subtitle_background_alpha",
+        getattr(gui, "subtitle_bg_alpha_spin", None).value() if hasattr(gui, "subtitle_bg_alpha_spin") else 0.6,
+    )
     s.setValue("subtitle_bold", gui.subtitle_bold_cb.isChecked())
     s.setValue("subtitle_auto_keyword_highlight", gui.subtitle_keyword_highlight_cb.isChecked())
     s.setValue("subtitle_highlight_color", gui.subtitle_highlight_color_combo.currentText())
@@ -84,8 +105,29 @@ def load_user_settings(gui):
         idx = gui.output_scale_mode_combo.findData(output_scale_mode)
         if idx >= 0:
             gui.output_scale_mode_combo.setCurrentIndex(idx)
+    filter_preset = str(s.value("video_filter_preset", "original") or "original").strip().lower()
+    try:
+        filter_intensity = int(float(s.value("video_filter_intensity", 75)))
+    except Exception:
+        filter_intensity = 75
+    try:
+        filter_overrides = json.loads(str(s.value("video_filter_overrides", "{}") or "{}"))
+    except Exception:
+        filter_overrides = {}
+    if not isinstance(filter_overrides, dict):
+        filter_overrides = {}
+    try:
+        filter_modified = json.loads(str(s.value("video_filter_modified", "{}") or "{}"))
+    except Exception:
+        filter_modified = {}
+    if not isinstance(filter_modified, dict):
+        filter_modified = {}
+    if hasattr(gui, "set_video_filter_state"):
+        gui.set_video_filter_state(filter_preset, filter_intensity, filter_overrides, filter_modified)
     source_lang = s.value("source_lang", gui.lang_whisper_combo.currentText())
-    gui.selected_whisper_model_name = str(s.value("whisper_model_name", getattr(gui, "selected_whisper_model_name", "base")) or "base").strip().lower()
+    gui.selected_whisper_model_name = str(
+        s.value("whisper_model_name", getattr(gui, "selected_whisper_model_name", "base")) or "base"
+    ).strip().lower()
     source_index = gui.lang_whisper_combo.findText(source_lang)
     if source_index < 0:
         source_index = gui.lang_whisper_combo.findData(source_lang)
@@ -134,7 +176,9 @@ def load_user_settings(gui):
     gui.subtitle_bottom_offset_spin.setValue(int(s.value("subtitle_vertical_offset", gui.subtitle_bottom_offset_spin.value())))
     gui.subtitle_color_hex = str(s.value("subtitle_color", gui.subtitle_color_hex)).upper()
     gui.subtitle_color_btn.setText(gui.subtitle_color_hex)
-    gui.subtitle_background_color_hex = str(s.value("subtitle_background_color", getattr(gui, "subtitle_background_color_hex", "#000000"))).upper()
+    gui.subtitle_background_color_hex = str(
+        s.value("subtitle_background_color", getattr(gui, "subtitle_background_color_hex", "#000000"))
+    ).upper()
     if hasattr(gui, "subtitle_background_color_btn"):
         gui.subtitle_background_color_btn.setText(gui.subtitle_background_color_hex)
     gui.subtitle_background_cb.setChecked(str(s.value("subtitle_background", gui.subtitle_background_cb.isChecked())).lower() == "true")
@@ -143,7 +187,9 @@ def load_user_settings(gui):
     if hasattr(gui, "subtitle_bg_alpha_spin"):
         gui.subtitle_bg_alpha_spin.setValue(float(s.value("subtitle_background_alpha", gui.subtitle_bg_alpha_spin.value())))
     gui.subtitle_bold_cb.setChecked(str(s.value("subtitle_bold", gui.subtitle_bold_cb.isChecked())).lower() == "true")
-    gui.subtitle_keyword_highlight_cb.setChecked(str(s.value("subtitle_auto_keyword_highlight", gui.subtitle_keyword_highlight_cb.isChecked())).lower() == "true")
+    gui.subtitle_keyword_highlight_cb.setChecked(
+        str(s.value("subtitle_auto_keyword_highlight", gui.subtitle_keyword_highlight_cb.isChecked())).lower() == "true"
+    )
     gui.subtitle_highlight_color_combo.setCurrentText(str(s.value("subtitle_highlight_color", gui.subtitle_highlight_color_combo.currentText())))
     gui.subtitle_highlight_mode_combo.setCurrentText(str(s.value("subtitle_highlight_mode", gui.subtitle_highlight_mode_combo.currentText())))
     gui.voice_speed_spin.setCurrentText(s.value("voice_speed", gui.voice_speed_spin.currentText()))
@@ -176,6 +222,3 @@ def load_user_settings(gui):
     gui.update_subtitle_preview_style()
     gui.on_output_mode_changed(gui.output_mode_combo.currentText())
     gui.refresh_ui_state()
-
-
-

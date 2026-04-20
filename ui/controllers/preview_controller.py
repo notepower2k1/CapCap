@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import time
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
@@ -292,6 +292,7 @@ class PreviewController:
             "output_scale_mode": self.gui.get_output_scale_mode_key(),
             "output_fill_focus": self.gui.get_output_fill_focus(),
             "output_fps": self.gui.get_output_fps_key(),
+            "video_filter": self.gui.get_video_filter_state() if hasattr(self.gui, "get_video_filter_state") else {},
         }
         return hashlib.sha1(json.dumps(payload, ensure_ascii=True, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -381,6 +382,7 @@ class PreviewController:
             output_scale_mode=self.gui.get_output_scale_mode_key(),
             output_fill_focus_x=fill_focus_x,
             output_fill_focus_y=fill_focus_y,
+            video_filter_state=self.gui.get_video_filter_state() if hasattr(self.gui, "get_video_filter_state") else {},
             project_state_path=project_state_path,
         )
         self.gui.export_thread.progress.connect(self.gui.on_export_progress)
@@ -461,6 +463,7 @@ class PreviewController:
             output_scale_mode=self.gui.get_output_scale_mode_key(),
             output_fill_focus_x=fill_focus_x,
             output_fill_focus_y=fill_focus_y,
+            video_filter_state=self.gui.get_video_filter_state() if hasattr(self.gui, "get_video_filter_state") else {},
         )
         self.gui.quick_preview_thread.finished.connect(self.gui.on_quick_preview_ready)
         self.gui.quick_preview_thread.start()
@@ -472,8 +475,13 @@ class PreviewController:
                 QMessageBox.warning(self.gui, "Error", "Please choose a video first.")
             return
 
-        preview_srt_path, preview_segments = self.build_full_active_subtitle_srt()
-        if not preview_srt_path:
+        mode = self.gui.get_output_mode_key()
+        preview_srt_path = ""
+        preview_segments = []
+        if mode in ("subtitle", "both"):
+            preview_srt_path, preview_segments = self.build_full_active_subtitle_srt()
+        has_active_video_filters = bool(hasattr(self.gui, "has_active_video_filters") and self.gui.has_active_video_filters())
+        if mode in ("subtitle", "both") and not preview_srt_path and not has_active_video_filters:
             if show_dialog:
                 QMessageBox.warning(self.gui, "Error", "No active subtitle track is available for frame preview.")
             return
@@ -496,6 +504,11 @@ class PreviewController:
         self.gui.preview_frame_btn.setText("Rendering frame...")
         self.gui.progress_bar.setValue(90)
         self.gui.frame_preview_status_label.setText("Rendering exact frame preview...")
+        # For live filter thumbnail preview, render the source frame directly and let the UI
+        # provide the black background. This keeps the actual video content larger.
+        use_output_canvas = bool(show_dialog)
+        target_width, target_height = ((None, None) if not use_output_canvas else self._resolve_output_canvas_dimensions(video_path))
+        fill_focus_x, fill_focus_y = self.gui.get_output_fill_focus()
 
         self.gui.frame_preview_thread = ExactFramePreviewWorker(
             video_path=video_path,
@@ -503,9 +516,45 @@ class PreviewController:
             timestamp_seconds=timestamp_seconds,
             srt_path=preview_srt_path,
             subtitle_style=self.gui.get_subtitle_export_style(segments=preview_segments),
+            target_width=target_width,
+            target_height=target_height,
+            output_scale_mode=self.gui.get_output_scale_mode_key(),
+            output_fill_focus_x=fill_focus_x,
+            output_fill_focus_y=fill_focus_y,
+            video_filter_state=self.gui.get_video_filter_state() if hasattr(self.gui, "get_video_filter_state") else {},
         )
         self.gui.frame_preview_thread.finished.connect(self.gui.on_exact_frame_ready)
         self.gui.frame_preview_thread.start()
+
+    def on_exact_frame_ready(self, output_path, error):
+        self.gui._frame_preview_running = False
+        self.gui.preview_frame_btn.setEnabled(True)
+        self.gui.preview_frame_btn.setText("Open Large Frame Preview")
+        self.gui.progress_bar.setValue(100)
+
+        if error:
+            self.gui.frame_preview_status_label.setText("Frame preview could not be rendered.")
+            if self.gui._show_dialog_on_frame_preview:
+                self.gui.show_error("Error", "Frame preview failed.", str(error))
+            else:
+                self.gui.log(f"[Frame Preview] skipped: {error}")
+            self.gui._show_dialog_on_frame_preview = False
+            return
+
+        if output_path and os.path.exists(output_path):
+            self.gui.last_exact_preview_frame_path = output_path
+            self.gui.processed_artifacts["preview_frame"] = output_path
+            self.gui.update_frame_preview_thumbnail(output_path)
+            if bool(hasattr(self.gui, "has_active_video_filters") and self.gui.has_active_video_filters()) and hasattr(self.gui, "show_filter_thumbnail_preview"):
+                self.gui.show_filter_thumbnail_preview(output_path)
+            if self.gui._show_dialog_on_frame_preview:
+                self.gui.show_frame_preview_dialog(output_path)
+
+        rerun_pending = bool(getattr(self.gui, "_pending_auto_frame_preview", False))
+        self.gui._pending_auto_frame_preview = False
+        self.gui._show_dialog_on_frame_preview = False
+        if rerun_pending:
+            QTimer.singleShot(0, self.gui.trigger_auto_frame_preview)
 
     def build_subtitle_preview_srt(self, start_seconds: float, duration_seconds: float):
         segments = self.gui.get_active_segments()
@@ -602,7 +651,11 @@ class PreviewController:
             self.gui.refresh_video_dimensions(output_path)
             self.gui.media_player.setSource(QUrl.fromLocalFile(output_path))
             self.gui.media_player.setPosition(0)
-            self.gui.sync_live_subtitle_preview()
+            self.gui._preview_video_has_burned_subtitles = self.gui.get_output_mode_key() in ("subtitle", "both")
+            if getattr(self.gui, "_preview_video_has_burned_subtitles", False):
+                self.gui.media_player.clear_subtitle()
+            else:
+                self.gui.sync_live_subtitle_preview()
             self.gui._refresh_preview_audio_controls()
             # QMessageBox.information(
             #     self.gui,
@@ -620,6 +673,8 @@ class PreviewController:
         video_path = self.gui.video_path_edit.text().strip()
         audio_path = self.gui.resolve_selected_audio_path()
         mode = self.gui.get_output_mode_key()
+        if hasattr(self.gui, "hide_filter_thumbnail_preview"):
+            self.gui.hide_filter_thumbnail_preview()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.gui, "Error", "Video file not found. Please select a video first.")
             return
@@ -631,9 +686,13 @@ class PreviewController:
             )
             return
 
-        # Subtitle-only preview uses mpv's live subtitle overlay; avoid copying the full video into temp.
-        if mode == "subtitle":
+        has_active_video_filters = bool(hasattr(self.gui, "has_active_video_filters") and self.gui.has_active_video_filters())
+        self.gui._preview_video_has_burned_subtitles = bool(mode == "subtitle" and has_active_video_filters)
+
+        # Subtitle-only preview can stay live when no canvas/filter processing is needed.
+        if mode == "subtitle" and not has_active_video_filters:
             try:
+                self.gui._preview_video_has_burned_subtitles = False
                 if hasattr(self.gui.video_view, "set_preview_aspect_ratio"):
                     self.gui.video_view.set_preview_aspect_ratio(self.gui.get_output_ratio_key())
                 if hasattr(self.gui.video_view, "set_preview_scale_mode"):
@@ -697,6 +756,7 @@ class PreviewController:
         if styled_signature:
             self.gui.log(f"[Preview] styled cache miss: {styled_signature[:10]}")
         self.gui._styled_preview_running = True
+        self.gui._preview_video_has_burned_subtitles = bool(mode == "subtitle" and has_active_video_filters)
         if hasattr(self.gui, "preview_btn"):
             self.gui.preview_btn.setEnabled(False)
         self.gui.progress_bar.setValue(95)
@@ -711,12 +771,13 @@ class PreviewController:
             mode=mode,
             srt_path=preview_srt_path,
             subtitle_style=subtitle_style,
-            render_subtitles=False,
+            render_subtitles=bool(mode == "subtitle" and has_active_video_filters),
             target_width=target_width,
             target_height=target_height,
             output_scale_mode=self.gui.get_output_scale_mode_key(),
             output_fill_focus_x=fill_focus_x,
             output_fill_focus_y=fill_focus_y,
+            video_filter_state=self.gui.get_video_filter_state() if hasattr(self.gui, "get_video_filter_state") else {},
         )
         self.gui.preview_thread.finished.connect(
             lambda preview_path, error: self.gui.on_preview_ready(preview_path, error, styled_signature)
@@ -732,12 +793,18 @@ class PreviewController:
         self.gui.refresh_ui_state()
 
         if error:
+            self.gui._video_filter_preview_dirty = bool(hasattr(self.gui, "has_active_video_filters") and self.gui.has_active_video_filters())
+            self.gui._video_filter_apply_requested = False
+            self.gui._play_video_filter_preview_when_ready = False
             self.gui._suspend_live_subtitle_sync = False
             self.gui.show_error("Error", "Preview failed.", str(error))
             self.gui._pipeline_fail("Preview failed.")
+            self.gui.refresh_ui_state()
             return
 
         if preview_path and os.path.exists(preview_path):
+            self.gui._video_filter_preview_dirty = False
+            self.gui._video_filter_apply_requested = False
             self.gui.last_preview_video_path = preview_path
             self.gui.processed_artifacts["preview_video"] = preview_path
             self.gui.last_styled_preview_path = preview_path
@@ -745,8 +812,17 @@ class PreviewController:
             self.gui.log(f"[Preview] ready={preview_path}")
             self.gui.refresh_video_dimensions(preview_path)
             self.gui.media_player.setSource(QUrl.fromLocalFile(preview_path))
-            self.gui.sync_live_subtitle_preview()
+            if getattr(self.gui, "_preview_video_has_burned_subtitles", False):
+                self.gui.media_player.clear_subtitle()
+            else:
+                self.gui.sync_live_subtitle_preview()
             self.gui._refresh_preview_audio_controls()
+            if getattr(self.gui, "_play_video_filter_preview_when_ready", False):
+                self.gui._play_video_filter_preview_when_ready = False
+                self.gui.media_player.play()
+                self.gui.timeline.set_playing(True)
+        if getattr(self.gui, "_pending_video_filter_preview", False):
+            QTimer.singleShot(0, self.gui.run_live_video_filter_preview)
             # QMessageBox.information(
             #     self.gui,
             #     "Preview Ready",

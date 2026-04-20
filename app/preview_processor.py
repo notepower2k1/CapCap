@@ -35,6 +35,67 @@ def _build_canvas_vf(target_width=None, target_height=None, scale_mode: str = "f
     return ""
 
 
+def _normalize_video_filter_state(video_filter_state) -> dict:
+    if not isinstance(video_filter_state, dict):
+        return {}
+    final_values = video_filter_state.get("final", video_filter_state)
+    if not isinstance(final_values, dict):
+        return {}
+    normalized = {}
+    for field in ("brightness", "contrast", "saturation", "temperature", "highlights", "shadows"):
+        try:
+            normalized[field] = max(-100.0, min(100.0, float(final_values.get(field, 0.0))))
+        except Exception:
+            normalized[field] = 0.0
+    return normalized
+
+
+def _build_video_filter_vf(video_filter_state=None) -> str:
+    values = _normalize_video_filter_state(video_filter_state)
+    if not values:
+        return ""
+    brightness = values.get("brightness", 0.0)
+    contrast = values.get("contrast", 0.0)
+    saturation = values.get("saturation", 0.0)
+    temperature = values.get("temperature", 0.0)
+    highlights = values.get("highlights", 0.0)
+    shadows = values.get("shadows", 0.0)
+
+    if not any(abs(value) > 0.01 for value in values.values()):
+        return ""
+
+    chain = []
+    eq_parts = []
+    if abs(brightness) > 0.01:
+        eq_parts.append(f"brightness={max(-1.0, min(1.0, brightness / 100.0 * 0.35)):.4f}")
+    if abs(contrast) > 0.01:
+        eq_parts.append(f"contrast={max(0.4, min(1.8, 1.0 + contrast / 100.0 * 0.65)):.4f}")
+    if abs(saturation) > 0.01:
+        eq_parts.append(f"saturation={max(0.0, min(2.2, 1.0 + saturation / 100.0 * 1.2)):.4f}")
+    if eq_parts:
+        chain.append("eq=" + ":".join(eq_parts))
+
+    if abs(temperature) > 0.01:
+        temp_norm = max(-0.35, min(0.35, temperature / 100.0 * 0.35))
+        rm = max(-1.0, min(1.0, temp_norm))
+        bm = max(-1.0, min(1.0, -temp_norm))
+        chain.append(f"colorbalance=rs={rm:.4f}:gs={temp_norm * 0.2:.4f}:bs={bm:.4f}")
+
+    if abs(highlights) > 0.01 or abs(shadows) > 0.01:
+        shadow_point = max(0.0, min(0.45, 0.25 + shadows / 100.0 * 0.18))
+        highlight_point = max(0.55, min(1.0, 0.75 + highlights / 100.0 * 0.18))
+        chain.append(
+            "curves=master="
+            f"'0/0 0.25/{shadow_point:.3f} 0.75/{highlight_point:.3f} 1/1'"
+        )
+
+    return ",".join(part for part in chain if part)
+
+
+def _merge_video_filter_chain(*parts) -> str:
+    return ",".join(str(part).strip() for part in parts if str(part or "").strip())
+
+
 def trim_video_clip(video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -85,6 +146,7 @@ def mux_audio_into_video_for_preview(
     focus_x=0.5,
     focus_y=0.5,
     output_fps=None,
+    video_filter_state=None,
 ) -> str:
     """Create a video by replacing audio.
 
@@ -103,7 +165,10 @@ def mux_audio_into_video_for_preview(
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
 
-    vf = _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y)
+    vf = _merge_video_filter_chain(
+        _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y),
+        _build_video_filter_vf(video_filter_state),
+    )
     fps_value = None
     try:
         if output_fps:
@@ -187,6 +252,7 @@ def mux_audio_into_video_clip_for_preview(
     scale_mode="fit",
     focus_x=0.5,
     focus_y=0.5,
+    video_filter_state=None,
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -198,7 +264,10 @@ def mux_audio_into_video_clip_for_preview(
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
 
-    vf = _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y)
+    vf = _merge_video_filter_chain(
+        _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y),
+        _build_video_filter_vf(video_filter_state),
+    )
 
     cmd = [
         ffmpeg,
@@ -279,54 +348,77 @@ def render_subtitle_frame_preview(
     custom_position_x: float = 50.0,
     custom_position_y: float = 86.0,
     single_line: bool = False,
+    target_width=None,
+    target_height=None,
+    scale_mode: str = "fit",
+    focus_x: float = 0.5,
+    focus_y: float = 0.5,
+    video_filter_state=None,
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
         raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
-    if not os.path.exists(srt_path):
-        raise FileNotFoundError(f"SRT not found: {srt_path}")
-
     from video_processor import get_video_dimensions, srt_to_ass
 
     os.makedirs(os.path.dirname(output_image_path) or ".", exist_ok=True)
     video_w, video_h = get_video_dimensions(video_path)
-    ass_path = srt_to_ass(
-        srt_path,
-        video_w,
-        video_h,
-        alignment=alignment,
-        margin_v=margin_v,
-        font_name=font_name,
-        font_size=font_size,
-        font_color=font_color,
-        background_box=background_box,
-        animation_style=animation_style,
-        highlight_color=highlight_color,
-        outline_color=outline_color,
-        outline_width=outline_width,
-        shadow_color=shadow_color,
-        shadow_depth=shadow_depth,
-        background_color=background_color,
-        background_alpha=background_alpha,
-        bold=bold,
-        preset_key=preset_key,
-        auto_keyword_highlight=auto_keyword_highlight,
-        animation_duration=animation_duration,
-        manual_highlights=manual_highlights,
-        word_timings=word_timings,
-        karaoke_timing_mode=karaoke_timing_mode,
-        custom_position_enabled=custom_position_enabled,
-        custom_position_x=custom_position_x,
-        custom_position_y=custom_position_y,
-        single_line=single_line,
-    )
+    try:
+        if target_width and target_height:
+            tw = int(target_width)
+            th = int(target_height)
+            if tw > 0 and th > 0:
+                video_w, video_h = tw, th
+    except Exception:
+        pass
 
-    escaped_ass = ass_path.replace("\\", "/")
-    if ":" in escaped_ass:
-        drive, rest = escaped_ass.split(":", 1)
-        escaped_ass = f"{drive}\\:{rest}"
+    ass_path = ""
+    vf_parts = [
+        _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y),
+        _build_video_filter_vf(video_filter_state),
+    ]
+    if srt_path:
+        if not os.path.exists(srt_path):
+            raise FileNotFoundError(f"SRT not found: {srt_path}")
+        ass_path = srt_to_ass(
+            srt_path,
+            video_w,
+            video_h,
+            alignment=alignment,
+            margin_v=margin_v,
+            font_name=font_name,
+            font_size=font_size,
+            font_color=font_color,
+            background_box=background_box,
+            animation_style=animation_style,
+            highlight_color=highlight_color,
+            outline_color=outline_color,
+            outline_width=outline_width,
+            shadow_color=shadow_color,
+            shadow_depth=shadow_depth,
+            background_color=background_color,
+            background_alpha=background_alpha,
+            bold=bold,
+            preset_key=preset_key,
+            auto_keyword_highlight=auto_keyword_highlight,
+            animation_duration=animation_duration,
+            manual_highlights=manual_highlights,
+            word_timings=word_timings,
+            karaoke_timing_mode=karaoke_timing_mode,
+            custom_position_enabled=custom_position_enabled,
+            custom_position_x=custom_position_x,
+            custom_position_y=custom_position_y,
+            single_line=single_line,
+        )
+
+        escaped_ass = ass_path.replace("\\", "/")
+        if ":" in escaped_ass:
+            drive, rest = escaped_ass.split(":", 1)
+            escaped_ass = f"{drive}\\:{rest}"
+        vf_parts.append(f"ass='{escaped_ass}'")
+
+    vf = _merge_video_filter_chain(*vf_parts)
 
     cmd = [
         ffmpeg,
@@ -339,7 +431,7 @@ def render_subtitle_frame_preview(
         "-i",
         video_path,
         "-vf",
-        f"ass='{escaped_ass}'",
+        vf,
         "-frames:v",
         "1",
         output_image_path,

@@ -1,7 +1,7 @@
 ﻿import os
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -29,6 +29,129 @@ def _set_preview_icon_button(button: QPushButton, icon_path: str, tooltip: str):
     button.setIcon(load_icon(icon_path, 18))
     button.setIconSize(QSize(18, 18))
     button.setStyleSheet("QPushButton { padding: 0; }")
+
+
+class FramePreviewWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pixmap = QPixmap()
+        self.video_source_width = 0
+        self.video_source_height = 0
+        self.preview_aspect_key = "source"
+        self.preview_scale_mode = "fit"
+        self.preview_fill_focus_x = 0.5
+        self.preview_fill_focus_y = 0.5
+        self.setMinimumHeight(320)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.hide()
+
+    def set_frame_image(self, image_path: str):
+        self._pixmap = QPixmap(image_path)
+        self.update()
+
+    def clear_frame_image(self):
+        self._pixmap = QPixmap()
+        self.update()
+
+    def set_video_dimensions(self, width: int, height: int):
+        self.video_source_width = max(0, int(width or 0))
+        self.video_source_height = max(0, int(height or 0))
+        self.update()
+
+    def set_preview_aspect_ratio(self, aspect_key: str):
+        self.preview_aspect_key = str(aspect_key or "source").strip().lower() or "source"
+        self.update()
+
+    def set_preview_scale_mode(self, scale_mode: str):
+        self.preview_scale_mode = str(scale_mode or "fit").strip().lower() or "fit"
+        self.update()
+
+    def set_preview_fill_focus(self, focus_x: float, focus_y: float):
+        self.preview_fill_focus_x = max(0.0, min(1.0, float(focus_x)))
+        self.preview_fill_focus_y = max(0.0, min(1.0, float(focus_y)))
+        self.update()
+
+    def _resolve_canvas_aspect_ratio(self) -> float | None:
+        aspect_map = {
+            "16:9": 16.0 / 9.0,
+            "9:16": 9.0 / 16.0,
+            "1:1": 1.0,
+            "4:3": 4.0 / 3.0,
+        }
+        if self.preview_aspect_key in aspect_map:
+            return aspect_map[self.preview_aspect_key]
+        if self.video_source_width and self.video_source_height:
+            return self.video_source_width / self.video_source_height
+        if not self._pixmap.isNull() and self._pixmap.height() > 0:
+            return self._pixmap.width() / self._pixmap.height()
+        return None
+
+    def get_preview_canvas_rect(self) -> QRectF:
+        view_w, view_h = float(self.width()), float(self.height())
+        if view_w <= 0 or view_h <= 0:
+            return QRectF(0, 0, 0, 0)
+        canvas_ratio = self._resolve_canvas_aspect_ratio()
+        if not canvas_ratio:
+            return QRectF(0, 0, view_w, view_h)
+        view_ratio = view_w / view_h if view_h else canvas_ratio
+        if canvas_ratio > view_ratio:
+            content_w = view_w
+            content_h = view_w / canvas_ratio
+            offset_x = 0.0
+            offset_y = (view_h - content_h) / 2.0
+        else:
+            content_h = view_h
+            content_w = view_h * canvas_ratio
+            offset_x = (view_w - content_w) / 2.0
+            offset_y = 0.0
+        return QRectF(offset_x, offset_y, content_w, content_h)
+
+    def get_video_content_rect(self) -> QRectF:
+        canvas_rect = self.get_preview_canvas_rect()
+        if canvas_rect.width() <= 0 or canvas_rect.height() <= 0:
+            return QRectF(0, 0, 0, 0)
+        source_w = self.video_source_width or self._pixmap.width()
+        source_h = self.video_source_height or self._pixmap.height()
+        if not source_w or not source_h:
+            return canvas_rect
+        source_ratio = source_w / source_h
+        canvas_ratio = canvas_rect.width() / canvas_rect.height() if canvas_rect.height() else source_ratio
+        if self.preview_scale_mode == "fill":
+            if source_ratio > canvas_ratio:
+                content_h = canvas_rect.height()
+                content_w = content_h * source_ratio
+                overflow_w = max(0.0, content_w - canvas_rect.width())
+                offset_x = canvas_rect.left() - overflow_w * self.preview_fill_focus_x
+                offset_y = canvas_rect.top()
+            else:
+                content_w = canvas_rect.width()
+                content_h = content_w / source_ratio
+                offset_x = canvas_rect.left()
+                overflow_h = max(0.0, content_h - canvas_rect.height())
+                offset_y = canvas_rect.top() - overflow_h * self.preview_fill_focus_y
+        else:
+            if source_ratio > canvas_ratio:
+                content_w = canvas_rect.width()
+                content_h = content_w / source_ratio
+                offset_x = canvas_rect.left()
+                offset_y = canvas_rect.top() + (canvas_rect.height() - content_h) / 2.0
+            else:
+                content_h = canvas_rect.height()
+                content_w = content_h * source_ratio
+                offset_x = canvas_rect.left() + (canvas_rect.width() - content_w) / 2.0
+                offset_y = canvas_rect.top()
+        return QRectF(offset_x, offset_y, content_w, content_h)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), Qt.black)
+        if self._pixmap.isNull():
+            return
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        canvas_rect = self.get_preview_canvas_rect()
+        target_rect = self.get_video_content_rect()
+        painter.setClipRect(canvas_rect)
+        painter.drawPixmap(target_rect, self._pixmap, QRectF(self._pixmap.rect()))
 
 
 class TimelineTrackLabels(QFrame):
@@ -90,13 +213,19 @@ def build_preview_panel(gui):
     gui.preview_context_label.setWordWrap(True)
     gui.preview_context_label.setObjectName("previewContextLabel")
     gui.preview_context_label.hide()
+    gui.frame_preview_badge_label = QLabel("Frame Preview")
+    gui.frame_preview_badge_label.setObjectName("helperLabel")
+    gui.frame_preview_badge_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    gui.frame_preview_badge_label.setStyleSheet(
+        "QLabel { background: rgba(8, 14, 24, 0.86); border: 1px solid #35506d; "
+        "border-radius: 10px; padding: 4px 10px; color: #cfe6ff; font-weight: 700; }"
+    )
+    gui.frame_preview_badge_label.hide()
     gui.frame_preview_status_label = QLabel("Exact frame preview updates here when available.")
     gui.frame_preview_status_label.setWordWrap(True)
     gui.frame_preview_status_label.setObjectName("helperLabel")
     gui.frame_preview_status_label.hide()
-    gui.frame_preview_image_label = QLabel("No frame preview yet")
-    gui.frame_preview_image_label.setAlignment(Qt.AlignCenter)
-    gui.frame_preview_image_label.setMinimumHeight(170)
+    gui.frame_preview_image_label = FramePreviewWidget()
     gui.frame_preview_image_label.hide()
 
     gui.video_view = MpvVideoView() if is_mpv_backend_available() else VideoView()
@@ -118,8 +247,12 @@ def build_preview_panel(gui):
     preview_card_layout.setSpacing(8)
     preview_card_layout.addWidget(gui.preview_context_label)
     preview_card_layout.addWidget(gui.frame_preview_status_label)
-    preview_card_layout.addWidget(gui.frame_preview_image_label)
+    preview_card_layout.addWidget(gui.frame_preview_image_label, 1)
     preview_card_layout.addWidget(gui.video_view, 1)
+    preview_card_layout.setStretchFactor(gui.frame_preview_image_label, 1)
+    preview_card_layout.setStretchFactor(gui.video_view, 1)
+    gui.frame_preview_badge_label.setParent(preview_card)
+    gui.frame_preview_badge_label.raise_()
 
     timeline_card = QFrame()
     timeline_card.setObjectName("statusCard")
@@ -361,5 +494,3 @@ def build_preview_panel(gui):
     right_layout.addWidget(controls_bar, 0)
     right_layout.addWidget(timeline_card, 0)
     return right_panel
-
-

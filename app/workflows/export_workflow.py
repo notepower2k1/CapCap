@@ -134,6 +134,7 @@ class ExportWorkflow:
         output_fill_focus_x=0.5,
         output_fill_focus_y=0.5,
         output_fps=None,
+        video_filter_state=None,
     ):
         if ass_path and os.path.exists(ass_path):
             ok = self.engine_runtime.embed_ass_subtitles(
@@ -147,6 +148,7 @@ class ExportWorkflow:
                 output_fill_focus_x=output_fill_focus_x,
                 output_fill_focus_y=output_fill_focus_y,
                 output_fps=output_fps,
+                video_filter_state=video_filter_state,
             )
         else:
             ok = self.engine_runtime.embed_subtitles(
@@ -160,6 +162,7 @@ class ExportWorkflow:
                 output_fill_focus_x=output_fill_focus_x,
                 output_fill_focus_y=output_fill_focus_y,
                 output_fps=output_fps,
+                video_filter_state=video_filter_state,
             )
         if not ok:
             raise RuntimeError("Failed to burn subtitles into the output video.")
@@ -180,6 +183,7 @@ class ExportWorkflow:
         output_scale_mode: str = "fit",
         output_fill_focus_x: float = 0.5,
         output_fill_focus_y: float = 0.5,
+        video_filter_state=None,
         project_state_path: str = "",
         on_progress=None,
     ) -> str:
@@ -207,6 +211,7 @@ class ExportWorkflow:
                     output_fill_focus_x=output_fill_focus_x,
                     output_fill_focus_y=output_fill_focus_y,
                     output_fps=target_fps,
+                    video_filter_state=video_filter_state,
                 )
             elif mode == "voice":
                 self._emit_progress(on_progress, 25, "Muxing Vietnamese audio into the video...")
@@ -220,6 +225,7 @@ class ExportWorkflow:
                     focus_x=output_fill_focus_x,
                     focus_y=output_fill_focus_y,
                     output_fps=target_fps,
+                    video_filter_state=video_filter_state,
                 )
             elif mode == "both":
                 tmp_mux_path = self._build_temp_mux_path()
@@ -247,6 +253,7 @@ class ExportWorkflow:
                     output_fill_focus_x=output_fill_focus_x,
                     output_fill_focus_y=output_fill_focus_y,
                     output_fps=target_fps,
+                    video_filter_state=video_filter_state,
                 )
             else:
                 raise ValueError(f"Unsupported export mode: {mode}")

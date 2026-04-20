@@ -163,6 +163,10 @@ class VideoTranslatorGUI(QMainWindow):
                 color: #a9b8cb;
                 line-height: 1.35em;
             }
+            QLabel#helperLabel[filterModified="true"] {
+                color: #8ad7ff;
+                font-weight: 700;
+            }
             QLabel#sectionTitle {
                 font-size: 13px;
                 font-weight: 700;
@@ -469,6 +473,31 @@ class VideoTranslatorGUI(QMainWindow):
         self._timeline_video_thumbnails = []
         self._pending_timeline_waveform_refresh = False
         self._pending_timeline_thumbnail_refresh = False
+        self._video_filter_ui_sync = False
+        self._video_filter_preset_key = "original"
+        self._video_filter_intensity = 75
+        self._video_filter_adjust_overrides = {
+            "brightness": 0,
+            "contrast": 0,
+            "saturation": 0,
+            "temperature": 0,
+            "highlights": 0,
+            "shadows": 0,
+        }
+        self._video_filter_user_modified = {
+            "brightness": False,
+            "contrast": False,
+            "saturation": False,
+            "temperature": False,
+            "highlights": False,
+            "shadows": False,
+        }
+        self._pending_video_filter_preview = False
+        self._filter_thumbnail_visible = False
+        self._play_video_filter_preview_when_ready = False
+        self._filter_thumbnail_target_height = 320
+        self._video_filter_preview_dirty = False
+        self._video_filter_apply_requested = False
         # Simple pipeline runner (Run All)
         self._pipeline_active = False
         self._pipeline_step = ""
@@ -1811,6 +1840,92 @@ class VideoTranslatorGUI(QMainWindow):
         self.live_preview_segments, self.live_preview_editor_name = self._resolve_live_preview_segments()
         self.sync_live_subtitle_preview()
 
+    def schedule_live_video_filter_preview(self):
+        if not hasattr(self, "video_filter_preview_timer"):
+            return
+        self._pending_video_filter_preview = True
+        if getattr(self, "_styled_preview_running", False):
+            return
+        self.video_filter_preview_timer.start()
+
+    def _is_video_filter_slider_interacting(self):
+        sliders = [getattr(self, "video_filter_intensity_slider", None)]
+        sliders.extend(list(getattr(self, "video_filter_adjust_sliders", {}).values()))
+        for slider in sliders:
+            if slider is not None and slider.isSliderDown():
+                return True
+        return False
+
+    def on_video_filter_slider_released(self):
+        self.schedule_live_video_filter_preview()
+
+    def is_filter_workflow_active(self) -> bool:
+        stack = getattr(self, "left_panel_stack", None)
+        if stack is None:
+            return False
+        try:
+            return int(stack.currentIndex()) == 4
+        except Exception:
+            return False
+
+    def _mark_video_filter_preview_dirty(self):
+        self._video_filter_preview_dirty = self.has_active_video_filters()
+        self._video_filter_apply_requested = False
+        self.refresh_ui_state()
+
+    def apply_current_video_filter(self):
+        if not self.has_active_video_filters():
+            self._video_filter_preview_dirty = False
+            self._video_filter_apply_requested = False
+            self.hide_filter_thumbnail_preview()
+            self.refresh_ui_state()
+            return
+        self._video_filter_apply_requested = True
+        self.refresh_ui_state()
+        self.preview_controller.preview_video()
+
+    def _can_auto_render_filter_preview(self):
+        video_path = self.video_path_edit.text().strip()
+        if not video_path or not os.path.exists(video_path):
+            return False
+        if getattr(self, "_styled_preview_running", False) or getattr(self, "_pipeline_active", False):
+            return False
+        if self.has_active_video_filters():
+            return True
+        mode = self.get_output_mode_key()
+        if mode == "subtitle":
+            return bool(self.last_translated_srt_path and os.path.exists(self.last_translated_srt_path))
+        if mode == "voice":
+            audio_path = self.resolve_selected_audio_path()
+            return bool(audio_path and os.path.exists(audio_path))
+        if mode == "both":
+            audio_path = self.resolve_selected_audio_path()
+            return bool(
+                audio_path
+                and os.path.exists(audio_path)
+                and self.last_translated_srt_path
+                and os.path.exists(self.last_translated_srt_path)
+            )
+        return False
+
+    def run_live_video_filter_preview(self):
+        if getattr(self, "_styled_preview_running", False) or getattr(self, "_frame_preview_running", False):
+            return
+        if not getattr(self, "_pending_video_filter_preview", False):
+            return
+        if not self.has_active_video_filters():
+            self._pending_video_filter_preview = False
+            self.hide_filter_thumbnail_preview()
+            return
+        if not self._can_auto_render_filter_preview():
+            self._pending_video_filter_preview = False
+            return
+        self._pending_video_filter_preview = False
+        try:
+            self.preview_controller.start_exact_frame_preview(show_dialog=False)
+        except Exception as exc:
+            self.log(f"[Filter Preview] skipped: {exc}")
+
     def save_user_settings(self):
         save_user_settings_impl(self)
         try:
@@ -2335,7 +2450,96 @@ class VideoTranslatorGUI(QMainWindow):
         self.start_exact_frame_preview(show_dialog=False)
 
     def update_frame_preview_thumbnail(self, image_path: str):
-        update_frame_preview_thumbnail_impl(self, image_path)
+        widget = getattr(self, "frame_preview_image_label", None)
+        if widget is not None and hasattr(widget, "set_frame_image"):
+            if hasattr(self, "video_view") and self.video_view is not None:
+                widget.set_video_dimensions(
+                    int(getattr(self.video_view, "video_source_width", 0) or 0),
+                    int(getattr(self.video_view, "video_source_height", 0) or 0),
+                )
+                widget.set_preview_aspect_ratio(getattr(self.video_view, "preview_aspect_key", "source"))
+                widget.set_preview_scale_mode(getattr(self.video_view, "preview_scale_mode", "fit"))
+                focus_x, focus_y = self.get_output_fill_focus()
+                widget.set_preview_fill_focus(focus_x, focus_y)
+            widget.set_frame_image(image_path)
+            return
+        update_frame_preview_thumbnail_impl(self, image_path, QPixmap, Qt)
+
+    def show_filter_thumbnail_preview(self, image_path: str):
+        self._filter_thumbnail_visible = True
+        if hasattr(self, "preview_context_label"):
+            self.preview_context_label.hide()
+        if hasattr(self, "frame_preview_status_label"):
+            self.frame_preview_status_label.hide()
+        if hasattr(self, "frame_preview_image_label"):
+            target_height = int(getattr(self, "_filter_thumbnail_target_height", 320) or 320)
+            if hasattr(self, "video_view") and self.video_view is not None:
+                live_height = int(self.video_view.height() or 0)
+                if live_height > 0:
+                    target_height = max(320, live_height)
+            current_height = int(getattr(self.frame_preview_image_label, "height", lambda: 0)() or 0)
+            if current_height > 0:
+                target_height = max(target_height, current_height)
+            self._filter_thumbnail_target_height = target_height
+            if hasattr(self.frame_preview_image_label, "setMinimumHeight"):
+                self.frame_preview_image_label.setMinimumHeight(target_height)
+            if hasattr(self.frame_preview_image_label, "setMaximumHeight"):
+                self.frame_preview_image_label.setMaximumHeight(target_height)
+            self.frame_preview_image_label.show()
+        if hasattr(self, "video_view"):
+            self.video_view.hide()
+        self.update_frame_preview_thumbnail(image_path)
+        if hasattr(self, "frame_preview_badge_label"):
+            self._position_frame_preview_badge()
+            self.frame_preview_badge_label.show()
+
+    def hide_filter_thumbnail_preview(self):
+        self._filter_thumbnail_visible = False
+        if hasattr(self, "frame_preview_badge_label"):
+            self.frame_preview_badge_label.hide()
+        if hasattr(self, "frame_preview_image_label") and self.frame_preview_image_label is not None:
+            current_height = int(getattr(self.frame_preview_image_label, "height", lambda: 0)() or 0)
+            if current_height > 0:
+                self._filter_thumbnail_target_height = max(320, current_height)
+        if hasattr(self, "frame_preview_image_label"):
+            if hasattr(self.frame_preview_image_label, "setMaximumHeight"):
+                self.frame_preview_image_label.setMaximumHeight(16777215)
+            if hasattr(self.frame_preview_image_label, "clear_frame_image"):
+                self.frame_preview_image_label.clear_frame_image()
+            self.frame_preview_image_label.hide()
+        if hasattr(self, "frame_preview_status_label"):
+            self.frame_preview_status_label.hide()
+        if hasattr(self, "preview_context_label"):
+            self.preview_context_label.hide()
+        if hasattr(self, "video_view"):
+            self.video_view.show()
+
+    def _position_frame_preview_badge(self):
+        badge = getattr(self, "frame_preview_badge_label", None)
+        if badge is None:
+            return
+        host = None
+        if getattr(self, "_filter_thumbnail_visible", False):
+            host = getattr(self, "frame_preview_image_label", None)
+        if host is None or not host.isVisible():
+            host = getattr(self, "video_view", None)
+        if host is None:
+            return
+        badge.adjustSize()
+        content_rect = None
+        if hasattr(host, "get_video_content_rect"):
+            try:
+                content_rect = host.get_video_content_rect()
+            except Exception:
+                content_rect = None
+        if content_rect is not None and content_rect.width() > 0 and content_rect.height() > 0:
+            x = host.x() + content_rect.right() - badge.width() - 14
+            y = host.y() + content_rect.top() + 14
+        else:
+            x = host.x() + max(12, host.width() - badge.width() - 14)
+            y = host.y() + 14
+        badge.move(int(x), int(y))
+        badge.raise_()
 
     def cleanup_file_if_exists(self, path: str):
         cleanup_file_if_exists_impl(path)
@@ -2379,6 +2583,226 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "video_view") and hasattr(self.video_view, "get_preview_fill_focus"):
             return self.video_view.get_preview_fill_focus()
         return (0.5, 0.5)
+
+    def _video_filter_presets(self):
+        return {
+            "original": {
+                "brightness": 0,
+                "contrast": 0,
+                "saturation": 0,
+                "temperature": 0,
+                "highlights": 0,
+                "shadows": 0,
+            },
+            "bright": {
+                "brightness": 20,
+                "contrast": 5,
+                "saturation": 5,
+                "temperature": 0,
+                "highlights": -10,
+                "shadows": 20,
+            },
+            "warm": {
+                "brightness": 10,
+                "contrast": 5,
+                "saturation": 10,
+                "temperature": 25,
+                "highlights": -5,
+                "shadows": 10,
+            },
+            "vivid": {
+                "brightness": 10,
+                "contrast": 20,
+                "saturation": 25,
+                "temperature": 0,
+                "highlights": -5,
+                "shadows": 5,
+            },
+            "cool": {
+                "brightness": 0,
+                "contrast": 15,
+                "saturation": 5,
+                "temperature": -20,
+                "highlights": -10,
+                "shadows": -5,
+            },
+            "soft": {
+                "brightness": 10,
+                "contrast": -12,
+                "saturation": 5,
+                "temperature": 10,
+                "highlights": -15,
+                "shadows": 15,
+            },
+        }
+
+    def _video_filter_fields(self):
+        return ("brightness", "contrast", "saturation", "temperature", "highlights", "shadows")
+
+    def _clamp_video_filter_value(self, value):
+        try:
+            numeric = int(round(float(value)))
+        except Exception:
+            numeric = 0
+        return max(-100, min(100, numeric))
+
+    def _default_video_filter_overrides(self):
+        return {field: 0 for field in self._video_filter_fields()}
+
+    def _default_video_filter_modified_flags(self):
+        return {field: False for field in self._video_filter_fields()}
+
+    def _normalize_video_filter_preset_key(self, preset_key):
+        key = str(preset_key or "original").strip().lower()
+        return key if key in self._video_filter_presets() else "original"
+
+    def _get_video_filter_base_values(self, preset_key=None):
+        key = self._normalize_video_filter_preset_key(preset_key or self._video_filter_preset_key)
+        return dict(self._video_filter_presets().get(key, self._video_filter_presets()["original"]))
+
+    def _get_video_filter_scaled_values(self, preset_key=None, intensity=None):
+        base_values = self._get_video_filter_base_values(preset_key)
+        scale = max(0.0, min(100.0, float(intensity if intensity is not None else self._video_filter_intensity))) / 100.0
+        return {
+            field: self._clamp_video_filter_value(base_values.get(field, 0) * scale)
+            for field in self._video_filter_fields()
+        }
+
+    def _get_video_filter_effective_values(self, preset_key=None, intensity=None, overrides=None, modified_flags=None):
+        scaled_values = self._get_video_filter_scaled_values(preset_key, intensity)
+        effective = {}
+        active_overrides = overrides if overrides is not None else self._video_filter_adjust_overrides
+        active_modified = modified_flags if modified_flags is not None else self._video_filter_user_modified
+        for field in self._video_filter_fields():
+            if active_modified.get(field, False):
+                effective[field] = self._clamp_video_filter_value(active_overrides.get(field, 0))
+            else:
+                effective[field] = self._clamp_video_filter_value(scaled_values.get(field, 0))
+        return effective
+
+    def _refresh_video_filter_ui(self):
+        if not hasattr(self, "video_filter_intensity_slider"):
+            return
+        self._video_filter_ui_sync = True
+        try:
+            for preset_key, button in getattr(self, "video_filter_preset_buttons", {}).items():
+                button.setChecked(preset_key == self._normalize_video_filter_preset_key(self._video_filter_preset_key))
+
+            self.video_filter_intensity_slider.setValue(int(self._video_filter_intensity))
+            if hasattr(self, "video_filter_intensity_value_label"):
+                self.video_filter_intensity_value_label.setText(str(int(self._video_filter_intensity)))
+
+            effective_values = self._get_video_filter_effective_values()
+            for field, slider in getattr(self, "video_filter_adjust_sliders", {}).items():
+                slider.setValue(int(effective_values.get(field, 0)))
+                self._update_video_filter_slider_visual_state(field, slider)
+            for field, label in getattr(self, "video_filter_adjust_value_labels", {}).items():
+                label.setText(str(int(effective_values.get(field, 0))))
+                is_modified = bool(self._video_filter_user_modified.get(field, False))
+                label.setProperty("filterModified", is_modified)
+                label.style().unpolish(label)
+                label.style().polish(label)
+        finally:
+            self._video_filter_ui_sync = False
+
+    def _update_video_filter_slider_visual_state(self, field, slider):
+        if not slider:
+            return
+        is_modified = bool(self._video_filter_user_modified.get(field, False))
+        if is_modified:
+            slider.setStyleSheet(
+                "QSlider::groove:horizontal {"
+                "background: #223248; height: 6px; border-radius: 3px; }"
+                "QSlider::sub-page:horizontal {"
+                "background: #4ea6d8; border-radius: 3px; }"
+                "QSlider::handle:horizontal {"
+                "background: #8ad7ff; width: 14px; margin: -5px 0; border-radius: 7px; }"
+            )
+        else:
+            slider.setStyleSheet("")
+
+    def set_video_filter_state(self, preset_key="original", intensity=75, overrides=None, modified_flags=None):
+        self._video_filter_preset_key = self._normalize_video_filter_preset_key(preset_key)
+        self._video_filter_intensity = max(0, min(100, int(round(float(intensity)))))
+        base_overrides = self._default_video_filter_overrides()
+        base_modified_flags = self._default_video_filter_modified_flags()
+        for field in self._video_filter_fields():
+            if overrides and field in overrides:
+                base_overrides[field] = self._clamp_video_filter_value(overrides[field])
+            if modified_flags and field in modified_flags:
+                base_modified_flags[field] = bool(modified_flags[field])
+        self._video_filter_adjust_overrides = base_overrides
+        self._video_filter_user_modified = base_modified_flags
+        self._refresh_video_filter_ui()
+        self.refresh_ui_state()
+
+    def on_video_filter_preset_selected(self, preset_key):
+        if self._video_filter_ui_sync:
+            return
+        self.set_video_filter_state(
+            self._normalize_video_filter_preset_key(preset_key),
+            75,
+            self._default_video_filter_overrides(),
+            self._default_video_filter_modified_flags(),
+        )
+        self._mark_video_filter_preview_dirty()
+        self.schedule_live_video_filter_preview()
+
+    def on_video_filter_intensity_changed(self, value):
+        if self._video_filter_ui_sync:
+            return
+        self._video_filter_intensity = max(0, min(100, int(value)))
+        self._refresh_video_filter_ui()
+        self.refresh_ui_state()
+        self._mark_video_filter_preview_dirty()
+        if not self._is_video_filter_slider_interacting():
+            self.schedule_live_video_filter_preview()
+
+    def on_video_filter_adjust_changed(self, field_key, value):
+        if self._video_filter_ui_sync:
+            return
+        normalized_field = str(field_key or "").strip().lower()
+        if normalized_field not in self._video_filter_fields():
+            return
+        clamped_value = self._clamp_video_filter_value(value)
+        scaled_value = self._get_video_filter_scaled_values().get(normalized_field, 0)
+        self._video_filter_adjust_overrides[normalized_field] = clamped_value
+        self._video_filter_user_modified[normalized_field] = int(clamped_value) != int(scaled_value)
+        self._refresh_video_filter_ui()
+        self.refresh_ui_state()
+        self._mark_video_filter_preview_dirty()
+        if not self._is_video_filter_slider_interacting():
+            self.schedule_live_video_filter_preview()
+
+    def reset_video_filters(self):
+        self.set_video_filter_state(
+            "original",
+            75,
+            self._default_video_filter_overrides(),
+            self._default_video_filter_modified_flags(),
+        )
+        self._video_filter_preview_dirty = False
+        self._video_filter_apply_requested = False
+        self.schedule_live_video_filter_preview()
+
+    def get_video_filter_state(self):
+        base_values = self._get_video_filter_base_values()
+        scaled_values = self._get_video_filter_scaled_values()
+        effective_values = self._get_video_filter_effective_values()
+        active = any(abs(int(value)) > 0 for value in effective_values.values())
+        return {
+            "preset": self._normalize_video_filter_preset_key(self._video_filter_preset_key),
+            "intensity": int(self._video_filter_intensity),
+            "base": base_values,
+            "scaled": scaled_values,
+            "overrides": dict(self._video_filter_adjust_overrides),
+            "modified": dict(self._video_filter_user_modified),
+            "final": effective_values,
+            "active": active,
+        }
+
+    def has_active_video_filters(self):
+        return bool(self.get_video_filter_state().get("active"))
 
     def on_output_ratio_changed(self, *_args):
         if hasattr(self, "video_view") and hasattr(self.video_view, "set_preview_aspect_ratio"):
@@ -2458,6 +2882,8 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_output_mode_changed(self, value: str):
         mode = self.get_output_mode_key()
+        if getattr(self, "_filter_thumbnail_visible", False):
+            self.hide_filter_thumbnail_preview()
         self.workflow_hint_label.setText(build_workflow_hint(mode, self.is_ai_polish_enabled()))
 
         show_voice = mode in ("voice", "both")
@@ -2486,6 +2912,11 @@ class VideoTranslatorGUI(QMainWindow):
             self.output_both_radio.setChecked(mode == "both")
         self.export_btn.setText(get_export_button_label(mode))
         self.refresh_ui_state()
+
+    def on_left_panel_workflow_changed(self, index: int):
+        # Filter thumbnail preview should only stay active while the Filter page is open.
+        if int(index) != 4 and getattr(self, "_filter_thumbnail_visible", False):
+            self.hide_filter_thumbnail_preview()
 
     def update_guidance_panel(self):
         guidance = build_guidance_state(
@@ -4342,7 +4773,10 @@ class VideoTranslatorGUI(QMainWindow):
 
             # Update live overlay text for faster feedback
             if hasattr(self, "video_view"):
-                if 0 <= active_index < len(segments):
+                if getattr(self, "_preview_video_has_burned_subtitles", False):
+                    self.video_view.subtitle_item.set_text("")
+                    self.video_view.subtitle_item.hide()
+                elif 0 <= active_index < len(segments):
                     self.video_view.subtitle_item.set_text(segments[active_index].get("text", ""))
                     self.video_view.subtitle_item.show()
                 else:
@@ -4417,6 +4851,31 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "preview_btn"):
             self.preview_btn.setVisible(True)
             self.preview_btn.setEnabled(preview_enabled and not getattr(self, "_styled_preview_running", False))
+        if hasattr(self, "video_filter_apply_btn"):
+            has_active_filters = self.has_active_video_filters() if hasattr(self, "has_active_video_filters") else False
+            self.video_filter_apply_btn.setVisible(True)
+            self.video_filter_apply_btn.setEnabled(
+                self.is_filter_workflow_active()
+                and v_ok
+                and has_active_filters
+                and not getattr(self, "_styled_preview_running", False)
+            )
+            self.video_filter_apply_btn.setText("Applying..." if getattr(self, "_video_filter_apply_requested", False) and getattr(self, "_styled_preview_running", False) else "Apply Filter")
+        is_rendering_filter_preview = bool(getattr(self, "_video_filter_apply_requested", False) and getattr(self, "_styled_preview_running", False))
+        if hasattr(self, "video_filter_render_status_label"):
+            status_text = ""
+            if not self.is_filter_workflow_active():
+                status_text = ""
+            elif getattr(self, "_video_filter_apply_requested", False) and getattr(self, "_styled_preview_running", False):
+                status_text = "Rendering filtered preview video..."
+            elif getattr(self, "_video_filter_preview_dirty", False):
+                status_text = "Filter changes pending. Click Apply Filter to render motion preview."
+            elif self.has_active_video_filters() if hasattr(self, "has_active_video_filters") else False:
+                status_text = "Filtered preview video is ready."
+            self.video_filter_render_status_label.setText(status_text)
+            self.video_filter_render_status_label.setVisible(bool(status_text))
+        if hasattr(self, "video_filter_render_progress"):
+            self.video_filter_render_progress.setVisible(self.is_filter_workflow_active() and is_rendering_filter_preview)
         if hasattr(self, "reset_framing_btn"):
             scale_mode = self.get_output_scale_mode_key() if hasattr(self, "get_output_scale_mode_key") else "fit"
             focus_x, focus_y = self.get_output_fill_focus() if hasattr(self, "get_output_fill_focus") else (0.5, 0.5)
