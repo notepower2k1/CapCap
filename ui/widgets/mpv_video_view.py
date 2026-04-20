@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QWidget
 
 
 class _SubtitleOverlayWidget(QWidget):
@@ -325,6 +325,7 @@ class MpvVideoView(QWidget):
     """Hosts an MPV video surface and overlays."""
     blurRegionChanged = Signal()
     subtitlePositionChanged = Signal(int, int)  # x_percent, y_percent
+    framingChanged = Signal(float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -334,15 +335,35 @@ class MpvVideoView(QWidget):
         self.video_source_width = 0
         self.video_source_height = 0
         self.preview_aspect_key = "source"
+        self.preview_scale_mode = "fit"
+        self.preview_fill_focus_x = 0.5
+        self.preview_fill_focus_y = 0.5
+        self._framing_drag_active = False
+        self._framing_drag_start = QPointF()
+        self._framing_drag_focus = (0.5, 0.5)
         self.subtitle_item = _SubtitleOverlayWidget(self)
         self.video_surface = QWidget(self)
         self.video_surface.setAttribute(Qt.WA_NativeWindow, True)
         self.video_surface.setAutoFillBackground(True)
         self.video_surface.setStyleSheet("background-color: black;")
         self.blur_overlay = _BlurRegionOverlayWindow(on_region_changed=self.blurRegionChanged.emit)
+        self.ratio_badge = QLabel(self)
+        self.ratio_badge.setObjectName("previewRatioBadge")
+        self.ratio_badge.setAlignment(Qt.AlignCenter)
+        self.ratio_badge.setStyleSheet(
+            "QLabel#previewRatioBadge {"
+            "background-color: rgba(12, 24, 38, 210);"
+            "color: rgb(183, 227, 255);"
+            "padding: 4px 9px;"
+            "border-radius: 9px;"
+            "font-weight: 600;"
+            "}"
+        )
+        self.ratio_badge.hide()
         self.video_surface.show()
         self.video_surface.lower()
         self.subtitle_item.raise_()
+        self.ratio_badge.raise_()
         self.video_surface.winId()
 
 
@@ -354,6 +375,7 @@ class MpvVideoView(QWidget):
         self.video_surface.setGeometry(content_rect)
         self.video_surface.lower()
         self.subtitle_item.raise_()
+        self._update_ratio_badge()
         self.reposition_subtitle()
 
     def resizeEvent(self, event):
@@ -362,6 +384,7 @@ class MpvVideoView(QWidget):
         self.video_surface.lower()
         self.subtitle_item.raise_()
         self.reposition_subtitle()
+        self._update_ratio_badge()
         self.blur_overlay.sync_to_view()
         self.update()
 
@@ -374,6 +397,7 @@ class MpvVideoView(QWidget):
         self.video_surface.show()
         self.video_surface.lower()
         self.subtitle_item.raise_()
+        self._update_ratio_badge()
         self.blur_overlay.sync_to_view()
 
     def hideEvent(self, event):
@@ -385,9 +409,52 @@ class MpvVideoView(QWidget):
         self.video_surface.setGeometry(self.get_video_content_rect().toRect())
         self.video_surface.lower()
         self.subtitle_item.raise_()
+        self._update_ratio_badge()
         self.reposition_subtitle()
         self.blur_overlay.sync_to_view()
         self.update()
+
+    def set_preview_scale_mode(self, scale_mode: str):
+        self.preview_scale_mode = str(scale_mode or "fit").strip().lower() or "fit"
+        self.video_surface.setGeometry(self.get_video_content_rect().toRect())
+        self.video_surface.lower()
+        self.subtitle_item.raise_()
+        self._update_ratio_badge()
+        self.reposition_subtitle()
+        self.blur_overlay.sync_to_view()
+        self.update()
+
+    def set_preview_fill_focus(self, focus_x: float, focus_y: float):
+        self.preview_fill_focus_x = max(0.0, min(1.0, float(focus_x)))
+        self.preview_fill_focus_y = max(0.0, min(1.0, float(focus_y)))
+        self.video_surface.setGeometry(self.get_video_content_rect().toRect())
+        self.video_surface.lower()
+        self.subtitle_item.raise_()
+        self._update_ratio_badge()
+        self.reposition_subtitle()
+        self.blur_overlay.sync_to_view()
+        self.update()
+
+    def reset_preview_fill_focus(self):
+        self.set_preview_fill_focus(0.5, 0.5)
+
+    def get_preview_fill_focus(self) -> tuple[float, float]:
+        return (float(self.preview_fill_focus_x), float(self.preview_fill_focus_y))
+
+    def _update_ratio_badge(self):
+        aspect_key = str(getattr(self, "preview_aspect_key", "source") or "source").strip().lower()
+        if aspect_key == "source":
+            self.ratio_badge.hide()
+            return
+        self.ratio_badge.setText(aspect_key.upper())
+        self.ratio_badge.adjustSize()
+        margin = 10
+        canvas_rect = self.get_preview_canvas_rect().toRect()
+        x_pos = canvas_rect.right() - self.ratio_badge.width() - margin
+        y_pos = canvas_rect.top() + margin
+        self.ratio_badge.move(max(margin, x_pos), max(margin, y_pos))
+        self.ratio_badge.raise_()
+        self.ratio_badge.show()
 
     def _resolve_canvas_aspect_ratio(self) -> float | None:
         aspect_key = str(getattr(self, "preview_aspect_key", "source") or "source").strip().lower()
@@ -433,16 +500,31 @@ class MpvVideoView(QWidget):
 
         source_ratio = self.video_source_width / self.video_source_height
         canvas_ratio = canvas_rect.width() / canvas_rect.height() if canvas_rect.height() else source_ratio
-        if source_ratio > canvas_ratio:
-            content_w = canvas_rect.width()
-            content_h = content_w / source_ratio
-            offset_x = canvas_rect.left()
-            offset_y = canvas_rect.top() + (canvas_rect.height() - content_h) / 2.0
+        scale_mode = str(getattr(self, "preview_scale_mode", "fit") or "fit").strip().lower()
+        if scale_mode == "fill":
+            if source_ratio > canvas_ratio:
+                content_h = canvas_rect.height()
+                content_w = content_h * source_ratio
+                overflow_w = max(0.0, content_w - canvas_rect.width())
+                offset_x = canvas_rect.left() - overflow_w * float(getattr(self, "preview_fill_focus_x", 0.5))
+                offset_y = canvas_rect.top()
+            else:
+                content_w = canvas_rect.width()
+                content_h = content_w / source_ratio
+                offset_x = canvas_rect.left()
+                overflow_h = max(0.0, content_h - canvas_rect.height())
+                offset_y = canvas_rect.top() - overflow_h * float(getattr(self, "preview_fill_focus_y", 0.5))
         else:
-            content_h = canvas_rect.height()
-            content_w = content_h * source_ratio
-            offset_x = canvas_rect.left() + (canvas_rect.width() - content_w) / 2.0
-            offset_y = canvas_rect.top()
+            if source_ratio > canvas_ratio:
+                content_w = canvas_rect.width()
+                content_h = content_w / source_ratio
+                offset_x = canvas_rect.left()
+                offset_y = canvas_rect.top() + (canvas_rect.height() - content_h) / 2.0
+            else:
+                content_h = canvas_rect.height()
+                content_w = content_h * source_ratio
+                offset_x = canvas_rect.left() + (canvas_rect.width() - content_w) / 2.0
+                offset_y = canvas_rect.top()
         return QRectF(offset_x, offset_y, content_w, content_h)
 
     def reposition_subtitle(self):
@@ -493,6 +575,60 @@ class MpvVideoView(QWidget):
         item.setFixedSize(int(item_w), int(item_h))
         item.update()
 
+    def _can_drag_framing(self) -> bool:
+        if str(getattr(self, "preview_scale_mode", "fit") or "fit").strip().lower() != "fill":
+            return False
+        canvas_rect = self.get_preview_canvas_rect()
+        content_rect = self.get_video_content_rect()
+        return content_rect.width() > canvas_rect.width() + 0.5 or content_rect.height() > canvas_rect.height() + 0.5
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self._can_drag_framing():
+            pos = QPointF(event.position())
+            if self.get_preview_canvas_rect().contains(pos):
+                self._framing_drag_active = True
+                self._framing_drag_start = pos
+                self._framing_drag_focus = self.get_preview_fill_focus()
+                self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._framing_drag_active:
+            pos = QPointF(event.position())
+            canvas_rect = self.get_preview_canvas_rect()
+            content_rect = self.get_video_content_rect()
+            dx = pos.x() - self._framing_drag_start.x()
+            dy = pos.y() - self._framing_drag_start.y()
+            focus_x, focus_y = self._framing_drag_focus
+            overflow_w = max(0.0, content_rect.width() - canvas_rect.width())
+            overflow_h = max(0.0, content_rect.height() - canvas_rect.height())
+            if overflow_w > 0.0:
+                focus_x = max(0.0, min(1.0, focus_x - (dx / overflow_w)))
+            if overflow_h > 0.0:
+                focus_y = max(0.0, min(1.0, focus_y - (dy / overflow_h)))
+            self.set_preview_fill_focus(focus_x, focus_y)
+            self.framingChanged.emit(focus_x, focus_y)
+            event.accept()
+            return
+        if self._can_drag_framing():
+            self.setCursor(Qt.OpenHandCursor)
+        else:
+            self.unsetCursor()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._framing_drag_active and event.button() == Qt.LeftButton:
+            self._framing_drag_active = False
+            if self._can_drag_framing():
+                self.setCursor(Qt.OpenHandCursor)
+            else:
+                self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         canvas_rect = self.get_preview_canvas_rect()
@@ -510,24 +646,6 @@ class MpvVideoView(QWidget):
         painter.fillPath(matte, QColor(2, 8, 16, 190))
         painter.setPen(QPen(QColor(78, 117, 158, 180), 1.5))
         painter.drawRoundedRect(canvas_rect, 12, 12)
-
-        aspect_key = str(getattr(self, "preview_aspect_key", "source") or "source").strip().lower()
-        if aspect_key != "source":
-            label = aspect_key.upper()
-            metrics = painter.fontMetrics()
-            text_w = metrics.horizontalAdvance(label) + 18
-            text_h = metrics.height() + 8
-            chip_rect = QRectF(
-                canvas_rect.right() - text_w - 10,
-                canvas_rect.top() + 10,
-                text_w,
-                text_h,
-            )
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(12, 24, 38, 210))
-            painter.drawRoundedRect(chip_rect, 9, 9)
-            painter.setPen(QColor(183, 227, 255))
-            painter.drawText(chip_rect, Qt.AlignCenter, label)
 
     def set_blur_edit_enabled(self, enabled: bool):
         if enabled:

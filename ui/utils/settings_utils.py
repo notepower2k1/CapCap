@@ -6,6 +6,8 @@
         s.setValue("output_fps", gui.output_fps_combo.currentData())
     if hasattr(gui, "output_ratio_combo"):
         s.setValue("output_ratio", gui.output_ratio_combo.currentData())
+    if hasattr(gui, "output_scale_mode_combo"):
+        s.setValue("output_scale_mode", gui.output_scale_mode_combo.currentData())
     s.setValue("source_lang", gui.lang_whisper_combo.currentText())
     s.setValue("whisper_model_name", gui.get_whisper_model_name())
     s.setValue("final_output_folder", gui.final_output_folder_edit.text())
@@ -77,6 +79,11 @@ def load_user_settings(gui):
         idx = gui.output_ratio_combo.findData(output_ratio)
         if idx >= 0:
             gui.output_ratio_combo.setCurrentIndex(idx)
+    output_scale_mode = str(s.value("output_scale_mode", "fit") or "fit").strip().lower()
+    if hasattr(gui, "output_scale_mode_combo"):
+        idx = gui.output_scale_mode_combo.findData(output_scale_mode)
+        if idx >= 0:
+            gui.output_scale_mode_combo.setCurrentIndex(idx)
     source_lang = s.value("source_lang", gui.lang_whisper_combo.currentText())
     gui.selected_whisper_model_name = str(s.value("whisper_model_name", getattr(gui, "selected_whisper_model_name", "base")) or "base").strip().lower()
     source_index = gui.lang_whisper_combo.findText(source_lang)

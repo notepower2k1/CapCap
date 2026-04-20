@@ -18,6 +18,23 @@ def _subprocess_run_kwargs() -> dict:
     return kwargs
 
 
+def _build_canvas_vf(target_width=None, target_height=None, scale_mode: str = "fit", focus_x: float = 0.5, focus_y: float = 0.5) -> str:
+    try:
+        if target_width and target_height:
+            tw = int(target_width)
+            th = int(target_height)
+            if tw > 0 and th > 0:
+                mode = str(scale_mode or "fit").strip().lower()
+                if mode == "fill":
+                    fx = max(0.0, min(1.0, float(focus_x)))
+                    fy = max(0.0, min(1.0, float(focus_y)))
+                    return f"scale=w={tw}:h={th}:force_original_aspect_ratio=increase,crop={tw}:{th}:(iw-{tw})*{fx:.6f}:(ih-{th})*{fy:.6f}"
+                return f"scale=w={tw}:h={th}:force_original_aspect_ratio=decrease,pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
+    except Exception:
+        return ""
+    return ""
+
+
 def trim_video_clip(video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -64,6 +81,9 @@ def mux_audio_into_video_for_preview(
     *,
     target_width=None,
     target_height=None,
+    scale_mode="fit",
+    focus_x=0.5,
+    focus_y=0.5,
     output_fps=None,
 ) -> str:
     """Create a video by replacing audio.
@@ -83,18 +103,7 @@ def mux_audio_into_video_for_preview(
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
 
-    vf = ""
-    try:
-        if target_width and target_height:
-            tw = int(target_width)
-            th = int(target_height)
-            if tw > 0 and th > 0:
-                vf = (
-                    f"scale=w={tw}:h={th}:force_original_aspect_ratio=decrease,"
-                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
-                )
-    except Exception:
-        vf = ""
+    vf = _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y)
     fps_value = None
     try:
         if output_fps:
@@ -175,6 +184,9 @@ def mux_audio_into_video_clip_for_preview(
     duration_seconds: float,
     target_width=None,
     target_height=None,
+    scale_mode="fit",
+    focus_x=0.5,
+    focus_y=0.5,
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -186,18 +198,7 @@ def mux_audio_into_video_clip_for_preview(
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
 
-    vf = ""
-    try:
-        if target_width and target_height:
-            tw = int(target_width)
-            th = int(target_height)
-            if tw > 0 and th > 0:
-                vf = (
-                    f"scale=w={tw}:h={th}:force_original_aspect_ratio=decrease,"
-                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
-                )
-    except Exception:
-        vf = ""
+    vf = _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y)
 
     cmd = [
         ffmpeg,

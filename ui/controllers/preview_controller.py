@@ -206,6 +206,8 @@ class PreviewController:
             "both": "Subtitle + voice",
         }.get(str(mode or "").strip().lower(), str(mode or "Unknown"))
         fps_label = f"{source_fps} FPS (Source)" if output_fps == "source" else f"{output_fps} FPS"
+        canvas_label = self.gui.get_output_scale_mode_key().capitalize()
+        focus_x, focus_y = self.gui.get_output_fill_focus()
         audio_label = "None"
         if mode in ("voice", "both"):
             audio_label = os.path.basename(audio_path) if audio_path else "Selected audio"
@@ -217,6 +219,8 @@ class PreviewController:
             f"Duration: {self._format_duration_ms(duration_ms)}",
             f"Resolution: {self._resolve_export_resolution_label(video_path, output_quality)}",
             f"FPS: {fps_label}",
+            f"Canvas: {canvas_label}",
+            f"Framing: {int(round(focus_x * 100))}% x / {int(round(focus_y * 100))}% y" if self.gui.get_output_scale_mode_key() == "fill" else "Framing: Center",
             f"Source Size: {source_size}",
             f"Audio: {audio_label}",
         ]
@@ -285,6 +289,8 @@ class PreviewController:
             "subtitle_style": subtitle_style or {},
             "output_quality": self.gui.get_output_quality_key(),
             "output_ratio": self.gui.get_output_ratio_key(),
+            "output_scale_mode": self.gui.get_output_scale_mode_key(),
+            "output_fill_focus": self.gui.get_output_fill_focus(),
             "output_fps": self.gui.get_output_fps_key(),
         }
         return hashlib.sha1(json.dumps(payload, ensure_ascii=True, sort_keys=True).encode("utf-8")).hexdigest()
@@ -359,6 +365,7 @@ class PreviewController:
         self.gui.on_export_progress(5, "Preparing final export...")
 
         project_state_path = self.gui.project_service.project_file(self.gui.current_project_state.project_root) if self.gui.current_project_state else ""
+        fill_focus_x, fill_focus_y = self.gui.get_output_fill_focus()
         self.gui.export_thread = FinalExportWorker(
             workspace_root=self.gui.workspace_root,
             video_path=video_path,
@@ -371,6 +378,9 @@ class PreviewController:
             output_quality=self.gui.get_output_quality_key(),
             output_fps=self.gui.get_output_fps_key(),
             output_ratio=self.gui.get_output_ratio_key(),
+            output_scale_mode=self.gui.get_output_scale_mode_key(),
+            output_fill_focus_x=fill_focus_x,
+            output_fill_focus_y=fill_focus_y,
             project_state_path=project_state_path,
         )
         self.gui.export_thread.progress.connect(self.gui.on_export_progress)
@@ -405,6 +415,7 @@ class PreviewController:
         start_seconds = max(0.0, self.gui.media_player.position() / 1000.0)
         duration_seconds = 5.0
         target_width, target_height = self._resolve_output_canvas_dimensions(video_path)
+        fill_focus_x, fill_focus_y = self.gui.get_output_fill_focus()
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         if self.gui.last_preview_video_path and self.gui.last_preview_video_path != self.gui.last_exact_preview_5s_path:
             try:
@@ -447,6 +458,9 @@ class PreviewController:
             subtitle_style=self.gui.get_subtitle_export_style(segments=preview_segments),
             target_width=target_width,
             target_height=target_height,
+            output_scale_mode=self.gui.get_output_scale_mode_key(),
+            output_fill_focus_x=fill_focus_x,
+            output_fill_focus_y=fill_focus_y,
         )
         self.gui.quick_preview_thread.finished.connect(self.gui.on_quick_preview_ready)
         self.gui.quick_preview_thread.start()
@@ -622,6 +636,8 @@ class PreviewController:
             try:
                 if hasattr(self.gui.video_view, "set_preview_aspect_ratio"):
                     self.gui.video_view.set_preview_aspect_ratio(self.gui.get_output_ratio_key())
+                if hasattr(self.gui.video_view, "set_preview_scale_mode"):
+                    self.gui.video_view.set_preview_scale_mode(self.gui.get_output_scale_mode_key())
                 self.gui.media_player.setSource(QUrl.fromLocalFile(video_path))
                 self.gui.sync_live_subtitle_preview()
                 self.gui._refresh_preview_audio_controls()
@@ -686,6 +702,7 @@ class PreviewController:
         self.gui.progress_bar.setValue(95)
         self.gui.refresh_ui_state()
         target_width, target_height = self._resolve_output_canvas_dimensions(video_path)
+        fill_focus_x, fill_focus_y = self.gui.get_output_fill_focus()
 
         self.gui.preview_thread = PreviewMuxWorker(
             video_path,
@@ -697,6 +714,9 @@ class PreviewController:
             render_subtitles=False,
             target_width=target_width,
             target_height=target_height,
+            output_scale_mode=self.gui.get_output_scale_mode_key(),
+            output_fill_focus_x=fill_focus_x,
+            output_fill_focus_y=fill_focus_y,
         )
         self.gui.preview_thread.finished.connect(
             lambda preview_path, error: self.gui.on_preview_ready(preview_path, error, styled_signature)

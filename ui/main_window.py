@@ -2299,11 +2299,44 @@ class VideoTranslatorGUI(QMainWindow):
             return str(value).strip().lower()
         return str(self.output_ratio_combo.currentText() or "source").strip().lower() or "source"
 
+    def get_output_scale_mode_key(self):
+        if not hasattr(self, "output_scale_mode_combo"):
+            return "fit"
+        value = self.output_scale_mode_combo.currentData()
+        if value:
+            return str(value).strip().lower()
+        return str(self.output_scale_mode_combo.currentText() or "fit").strip().lower() or "fit"
+
+    def get_output_fill_focus(self):
+        if hasattr(self, "video_view") and hasattr(self.video_view, "get_preview_fill_focus"):
+            return self.video_view.get_preview_fill_focus()
+        return (0.5, 0.5)
+
     def on_output_ratio_changed(self, *_args):
         if hasattr(self, "video_view") and hasattr(self.video_view, "set_preview_aspect_ratio"):
             self.video_view.set_preview_aspect_ratio(self.get_output_ratio_key())
+        if hasattr(self, "video_view") and hasattr(self.video_view, "set_preview_scale_mode"):
+            self.video_view.set_preview_scale_mode(self.get_output_scale_mode_key())
         self.update_subtitle_preview_style()
         self.apply_preview_blur_region()
+        self.refresh_ui_state()
+
+    def on_output_scale_mode_changed(self, *_args):
+        if hasattr(self, "video_view") and hasattr(self.video_view, "set_preview_scale_mode"):
+            self.video_view.set_preview_scale_mode(self.get_output_scale_mode_key())
+        self.update_subtitle_preview_style()
+        self.apply_preview_blur_region()
+        self.refresh_ui_state()
+
+    def on_preview_framing_changed(self, *_args):
+        self.apply_preview_blur_region()
+        self.refresh_ui_state()
+
+    def reset_preview_framing(self):
+        if hasattr(self, "video_view") and hasattr(self.video_view, "reset_preview_fill_focus"):
+            self.video_view.reset_preview_fill_focus()
+        self.apply_preview_blur_region()
+        self.refresh_ui_state()
 
     def get_audio_handling_mode(self):
         if not hasattr(self, "audio_handling_combo"):
@@ -4302,6 +4335,12 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "preview_btn"):
             self.preview_btn.setVisible(True)
             self.preview_btn.setEnabled(preview_enabled and not getattr(self, "_styled_preview_running", False))
+        if hasattr(self, "reset_framing_btn"):
+            scale_mode = self.get_output_scale_mode_key() if hasattr(self, "get_output_scale_mode_key") else "fit"
+            focus_x, focus_y = self.get_output_fill_focus() if hasattr(self, "get_output_fill_focus") else (0.5, 0.5)
+            framing_dirty = abs(float(focus_x) - 0.5) > 0.001 or abs(float(focus_y) - 0.5) > 0.001
+            self.reset_framing_btn.setVisible(True)
+            self.reset_framing_btn.setEnabled(v_ok and scale_mode == "fill" and framing_dirty)
         if hasattr(self, "play_btn"):
             self.play_btn.setEnabled(v_ok and not voice_running and not getattr(self, "_styled_preview_running", False))
         if hasattr(self, "stop_btn"):

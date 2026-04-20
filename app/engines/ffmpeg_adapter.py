@@ -5,7 +5,7 @@ class FFmpegAdapter:
     def extract_audio(self, video_path: str, audio_output_path: str) -> bool:
         return extract_audio(video_path, audio_output_path)
 
-    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, target_width=None, target_height=None, output_fps=None) -> bool:
+    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None) -> bool:
         subtitle_style = subtitle_style or {}
         return embed_subtitles(
             video_path,
@@ -39,11 +39,25 @@ class FFmpegAdapter:
             blur_region=subtitle_style.get("blur_region"),
             target_width=target_width,
             target_height=target_height,
+            output_scale_mode=output_scale_mode,
+            output_fill_focus_x=output_fill_focus_x,
+            output_fill_focus_y=output_fill_focus_y,
             output_fps=output_fps,
         )
 
-    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, target_width=None, target_height=None, output_fps=None) -> bool:
-        return embed_ass_subtitles(video_path, ass_path, output_path, blur_region=blur_region, target_width=target_width, target_height=target_height, output_fps=output_fps)
+    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None) -> bool:
+        return embed_ass_subtitles(
+            video_path,
+            ass_path,
+            output_path,
+            blur_region=blur_region,
+            target_width=target_width,
+            target_height=target_height,
+            output_scale_mode=output_scale_mode,
+            output_fill_focus_x=output_fill_focus_x,
+            output_fill_focus_y=output_fill_focus_y,
+            output_fps=output_fps,
+        )
 
     def get_video_dimensions(self, video_path: str):
         return get_video_dimensions(video_path)

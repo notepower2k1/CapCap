@@ -232,6 +232,7 @@ def build_preview_panel(gui):
     gui.play_btn = QPushButton()
     gui.stop_btn = QPushButton()
     gui.preview_btn = QPushButton()
+    gui.reset_framing_btn = QPushButton("Reset Framing")
     gui.blur_area_btn = QPushButton()
     gui.blur_area_btn.setCheckable(True)
     _set_preview_icon_button(gui.play_btn, os.path.join(icons_dir, "play.svg"), "Play or pause preview")
@@ -241,6 +242,7 @@ def build_preview_panel(gui):
     controls_layout.addWidget(gui.play_btn)
     controls_layout.addWidget(gui.stop_btn)
     controls_layout.addWidget(gui.preview_btn)
+    controls_layout.addWidget(gui.reset_framing_btn)
     controls_layout.addWidget(gui.blur_area_btn)
 
     preview_audio_layout = QHBoxLayout()

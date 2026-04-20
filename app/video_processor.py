@@ -92,6 +92,23 @@ def _build_blur_filter_chain(blur_region, video_width, video_height):
     )
 
 
+def _build_canvas_filter_chain(target_width=None, target_height=None, scale_mode: str = "fit", focus_x: float = 0.5, focus_y: float = 0.5):
+    try:
+        if target_width and target_height:
+            tw = int(target_width)
+            th = int(target_height)
+            if tw > 0 and th > 0:
+                mode = str(scale_mode or "fit").strip().lower()
+                if mode == "fill":
+                    fx = max(0.0, min(1.0, float(focus_x)))
+                    fy = max(0.0, min(1.0, float(focus_y)))
+                    return f"scale=w={tw}:h={th}:force_original_aspect_ratio=increase,crop={tw}:{th}:(iw-{tw})*{fx:.6f}:(ih-{th})*{fy:.6f}"
+                return f"scale=w={tw}:h={th}:force_original_aspect_ratio=decrease,pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
+    except Exception:
+        return ""
+    return ""
+
+
 def get_video_dimensions(video_path):
     """Return (width, height) of the first video stream using ffprobe.
     Falls back to (1920, 1080) if ffprobe is unavailable or fails.
@@ -706,7 +723,7 @@ def srt_to_ass(srt_path: str,
     return ass_path
 
 
-def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, target_width=None, target_height=None, output_fps=None):
+def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None):
     """Burn subtitles into video using an already-prepared ASS file."""
     ffmpeg = _ffmpeg_path(ffmpeg_path)
     if not os.path.exists(ffmpeg):
@@ -717,19 +734,15 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
     escaped_ass = _escape_path_for_filter(ass_path)
     video_w, video_h = get_video_dimensions(video_path)
 
-    scale_chain = ""
+    scale_chain = _build_canvas_filter_chain(target_width, target_height, output_scale_mode, output_fill_focus_x, output_fill_focus_y)
     try:
         if target_width and target_height:
             tw = int(target_width)
             th = int(target_height)
             if tw > 0 and th > 0:
                 video_w, video_h = tw, th
-                scale_chain = (
-                    f"scale=w={tw}:h={th}:force_original_aspect_ratio=decrease,"
-                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
-                )
     except Exception:
-        scale_chain = ""
+        pass
 
     blur_chain = _build_blur_filter_chain(blur_region, video_w, video_h)
     prefix = f"{scale_chain}," if scale_chain else ""
@@ -856,6 +869,9 @@ def embed_subtitles(video_path, srt_path, output_path,
                     blur_region=None,
                      target_width=None,
                      target_height=None,
+                     output_scale_mode="fit",
+                     output_fill_focus_x=0.5,
+                     output_fill_focus_y=0.5,
                      output_fps=None,
                      ffmpeg_path=None):
     """Burn subtitles into video using a properly-styled ASS file.
@@ -908,7 +924,19 @@ def embed_subtitles(video_path, srt_path, output_path,
         single_line=single_line,
     )
 
-    success = embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=ffmpeg, blur_region=blur_region, target_width=target_width, target_height=target_height, output_fps=output_fps)
+    success = embed_ass_subtitles(
+        video_path,
+        ass_path,
+        output_path,
+        ffmpeg_path=ffmpeg,
+        blur_region=blur_region,
+        target_width=target_width,
+        target_height=target_height,
+        output_scale_mode=output_scale_mode,
+        output_fill_focus_x=output_fill_focus_x,
+        output_fill_focus_y=output_fill_focus_y,
+        output_fps=output_fps,
+    )
 
     # Step 4: clean up temp ASS
     if os.path.exists(ass_path):

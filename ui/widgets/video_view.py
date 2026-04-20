@@ -9,6 +9,8 @@ from .subtitle_overlay import SubtitleOverlayItem
 class VideoView(QGraphicsView):
     """Hosts video and subtitle overlay in one scene."""
 
+    framingChanged = Signal(float, float)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -29,6 +31,12 @@ class VideoView(QGraphicsView):
         self.video_source_width = 0
         self.video_source_height = 0
         self.preview_aspect_key = "source"
+        self.preview_scale_mode = "fit"
+        self.preview_fill_focus_x = 0.5
+        self.preview_fill_focus_y = 0.5
+        self._framing_drag_active = False
+        self._framing_drag_start = QPointF()
+        self._framing_drag_focus = (0.5, 0.5)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -55,6 +63,29 @@ class VideoView(QGraphicsView):
         self.video_item.setSize(QSizeF(content_rect.width(), content_rect.height()))
         self.reposition_subtitle()
         self.viewport().update()
+
+    def set_preview_scale_mode(self, scale_mode: str):
+        self.preview_scale_mode = str(scale_mode or "fit").strip().lower() or "fit"
+        content_rect = self.get_video_content_rect()
+        self.video_item.setPos(content_rect.topLeft())
+        self.video_item.setSize(QSizeF(content_rect.width(), content_rect.height()))
+        self.reposition_subtitle()
+        self.viewport().update()
+
+    def set_preview_fill_focus(self, focus_x: float, focus_y: float):
+        self.preview_fill_focus_x = max(0.0, min(1.0, float(focus_x)))
+        self.preview_fill_focus_y = max(0.0, min(1.0, float(focus_y)))
+        content_rect = self.get_video_content_rect()
+        self.video_item.setPos(content_rect.topLeft())
+        self.video_item.setSize(QSizeF(content_rect.width(), content_rect.height()))
+        self.reposition_subtitle()
+        self.viewport().update()
+
+    def reset_preview_fill_focus(self):
+        self.set_preview_fill_focus(0.5, 0.5)
+
+    def get_preview_fill_focus(self) -> tuple[float, float]:
+        return (float(self.preview_fill_focus_x), float(self.preview_fill_focus_y))
 
     def _resolve_canvas_aspect_ratio(self) -> float | None:
         aspect_key = str(getattr(self, "preview_aspect_key", "source") or "source").strip().lower()
@@ -103,16 +134,31 @@ class VideoView(QGraphicsView):
         source_ratio = self.video_source_width / self.video_source_height
         canvas_ratio = canvas_rect.width() / canvas_rect.height() if canvas_rect.height() else source_ratio
 
-        if source_ratio > canvas_ratio:
-            content_w = canvas_rect.width()
-            content_h = content_w / source_ratio
-            offset_x = canvas_rect.left()
-            offset_y = canvas_rect.top() + (canvas_rect.height() - content_h) / 2.0
+        scale_mode = str(getattr(self, "preview_scale_mode", "fit") or "fit").strip().lower()
+        if scale_mode == "fill":
+            if source_ratio > canvas_ratio:
+                content_h = canvas_rect.height()
+                content_w = content_h * source_ratio
+                overflow_w = max(0.0, content_w - canvas_rect.width())
+                offset_x = canvas_rect.left() - overflow_w * float(getattr(self, "preview_fill_focus_x", 0.5))
+                offset_y = canvas_rect.top()
+            else:
+                content_w = canvas_rect.width()
+                content_h = content_w / source_ratio
+                offset_x = canvas_rect.left()
+                overflow_h = max(0.0, content_h - canvas_rect.height())
+                offset_y = canvas_rect.top() - overflow_h * float(getattr(self, "preview_fill_focus_y", 0.5))
         else:
-            content_h = canvas_rect.height()
-            content_w = content_h * source_ratio
-            offset_x = canvas_rect.left() + (canvas_rect.width() - content_w) / 2.0
-            offset_y = canvas_rect.top()
+            if source_ratio > canvas_ratio:
+                content_w = canvas_rect.width()
+                content_h = content_w / source_ratio
+                offset_x = canvas_rect.left()
+                offset_y = canvas_rect.top() + (canvas_rect.height() - content_h) / 2.0
+            else:
+                content_h = canvas_rect.height()
+                content_w = content_h * source_ratio
+                offset_x = canvas_rect.left() + (canvas_rect.width() - content_w) / 2.0
+                offset_y = canvas_rect.top()
         return QRectF(offset_x, offset_y, content_w, content_h)
 
     def reposition_subtitle(self):
@@ -157,6 +203,60 @@ class VideoView(QGraphicsView):
         y_max = rect.bottom()
         y_pos = max(y_min, min(y_pos, y_max))
         item.setPos(QPointF(x_pos, y_pos))
+
+    def _can_drag_framing(self) -> bool:
+        if str(getattr(self, "preview_scale_mode", "fit") or "fit").strip().lower() != "fill":
+            return False
+        canvas_rect = self.get_preview_canvas_rect()
+        content_rect = self.get_video_content_rect()
+        return content_rect.width() > canvas_rect.width() + 0.5 or content_rect.height() > canvas_rect.height() + 0.5
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self._can_drag_framing():
+            pos = QPointF(event.position()) if hasattr(event, "position") else QPointF(event.pos())
+            if self.get_preview_canvas_rect().contains(pos):
+                self._framing_drag_active = True
+                self._framing_drag_start = pos
+                self._framing_drag_focus = self.get_preview_fill_focus()
+                self.viewport().setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._framing_drag_active:
+            pos = QPointF(event.position()) if hasattr(event, "position") else QPointF(event.pos())
+            canvas_rect = self.get_preview_canvas_rect()
+            content_rect = self.get_video_content_rect()
+            dx = pos.x() - self._framing_drag_start.x()
+            dy = pos.y() - self._framing_drag_start.y()
+            focus_x, focus_y = self._framing_drag_focus
+            overflow_w = max(0.0, content_rect.width() - canvas_rect.width())
+            overflow_h = max(0.0, content_rect.height() - canvas_rect.height())
+            if overflow_w > 0.0:
+                focus_x = max(0.0, min(1.0, focus_x - (dx / overflow_w)))
+            if overflow_h > 0.0:
+                focus_y = max(0.0, min(1.0, focus_y - (dy / overflow_h)))
+            self.set_preview_fill_focus(focus_x, focus_y)
+            self.framingChanged.emit(focus_x, focus_y)
+            event.accept()
+            return
+        if self._can_drag_framing():
+            self.viewport().setCursor(Qt.OpenHandCursor)
+        else:
+            self.viewport().unsetCursor()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._framing_drag_active and event.button() == Qt.LeftButton:
+            self._framing_drag_active = False
+            if self._can_drag_framing():
+                self.viewport().setCursor(Qt.OpenHandCursor)
+            else:
+                self.viewport().unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event):
         super().paintEvent(event)

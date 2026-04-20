@@ -124,7 +124,7 @@ class EngineRuntime:
             style_instruction=style_instruction,
         )
 
-    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, target_width=None, target_height=None, output_fps=None) -> bool:
+    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None) -> bool:
         return self.ffmpeg.embed_subtitles(
             video_path,
             srt_path,
@@ -132,11 +132,25 @@ class EngineRuntime:
             subtitle_style=subtitle_style,
             target_width=target_width,
             target_height=target_height,
+            output_scale_mode=output_scale_mode,
+            output_fill_focus_x=output_fill_focus_x,
+            output_fill_focus_y=output_fill_focus_y,
             output_fps=output_fps,
         )
 
-    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, target_width=None, target_height=None, output_fps=None) -> bool:
-        return self.ffmpeg.embed_ass_subtitles(video_path, ass_path, output_path, blur_region=blur_region, target_width=target_width, target_height=target_height, output_fps=output_fps)
+    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None) -> bool:
+        return self.ffmpeg.embed_ass_subtitles(
+            video_path,
+            ass_path,
+            output_path,
+            blur_region=blur_region,
+            target_width=target_width,
+            target_height=target_height,
+            output_scale_mode=output_scale_mode,
+            output_fill_focus_x=output_fill_focus_x,
+            output_fill_focus_y=output_fill_focus_y,
+            output_fps=output_fps,
+        )
 
     def get_video_dimensions(self, video_path: str):
         return self.ffmpeg.get_video_dimensions(video_path)
@@ -215,8 +229,18 @@ class EngineRuntime:
             ducking_amount_db=ducking_amount_db,
         )
 
-    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_fps=None) -> str:
-        return self.preview.mux_audio_for_preview(video_path, audio_path, output_video_path, target_width=target_width, target_height=target_height, output_fps=output_fps)
+    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_scale_mode="fit", focus_x=0.5, focus_y=0.5, output_fps=None) -> str:
+        return self.preview.mux_audio_for_preview(
+            video_path,
+            audio_path,
+            output_video_path,
+            target_width=target_width,
+            target_height=target_height,
+            output_scale_mode=output_scale_mode,
+            focus_x=focus_x,
+            focus_y=focus_y,
+            output_fps=output_fps,
+        )
 
     def trim_video_clip(self, video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:
         return self.preview.trim_video_clip(video_path, output_video_path, start_seconds, duration_seconds)

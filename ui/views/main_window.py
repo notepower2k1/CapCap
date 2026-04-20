@@ -143,6 +143,8 @@ def _connect_ui_signals(gui):
     gui.import_translation_btn.clicked.connect(gui.import_translated_srt)
     gui.voiceover_btn.clicked.connect(gui.run_voiceover)
     gui.preview_btn.clicked.connect(gui.preview_video)
+    if hasattr(gui, "reset_framing_btn"):
+        gui.reset_framing_btn.clicked.connect(gui.reset_preview_framing)
     gui.output_mode_combo.currentTextChanged.connect(gui.on_output_mode_changed)
     if hasattr(gui, "output_quality_combo"):
         gui.output_quality_combo.currentIndexChanged.connect(gui.refresh_ui_state)
@@ -165,6 +167,8 @@ def _connect_ui_signals(gui):
     gui.use_generated_audio_radio.toggled.connect(gui.on_audio_source_mode_changed)
     gui.use_existing_audio_radio.toggled.connect(gui.on_audio_source_mode_changed)
     gui.blur_area_btn.toggled.connect(gui.toggle_blur_area_editing)
+    if hasattr(gui, "video_view") and hasattr(gui.video_view, "framingChanged"):
+        gui.video_view.framingChanged.connect(gui.on_preview_framing_changed)
     gui.transcript_text.textChanged.connect(gui.refresh_ui_state)
     gui.transcript_text.textChanged.connect(gui.schedule_live_subtitle_preview_refresh)
     gui.transcript_text.textChanged.connect(gui.sync_segment_editor_from_hidden_text)

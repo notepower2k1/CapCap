@@ -89,6 +89,9 @@ class WorkflowRuntime:
         output_quality: str = "source",
         output_fps: str = "source",
         output_ratio: str = "source",
+        output_scale_mode: str = "fit",
+        output_fill_focus_x: float = 0.5,
+        output_fill_focus_y: float = 0.5,
         project_state_path: str = "",
         on_progress: callable = None,
     ) -> str:
@@ -103,6 +106,9 @@ class WorkflowRuntime:
             output_quality=output_quality,
             output_fps=output_fps,
             output_ratio=output_ratio,
+            output_scale_mode=output_scale_mode,
+            output_fill_focus_x=output_fill_focus_x,
+            output_fill_focus_y=output_fill_focus_y,
             project_state_path=project_state_path,
             on_progress=on_progress,
         )

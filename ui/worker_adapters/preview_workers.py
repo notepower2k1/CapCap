@@ -15,7 +15,7 @@ from services import EngineRuntime
 class PreviewMuxWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None, render_subtitles=True, target_width=None, target_height=None):
+    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None, render_subtitles=True, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5):
         super().__init__()
         self.video_path = video_path
         self.audio_path = audio_path
@@ -26,6 +26,9 @@ class PreviewMuxWorker(QThread):
         self.render_subtitles = bool(render_subtitles)
         self.target_width = target_width
         self.target_height = target_height
+        self.output_scale_mode = output_scale_mode
+        self.output_fill_focus_x = output_fill_focus_x
+        self.output_fill_focus_y = output_fill_focus_y
 
     def run(self):
         temp_mux_path = ""
@@ -43,6 +46,9 @@ class PreviewMuxWorker(QThread):
                     temp_mux_path,
                     target_width=self.target_width,
                     target_height=self.target_height,
+                    scale_mode=self.output_scale_mode,
+                    focus_x=self.output_fill_focus_x,
+                    focus_y=self.output_fill_focus_y,
                 )
 
             if self.render_subtitles and self.mode in ("subtitle", "both") and self.srt_path and os.path.exists(self.srt_path):
@@ -54,6 +60,9 @@ class PreviewMuxWorker(QThread):
                     subtitle_style=self.subtitle_style,
                     target_width=self.target_width,
                     target_height=self.target_height,
+                    output_scale_mode=self.output_scale_mode,
+                    output_fill_focus_x=self.output_fill_focus_x,
+                    output_fill_focus_y=self.output_fill_focus_y,
                 )
                 if not ok:
                     raise RuntimeError("Failed to render subtitle preview video.")
@@ -77,7 +86,7 @@ class PreviewMuxWorker(QThread):
 class QuickPreviewWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", audio_path="", subtitle_style=None, target_width=None, target_height=None):
+    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", audio_path="", subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5):
         super().__init__()
         self.video_path = video_path
         self.output_path = output_path
@@ -89,6 +98,9 @@ class QuickPreviewWorker(QThread):
         self.subtitle_style = subtitle_style or {}
         self.target_width = target_width
         self.target_height = target_height
+        self.output_scale_mode = output_scale_mode
+        self.output_fill_focus_x = output_fill_focus_x
+        self.output_fill_focus_y = output_fill_focus_y
 
     def run(self):
         temp_paths = []
@@ -114,6 +126,9 @@ class QuickPreviewWorker(QThread):
                     self.duration_seconds,
                     target_width=self.target_width,
                     target_height=self.target_height,
+                    scale_mode=self.output_scale_mode,
+                    focus_x=self.output_fill_focus_x,
+                    focus_y=self.output_fill_focus_y,
                 )
                 current_video = voice_clip
 
@@ -126,6 +141,9 @@ class QuickPreviewWorker(QThread):
                     subtitle_style=self.subtitle_style,
                     target_width=self.target_width,
                     target_height=self.target_height,
+                    output_scale_mode=self.output_scale_mode,
+                    output_fill_focus_x=self.output_fill_focus_x,
+                    output_fill_focus_y=self.output_fill_focus_y,
                 )
                 if not ok:
                     raise RuntimeError("Failed to render subtitle preview clip.")

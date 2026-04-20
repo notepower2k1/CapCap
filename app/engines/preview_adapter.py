@@ -7,8 +7,18 @@ from preview_processor import (
 
 
 class PreviewAdapter:
-    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_fps=None) -> str:
-        return mux_audio_into_video_for_preview(video_path, audio_path, output_video_path, target_width=target_width, target_height=target_height, output_fps=output_fps)
+    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_scale_mode="fit", focus_x=0.5, focus_y=0.5, output_fps=None) -> str:
+        return mux_audio_into_video_for_preview(
+            video_path,
+            audio_path,
+            output_video_path,
+            target_width=target_width,
+            target_height=target_height,
+            scale_mode=output_scale_mode,
+            focus_x=focus_x,
+            focus_y=focus_y,
+            output_fps=output_fps,
+        )
 
     def trim_video_clip(self, video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:
         return trim_video_clip(video_path, output_video_path, start_seconds, duration_seconds)
@@ -20,6 +30,12 @@ class PreviewAdapter:
         output_video_path: str,
         start_seconds: float,
         duration_seconds: float,
+        *,
+        target_width=None,
+        target_height=None,
+        output_scale_mode="fit",
+        focus_x=0.5,
+        focus_y=0.5,
     ) -> str:
         return mux_audio_into_video_clip_for_preview(
             video_path,
@@ -27,6 +43,11 @@ class PreviewAdapter:
             output_video_path,
             start_seconds,
             duration_seconds,
+            target_width=target_width,
+            target_height=target_height,
+            scale_mode=output_scale_mode,
+            focus_x=focus_x,
+            focus_y=focus_y,
         )
 
     def render_subtitle_frame(
