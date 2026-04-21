@@ -233,24 +233,43 @@ def build_start_group(gui, left_layout):
     gui.left_panel_stack = QStackedWidget()
     gui.left_panel_stack.setObjectName("leftPanelStack")
 
-    def _make_page():
+    gui.workflow_page_containers = {}
+    gui.workflow_page_hints = {}
+    gui.workflow_tab_buttons = {}
+
+    def _make_page(page_key: str):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
-        return page, layout
+
+        lock_hint = QLabel("")
+        lock_hint.setObjectName("helperLabel")
+        lock_hint.setWordWrap(True)
+        lock_hint.setVisible(False)
+        layout.addWidget(lock_hint)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(10)
+        layout.addWidget(content)
+
+        gui.workflow_page_containers[page_key] = content
+        gui.workflow_page_hints[page_key] = lock_hint
+        return page, content_layout
 
     pages = []
-    media_page, media_layout = _make_page()
-    language_page, language_layout = _make_page()
-    voice_page, voice_layout = _make_page()
-    style_page, style_layout = _make_page()
-    filter_page, filter_layout = _make_page()
-    advanced_page, advanced_layout = _make_page()
+    media_page, media_layout = _make_page("media")
+    language_page, language_layout = _make_page("language")
+    voice_page, voice_layout = _make_page("voice")
+    style_page, style_layout = _make_page("style")
+    filter_page, filter_layout = _make_page("filter")
+    advanced_page, advanced_layout = _make_page("advanced")
     gui.workflow_advanced_layout = advanced_layout
     pages.extend([media_page, language_page, voice_page, style_page, filter_page, advanced_page])
 
-    def _add_tab(label: str, page_index: int, checked: bool = False):
+    def _add_tab(label: str, page_index: int, page_key: str, checked: bool = False):
         btn = QPushButton(label)
         btn.setCheckable(True)
         btn.setChecked(checked)
@@ -263,14 +282,15 @@ def build_start_group(gui, left_layout):
         col = page_index % 2
         tab_bar_layout.addWidget(btn, row, col)
         btn.toggled.connect(lambda active, idx=page_index: active and gui.left_panel_stack.setCurrentIndex(idx))
+        gui.workflow_tab_buttons[page_key] = btn
         return btn
 
-    _add_tab("Media", 0, checked=True)
-    _add_tab("Language", 1)
-    _add_tab("Voice", 2)
-    _add_tab("Style", 3)
-    _add_tab("Filter", 4)
-    _add_tab("Advanced", 5)
+    _add_tab("Media", 0, "media", checked=True)
+    _add_tab("Language", 1, "language")
+    _add_tab("Voice", 2, "voice")
+    _add_tab("Style", 3, "style")
+    _add_tab("Filter", 4, "filter")
+    _add_tab("Advanced", 5, "advanced")
     gui.show_progress_btn = QPushButton("Show Progress")
     gui.show_progress_btn.clicked.connect(gui.show_active_progress_dialog)
     gui.show_progress_btn.setVisible(False)

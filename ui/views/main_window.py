@@ -258,6 +258,7 @@ def _initialize_ui_state(gui):
     gui.use_exact_subtitle_preview = True
 
     gui.update_subtitle_preview_style()
+    gui.refresh_ui_state()
     gui.on_subtitle_preset_changed()
     gui.on_output_mode_changed(gui.output_mode_combo.currentText())
     gui.update_project_header()

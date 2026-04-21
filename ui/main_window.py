@@ -105,7 +105,7 @@ class VideoTranslatorGUI(QMainWindow):
         if os.path.exists(self.logo_path):
             self.setWindowIcon(QIcon(self.logo_path))
         self.setWindowFlag(Qt.WindowCloseButtonHint, True)
-        self.setWindowFlag(Qt.WindowMinimizeButtonHint, False)
+        self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
         self.setWindowFlag(Qt.WindowMaximizeButtonHint, False)
         
         # Maximize and prevent resizing
@@ -3023,6 +3023,53 @@ class VideoTranslatorGUI(QMainWindow):
         if int(index) != 4 and getattr(self, "_filter_thumbnail_visible", False):
             self.hide_filter_thumbnail_preview()
 
+    def _workflow_dependency_state(self) -> dict:
+        video_path = self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
+        has_video = bool(video_path and os.path.exists(video_path))
+        return {
+            "media": {"enabled": True, "reason": ""},
+            "language": {"enabled": has_video, "reason": "Select a video first to transcribe and translate."},
+            "voice": {"enabled": has_video, "reason": "Select a video first to configure voice and audio."},
+            "style": {"enabled": has_video, "reason": "Select a video first to style subtitle output."},
+            "filter": {"enabled": has_video, "reason": "Select a video first to preview and apply filters."},
+            "advanced": {"enabled": True, "reason": ""},
+        }
+
+    def update_workflow_availability(self):
+        states = self._workflow_dependency_state()
+        current_index = int(self.left_panel_stack.currentIndex()) if hasattr(self, "left_panel_stack") else 0
+        page_order = ["media", "language", "voice", "style", "filter", "advanced"]
+
+        for page_key, state in states.items():
+            container = getattr(self, "workflow_page_containers", {}).get(page_key) if hasattr(self, "workflow_page_containers") else None
+            hint = getattr(self, "workflow_page_hints", {}).get(page_key) if hasattr(self, "workflow_page_hints") else None
+            tab_btn = getattr(self, "workflow_tab_buttons", {}).get(page_key) if hasattr(self, "workflow_tab_buttons") else None
+            enabled = bool(state.get("enabled"))
+            reason = str(state.get("reason", "") or "").strip()
+            if container is not None:
+                container.setEnabled(enabled)
+            if hint is not None:
+                hint.setText("" if enabled else reason)
+                hint.setVisible(not enabled and bool(reason))
+            if tab_btn is not None:
+                tab_btn.setEnabled(enabled)
+                tab_btn.style().unpolish(tab_btn)
+                tab_btn.style().polish(tab_btn)
+
+        active_key = page_order[current_index] if 0 <= current_index < len(page_order) else "media"
+        active_state = states.get(active_key, {"enabled": True})
+        if not active_state.get("enabled", True):
+            for fallback_key in ("media", "advanced"):
+                fallback_index = page_order.index(fallback_key)
+                fallback_state = states.get(fallback_key, {"enabled": True})
+                if fallback_state.get("enabled", True):
+                    btn = getattr(self, "workflow_tab_buttons", {}).get(fallback_key) if hasattr(self, "workflow_tab_buttons") else None
+                    if btn is not None:
+                        btn.setChecked(True)
+                    elif hasattr(self, "left_panel_stack"):
+                        self.left_panel_stack.setCurrentIndex(fallback_index)
+                    break
+
     def update_guidance_panel(self):
         guidance = build_guidance_state(
             video_path=self.video_path_edit.text(),
@@ -5047,6 +5094,7 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "tabs"):
             self.tabs.setTabEnabled(1, v_ok)
             self.tabs.setTabEnabled(2, v_ok and mode in ("voice", "both"))
+        self.update_workflow_availability()
         self.update_guidance_panel()
 
     def dragEnterEvent(self, event):
