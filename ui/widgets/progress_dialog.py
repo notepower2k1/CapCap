@@ -119,6 +119,12 @@ class StepWidget(QFrame):
             self.setStyleSheet(self.styleSheet() + "#stepWidget { border: 1px solid rgba(255, 68, 68, 80); background-color: rgba(255, 68, 68, 15); }")
             self.stop_timer()
             self.pulse_timer.stop()
+        elif status == "skipped":
+            self.status_label.setText("Skipped")
+            self.status_label.setStyleSheet("color: #f5c86a;")
+            self.indicator.setStyleSheet("background-color: #f5c86a;")
+            self.stop_timer()
+            self.pulse_timer.stop()
         else:
             self.status_label.setText("Pending")
             self.status_label.setStyleSheet("color: #666;")
@@ -307,6 +313,10 @@ class PipelineProgressDialog(QDialog):
             self.footer.setText(f"Error encountered during: {self.steps[step_id].name_label.text()}")
             self.footer.setStyleSheet("color: #FF4444; font-weight: bold; margin-top: 15px;")
             self._stop_total_timer()
+
+    def skip_step(self, step_id):
+        if step_id in self.steps:
+            self.steps[step_id].set_status("skipped")
 
     def set_completed(self):
         self.overall_progress.setValue(100)

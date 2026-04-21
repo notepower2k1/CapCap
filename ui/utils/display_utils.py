@@ -76,19 +76,23 @@ def cleanup_temp_preview_files(gui):
     except Exception:
         pass
 
+    preview_temp_root = ""
+    if hasattr(gui, "get_project_temp_path"):
+        preview_temp_root = gui.get_project_temp_path("preview")
+
     paths = [
         gui.last_preview_video_path,
         gui.last_exact_preview_5s_path,
         gui.last_exact_preview_frame_path,
-        os.path.join(os.getcwd(), "temp", "preview_subtitle_5s.srt"),
-        os.path.join(os.getcwd(), "temp", "preview_subtitle_full.srt"),
+        os.path.join(preview_temp_root, "preview_subtitle_5s.srt") if preview_temp_root else "",
+        os.path.join(preview_temp_root, "preview_subtitle_full.srt") if preview_temp_root else "",
     ]
     for path in paths:
         gui.cleanup_file_if_exists(path)
 
     # Prune old styled preview renders to avoid temp folder bloat.
     try:
-        temp_root = os.path.join(os.getcwd(), "temp")
+        temp_root = preview_temp_root
         if os.path.isdir(temp_root):
             candidates = []
             for name in os.listdir(temp_root):

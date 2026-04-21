@@ -115,8 +115,8 @@ class ExportWorkflow:
         }
         return ratio_map.get(key)
 
-    def _build_temp_mux_path(self) -> str:
-        tmp_dir = os.path.join(self.workspace_root, "temp")
+    def _build_temp_mux_path(self, project_temp_dir: str = "") -> str:
+        tmp_dir = str(project_temp_dir or "").strip() or os.path.join(self.workspace_root, "temp")
         os.makedirs(tmp_dir, exist_ok=True)
         return os.path.join(tmp_dir, f"final_mux_{int(time.time())}.mp4")
 
@@ -185,6 +185,7 @@ class ExportWorkflow:
         output_fill_focus_y: float = 0.5,
         video_filter_state=None,
         project_state_path: str = "",
+        project_temp_dir: str = "",
         on_progress=None,
     ) -> str:
         subtitle_style = subtitle_style or {}
@@ -228,7 +229,7 @@ class ExportWorkflow:
                     video_filter_state=video_filter_state,
                 )
             elif mode == "both":
-                tmp_mux_path = self._build_temp_mux_path()
+                tmp_mux_path = self._build_temp_mux_path(project_temp_dir)
                 self._emit_progress(on_progress, 18, "Muxing Vietnamese audio with the source video...")
                 # Keep this mux fast (no scaling). Scaling happens in the subtitle-burn step.
                 self.engine_runtime.mux_audio_for_preview(

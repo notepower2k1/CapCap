@@ -59,6 +59,7 @@ class WorkflowRuntime:
         bg_gain_db: float = 0.0,
         ducking_amount_db: float = -6.0,
         project_state_path: str = "",
+        project_temp_dir: str = "",
         on_progress: callable = None,
     ):
         return self.voice_workflow.run(
@@ -73,6 +74,7 @@ class WorkflowRuntime:
             bg_gain_db=bg_gain_db,
             ducking_amount_db=ducking_amount_db,
             project_state_path=project_state_path,
+            project_temp_dir=project_temp_dir,
             on_progress=on_progress,
         )
 
@@ -94,6 +96,7 @@ class WorkflowRuntime:
         output_fill_focus_y: float = 0.5,
         video_filter_state=None,
         project_state_path: str = "",
+        project_temp_dir: str = "",
         on_progress: callable = None,
     ) -> str:
         return self.export_workflow.run(
@@ -112,6 +115,7 @@ class WorkflowRuntime:
             output_fill_focus_y=output_fill_focus_y,
             video_filter_state=video_filter_state,
             project_state_path=project_state_path,
+            project_temp_dir=project_temp_dir,
             on_progress=on_progress,
         )
 

@@ -384,6 +384,7 @@ class PreviewController:
             output_fill_focus_y=fill_focus_y,
             video_filter_state=self.gui.get_video_filter_state() if hasattr(self.gui, "get_video_filter_state") else {},
             project_state_path=project_state_path,
+            project_temp_dir=self.gui.get_project_temp_dir("export"),
         )
         self.gui.export_thread.progress.connect(self.gui.on_export_progress)
         self.gui.export_thread.finished.connect(self.gui.on_export_finished)
@@ -464,6 +465,7 @@ class PreviewController:
             output_fill_focus_x=fill_focus_x,
             output_fill_focus_y=fill_focus_y,
             video_filter_state=self.gui.get_video_filter_state() if hasattr(self.gui, "get_video_filter_state") else {},
+            temp_dir=self.gui.get_project_temp_dir("preview"),
         )
         self.gui.quick_preview_thread.finished.connect(self.gui.on_quick_preview_ready)
         self.gui.quick_preview_thread.start()
@@ -492,8 +494,7 @@ class PreviewController:
             return
 
         timestamp_seconds = max(0.0, self.gui.media_player.position() / 1000.0)
-        out_dir = os.path.join(self.gui.workspace_root, "temp")
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = self.gui.get_project_temp_dir("preview")
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         self.gui.cleanup_file_if_exists(self.gui.last_exact_preview_frame_path)
         frame_output = os.path.join(out_dir, f"{video_name}_preview_frame_{int(time.time())}.png")
@@ -597,7 +598,7 @@ class PreviewController:
         if not clipped:
             return "", []
 
-        preview_srt_path = os.path.normpath(os.path.join(self.gui.workspace_root, "temp", "preview_subtitle_5s.srt"))
+        preview_srt_path = self.gui.get_project_temp_path("preview", "preview_subtitle_5s.srt", create_parent=True)
         self.gui.cleanup_file_if_exists(preview_srt_path)
         from subtitle_builder import generate_srt
 
@@ -608,7 +609,7 @@ class PreviewController:
         segments = self.gui.get_active_segments()
         if not segments:
             return "", []
-        preview_srt_path = os.path.normpath(os.path.join(self.gui.workspace_root, "temp", "preview_subtitle_full.srt"))
+        preview_srt_path = self.gui.get_project_temp_path("preview", "preview_subtitle_full.srt", create_parent=True)
         self.gui.cleanup_file_if_exists(preview_srt_path)
         from subtitle_builder import generate_srt
 
@@ -673,8 +674,6 @@ class PreviewController:
         video_path = self.gui.video_path_edit.text().strip()
         audio_path = self.gui.resolve_selected_audio_path()
         mode = self.gui.get_output_mode_key()
-        if hasattr(self.gui, "hide_filter_thumbnail_preview"):
-            self.gui.hide_filter_thumbnail_preview()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.gui, "Error", "Video file not found. Please select a video first.")
             return
@@ -705,7 +704,7 @@ class PreviewController:
                 pass
             return
         ts = int(time.time())
-        preview_out = os.path.normpath(os.path.join(self.gui.workspace_root, "temp", f"preview_vi_voice_{ts}.mp4"))
+        preview_out = self.gui.get_project_temp_path("preview", f"preview_vi_voice_{ts}.mp4", create_parent=True)
         preview_srt_path = ""
         preview_segments = []
         subtitle_style = {}
@@ -778,6 +777,7 @@ class PreviewController:
             output_fill_focus_x=fill_focus_x,
             output_fill_focus_y=fill_focus_y,
             video_filter_state=self.gui.get_video_filter_state() if hasattr(self.gui, "get_video_filter_state") else {},
+            temp_dir=self.gui.get_project_temp_dir("preview"),
         )
         self.gui.preview_thread.finished.connect(
             lambda preview_path, error: self.gui.on_preview_ready(preview_path, error, styled_signature)
@@ -805,6 +805,8 @@ class PreviewController:
         if preview_path and os.path.exists(preview_path):
             self.gui._video_filter_preview_dirty = False
             self.gui._video_filter_apply_requested = False
+            if hasattr(self.gui, "hide_filter_thumbnail_preview"):
+                self.gui.hide_filter_thumbnail_preview()
             self.gui.last_preview_video_path = preview_path
             self.gui.processed_artifacts["preview_video"] = preview_path
             self.gui.last_styled_preview_path = preview_path

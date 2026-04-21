@@ -299,6 +299,7 @@ class VoiceWorkflow:
         bg_gain_db: float = 0.0,
         ducking_amount_db: float = -6.0,
         project_state_path: str = "",
+        project_temp_dir: str = "",
         on_progress: callable = None,
     ):
         workflow_started = time.perf_counter()
@@ -308,7 +309,7 @@ class VoiceWorkflow:
         print(f"[Voice Workflow] Audio handling mode: {audio_mode_key}")
 
         os.makedirs(output_dir, exist_ok=True)
-        tmp_dir = os.path.join(output_dir, "_tts_tmp")
+        tmp_dir = str(project_temp_dir or "").strip() or os.path.join(output_dir, "_tts_tmp")
         os.makedirs(tmp_dir, exist_ok=True)
         voice_provider = self._voice_provider(voice_name)
         provider_speed = self._provider_native_speed(

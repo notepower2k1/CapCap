@@ -4,6 +4,9 @@ import subprocess
 from runtime_paths import bin_path
 
 
+_FFMPEG_ENCODER_CACHE = {}
+
+
 def _ffmpeg_path():
     return bin_path("ffmpeg", "ffmpeg.exe")
 
@@ -16,6 +19,86 @@ def _subprocess_run_kwargs() -> dict:
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         kwargs["startupinfo"] = startupinfo
     return kwargs
+
+
+def _ffmpeg_supports_encoder(ffmpeg_path: str, encoder_name: str) -> bool:
+    cache_key = (os.path.abspath(ffmpeg_path), encoder_name)
+    cached = _FFMPEG_ENCODER_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            check=True,
+            **_subprocess_run_kwargs(),
+        )
+        supported = encoder_name in (result.stdout or "")
+    except Exception:
+        supported = False
+    _FFMPEG_ENCODER_CACHE[cache_key] = supported
+    return supported
+
+
+def _preferred_h264_encoder_args(ffmpeg_path: str, *, fast: bool = False) -> list[str]:
+    if _ffmpeg_supports_encoder(ffmpeg_path, "h264_nvenc"):
+        return [
+            "-c:v",
+            "h264_nvenc",
+            "-preset",
+            "p5" if fast else "p4",
+            "-cq",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    return [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast" if fast else "medium",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+    ]
+
+
+def _run_ffmpeg_with_h264_fallback(
+    ffmpeg: str,
+    base_cmd: list[str],
+    output_path: str,
+    *,
+    fast: bool = False,
+    error_message: str = "FFmpeg command failed.",
+) -> None:
+    encoder_args = _preferred_h264_encoder_args(ffmpeg, fast=fast)
+    cmd = [*base_cmd, *encoder_args, output_path]
+    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
+    if proc.returncode == 0:
+        return
+
+    encoder_name = encoder_args[1] if len(encoder_args) > 1 else ""
+    if encoder_name != "libx264":
+        fallback_cmd = [
+            *base_cmd,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast" if fast else "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            output_path,
+        ]
+        fallback_proc = subprocess.run(fallback_cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
+        if fallback_proc.returncode == 0:
+            return
+        raise RuntimeError(fallback_proc.stderr or fallback_proc.stdout or error_message)
+
+    raise RuntimeError(proc.stderr or proc.stdout or error_message)
 
 
 def _build_canvas_vf(target_width=None, target_height=None, scale_mode: str = "fit", focus_x: float = 0.5, focus_y: float = 0.5) -> str:
@@ -39,14 +122,29 @@ def _normalize_video_filter_state(video_filter_state) -> dict:
     if not isinstance(video_filter_state, dict):
         return {}
     final_values = video_filter_state.get("final", video_filter_state)
-    if not isinstance(final_values, dict):
-        return {}
     normalized = {}
     for field in ("brightness", "contrast", "saturation", "temperature", "highlights", "shadows"):
         try:
-            normalized[field] = max(-100.0, min(100.0, float(final_values.get(field, 0.0))))
+            source_values = final_values if isinstance(final_values, dict) else {}
+            normalized[field] = max(-100.0, min(100.0, float(source_values.get(field, 0.0))))
         except Exception:
             normalized[field] = 0.0
+    lut_path = str(video_filter_state.get("lut_path", "") or "").strip()
+    if lut_path and os.path.exists(lut_path):
+        normalized["lut_path"] = lut_path
+    else:
+        normalized["lut_path"] = ""
+    try:
+        normalized["lut_strength"] = max(0.0, min(1.0, float(video_filter_state.get("lut_strength", 0.0) or 0.0)))
+    except Exception:
+        normalized["lut_strength"] = 0.0
+    return normalized
+
+
+def _escape_ffmpeg_path(path: str) -> str:
+    normalized = str(path or "").strip().replace("\\", "/")
+    normalized = normalized.replace(":", "\\:")
+    normalized = normalized.replace("'", "\\'")
     return normalized
 
 
@@ -60,11 +158,20 @@ def _build_video_filter_vf(video_filter_state=None) -> str:
     temperature = values.get("temperature", 0.0)
     highlights = values.get("highlights", 0.0)
     shadows = values.get("shadows", 0.0)
+    lut_path = str(values.get("lut_path", "") or "").strip()
+    lut_strength = max(0.0, min(1.0, float(values.get("lut_strength", 0.0) or 0.0)))
 
-    if not any(abs(value) > 0.01 for value in values.values()):
+    if not any(abs(values.get(field, 0.0)) > 0.01 for field in ("brightness", "contrast", "saturation", "temperature", "highlights", "shadows")) and not (lut_path and lut_strength > 0.001):
         return ""
 
     chain = []
+    if lut_path and lut_strength > 0.001:
+        escaped_lut_path = _escape_ffmpeg_path(lut_path)
+        chain.append(
+            "split=2[base][lutsrc];"
+            f"[lutsrc]lut3d=file='{escaped_lut_path}'[lutapplied];"
+            f"[base][lutapplied]blend=all_expr='A*(1-{lut_strength:.4f})+B*{lut_strength:.4f}'"
+        )
     eq_parts = []
     if abs(brightness) > 0.01:
         eq_parts.append(f"brightness={max(-1.0, min(1.0, brightness / 100.0 * 0.35)):.4f}")
@@ -105,7 +212,7 @@ def trim_video_clip(video_path: str, output_video_path: str, start_seconds: floa
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
 
-    cmd = [
+    base_cmd = [
         ffmpeg,
         "-hide_banner",
         "-loglevel",
@@ -117,21 +224,18 @@ def trim_video_clip(video_path: str, output_video_path: str, start_seconds: floa
         str(max(0.1, float(duration_seconds))),
         "-i",
         video_path,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "18",
         "-c:a",
         "aac",
         "-b:a",
         "192k",
-        output_video_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg trim video clip failed.")
+    _run_ffmpeg_with_h264_fallback(
+        ffmpeg,
+        base_cmd,
+        output_video_path,
+        fast=True,
+        error_message="FFmpeg trim video clip failed.",
+    )
     return output_video_path
 
 
@@ -194,51 +298,45 @@ def mux_audio_into_video_for_preview(
         "1:a:0",
     ]
 
+    needs_encode = bool(vf or fps_value)
     if vf:
-        cmd += [
-            "-vf",
-            vf,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "18",
-            "-pix_fmt",
-            "yuv420p",
-        ]
-    else:
+        cmd += ["-vf", vf]
+
+    if needs_encode:
+        base_cmd = list(cmd)
         if fps_value:
-            cmd += [
-                "-c:v",
-                "libx264",
-                "-preset",
-                "medium",
-                "-crf",
-                "18",
-                "-pix_fmt",
-                "yuv420p",
-            ]
-        else:
-            cmd += ["-c:v", "copy"]
-
-    if fps_value:
-        cmd += ["-r", str(fps_value)]
-
-    cmd += [
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-shortest",
-        "-movflags",
-        "+faststart",
-        output_video_path,
-    ]
-
-    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux failed.")
+            base_cmd += ["-r", str(fps_value)]
+        base_cmd += [
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            "-movflags",
+            "+faststart",
+        ]
+        _run_ffmpeg_with_h264_fallback(
+            ffmpeg,
+            base_cmd,
+            output_video_path,
+            error_message="FFmpeg mux failed.",
+        )
+    else:
+        cmd += [
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            "-movflags",
+            "+faststart",
+            output_video_path,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux failed.")
     return output_video_path
 
 def mux_audio_into_video_clip_for_preview(
@@ -297,23 +395,20 @@ def mux_audio_into_video_clip_for_preview(
             "-vf",
             vf,
         ]
-    cmd += [
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "18",
+    base_cmd = [*cmd,
         "-c:a",
         "aac",
         "-b:a",
         "192k",
         "-shortest",
-        output_video_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux clip failed.")
+    _run_ffmpeg_with_h264_fallback(
+        ffmpeg,
+        base_cmd,
+        output_video_path,
+        fast=True,
+        error_message="FFmpeg mux clip failed.",
+    )
     return output_video_path
 
 

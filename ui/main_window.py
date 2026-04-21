@@ -1722,7 +1722,7 @@ class VideoTranslatorGUI(QMainWindow):
                         for idx in range(thumb_count)
                     ]
 
-                thumb_dir = temp_path("timeline_video_thumbs")
+                thumb_dir = self.get_project_temp_dir("timeline_video_thumbs")
                 os.makedirs(thumb_dir, exist_ok=True)
                 digest = hashlib.md5(f"{video_path}|{cache_key[1]}|{cache_key[2]}|{cache_key[3]}".encode("utf-8")).hexdigest()[:16]
 
@@ -1883,6 +1883,35 @@ class VideoTranslatorGUI(QMainWindow):
         self._video_filter_apply_requested = True
         self.refresh_ui_state()
         self.preview_controller.preview_video()
+
+    def revert_video_filter_preview_to_source(self):
+        video_path = self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
+        if not video_path or not os.path.exists(video_path):
+            return
+        self._play_video_filter_preview_when_ready = False
+        self.hide_filter_thumbnail_preview()
+        try:
+            current_position = int(self.media_player.position())
+        except Exception:
+            current_position = 0
+        try:
+            self.media_player.pause()
+        except Exception:
+            pass
+        try:
+            self.media_player.setSource(QUrl.fromLocalFile(video_path))
+            if current_position > 0:
+                self.media_player.setPosition(current_position)
+        except Exception:
+            pass
+        self.refresh_video_dimensions(video_path)
+        self._preview_video_has_burned_subtitles = False
+        self.sync_live_subtitle_preview()
+        if hasattr(self, "timeline"):
+            self.timeline.set_playing(False)
+        if hasattr(self, "_refresh_preview_audio_controls"):
+            self._refresh_preview_audio_controls()
+        self.refresh_ui_state()
 
     def _can_auto_render_filter_preview(self):
         video_path = self.video_path_edit.text().strip()
@@ -2543,6 +2572,53 @@ class VideoTranslatorGUI(QMainWindow):
 
     def cleanup_file_if_exists(self, path: str):
         cleanup_file_if_exists_impl(path)
+
+    def get_workspace_temp_root(self, create: bool = False) -> str:
+        root = os.path.normpath(os.path.join(self.workspace_root, "temp"))
+        if create:
+            os.makedirs(root, exist_ok=True)
+        return root
+
+    def get_current_project_temp_key(self) -> str:
+        state = getattr(self, "current_project_state", None)
+        project_id = str(getattr(state, "project_id", "") or "").strip()
+        if project_id:
+            return project_id
+        project_root = str(getattr(state, "project_root", "") or "").strip()
+        if project_root:
+            return os.path.basename(os.path.normpath(project_root))
+        video_path = self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
+        if video_path:
+            video_name = os.path.splitext(os.path.basename(video_path))[0] or "project"
+            slug = re.sub(r"[^a-zA-Z0-9]+", "_", video_name).strip("_").lower() or "project"
+            digest = hashlib.sha1(os.path.abspath(video_path).encode("utf-8")).hexdigest()[:8]
+            return f"{slug}_{digest}"
+        return "global"
+
+    def get_project_temp_root(self, create: bool = False) -> str:
+        root = os.path.normpath(
+            os.path.join(
+                self.get_workspace_temp_root(create=create),
+                "projects",
+                self.get_current_project_temp_key(),
+            )
+        )
+        if create:
+            os.makedirs(root, exist_ok=True)
+        return root
+
+    def get_project_temp_path(self, *parts: str, create_parent: bool = False) -> str:
+        path = os.path.normpath(os.path.join(self.get_project_temp_root(create=create_parent), *parts))
+        if create_parent:
+            parent = os.path.dirname(path) if os.path.splitext(path)[1] else path
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+        return path
+
+    def get_project_temp_dir(self, *parts: str) -> str:
+        path = self.get_project_temp_path(*parts, create_parent=True)
+        os.makedirs(path, exist_ok=True)
+        return path
     def get_output_mode_key(self):
         value = self.output_mode_combo.currentText() if hasattr(self, "output_mode_combo") else "Vietnamese subtitles + voice"
         return get_output_mode_key(value)
@@ -2636,6 +2712,13 @@ class VideoTranslatorGUI(QMainWindow):
             },
         }
 
+    def _video_filter_lut_map(self):
+        return {
+            "warm": asset_path("luts", "Portrait", "Portrait3.cube"),
+            "vivid": asset_path("luts", "Color Boost", "Earth_Tone_Boost.cube"),
+            "cool": asset_path("luts", "Cinematic", "Cinematic-2.cube"),
+        }
+
     def _video_filter_fields(self):
         return ("brightness", "contrast", "saturation", "temperature", "highlights", "shadows")
 
@@ -2692,12 +2775,11 @@ class VideoTranslatorGUI(QMainWindow):
             if hasattr(self, "video_filter_intensity_value_label"):
                 self.video_filter_intensity_value_label.setText(str(int(self._video_filter_intensity)))
 
-            effective_values = self._get_video_filter_effective_values()
             for field, slider in getattr(self, "video_filter_adjust_sliders", {}).items():
-                slider.setValue(int(effective_values.get(field, 0)))
+                slider.setValue(int(self._video_filter_adjust_overrides.get(field, 0)))
                 self._update_video_filter_slider_visual_state(field, slider)
             for field, label in getattr(self, "video_filter_adjust_value_labels", {}).items():
-                label.setText(str(int(effective_values.get(field, 0))))
+                label.setText(str(int(self._video_filter_adjust_overrides.get(field, 0))))
                 is_modified = bool(self._video_filter_user_modified.get(field, False))
                 label.setProperty("filterModified", is_modified)
                 label.style().unpolish(label)
@@ -2739,10 +2821,12 @@ class VideoTranslatorGUI(QMainWindow):
     def on_video_filter_preset_selected(self, preset_key):
         if self._video_filter_ui_sync:
             return
+        normalized_preset = self._normalize_video_filter_preset_key(preset_key)
+        seeded_overrides = self._get_video_filter_scaled_values(normalized_preset, 75)
         self.set_video_filter_state(
-            self._normalize_video_filter_preset_key(preset_key),
+            normalized_preset,
             75,
-            self._default_video_filter_overrides(),
+            seeded_overrides,
             self._default_video_filter_modified_flags(),
         )
         self._mark_video_filter_preview_dirty()
@@ -2783,21 +2867,42 @@ class VideoTranslatorGUI(QMainWindow):
         )
         self._video_filter_preview_dirty = False
         self._video_filter_apply_requested = False
+        self.revert_video_filter_preview_to_source()
+        self.schedule_live_video_filter_preview()
+
+    def reset_video_filter_adjustments(self):
+        seeded_overrides = self._get_video_filter_scaled_values(self._video_filter_preset_key, self._video_filter_intensity)
+        self.set_video_filter_state(
+            self._video_filter_preset_key,
+            self._video_filter_intensity,
+            seeded_overrides,
+            self._default_video_filter_modified_flags(),
+        )
+        self._mark_video_filter_preview_dirty()
         self.schedule_live_video_filter_preview()
 
     def get_video_filter_state(self):
         base_values = self._get_video_filter_base_values()
         scaled_values = self._get_video_filter_scaled_values()
         effective_values = self._get_video_filter_effective_values()
+        preset_key = self._normalize_video_filter_preset_key(self._video_filter_preset_key)
+        lut_path = str(self._video_filter_lut_map().get(preset_key, "") or "").strip()
+        if lut_path and not os.path.exists(lut_path):
+            lut_path = ""
+        lut_strength = 0.0
+        if lut_path:
+            lut_strength = max(0.0, min(0.45, (float(self._video_filter_intensity) / 100.0) * 0.45))
         active = any(abs(int(value)) > 0 for value in effective_values.values())
         return {
-            "preset": self._normalize_video_filter_preset_key(self._video_filter_preset_key),
+            "preset": preset_key,
             "intensity": int(self._video_filter_intensity),
             "base": base_values,
             "scaled": scaled_values,
             "overrides": dict(self._video_filter_adjust_overrides),
             "modified": dict(self._video_filter_user_modified),
             "final": effective_values,
+            "lut_path": lut_path,
+            "lut_strength": lut_strength,
             "active": active,
         }
 
@@ -4397,7 +4502,13 @@ class VideoTranslatorGUI(QMainWindow):
             self.preview_voice_btn.setEnabled(False)
             self.preview_voice_btn.setText("...")
 
-        worker = VoiceSamplePreviewWorker(self.workspace_root, text, voice_name, voice_speed)
+        worker = VoiceSamplePreviewWorker(
+            self.workspace_root,
+            text,
+            voice_name,
+            voice_speed,
+            temp_dir=self.get_project_temp_dir("voice_sample_preview"),
+        )
         worker.finished.connect(self.on_voice_sample_preview_ready)
         self._voice_sample_preview_thread = worker
         worker.start()
@@ -4442,7 +4553,14 @@ class VideoTranslatorGUI(QMainWindow):
             row["preview_button"].setEnabled(False)
             row["preview_button"].setText("...")
 
-        worker = SegmentAudioPreviewWorker(self.workspace_root, index, text, voice_name, voice_speed)
+        worker = SegmentAudioPreviewWorker(
+            self.workspace_root,
+            index,
+            text,
+            voice_name,
+            voice_speed,
+            temp_dir=self.get_project_temp_dir("segment_audio_preview"),
+        )
         worker.finished.connect(self.on_segment_audio_preview_ready)
         self._segment_preview_threads[index] = worker
         worker.start()
@@ -4616,8 +4734,7 @@ class VideoTranslatorGUI(QMainWindow):
             self._live_preview_signature = None
             return "", ""
 
-        preview_dir = os.path.join(self.workspace_root, "temp")
-        os.makedirs(preview_dir, exist_ok=True)
+        preview_dir = self.get_project_temp_dir("preview")
         preview_srt_path = os.path.join(preview_dir, "live_preview_subtitle.srt")
 
         from subtitle_builder import generate_srt
@@ -5900,6 +6017,7 @@ class VideoTranslatorGUI(QMainWindow):
             bg_gain,
             ducking_amount,
             project_state_path,
+            self.get_project_temp_dir("tts"),
         )
         self.voice_thread.finished.connect(self.on_voiceover_finished)
         self.voice_thread.start()
@@ -6068,10 +6186,12 @@ class VideoTranslatorGUI(QMainWindow):
             self.last_styled_preview_path,
             self.last_exact_preview_5s_path,
             self.last_exact_preview_frame_path,
-            os.path.join(self.workspace_root, "output", "_tts_tmp"),
-            os.path.join(self.workspace_root, "temp", "segment_audio_preview"),
-            os.path.join(self.workspace_root, "temp", "voice_sample_preview"),
-            os.path.join(self.workspace_root, "temp", "htdemucs"),
+            self.get_project_temp_path("tts"),
+            self.get_project_temp_path("segment_audio_preview"),
+            self.get_project_temp_path("voice_sample_preview"),
+            self.get_project_temp_path("htdemucs"),
+            self.get_project_temp_path("timeline_video_thumbs"),
+            self.get_project_temp_root(),
             project_root,
         ]
         for candidate in candidates:
@@ -6082,15 +6202,7 @@ class VideoTranslatorGUI(QMainWindow):
 
     def clean_current_project(self):
         project_state = getattr(self, "current_project_state", None)
-        if not project_state and not any(
-            [
-                getattr(self, "last_voice_vi_path", ""),
-                getattr(self, "last_mixed_vi_path", ""),
-                getattr(self, "last_extracted_audio", ""),
-                getattr(self, "last_vocals_path", ""),
-                getattr(self, "last_music_path", ""),
-            ]
-        ):
+        if not self._has_cleanable_project_data():
             QMessageBox.information(self, "Clean Project", "There is no generated project data to clean right now.")
             return
 
@@ -6115,11 +6227,11 @@ class VideoTranslatorGUI(QMainWindow):
             "TTS cache": [],
             "Temp folders": [],
         }
-        workspace_temp_root = os.path.join(self.workspace_root, "temp")
+        project_temp_root = self.get_project_temp_root()
         output_root = os.path.join(self.workspace_root, "output")
         project_root = str(getattr(project_state, "project_root", "") or "").strip()
         project_state_path = self.project_service.project_file(project_root) if project_root else ""
-        allowed_roots = [root for root in [workspace_temp_root, output_root, project_root] if root]
+        allowed_roots = [root for root in [project_temp_root, output_root, project_root] if root]
 
         self.cleanup_temp_preview_files()
 
@@ -6142,10 +6254,12 @@ class VideoTranslatorGUI(QMainWindow):
 
         dir_candidates = [
             ("Project folder", project_root),
-            ("TTS cache", os.path.join(output_root, "_tts_tmp")),
-            ("Temp folders", os.path.join(workspace_temp_root, "segment_audio_preview")),
-            ("Temp folders", os.path.join(workspace_temp_root, "voice_sample_preview")),
-            ("Temp folders", os.path.join(workspace_temp_root, "htdemucs")),
+            ("TTS cache", self.get_project_temp_path("tts")),
+            ("Temp folders", self.get_project_temp_path("segment_audio_preview")),
+            ("Temp folders", self.get_project_temp_path("voice_sample_preview")),
+            ("Temp folders", self.get_project_temp_path("htdemucs")),
+            ("Temp folders", self.get_project_temp_path("timeline_video_thumbs")),
+            ("Temp folders", project_temp_root),
         ]
         for group_name, candidate in dir_candidates:
             before_count = len(removed_paths)

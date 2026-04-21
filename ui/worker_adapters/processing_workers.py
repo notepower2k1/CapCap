@@ -260,7 +260,7 @@ class VoiceOverWorker(QThread):
     finished = Signal(str, str, str)
     progress = Signal(str)  # New signal for progress messages
 
-    def __init__(self, workspace_root, segments, output_dir, background_path, audio_handling_mode, voice_name, voice_speed, timing_sync_mode, voice_gain_db, bg_gain_db, ducking_amount_db, project_state_path=""):
+    def __init__(self, workspace_root, segments, output_dir, background_path, audio_handling_mode, voice_name, voice_speed, timing_sync_mode, voice_gain_db, bg_gain_db, ducking_amount_db, project_state_path="", project_temp_dir=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.segments = segments
@@ -274,6 +274,7 @@ class VoiceOverWorker(QThread):
         self.bg_gain_db = bg_gain_db
         self.ducking_amount_db = ducking_amount_db
         self.project_state_path = project_state_path
+        self.project_temp_dir = project_temp_dir
 
     def run(self):
         try:
@@ -293,6 +294,7 @@ class VoiceOverWorker(QThread):
                 bg_gain_db=self.bg_gain_db,
                 ducking_amount_db=self.ducking_amount_db,
                 project_state_path=self.project_state_path,
+                project_temp_dir=self.project_temp_dir,
                 on_progress=self.progress.emit,  # Pass callback
             )
             self.finished.emit(result.get("voice_track", ""), result.get("mixed_path", ""), "")
@@ -305,7 +307,7 @@ class FinalExportWorker(QThread):
     finished = Signal(str, str)
     progress = Signal(int, str)
 
-    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", output_ratio="source", output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, project_state_path=""):
+    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", output_ratio="source", output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, project_state_path="", project_temp_dir=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.video_path = video_path
@@ -323,6 +325,7 @@ class FinalExportWorker(QThread):
         self.output_fill_focus_y = output_fill_focus_y
         self.video_filter_state = video_filter_state or {}
         self.project_state_path = project_state_path
+        self.project_temp_dir = project_temp_dir
 
     def run(self):
         try:
@@ -343,6 +346,7 @@ class FinalExportWorker(QThread):
                 output_fill_focus_y=self.output_fill_focus_y,
                 video_filter_state=self.video_filter_state,
                 project_state_path=self.project_state_path,
+                project_temp_dir=self.project_temp_dir,
                 on_progress=self.progress.emit,
             )
             self.finished.emit(output, "")
@@ -353,17 +357,18 @@ class FinalExportWorker(QThread):
 class SegmentAudioPreviewWorker(QThread):
     finished = Signal(int, str, str)
 
-    def __init__(self, workspace_root, index, text, voice_name, voice_speed):
+    def __init__(self, workspace_root, index, text, voice_name, voice_speed, temp_dir=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.index = index
         self.text = text
         self.voice_name = voice_name
         self.voice_speed = voice_speed
+        self.temp_dir = temp_dir
 
     def run(self):
         try:
-            temp_dir = os.path.join(self.workspace_root, "temp", "segment_audio_preview")
+            temp_dir = self.temp_dir or os.path.join(self.workspace_root, "temp", "segment_audio_preview")
             os.makedirs(temp_dir, exist_ok=True)
             wav_path = os.path.join(temp_dir, f"segment_{self.index}_{os.getpid()}.wav")
             base_wav_path = os.path.join(temp_dir, f"segment_{self.index}_{os.getpid()}_base.wav")
@@ -392,16 +397,17 @@ class SegmentAudioPreviewWorker(QThread):
 class VoiceSamplePreviewWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, workspace_root, text, voice_name, voice_speed):
+    def __init__(self, workspace_root, text, voice_name, voice_speed, temp_dir=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.text = text
         self.voice_name = voice_name
         self.voice_speed = voice_speed
+        self.temp_dir = temp_dir
 
     def run(self):
         try:
-            temp_dir = os.path.join(self.workspace_root, "temp", "voice_sample_preview")
+            temp_dir = self.temp_dir or os.path.join(self.workspace_root, "temp", "voice_sample_preview")
             os.makedirs(temp_dir, exist_ok=True)
             wav_path = os.path.join(temp_dir, f"voice_sample_{os.getpid()}.wav")
             base_wav_path = os.path.join(temp_dir, f"voice_sample_{os.getpid()}_base.wav")

@@ -15,7 +15,7 @@ from services import EngineRuntime
 class PreviewMuxWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None, render_subtitles=True, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None):
+    def __init__(self, video_path, audio_path, output_path, mode="voice", srt_path="", subtitle_style=None, render_subtitles=True, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, temp_dir=""):
         super().__init__()
         self.video_path = video_path
         self.audio_path = audio_path
@@ -30,6 +30,7 @@ class PreviewMuxWorker(QThread):
         self.output_fill_focus_x = output_fill_focus_x
         self.output_fill_focus_y = output_fill_focus_y
         self.video_filter_state = video_filter_state or {}
+        self.temp_dir = temp_dir
 
     def run(self):
         temp_mux_path = ""
@@ -38,7 +39,7 @@ class PreviewMuxWorker(QThread):
 
             current_video = self.video_path
             if self.audio_path and os.path.exists(self.audio_path):
-                temp_dir = os.path.join(os.getcwd(), "temp")
+                temp_dir = self.temp_dir or os.path.join(os.getcwd(), "temp")
                 os.makedirs(temp_dir, exist_ok=True)
                 temp_mux_path = os.path.normpath(os.path.join(temp_dir, f"preview_mux_{int(time.time())}.mp4"))
                 current_video = mux_audio_into_video_for_preview(
@@ -89,7 +90,7 @@ class PreviewMuxWorker(QThread):
 class QuickPreviewWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", audio_path="", subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None):
+    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", audio_path="", subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, temp_dir=""):
         super().__init__()
         self.video_path = video_path
         self.output_path = output_path
@@ -105,13 +106,14 @@ class QuickPreviewWorker(QThread):
         self.output_fill_focus_x = output_fill_focus_x
         self.output_fill_focus_y = output_fill_focus_y
         self.video_filter_state = video_filter_state or {}
+        self.temp_dir = temp_dir
 
     def run(self):
         temp_paths = []
         try:
             from preview_processor import mux_audio_into_video_clip_for_preview, trim_video_clip
 
-            temp_dir = os.path.join(os.getcwd(), "temp")
+            temp_dir = self.temp_dir or os.path.join(os.getcwd(), "temp")
             os.makedirs(temp_dir, exist_ok=True)
             stamp = int(time.time())
             base_clip = os.path.join(temp_dir, f"preview_base_{stamp}.mp4")

@@ -789,6 +789,8 @@ def build_start_group(gui, left_layout):
         gui.video_filter_adjust_sliders[field_key] = slider
         gui.video_filter_adjust_value_labels[field_key] = value_label
         adjust_layout.addWidget(_build_filter_slider_row(field_label, slider, value_label))
+    gui.video_filter_reset_adjust_btn = QPushButton("Reset Adjust")
+    gui.video_filter_reset_adjust_btn.clicked.connect(gui.reset_video_filter_adjustments)
     gui.video_filter_reset_btn = QPushButton("Reset All")
     gui.video_filter_reset_btn.clicked.connect(gui.reset_video_filters)
     filter_action_row = QHBoxLayout()
@@ -798,6 +800,7 @@ def build_start_group(gui, left_layout):
     gui.video_filter_apply_btn = QPushButton("Apply Filter")
     gui.video_filter_apply_btn.clicked.connect(gui.apply_current_video_filter)
     filter_action_row.addWidget(gui.video_filter_apply_btn)
+    filter_action_row.addWidget(gui.video_filter_reset_adjust_btn)
     filter_action_row.addWidget(gui.video_filter_reset_btn)
     adjust_layout.addLayout(filter_action_row)
     gui.video_filter_render_status_label = QLabel("")
