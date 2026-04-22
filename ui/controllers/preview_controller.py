@@ -391,6 +391,8 @@ class PreviewController:
         self.gui.export_thread.start()
 
     def preview_five_seconds(self):
+        if hasattr(self.gui, "ensure_media_backend_ready"):
+            self.gui.ensure_media_backend_ready()
         video_path = self.gui.video_path_edit.text().strip()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.gui, "Error", "Please choose a video first.")
@@ -471,6 +473,8 @@ class PreviewController:
         self.gui.quick_preview_thread.start()
 
     def start_exact_frame_preview(self, show_dialog: bool = True):
+        if hasattr(self.gui, "ensure_media_backend_ready"):
+            self.gui.ensure_media_backend_ready()
         video_path = self.gui.video_path_edit.text().strip()
         if not video_path or not os.path.exists(video_path):
             if show_dialog:
@@ -636,6 +640,8 @@ class PreviewController:
             self.gui.log("[Export] Kept current preview/subtitle state so you can continue editing after export.")
 
     def on_quick_preview_ready(self, output_path, error):
+        if hasattr(self.gui, "ensure_media_backend_ready"):
+            self.gui.ensure_media_backend_ready()
         self.gui._suspend_live_subtitle_sync = False
         self.gui.preview_5s_btn.setEnabled(True)
         self.gui.preview_5s_btn.setText("Open 5-Second Preview")
@@ -671,6 +677,8 @@ class PreviewController:
         self._start_video_preview()
 
     def _start_video_preview(self):
+        if hasattr(self.gui, "ensure_media_backend_ready"):
+            self.gui.ensure_media_backend_ready()
         video_path = self.gui.video_path_edit.text().strip()
         audio_path = self.gui.resolve_selected_audio_path()
         mode = self.gui.get_output_mode_key()
@@ -785,6 +793,8 @@ class PreviewController:
         self.gui.preview_thread.start()
 
     def on_preview_ready(self, preview_path, error, styled_signature=""):
+        if hasattr(self.gui, "ensure_media_backend_ready"):
+            self.gui.ensure_media_backend_ready()
         self.gui._styled_preview_running = False
         self.gui._suspend_live_subtitle_sync = False
         if hasattr(self.gui, "preview_btn"):
@@ -823,16 +833,14 @@ class PreviewController:
                 self.gui._play_video_filter_preview_when_ready = False
                 self.gui.media_player.play()
                 self.gui.timeline.set_playing(True)
-        if getattr(self.gui, "_pending_video_filter_preview", False):
-            QTimer.singleShot(0, self.gui.run_live_video_filter_preview)
-            # QMessageBox.information(
-            #     self.gui,
-            #     "Preview Ready",
-            #     "Loaded the styled preview into the player.\nPress Play to review the karaoke render, then click 'Export Final Video' when you are satisfied.",
-            # )
+
+        if bool(getattr(self.gui, "_pipeline_active", False)) and str(getattr(self.gui, "_pipeline_step", "") or "").strip().lower() == "preview":
             self.gui.pipeline_controller.pipeline_advance("preview")
             self.gui.apply_segments_to_timeline()
             self.gui.refresh_ui_state()
+
+        if getattr(self.gui, "_pending_video_filter_preview", False):
+            QTimer.singleShot(0, self.gui.run_live_video_filter_preview)
 
 
 

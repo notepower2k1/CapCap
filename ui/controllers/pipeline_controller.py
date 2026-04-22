@@ -200,6 +200,10 @@ class PipelineController:
         if completed_step == "translation":
             if mode == "subtitle":
                 self.pipeline_done()
+                if self.progress_dialog:
+                    self.progress_dialog.skip_step("voiceover")
+                    self.progress_dialog.skip_step("preview")
+                    self.progress_dialog.set_completed()
                 return
             # Start voiceover
             self.gui._pipeline_step = "voiceover"
@@ -207,17 +211,14 @@ class PipelineController:
             self.gui.run_voiceover()
             
         elif completed_step == "voiceover":
-            # Voice generation is enough to unblock user work. Preview render can continue in background.
+            self.gui._pipeline_step = "preview"
+            if self.progress_dialog:
+                self.progress_dialog.start_step("preview")
             try:
-                self.gui.log("[Pipeline] Voiceover complete. Starting preview render in background.")
+                self.gui.log("[Pipeline] Voiceover complete. Preparing video preview.")
                 self.gui.preview_video()
             except Exception as exc:
-                self.gui.log(f"[Pipeline] Background preview start skipped: {exc}")
-            if self.progress_dialog:
-                self.progress_dialog.skip_step("preview")
-            self.pipeline_done()
-            if self.progress_dialog:
-                self.progress_dialog.set_completed()
+                self.pipeline_fail(f"Preview start failed: {exc}")
             
         elif completed_step == "preview":
             # Success!

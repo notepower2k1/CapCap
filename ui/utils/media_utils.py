@@ -29,6 +29,8 @@ def refresh_video_dimensions(gui, path: str, get_video_dimensions):
 
 def toggle_play(gui):
     try:
+        if hasattr(gui, "ensure_media_backend_ready"):
+            gui.ensure_media_backend_ready()
         if hasattr(gui, "audio_preview_player"):
             gui.audio_preview_player.stop()
 
@@ -92,6 +94,8 @@ def toggle_play(gui):
 
 
 def stop_video(gui):
+    if hasattr(gui, "ensure_media_backend_ready"):
+        gui.ensure_media_backend_ready()
     if hasattr(gui, "audio_preview_player"):
         gui.audio_preview_player.stop()
     gui.media_player.stop()
@@ -117,6 +121,8 @@ def duration_changed(gui, duration):
 
 
 def set_position(gui, position):
+    if hasattr(gui, "ensure_media_backend_ready"):
+        gui.ensure_media_backend_ready()
     gui.media_player.setPosition(position)
     gui.timeline.set_position(position)
     try:
@@ -153,6 +159,8 @@ def browse_video(gui):
     if not file_path:
         return
 
+    if hasattr(gui, "ensure_media_backend_ready"):
+        gui.ensure_media_backend_ready()
     gui.video_path_edit.setText(file_path)
     gui.media_player.setSource(QUrl.fromLocalFile(file_path))
     gui.refresh_video_dimensions(file_path)

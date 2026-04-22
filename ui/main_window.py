@@ -90,6 +90,74 @@ from workers import (
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'app'))
 from video_processor import get_video_dimensions
 
+
+class _BootstrapMediaBackend:
+    backend_name = "bootstrap"
+    _source_path = ""
+
+    def setSource(self, source):
+        self._source_path = ""
+
+    def play(self):
+        return None
+
+    def pause(self):
+        return None
+
+    def stop(self):
+        return None
+
+    def setPosition(self, position):
+        return None
+
+    def position(self):
+        return 0
+
+    def duration(self):
+        return 0
+
+    def playbackState(self):
+        return QMediaPlayer.StoppedState
+
+    def is_playing(self):
+        return False
+
+    def set_subtitle_file(self, subtitle_path, subtitle_style=None):
+        return None
+
+    def clear_subtitle(self):
+        return None
+
+    def set_audio_file(self, audio_path):
+        return None
+
+    def clear_audio(self):
+        return None
+
+    def set_blur_region(self, blur_region=None):
+        return None
+
+    def clear_blur_region(self):
+        return None
+
+    def set_volume(self, percent):
+        return None
+
+    def volume(self):
+        return 100
+
+    def set_muted(self, muted):
+        return None
+
+    def is_muted(self):
+        return False
+
+    def set_playback_rate(self, rate):
+        return None
+
+    def playback_rate(self):
+        return 1.0
+
 class VideoTranslatorGUI(QMainWindow):
     VOICE_ENTRY_ID_ROLE = Qt.UserRole + 1
 
@@ -454,6 +522,9 @@ class VideoTranslatorGUI(QMainWindow):
         self.voice_catalog_entries = []
         self.voice_catalog_map = {}
         self._voice_signals_bound = False
+        self._media_backend_ready = False
+        self._preview_audio_signals_bound = False
+        self.media_player = _BootstrapMediaBackend()
         self.voice_preview_dialog = None
         self._voice_preview_row_buttons = {}
         self._tracked_progress_dialogs = []
@@ -508,19 +579,16 @@ class VideoTranslatorGUI(QMainWindow):
         self.last_styled_preview_signature = ""
         self.last_exact_preview_5s_path = ""
 
+        self._deferred_startup_stage1_done = False
+        self._deferred_startup_stage2_done = False
+
         self.setup_ui()
         self._configure_local_voice_mode_ui()
-        self.setup_media_player()
-        self.setup_audio_preview_player()
         self._timeline_visual_refresh_timer = QTimer(self)
         self._timeline_visual_refresh_timer.setSingleShot(True)
         self._timeline_visual_refresh_timer.timeout.connect(self._run_pending_timeline_visual_refresh)
-        if hasattr(self, "video_view") and hasattr(self.video_view, "blurRegionChanged"):
-            self.video_view.blurRegionChanged.connect(self.apply_preview_blur_region)
-        self.load_voice_preview_catalog()
-        self.load_user_settings()
-        self.ensure_local_translator_auto_configured()
-        self.refresh_saved_subtitle_style_presets()
+        QTimer.singleShot(0, self._run_deferred_startup_stage1)
+        QTimer.singleShot(600, self._run_deferred_startup_stage2)
 
     def get_selected_subtitle_preset(self) -> str:
         if getattr(self, "subtitle_preset_custom_radio", None) and self.subtitle_preset_custom_radio.isChecked():
@@ -631,6 +699,32 @@ class VideoTranslatorGUI(QMainWindow):
     def setup_ui(self):
         build_main_window_ui(self)
 
+    def _run_deferred_startup_stage1(self):
+        if getattr(self, "_deferred_startup_stage1_done", False):
+            return
+        self._deferred_startup_stage1_done = True
+        self.setup_audio_preview_player()
+        self.load_user_settings()
+        self.refresh_saved_subtitle_style_presets()
+
+    def _run_deferred_startup_stage2(self):
+        if getattr(self, "_deferred_startup_stage2_done", False):
+            return
+        self._deferred_startup_stage2_done = True
+        self.load_voice_preview_catalog()
+        self.ensure_local_translator_auto_configured()
+
+    def ensure_media_backend_ready(self):
+        if getattr(self, "_media_backend_ready", False):
+            return
+        self.setup_media_player()
+        if hasattr(self, "video_view") and hasattr(self.video_view, "blurRegionChanged"):
+            try:
+                self.video_view.blurRegionChanged.disconnect(self.apply_preview_blur_region)
+            except Exception:
+                pass
+            self.video_view.blurRegionChanged.connect(self.apply_preview_blur_region)
+
     def _configure_local_voice_mode_ui(self):
         if hasattr(self, "use_free_voice_radio"):
             try:
@@ -665,6 +759,9 @@ class VideoTranslatorGUI(QMainWindow):
                 pass
 
     def setup_audio_preview_player(self):
+        if getattr(self, "_preview_audio_signals_bound", False):
+            return
+        self._preview_audio_signals_bound = True
         self.audio_preview_player = QMediaPlayer(self)
         self.audio_preview_output = QAudioOutput(self)
         self.audio_preview_player.setAudioOutput(self.audio_preview_output)
@@ -5115,6 +5212,7 @@ class VideoTranslatorGUI(QMainWindow):
         for url in mime_data.urls():
             local_path = url.toLocalFile()
             if local_path and os.path.splitext(local_path)[1].lower() in {".mp4", ".mkv", ".avi", ".mov"}:
+                self.ensure_media_backend_ready()
                 self.video_path_edit.setText(local_path)
                 self.media_player.setSource(QUrl.fromLocalFile(local_path))
                 self.refresh_video_dimensions(local_path)
@@ -5892,10 +5990,16 @@ class VideoTranslatorGUI(QMainWindow):
 
 
     def setup_media_player(self):
+        if getattr(self, "_media_backend_ready", False):
+            return
+        previous_volume = getattr(self, "_preview_volume", 100)
+        previous_muted = getattr(self, "_preview_muted", False)
+        previous_speed = getattr(self, "_preview_speed", 1.0)
         setup_media_player_impl(self)
-        self._preview_volume = 100
-        self._preview_muted = False
-        self._preview_speed = 1.0
+        self._preview_volume = previous_volume
+        self._preview_muted = previous_muted
+        self._preview_speed = previous_speed
+        self._media_backend_ready = True
         self._apply_preview_audio_state()
 
     def browse_video(self):

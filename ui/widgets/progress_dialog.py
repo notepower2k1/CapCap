@@ -319,6 +319,14 @@ class PipelineProgressDialog(QDialog):
             self.steps[step_id].set_status("skipped")
 
     def set_completed(self):
+        for step_id in self.step_order:
+            widget = self.steps.get(step_id)
+            if widget is None:
+                continue
+            if widget.status == "running":
+                widget.set_status("done")
+            elif widget.status == "pending":
+                widget.set_status("skipped")
         self.overall_progress.setValue(100)
         self.footer.setText("✨ Pipeline execution complete! Video is ready.")
         self.footer.setStyleSheet("color: #00FF88; font-weight: bold; font-size: 14px; margin-top: 15px;")
