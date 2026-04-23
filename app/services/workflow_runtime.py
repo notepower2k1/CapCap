@@ -60,6 +60,9 @@ class WorkflowRuntime:
         ducking_amount_db: float = -6.0,
         project_state_path: str = "",
         project_temp_dir: str = "",
+        ai_rewrite_dubbing: bool = False,
+        dubbing_style_instruction: str = "",
+        source_language: str = "auto",
         on_progress: callable = None,
     ):
         return self.voice_workflow.run(
@@ -75,6 +78,9 @@ class WorkflowRuntime:
             ducking_amount_db=ducking_amount_db,
             project_state_path=project_state_path,
             project_temp_dir=project_temp_dir,
+            ai_rewrite_dubbing=ai_rewrite_dubbing,
+            dubbing_style_instruction=dubbing_style_instruction,
+            source_language=source_language,
             on_progress=on_progress,
         )
 

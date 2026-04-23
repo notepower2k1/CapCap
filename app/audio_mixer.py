@@ -50,8 +50,8 @@ def fit_wav_to_duration(
     output_wav_path: str,
     target_duration_seconds: float,
     mode: str = "off",
-    smart_min_ratio: float = 0.55,
-    smart_max_ratio: float = 1.25,
+    smart_min_ratio: float = 0.77,
+    smart_max_ratio: float = 1.15,
 ) -> str:
     mode_key = (mode or "off").strip().lower()
     if mode_key == "force fit":
@@ -70,8 +70,8 @@ def fit_wav_to_duration(
     if abs(fit_ratio - 1.0) < 0.02:
         return input_wav_path
     if mode_key == "smart":
-        # In Smart mode we compress long clips more aggressively so subtitles
-        # are less likely to jump while the old sentence is still speaking.
+        # Smart mode should avoid "saving" bad TTS by over-stretching.
+        # Past this range the text itself likely needs to be shorter.
         if fit_ratio < 1.0 and fit_ratio < smart_min_ratio:
             return input_wav_path
         if fit_ratio > 1.0 and fit_ratio > smart_max_ratio:

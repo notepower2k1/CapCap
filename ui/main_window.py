@@ -3065,6 +3065,14 @@ class VideoTranslatorGUI(QMainWindow):
     def is_ai_subtitle_optimization_enabled(self):
         return bool(getattr(self, "ai_subtitle_optimization_cb", None) and self.ai_subtitle_optimization_cb.isChecked())
 
+    def is_ai_dubbing_rewrite_enabled(self):
+        return bool(getattr(self, "ai_dubbing_rewrite_cb", None) and self.ai_dubbing_rewrite_cb.isChecked())
+
+    def get_ai_dubbing_style_instruction(self):
+        if hasattr(self, "translator_style_edit"):
+            return " ".join(self.translator_style_edit.text().split()).strip()
+        return ""
+
     def get_ai_style_instruction(self):
         style_parts = []
         if hasattr(self, "translator_style_edit"):
@@ -4685,7 +4693,7 @@ class VideoTranslatorGUI(QMainWindow):
             return
 
         source_segments = self.current_translated_segments or self.current_segments
-        text = str(source_segments[index].get("text", "")).strip()
+        text = str(source_segments[index].get("tts_text") or source_segments[index].get("text", "")).strip()
         if not text:
             QMessageBox.warning(self, "Missing Subtitle", "This subtitle line is empty.")
             return
@@ -6056,6 +6064,11 @@ class VideoTranslatorGUI(QMainWindow):
                 'end': float(group_items[-1].get('tts_group_end', group_items[-1].get('end', 0.0)) or group_items[-1].get('end', 0.0)),
                 'text': tts_text,
                 'tts_text': tts_text,
+                'tts_group_id': group_id,
+                'source_text': ' '.join(
+                    ' '.join(str(item.get('source_text') or item.get('text') or '').split()).strip()
+                    for item in group_items
+                ).strip(),
             })
             idx = cursor
         return grouped_segments
@@ -6170,11 +6183,76 @@ class VideoTranslatorGUI(QMainWindow):
             ducking_amount,
             project_state_path,
             self.get_project_temp_dir("tts"),
+            self.is_ai_dubbing_rewrite_enabled() and self.get_output_mode_key() in ("voice", "both"),
+            self.get_ai_dubbing_style_instruction(),
+            self.get_source_language_code(),
         )
         self.voice_thread.finished.connect(self.on_voiceover_finished)
         self.voice_thread.start()
 
-    def on_voiceover_finished(self, voice_track, mixed, error):
+    def _apply_generated_tts_texts(self, voice_segments):
+        source_segments = self.current_translated_segments
+        if not source_segments or not voice_segments:
+            return False
+
+        updated = False
+        grouped_updates = {}
+        positional_updates = []
+        severe_actions = {"compress_aggressive", "compress_emergency", "keyword_only", "speed_rescue", "speed_balance", "speed_stubborn"}
+        for seg in list(voice_segments or []):
+            tts_text = ' '.join(str((seg or {}).get("tts_text") or (seg or {}).get("text") or "").split()).strip()
+            if not tts_text:
+                continue
+            subtitle_vi = ' '.join(str((seg or {}).get("subtitle_vi") or (seg or {}).get("text") or "").split()).strip()
+            dubbing_vi = ' '.join(str((seg or {}).get("dubbing_vi") or tts_text).split()).strip()
+            action_taken = str((seg or {}).get("action_taken") or "").strip().lower()
+            ratio = float((seg or {}).get("ratio") or 0.0)
+            prefer_dub_match = action_taken in severe_actions or ratio > 1.15
+            display_text = dubbing_vi if prefer_dub_match else (subtitle_vi or dubbing_vi)
+            group_id = str((seg or {}).get("tts_group_id") or "").strip()
+            payload = {
+                "tts_text": tts_text,
+                "subtitle_vi": subtitle_vi or display_text,
+                "dubbing_vi": dubbing_vi,
+                "display_text": display_text,
+                "action_taken": action_taken,
+                "ratio": ratio,
+                "attempt_count": int((seg or {}).get("attempt_count") or 1),
+            }
+            if group_id:
+                grouped_updates[group_id] = payload
+            else:
+                positional_updates.append(payload)
+
+        positional_index = 0
+        for seg in source_segments:
+            group_id = str((seg or {}).get("tts_group_id") or "").strip()
+            if group_id and group_id in grouped_updates:
+                next_payload = grouped_updates[group_id]
+            elif positional_index < len(positional_updates):
+                next_payload = positional_updates[positional_index]
+                positional_index += 1
+            else:
+                continue
+
+            next_tts_text = next_payload["tts_text"]
+            current_tts_text = ' '.join(str(seg.get("tts_text") or "").split()).strip()
+            current_text = ' '.join(str(seg.get("text") or "").split()).strip()
+            if current_tts_text != next_tts_text:
+                seg["tts_text"] = next_tts_text
+                updated = True
+            next_display_text = next_payload["display_text"]
+            if next_display_text and current_text != next_display_text:
+                seg["text"] = next_display_text
+                updated = True
+            seg["subtitle_vi"] = next_payload["subtitle_vi"]
+            seg["dubbing_vi"] = next_payload["dubbing_vi"]
+            seg["action_taken"] = next_payload["action_taken"]
+            seg["ratio"] = next_payload["ratio"]
+            seg["attempt_count"] = next_payload["attempt_count"]
+        return updated
+
+    def on_voiceover_finished(self, voice_track, mixed, voice_segments, error):
         self.voiceover_btn.setEnabled(True)
         self.voiceover_btn.setText("Generate Voice / Mix")
         self.progress_bar.setValue(100)
@@ -6201,8 +6279,14 @@ class VideoTranslatorGUI(QMainWindow):
             self.update_project_step("mix_audio", "done")
         elif self.bg_music_edit.text().strip():
             self.update_project_step("mix_audio", "skipped")
+        if self._apply_generated_tts_texts(voice_segments):
+            self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+            self.persist_current_timeline_project_data()
         if self.current_project_state:
-            voice_signature = str(getattr(self, "_pending_voice_signature", "") or "").strip()
+            voice_signature = self.build_current_voice_signature(
+                segments=self._get_voiceover_segments(),
+                background_path=self.resolve_background_audio_path(),
+            )
             if voice_signature:
                 self.current_project_state.set_setting("voice_signature", voice_signature)
                 self.project_service.save_project(self.current_project_state)

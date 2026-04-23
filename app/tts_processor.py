@@ -13,8 +13,6 @@ from piper import PiperVoice
 from piper.config import SynthesisConfig
 from runtime_paths import app_path, bin_path, bundle_root, models_path, temp_path
 from vietnormalizer.normalizer import VietnameseNormalizer
-
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(os.path.dirname(BASE_DIR), ".env")
 if os.path.exists(ENV_PATH):
@@ -23,6 +21,7 @@ if os.path.exists(ENV_PATH):
 
 _PIPER_VOICE_CACHE: dict[str, PiperVoice] = {}
 _PIPER_VOICE_CACHE_LOCK = threading.Lock()
+_VIETNAMESE_NORMALIZER = None
 
 
 def _voice_catalog_path() -> str:
@@ -102,6 +101,23 @@ def _speed_to_float(speed) -> float:
         return 1.0
 
 
+def normalize_text_for_tts(text: str, *, provider: str = "piper") -> str:
+    value = " ".join(str(text or "").replace("\n", " ").split()).strip()
+    if not value:
+        return ""
+    if str(provider or "").strip().lower() != "piper":
+        return value
+
+    global _VIETNAMESE_NORMALIZER
+    if _VIETNAMESE_NORMALIZER is None:
+        _VIETNAMESE_NORMALIZER = VietnameseNormalizer()
+    try:
+        normalized = _VIETNAMESE_NORMALIZER.normalize(value)
+        return " ".join(str(normalized or "").replace("\n", " ").split()).strip() or value
+    except Exception:
+        return value
+
+
 def _subprocess_run_kwargs() -> dict:
     kwargs = {}
     if os.name == "nt":
@@ -161,8 +177,7 @@ def piper_tts_to_wav_16k_mono(
     # Normalize text
     if on_progress:
         on_progress(f"Normalizing Vietnamese text...")
-    normalizer = VietnameseNormalizer()
-    normalized_text = normalizer.normalize(text)
+    normalized_text = normalize_text_for_tts(text, provider="piper")
 
     # Load Piper voice
     voice = _get_cached_piper_voice(model_path=model_path, on_progress=on_progress)

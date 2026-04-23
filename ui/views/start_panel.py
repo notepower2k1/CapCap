@@ -524,6 +524,16 @@ def build_start_group(gui, left_layout):
     voice_setup_layout.addWidget(gui.voice_speed_spin)
     voice_setup_layout.addWidget(QLabel("Audio cleanup"))
     voice_setup_layout.addWidget(gui.audio_handling_combo)
+    gui.ai_dubbing_rewrite_cb = QCheckBox("Use AI Rewrite Dubbing for voice timing")
+    gui.ai_dubbing_rewrite_cb.setChecked(True)
+    voice_setup_layout.addWidget(gui.ai_dubbing_rewrite_cb)
+    gui.ai_dubbing_rewrite_hint_label = QLabel(
+        "Keeps subtitle text readable, but lets AI create a shorter spoken version for TTS when timing is tight.",
+        gui,
+    )
+    gui.ai_dubbing_rewrite_hint_label.setObjectName("helperLabel")
+    gui.ai_dubbing_rewrite_hint_label.setWordWrap(True)
+    voice_setup_layout.addWidget(gui.ai_dubbing_rewrite_hint_label)
     voice_layout.addWidget(voice_setup_card)
 
     voice_preview_card, voice_preview_layout = _section_card()

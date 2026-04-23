@@ -257,10 +257,10 @@ class PrepareWorkflowWorker(QThread):
 
 
 class VoiceOverWorker(QThread):
-    finished = Signal(str, str, str)
+    finished = Signal(str, str, object, str)
     progress = Signal(str)  # New signal for progress messages
 
-    def __init__(self, workspace_root, segments, output_dir, background_path, audio_handling_mode, voice_name, voice_speed, timing_sync_mode, voice_gain_db, bg_gain_db, ducking_amount_db, project_state_path="", project_temp_dir=""):
+    def __init__(self, workspace_root, segments, output_dir, background_path, audio_handling_mode, voice_name, voice_speed, timing_sync_mode, voice_gain_db, bg_gain_db, ducking_amount_db, project_state_path="", project_temp_dir="", ai_rewrite_dubbing=False, dubbing_style_instruction="", source_language="auto"):
         super().__init__()
         self.workspace_root = workspace_root
         self.segments = segments
@@ -275,6 +275,9 @@ class VoiceOverWorker(QThread):
         self.ducking_amount_db = ducking_amount_db
         self.project_state_path = project_state_path
         self.project_temp_dir = project_temp_dir
+        self.ai_rewrite_dubbing = ai_rewrite_dubbing
+        self.dubbing_style_instruction = dubbing_style_instruction
+        self.source_language = source_language
 
     def run(self):
         try:
@@ -295,12 +298,20 @@ class VoiceOverWorker(QThread):
                 ducking_amount_db=self.ducking_amount_db,
                 project_state_path=self.project_state_path,
                 project_temp_dir=self.project_temp_dir,
+                ai_rewrite_dubbing=self.ai_rewrite_dubbing,
+                dubbing_style_instruction=self.dubbing_style_instruction,
+                source_language=self.source_language,
                 on_progress=self.progress.emit,  # Pass callback
             )
-            self.finished.emit(result.get("voice_track", ""), result.get("mixed_path", ""), "")
+            self.finished.emit(
+                result.get("voice_track", ""),
+                result.get("mixed_path", ""),
+                result.get("segments", []),
+                "",
+            )
         except Exception as exc:
             print(f"[VoiceOverWorker ERROR] {str(exc)}")
-            self.finished.emit("", "", str(exc))
+            self.finished.emit("", "", [], str(exc))
 
 
 class FinalExportWorker(QThread):

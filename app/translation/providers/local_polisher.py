@@ -235,6 +235,7 @@ class LocalPolisherProvider:
     def _build_prompt(self, source_texts, translated_texts, src_lang, target_lang, style_instruction) -> str:
         is_direct = not translated_texts
         style_part = f" Style: {style_instruction}" if style_instruction else ""
+        dubbing_mode = "[mode=dubbing_rewrite]" in str(style_instruction or "").lower()
         if is_direct:
             lines = [f"{i + 1}. {s}" for i, s in enumerate(source_texts)]
             header = (
@@ -244,15 +245,34 @@ class LocalPolisherProvider:
             )
         else:
             lines = [f"{i + 1}. {s} ||| {t}" for i, (s, t) in enumerate(zip(source_texts, translated_texts))]
-            header = (
-                f"Rewrite these subtitle translations from {src_lang} to {target_lang}.{style_part}\n"
-                "Target: natural Vietnamese for short-form video voiceover/subtitles.\n"
-                "Format: Number. Source ||| Draft"
+            if dubbing_mode:
+                header = (
+                    f"Rewrite these dubbing drafts from {src_lang} to {target_lang}.{style_part}\n"
+                    "Target: short spoken Vietnamese for TTS timing rescue.\n"
+                    "Format: Number. Source ||| Draft"
+                )
+            else:
+                header = (
+                    f"Rewrite these subtitle translations from {src_lang} to {target_lang}.{style_part}\n"
+                    "Target: natural Vietnamese for short-form video voiceover/subtitles.\n"
+                    "Format: Number. Source ||| Draft"
+                )
+        rules = (
+            "Rules: Keep meaning accurate, concise, natural, and easy to read quickly. "
+            "Return only numbered lines. No commentary, no code fences, no extra headings."
+        )
+        if dubbing_mode:
+            rules = (
+                "Rules: Rewrite for spoken dubbing timing, not subtitle readability. "
+                "Use the metadata in the source line as hard constraints, especially max_words_vi and measured_ratio. "
+                "The output must be shorter than the draft when the draft is overlong. "
+                "Preserve names, numbers, product names, and key claims exactly. "
+                "Remove filler first. Keep one concise spoken line per number. "
+                "Return only numbered lines. No commentary, no code fences, no extra headings."
             )
         return (
             f"{header}\n"
-            "Rules: Keep meaning accurate, concise, natural, and easy to read quickly. "
-            "Return only numbered lines. No commentary, no code fences, no extra headings.\n\n"
+            f"{rules}\n\n"
             + "\n".join(lines)
         )
 

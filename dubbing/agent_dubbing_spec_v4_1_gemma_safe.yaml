@@ -1,0 +1,292 @@
+spec_name: agent_dubbing_spec_v4_1_gemma_safe
+spec_version: "4.1"
+language_pair:
+  source: zh
+  target: vi
+use_case: chinese_to_vietnamese_dubbing_with_duration_control
+model_target:
+  family: gemma
+  size_hint: 4b
+  design_goal: lean_and_stable
+
+goals:
+  - generate dubbing_vi that fits original video timing
+  - generate subtitle_vi that is readable on screen
+  - minimize cases where Vietnamese TTS runs longer than source timeline
+  - keep prompt short and move decision logic outside the model
+
+operating_principle:
+  preferred_pipeline:
+    - duration_aware_translation
+    - validate
+    - tts
+    - measure
+    - rewrite_if_needed
+    - slight_trim_or_speed
+  avoid_pipeline:
+    - free_translation
+    - tts
+    - aggressive_speed_up
+
+segment_input:
+  required_fields:
+    - index
+    - start_time
+    - end_time
+    - duration_sec
+    - source_text
+  optional_fields:
+    - context_prev
+    - context_next
+
+segment_output:
+  index: 1
+  source_text: "..."
+  subtitle_vi: "..."
+  dubbing_vi: "..."
+  duration_sec: 2.4
+  max_words_vi: 9
+  speech_cost: 3
+  tts_duration: 2.2
+  ratio: 0.92
+  attempt_count: 1
+  action_taken: accept
+
+core_principles:
+  - keep_prompt_short
+  - prioritize_text_fit_before_audio_fit
+  - use_speech_cost_outside_model
+  - rewrite_earlier_for_short_segments
+  - retry_with_stronger_compression_each_time
+
+formulas:
+  base_words_formula: "floor(duration_sec * 4.5)"
+  ratio_formula: "tts_duration / duration_sec"
+  max_words_rule:
+    when_speech_cost_gte_3: "floor(duration_sec * 4.0)"
+    otherwise: "floor(duration_sec * 4.5)"
+
+speech_cost:
+  initial_value: 0
+  scoring_rules:
+    - rule: contains_number
+      score: 2
+    - rule: contains_long_proper_name_or_latin_or_uppercase_or_special_symbol
+      score: 2
+    - rule: many_commas_or_pauses
+      score: 1
+    - rule: many_long_or_hard_to_read_words_in_sequence
+      score: 1
+    - rule: many_words_with_two_or_more_syllables
+      score: 1
+    - rule: contains_technical_or_hard_to_read_phrase
+      score: 1
+  buckets:
+    low: "0-1"
+    medium: "2-3"
+    high: ">=4"
+
+short_segment_rules:
+  keyword_only_threshold_sec: 0.8
+  keyword_only_behavior:
+    - keep only 1 to 2 key words
+    - prefer noun_verb_emphasis
+    - drop full sentence structure
+  examples:
+    - source_text: "这个问题非常重要"
+      dubbing_vi: "Quan trọng"
+    - source_text: "马上开始"
+      dubbing_vi: "Bắt đầu"
+    - source_text: "快跑"
+      dubbing_vi: "Chạy đi"
+
+decision_thresholds:
+  default:
+    accept_if_ratio_lte: 1.05
+    light_trim_or_speed_if_ratio_lte: 1.15
+    rewrite_if_ratio_lte: 1.30
+    aggressive_rewrite_if_ratio_gt: 1.30
+  short_segments:
+    if_duration_lt_1_8_and_ratio_gt: 1.10
+    if_duration_lt_1_2_and_ratio_gt: 1.05
+    if_duration_lt_0_8: prefer_keyword_only
+  high_speech_cost:
+    if_speech_cost_gte_4_and_ratio_gt: 1.08
+    if_speech_cost_gte_3: tighten_max_words_early
+
+tts_speed_limits:
+  ideal_range: [1.0, 1.15]
+  acceptable_range: [1.15, 1.25]
+  max_recommended: 1.30
+  if_more_than_max: translation_not_fit
+
+prompts:
+  translate_for_dubbing: |
+    Dịch câu tiếng Trung sang tiếng Việt để lồng tiếng video.
+
+    - Giữ ý chính
+    - Câu ngắn, dễ đọc
+    - Phải đọc kịp trong {duration_sec} giây
+    - Tối đa {max_words_vi} từ
+    - Ưu tiên ngắn gọn hơn dịch sát chữ
+
+    Chỉ trả về 1 câu tiếng Việt.
+
+    Câu gốc:
+    {source_text}
+  compress_light: |
+    Rút gọn câu tiếng Việt sau để đọc nhanh hơn.
+
+    - Giữ ý chính
+    - Ngắn hơn rõ rệt
+    - Tối đa {max_words_vi} từ
+
+    Câu gốc:
+    {source_text}
+
+    Câu hiện tại:
+    {draft_vi}
+  compress_aggressive: |
+    Rút gọn mạnh câu tiếng Việt sau để lồng tiếng kịp video.
+
+    - Chỉ giữ ý chính nhất
+    - Bỏ phần phụ, chủ ngữ nếu không cần
+    - Ưu tiên động từ và thông tin quan trọng
+    - Tối đa {max_words_vi} từ
+
+    Câu gốc:
+    {source_text}
+
+    Câu hiện tại:
+    {draft_vi}
+
+subtitle_strategy:
+  default: subtitle_vi_equals_dubbing_vi
+  optional_fuller_subtitle_when:
+    - action_taken_is_compress_aggressive
+    - action_taken_is_keyword_only
+  lean_rule: |
+    if action_taken in ["compress_aggressive", "keyword_only"]:
+        subtitle_vi = maybe_fuller_subtitle(source_text, dubbing_vi)
+    else:
+        subtitle_vi = dubbing_vi
+
+rewrite_strategy:
+  remove_first:
+    - adverbs
+    - explicit_subject_if_context_clear
+    - explanatory_phrases
+    - filler_words
+    - repeated_meaning
+    - non_critical_politeness
+  keep_first:
+    - main_verb
+    - main_noun
+    - new_information
+    - punchline_or_emphasis
+
+processing_steps:
+  - compute_duration_sec
+  - estimate_speech_cost
+  - compute_max_words_vi
+  - if_duration_lt_0_8_then_keyword_only_else_translate
+  - validate_single_sentence_and_word_budget
+  - run_tts
+  - measure_audio_duration
+  - compute_ratio
+  - decide_accept_trim_speed_or_rewrite
+
+retry_policy:
+  default_retry_cap: 2
+  extended_retry_when:
+    - duration_sec_lt_1_8
+    - speech_cost_gte_4
+  extended_retry_cap: 3
+  attempt_strategy:
+    attempt_1: translate_or_compress_light
+    attempt_2: compress_aggressive
+    attempt_3: keyword_only_or_extreme_compress
+  no_infinite_loop: true
+
+pseudocode: |
+  for each segment:
+      duration_sec = end_time - start_time
+      speech_cost = estimate_speech_cost(source_text)
+
+      if duration_sec < 0.8:
+          dubbing_vi = keyword_only(source_text)
+          retry_cap = 2
+      else:
+          if speech_cost >= 3:
+              max_words_vi = floor(duration_sec * 4.0)
+          else:
+              max_words_vi = floor(duration_sec * 4.5)
+
+          dubbing_vi = translate_for_dubbing(source_text, duration_sec, max_words_vi)
+
+          if word_count(dubbing_vi) > max_words_vi:
+              dubbing_vi = compress_light(source_text, dubbing_vi, max_words_vi)
+
+          retry_cap = 2
+          if duration_sec < 1.8 or speech_cost >= 4:
+              retry_cap = 3
+
+      attempt = 1
+      while attempt <= retry_cap:
+          audio = tts(dubbing_vi)
+          tts_duration = measure(audio)
+          ratio = tts_duration / duration_sec
+
+          if ratio <= 1.05:
+              action_taken = "accept"
+              break
+
+          if duration_sec < 0.8:
+              action_taken = "keyword_only"
+              break
+
+          if attempt == 1:
+              dubbing_vi = compress_light(source_text, dubbing_vi, max_words_vi)
+              action_taken = "compress_light"
+              attempt += 1
+              continue
+
+          if attempt == 2:
+              dubbing_vi = compress_aggressive(source_text, dubbing_vi, max_words_vi)
+              action_taken = "compress_aggressive"
+              attempt += 1
+              continue
+
+          dubbing_vi = keyword_only(source_text)
+          action_taken = "keyword_only"
+          attempt += 1
+
+      if action_taken in ["compress_aggressive", "keyword_only"]:
+          subtitle_vi = maybe_fuller_subtitle(source_text, dubbing_vi)
+      else:
+          subtitle_vi = dubbing_vi
+
+agent_responsibilities:
+  - always use duration_sec to constrain output length
+  - keep prompts short
+  - use speech_cost as external guardrail
+  - reduce max_words_vi for hard_to_read segments
+  - rewrite earlier for short segments
+  - use keyword_only for ultra_short segments when needed
+  - escalate compression across retries
+  - do not rely on speed_over_1_30_as_default_fix
+  - support separate dubbing_vi and subtitle_vi
+  - log all key metrics
+
+logging_fields:
+  - duration_sec
+  - max_words_vi
+  - speech_cost
+  - dubbing_vi
+  - subtitle_vi
+  - tts_duration
+  - ratio
+  - attempt_count
+  - action_taken
+
+recommended_pipeline: "Short prompt -> TTS -> Measure -> Early rewrite for short/hard segments -> Aggressive rewrite if needed -> Slight speed only when safe"

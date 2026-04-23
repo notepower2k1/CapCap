@@ -86,16 +86,27 @@ class GeminiPolisherProvider:
     def _build_prompt(self, source_texts, translated_texts, src_lang, target_lang, style_instruction) -> str:
         is_direct = not translated_texts
         style_part = f" Style: {style_instruction}" if style_instruction else ""
+        dubbing_mode = "[mode=dubbing_rewrite]" in str(style_instruction or "").lower()
         
         if is_direct:
             lines = [f"{i+1}. {s}" for i, s in enumerate(source_texts)]
             header = f"Translate these {src_lang}->{target_lang} subtitles directly.{style_part}\nFormat: Number. Text"
         else:
             lines = [f"{i+1}. {s} ||| {t}" for i, (s, t) in enumerate(zip(source_texts, translated_texts))]
-            header = f"Refine these {src_lang}->{target_lang} subtitle translations.{style_part}\nFormat: Number. Source ||| Draft"
+            if dubbing_mode:
+                header = f"Rewrite these {src_lang}->{target_lang} dubbing drafts for TTS timing rescue.{style_part}\nFormat: Number. Source ||| Draft"
+            else:
+                header = f"Refine these {src_lang}->{target_lang} subtitle translations.{style_part}\nFormat: Number. Source ||| Draft"
+        rules = "Rules: Natural, punchy, concise. One translation per number. No commentary."
+        if dubbing_mode:
+            rules = (
+                "Rules: Spoken dubbing rescue only. Follow source metadata as hard timing constraints. "
+                "Make the result shorter than the draft when needed. Preserve names, numbers, products, and key claims exactly. "
+                "One short spoken line per number. No commentary."
+            )
 
         return (
             f"{header}\n"
-            "Rules: Natural, punchy, concise. One translation per number. No commentary.\n\n"
+            f"{rules}\n\n"
             + "\n".join(lines)
         )

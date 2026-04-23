@@ -204,10 +204,11 @@ class ProjectService:
         bg_gain_db: float = 0.0,
         ducking_amount_db: float = -6.0,
     ) -> str:
+        safe_voice_speed = max(0.5, min(1.30, float(voice_speed or 1.0)))
         payload = {
             "audio_handling_mode": str(audio_handling_mode or "fast").strip().lower(),
             "voice_name": str(voice_name or "").strip(),
-            "voice_speed": round(float(voice_speed or 1.0), 3),
+            "voice_speed": round(safe_voice_speed, 3),
             "timing_sync_mode": str(timing_sync_mode or "off").strip().lower(),
             "background": self._file_signature(background_path),
             "voice_gain_db": round(float(voice_gain_db or 0.0), 3),
