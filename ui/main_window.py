@@ -1696,6 +1696,33 @@ class VideoTranslatorGUI(QMainWindow):
             choices.append((label, "dubbed"))
         return choices
 
+    def _preferred_preview_audio_track_mode(self) -> str:
+        mode = str(self.get_output_mode_key() or "subtitle").strip().lower()
+        if mode in ("voice", "both"):
+            dubbed_audio = self._resolve_preview_dubbed_audio_path()
+            if dubbed_audio:
+                return "dubbed"
+        return "original"
+
+    def sync_preview_audio_track_to_output(self, *, apply_to_player: bool = True):
+        target_mode = self._preferred_preview_audio_track_mode()
+        self._preview_audio_track_mode = target_mode
+
+        if not apply_to_player or not getattr(self, "media_player", None):
+            self._refresh_preview_audio_controls()
+            return
+
+        source_video = self._resolve_preview_original_video_path()
+        current_source = self._normalize_local_file_path(str(getattr(self.media_player, "_source_path", "") or ""))
+        should_apply = not current_source
+        if source_video and current_source:
+            should_apply = os.path.abspath(current_source) == os.path.abspath(source_video)
+
+        if should_apply:
+            self._apply_preview_audio_track_selection()
+            return
+        self._refresh_preview_audio_controls()
+
     def _apply_preview_audio_track_selection(self):
         if (
             getattr(self, "_preview_audio_track_switching", False)
@@ -3173,7 +3200,7 @@ class VideoTranslatorGUI(QMainWindow):
         return getattr(self, "translator_ai_cb", None) and self.translator_ai_cb.isChecked()
 
     def is_ai_subtitle_optimization_enabled(self):
-        return bool(getattr(self, "ai_subtitle_optimization_cb", None) and self.ai_subtitle_optimization_cb.isChecked())
+        return bool(self.is_ai_polish_enabled())
 
     def is_ai_dubbing_rewrite_enabled(self):
         return bool(getattr(self, "ai_dubbing_rewrite_cb", None) and self.ai_dubbing_rewrite_cb.isChecked())
@@ -6526,6 +6553,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         self.schedule_timeline_visual_refresh(waveform=True, thumbnails=False)
         self.refresh_ui_state()
+        self.sync_preview_audio_track_to_output()
         if self.last_preview_video_path:
             self.log("[Voiceover] Refreshing preview video with latest subtitle and audio...")
             try:

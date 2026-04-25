@@ -70,9 +70,6 @@ def build_advanced_group(gui, left_layout):
 
 def _build_audio_mix_controls(gui, advanced_layout):
     ai_card, ai_layout = _advanced_block("AI")
-    gui.ai_subtitle_optimization_cb = QCheckBox("Enable AI Subtitle Optimization")
-    gui.ai_subtitle_optimization_cb.setChecked(False)
-    ai_layout.addWidget(gui.ai_subtitle_optimization_cb)
     gui.keep_timeline_cb.setText("Keep subtitle timings when editing text")
     ai_layout.addWidget(gui.keep_timeline_cb)
     advanced_layout.addWidget(ai_card)

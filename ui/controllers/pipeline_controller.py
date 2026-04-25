@@ -120,7 +120,7 @@ class PipelineController:
         # Start the background worker
         self.gui.log(f"[Pipeline] Starting prepare workflow for: {video_path}")
         output_mode = self.gui.get_output_mode_key()
-        optimize_subtitles = self.gui.is_ai_subtitle_optimization_enabled() and output_mode == "subtitle"
+        optimize_subtitles = self.gui.is_ai_polish_enabled() and output_mode == "subtitle"
         self.gui.prepare_workflow_thread = PrepareWorkflowWorker(
             self.gui.workspace_root,
             video_path,

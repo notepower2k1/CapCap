@@ -636,6 +636,7 @@ class PreviewController:
             self.gui.processed_artifacts["final_video"] = output_path
             self.gui.update_project_artifact("final_video", output_path)
             self.gui.update_project_step("export", "done")
+            self.gui.sync_preview_audio_track_to_output(apply_to_player=False)
             self.gui.log(f"[Export] Final video exported successfully: {output_path}")
             self.gui.log("[Export] Kept current preview/subtitle state so you can continue editing after export.")
 
@@ -663,6 +664,7 @@ class PreviewController:
                 self.gui.media_player.clear_subtitle()
             else:
                 self.gui.sync_live_subtitle_preview()
+            self.gui.sync_preview_audio_track_to_output(apply_to_player=False)
             self.gui._refresh_preview_audio_controls()
             # QMessageBox.information(
             #     self.gui,
@@ -828,6 +830,7 @@ class PreviewController:
                 self.gui.media_player.clear_subtitle()
             else:
                 self.gui.sync_live_subtitle_preview()
+            self.gui.sync_preview_audio_track_to_output(apply_to_player=False)
             self.gui._refresh_preview_audio_controls()
             if getattr(self.gui, "_play_video_filter_preview_when_ready", False):
                 self.gui._play_video_filter_preview_when_ready = False
