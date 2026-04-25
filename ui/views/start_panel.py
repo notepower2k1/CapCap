@@ -509,6 +509,8 @@ def build_start_group(gui, left_layout):
     gui.free_voice_combo.currentIndexChanged.connect(gui.on_selected_voice_changed)
     gui.preview_voice_btn = QPushButton("Preview Selected Voice")
     gui.preview_voice_btn.clicked.connect(gui.preview_selected_voice_sample)
+    if not hasattr(gui, "voiceover_btn"):
+        gui.voiceover_btn = QPushButton("Generate Voice / Mix", gui)
     gui.voice_preview_meta_label = QLabel("Listen to a short sample before generating the full voice track.", gui)
     gui.voice_preview_meta_label.setObjectName("helperLabel")
     gui.voice_preview_meta_label.setWordWrap(True)
@@ -541,6 +543,7 @@ def build_start_group(gui, left_layout):
     voice_preview_title.setObjectName("sectionTitle")
     voice_preview_layout.addWidget(voice_preview_title)
     voice_preview_layout.addWidget(gui.preview_voice_btn)
+    voice_preview_layout.addWidget(gui.voiceover_btn)
     voice_layout.addWidget(voice_preview_card)
     voice_page.layout().addWidget(voice_card)
 

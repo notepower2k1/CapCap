@@ -518,6 +518,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._last_audio_preview_path = ""
         self._segment_preview_threads = {}
         self._voice_sample_preview_thread = None
+        self._voiceover_force_refresh = False
         self.voice_catalog_entries_all = []
         self.voice_catalog_entries = []
         self.voice_catalog_map = {}
@@ -3549,10 +3550,65 @@ class VideoTranslatorGUI(QMainWindow):
                     "end": float(reference.get("end", 0.0)),
                     "original": str(base.get("text", "")),
                     "translated": str(translated.get("text", "")),
+                    "spoken": str(translated.get("tts_text") or translated.get("dubbing_vi") or translated.get("text", "")),
+                    "subtitle_vi": str(translated.get("subtitle_vi") or translated.get("text", "")),
+                    "dubbing_vi": str(translated.get("dubbing_vi") or translated.get("tts_text") or translated.get("text", "")),
+                    "ratio": float(translated.get("ratio", 0.0) or 0.0),
+                    "attempt_count": int(translated.get("attempt_count", 0) or 0),
+                    "action_taken": str(translated.get("action_taken", "")),
                     "manual_highlights": list(translated.get("manual_highlights", [])),
                 }
             )
         return rows
+
+    def _update_segment_spoken_status(self, index: int):
+        row = self._find_segment_editor_row(index)
+        if not row:
+            return
+        segment = {}
+        if 0 <= index < len(self.current_translated_segments or []):
+            segment = self.current_translated_segments[index] or {}
+        subtitle_text = " ".join(str(segment.get("text", "") or "").split()).strip()
+        spoken_text = " ".join(str(segment.get("tts_text") or segment.get("dubbing_vi") or segment.get("text", "")).split()).strip()
+        row["spoken_status_label"].clear()
+        if "match_subtitle_button" in row:
+            row["match_subtitle_button"].setEnabled(bool(spoken_text) and subtitle_text != spoken_text)
+
+    def on_segment_spoken_text_edited(self, index: int, editor: QTextEdit):
+        if getattr(self, "_syncing_segment_editor", False):
+            return
+        if not (0 <= index < len(self.current_translated_segments or [])):
+            return
+        value = " ".join(editor.toPlainText().split()).strip()
+        segment = self.current_translated_segments[index]
+        segment["tts_text"] = value
+        segment["dubbing_vi"] = value
+        segment["voice_edited"] = True
+        self._voiceover_force_refresh = True
+        self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+        self.persist_current_timeline_project_data()
+        self._update_segment_spoken_status(index)
+        self.refresh_ui_state()
+
+    def use_spoken_text_for_subtitle(self, index: int):
+        if not (0 <= index < len(self.current_translated_segments or [])):
+            return
+        segment = self.current_translated_segments[index]
+        spoken_text = " ".join(str(segment.get("tts_text") or segment.get("dubbing_vi") or "").split()).strip()
+        if not spoken_text:
+            QMessageBox.information(self, "Nothing To Match", "This line does not have voice text yet.")
+            return
+        segment["text"] = spoken_text
+        segment["subtitle_vi"] = spoken_text
+        segment["voice_edited"] = True
+        self._voiceover_force_refresh = True
+        self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+        self._sync_hidden_translated_text_from_segments()
+        self.apply_segments_to_timeline()
+        self.persist_current_timeline_project_data()
+        self.schedule_live_subtitle_preview_refresh()
+        self.sync_segment_editor_rows()
+        self.refresh_ui_state()
 
     def _normalize_manual_highlight(self, text: str) -> str:
         return re.sub(r"\s+", " ", (text or "").replace("\u2029", " ").replace("\n", " ")).strip()
@@ -4271,6 +4327,9 @@ class VideoTranslatorGUI(QMainWindow):
                 original_label.setWordWrap(True)
                 original_label.setObjectName("helperLabel")
                 original_label.setVisible(show_original and bool(row["original"].strip()))
+                subtitle_title = QLabel("Subtitle", card)
+                subtitle_title.setObjectName("helperLabel")
+                subtitle_title.setStyleSheet("font-size: 12px; font-weight: 700; color: #8ad7ff;")
 
                 arrow_label = QLabel("→", card)
                 arrow_label.setStyleSheet("font-size: 16px; font-weight: 700; color: #8ad7ff;")
@@ -4281,6 +4340,7 @@ class VideoTranslatorGUI(QMainWindow):
                 translated_editor.setMinimumHeight(96)
                 translated_editor.setMaximumHeight(120)
                 translated_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                translated_editor.setPlaceholderText("Text shown on screen.")
                 translated_editor.textChanged.connect(
                     lambda idx=idx, editor=translated_editor: self.on_segment_translation_edited(idx, editor)
                 )
@@ -4292,6 +4352,35 @@ class VideoTranslatorGUI(QMainWindow):
                 highlight_btn.clicked.connect(
                     lambda _=False, idx=idx, editor=translated_editor: self.add_segment_manual_highlight(idx, editor)
                 )
+                spoken_title = QLabel("Voice", card)
+                spoken_title.setObjectName("helperLabel")
+                spoken_title.setStyleSheet("font-size: 12px; font-weight: 700; color: #8ad7ff;")
+                spoken_status_label = QLabel("", card)
+                spoken_status_label.setObjectName("helperLabel")
+                spoken_status_label.setWordWrap(True)
+                spoken_status_label.hide()
+                spoken_editor = QTextEdit(card)
+                spoken_editor.setObjectName("segmentInspectorEditor")
+                spoken_editor.setAcceptRichText(False)
+                spoken_editor.setPlainText(row["spoken"])
+                spoken_editor.setMinimumHeight(72)
+                spoken_editor.setMaximumHeight(92)
+                spoken_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                spoken_editor.setPlaceholderText("Text spoken by the voice.")
+                spoken_editor.textChanged.connect(
+                    lambda idx=idx, editor=spoken_editor: self.on_segment_spoken_text_edited(idx, editor)
+                )
+
+                spoken_action_layout = QHBoxLayout()
+                spoken_action_layout.setContentsMargins(0, 0, 0, 0)
+                spoken_action_layout.setSpacing(8)
+                match_subtitle_btn = QPushButton("Use voice for subtitle", card)
+                match_subtitle_btn.clicked.connect(lambda _=False, idx=idx: self.use_spoken_text_for_subtitle(idx))
+                preview_btn = QPushButton("Regenerate voice", card)
+                preview_btn.clicked.connect(lambda _=False, idx=idx: self.preview_segment_audio(idx))
+                spoken_action_layout.addWidget(match_subtitle_btn)
+                spoken_action_layout.addWidget(preview_btn)
+                spoken_action_layout.addStretch()
 
                 highlight_action_layout = QHBoxLayout()
                 highlight_action_layout.setContentsMargins(0, 0, 0, 0)
@@ -4317,7 +4406,11 @@ class VideoTranslatorGUI(QMainWindow):
                 divider.setFrameShape(QFrame.HLine)
                 divider.setStyleSheet("color: #27425d;")
                 card_layout.addWidget(divider)
+                card_layout.addWidget(subtitle_title)
                 card_layout.addWidget(translated_editor, 0)
+                card_layout.addWidget(spoken_title)
+                card_layout.addWidget(spoken_editor, 0)
+                card_layout.addLayout(spoken_action_layout)
                 card_layout.addLayout(highlight_action_layout)
                 card_layout.addLayout(highlight_meta_layout)
                 for label in card.findChildren(QLabel):
@@ -4329,7 +4422,12 @@ class VideoTranslatorGUI(QMainWindow):
                         "segment_index": idx,
                         "frame": card,
                         "original_label": original_label,
+                        "subtitle_title": subtitle_title,
                         "translated_editor": translated_editor,
+                        "spoken_editor": spoken_editor,
+                        "spoken_status_label": spoken_status_label,
+                        "match_subtitle_button": match_subtitle_btn,
+                        "preview_button": preview_btn,
                         "highlight_button": highlight_btn,
                         "highlight_placeholder": highlight_placeholder,
                         "highlight_chip_layout": highlight_chip_layout,
@@ -4337,6 +4435,7 @@ class VideoTranslatorGUI(QMainWindow):
                 )
                 self._update_segment_highlight_button_state(idx, translated_editor)
                 self._sync_segment_highlight_chip_row(idx)
+                self._update_segment_spoken_status(idx)
 
             self._set_segment_editor_highlight(selected_index)
         finally:
@@ -4712,6 +4811,7 @@ class VideoTranslatorGUI(QMainWindow):
             voice_name,
             voice_speed,
             temp_dir=self.get_project_temp_dir("segment_audio_preview"),
+            cache_temp_dir=self.get_project_temp_dir("tts"),
         )
         worker.finished.connect(self.on_segment_audio_preview_ready)
         self._segment_preview_threads[index] = worker
@@ -4721,6 +4821,7 @@ class VideoTranslatorGUI(QMainWindow):
         row = self._find_segment_editor_row(index)
         if row:
             row["preview_button"].setEnabled(True)
+            row["preview_button"].setText("Regenerate voice")
             row["preview_button"].setIcon(load_icon(asset_path("icons", "audio_preview.svg"), 18))
         self._segment_preview_threads.pop(index, None)
 
@@ -6043,9 +6144,17 @@ class VideoTranslatorGUI(QMainWindow):
             segment = dict(source_segments[idx])
             group_id = str(segment.get('tts_group_id', '') or '').strip()
             tts_text = ' '.join(str(segment.get('tts_text') or '').split()).strip()
-            if not group_id or not tts_text:
+            if not group_id:
+                fallback_text = tts_text or ' '.join(str(segment.get('text') or '').split()).strip()
+                segment['text'] = fallback_text
+                segment['tts_text'] = fallback_text
+                grouped_segments.append(segment)
+                idx += 1
+                continue
+            if not tts_text:
                 fallback_text = ' '.join(str(segment.get('text') or '').split()).strip()
                 segment['text'] = fallback_text
+                segment['tts_text'] = fallback_text
                 grouped_segments.append(segment)
                 idx += 1
                 continue
@@ -6101,11 +6210,12 @@ class VideoTranslatorGUI(QMainWindow):
         ducking_amount = float(self.ducking_amount_spin.value()) if hasattr(self, "ducking_amount_spin") else -6.0
         voice_signature = self.build_current_voice_signature(segments=segments, background_path=bg_path)
         if state and voice_signature:
+            force_refresh = bool(getattr(self, "_voiceover_force_refresh", False))
             cached_voice_signature = str(state.settings.get("voice_signature", "") or "").strip()
             cached_voice_track = self._normalize_local_file_path(state.artifacts.get("voice_vi", "") or self.last_voice_vi_path)
             cached_mixed_track = self._normalize_local_file_path(state.artifacts.get("mixed_vi", "") or self.last_mixed_vi_path)
             required_output = cached_mixed_track if bg_path else cached_voice_track
-            if cached_voice_signature == voice_signature and required_output and os.path.exists(required_output):
+            if not force_refresh and cached_voice_signature == voice_signature and required_output and os.path.exists(required_output):
                 self.last_voice_vi_path = cached_voice_track if cached_voice_track and os.path.exists(cached_voice_track) else self.last_voice_vi_path
                 self.last_mixed_vi_path = cached_mixed_track if cached_mixed_track and os.path.exists(cached_mixed_track) else ""
                 if self.last_voice_vi_path:
@@ -6198,7 +6308,6 @@ class VideoTranslatorGUI(QMainWindow):
         updated = False
         grouped_updates = {}
         positional_updates = []
-        severe_actions = {"compress_aggressive", "compress_emergency", "keyword_only", "speed_rescue", "speed_balance", "speed_stubborn"}
         for seg in list(voice_segments or []):
             tts_text = ' '.join(str((seg or {}).get("tts_text") or (seg or {}).get("text") or "").split()).strip()
             if not tts_text:
@@ -6207,14 +6316,11 @@ class VideoTranslatorGUI(QMainWindow):
             dubbing_vi = ' '.join(str((seg or {}).get("dubbing_vi") or tts_text).split()).strip()
             action_taken = str((seg or {}).get("action_taken") or "").strip().lower()
             ratio = float((seg or {}).get("ratio") or 0.0)
-            prefer_dub_match = action_taken in severe_actions or ratio > 1.15
-            display_text = dubbing_vi if prefer_dub_match else (subtitle_vi or dubbing_vi)
             group_id = str((seg or {}).get("tts_group_id") or "").strip()
             payload = {
                 "tts_text": tts_text,
-                "subtitle_vi": subtitle_vi or display_text,
+                "subtitle_vi": subtitle_vi,
                 "dubbing_vi": dubbing_vi,
-                "display_text": display_text,
                 "action_taken": action_taken,
                 "ratio": ratio,
                 "attempt_count": int((seg or {}).get("attempt_count") or 1),
@@ -6237,13 +6343,8 @@ class VideoTranslatorGUI(QMainWindow):
 
             next_tts_text = next_payload["tts_text"]
             current_tts_text = ' '.join(str(seg.get("tts_text") or "").split()).strip()
-            current_text = ' '.join(str(seg.get("text") or "").split()).strip()
             if current_tts_text != next_tts_text:
                 seg["tts_text"] = next_tts_text
-                updated = True
-            next_display_text = next_payload["display_text"]
-            if next_display_text and current_text != next_display_text:
-                seg["text"] = next_display_text
                 updated = True
             seg["subtitle_vi"] = next_payload["subtitle_vi"]
             seg["dubbing_vi"] = next_payload["dubbing_vi"]
@@ -6258,6 +6359,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.progress_bar.setValue(100)
 
         if error:
+            self._voiceover_force_refresh = False
             self._pending_voice_signature = ""
             self.update_project_step("generate_tts", "failed")
             if self.bg_music_edit.text().strip():
@@ -6281,7 +6383,11 @@ class VideoTranslatorGUI(QMainWindow):
             self.update_project_step("mix_audio", "skipped")
         if self._apply_generated_tts_texts(voice_segments):
             self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
+            self._sync_hidden_translated_text_from_segments()
+            self.apply_segments_to_timeline()
             self.persist_current_timeline_project_data()
+            self.schedule_live_subtitle_preview_refresh()
+            self.sync_segment_editor_rows()
         if self.current_project_state:
             voice_signature = self.build_current_voice_signature(
                 segments=self._get_voiceover_segments(),
@@ -6290,6 +6396,7 @@ class VideoTranslatorGUI(QMainWindow):
             if voice_signature:
                 self.current_project_state.set_setting("voice_signature", voice_signature)
                 self.project_service.save_project(self.current_project_state)
+        self._voiceover_force_refresh = False
         self._pending_voice_signature = ""
 
         if mixed:
@@ -6299,6 +6406,12 @@ class VideoTranslatorGUI(QMainWindow):
 
         self.schedule_timeline_visual_refresh(waveform=True, thumbnails=False)
         self.refresh_ui_state()
+        if self.last_preview_video_path:
+            self.log("[Voiceover] Refreshing preview video with latest subtitle and audio...")
+            try:
+                self.preview_video()
+            except Exception:
+                pass
         self._pipeline_advance("voiceover")
 
     def preview_video(self):

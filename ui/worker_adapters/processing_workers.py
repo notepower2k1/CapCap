@@ -368,7 +368,7 @@ class FinalExportWorker(QThread):
 class SegmentAudioPreviewWorker(QThread):
     finished = Signal(int, str, str)
 
-    def __init__(self, workspace_root, index, text, voice_name, voice_speed, temp_dir=""):
+    def __init__(self, workspace_root, index, text, voice_name, voice_speed, temp_dir="", cache_temp_dir=""):
         super().__init__()
         self.workspace_root = workspace_root
         self.index = index
@@ -376,27 +376,63 @@ class SegmentAudioPreviewWorker(QThread):
         self.voice_name = voice_name
         self.voice_speed = voice_speed
         self.temp_dir = temp_dir
+        self.cache_temp_dir = cache_temp_dir
 
     def run(self):
         try:
-            temp_dir = self.temp_dir or os.path.join(self.workspace_root, "temp", "segment_audio_preview")
-            os.makedirs(temp_dir, exist_ok=True)
-            wav_path = os.path.join(temp_dir, f"segment_{self.index}_{os.getpid()}.wav")
-            base_wav_path = os.path.join(temp_dir, f"segment_{self.index}_{os.getpid()}_base.wav")
             engine = EngineRuntime()
+            preview_temp_dir = self.temp_dir or os.path.join(self.workspace_root, "temp", "segment_audio_preview")
+            os.makedirs(preview_temp_dir, exist_ok=True)
+            cache_temp_dir = self.cache_temp_dir or preview_temp_dir
+            os.makedirs(cache_temp_dir, exist_ok=True)
+
+            from workflows.voice_workflow import VoiceWorkflow
+
+            workflow = VoiceWorkflow(self.workspace_root)
+            requested_speed = workflow._clamp_requested_speed(float(self.voice_speed))
+            voice_provider = workflow._voice_provider(self.voice_name)
+            provider_speed = workflow._provider_native_speed(
+                provider=voice_provider,
+                requested_speed=requested_speed,
+            )
+            residual_speed = (requested_speed / provider_speed) if provider_speed > 0.0 else requested_speed
+
+            base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_base.wav")
             engine.synthesize_segment(
                 text=self.text,
                 wav_path=base_wav_path,
                 voice=self.voice_name,
-                speed=1.0,
-                tmp_dir=temp_dir,
+                speed=provider_speed,
+                tmp_dir=cache_temp_dir,
             )
-            speed_value = float(self.voice_speed)
-            if abs(speed_value - 1.0) >= 0.02:
+
+            manifest = workflow._load_manifest(cache_temp_dir)
+            manifest_segments = dict(manifest.get("segments", {}) or {})
+            manifest_by_cache_key = dict(manifest.get("by_cache_key", {}) or {})
+            cache_key = workflow._segment_cache_key(
+                text=self.text,
+                voice_name=self.voice_name,
+                provider_speed=provider_speed,
+            )
+            manifest_entry = {
+                "cache_key": cache_key,
+                "wav_path": base_wav_path,
+                "text": self.text,
+                "voice_name": self.voice_name,
+                "provider_speed": provider_speed,
+            }
+            manifest_segments[str(self.index)] = manifest_entry
+            manifest_by_cache_key[cache_key] = dict(manifest_entry)
+            manifest["segments"] = manifest_segments
+            manifest["by_cache_key"] = manifest_by_cache_key
+            workflow._save_manifest(cache_temp_dir, manifest)
+
+            wav_path = os.path.join(preview_temp_dir, f"segment_{self.index}_{os.getpid()}.wav")
+            if abs(residual_speed - 1.0) >= 0.02:
                 output = engine.change_wav_speed(
                     input_wav_path=base_wav_path,
                     output_wav_path=wav_path,
-                    speed_ratio=speed_value,
+                    speed_ratio=residual_speed,
                 )
             else:
                 output = base_wav_path

@@ -83,6 +83,32 @@ class VoiceWorkflow:
         with open(manifest_path, "w", encoding="utf-8") as handle:
             json.dump(manifest, handle, ensure_ascii=False, indent=2)
 
+    def _update_manifest_entries(self, *, tmp_dir: str, segments, wavs, voice_name: str, provider_speed: float) -> None:
+        manifest = self._load_manifest(tmp_dir)
+        manifest_segments = dict(manifest.get("segments", {}) or {})
+        manifest_by_cache_key = dict(manifest.get("by_cache_key", {}) or {})
+        for idx, (seg, wav_path) in enumerate(zip(list(segments or []), list(wavs or []))):
+            text = str((seg or {}).get("tts_text") or (seg or {}).get("text") or "").strip()
+            if not text or not wav_path or not os.path.exists(wav_path):
+                continue
+            cache_key = self._segment_cache_key(
+                text=text,
+                voice_name=voice_name,
+                provider_speed=provider_speed,
+            )
+            entry = {
+                "cache_key": cache_key,
+                "wav_path": str(wav_path),
+                "text": text,
+                "voice_name": str(voice_name),
+                "provider_speed": float(provider_speed),
+            }
+            manifest_segments[str(idx)] = entry
+            manifest_by_cache_key[cache_key] = dict(entry)
+        manifest["segments"] = manifest_segments
+        manifest["by_cache_key"] = manifest_by_cache_key
+        self._save_manifest(tmp_dir, manifest)
+
     def _segment_cache_key(self, *, text: str, voice_name: str, provider_speed: float) -> str:
         payload = f"{voice_name}|{provider_speed:.3f}|{text.strip()}"
         return hashlib.sha1(payload.encode("utf-8")).hexdigest()
@@ -678,31 +704,42 @@ class VoiceWorkflow:
             current = dict(seg or {})
             source_text = (current.get("source_text") or current.get("text") or "").strip()
             subtitle_text = (current.get("text") or "").strip()
+            existing_tts_text = (current.get("tts_text") or current.get("dubbing_vi") or "").strip()
+            voice_edited = bool(current.get("voice_edited"))
             duration_sec = max(0.0, float(current.get("end", 0.0)) - float(current.get("start", 0.0)))
             speech_cost = self._estimate_speech_cost(source_text)
             max_words_vi = self._max_words_vi(duration_sec, speech_cost)
-            planned_text = self._plan_initial_dubbing_text(
-                source_text=source_text,
-                subtitle_text=subtitle_text,
-                duration_sec=duration_sec,
-                speech_cost=speech_cost,
-                max_words_vi=max_words_vi,
-                enabled=bool(ai_rewrite_dubbing),
-                source_language=source_language,
-                style_instruction=style_instruction,
-            )
+            if existing_tts_text:
+                planned_text = existing_tts_text
+            else:
+                planned_text = self._plan_initial_dubbing_text(
+                    source_text=source_text,
+                    subtitle_text=subtitle_text,
+                    duration_sec=duration_sec,
+                    speech_cost=speech_cost,
+                    max_words_vi=max_words_vi,
+                    enabled=bool(ai_rewrite_dubbing),
+                    source_language=source_language,
+                    style_instruction=style_instruction,
+                )
             original_words = self._count_words(subtitle_text)
-            tts_text, validation_action = self._validate_initial_dubbing_text(
-                source_text=source_text,
-                subtitle_text=subtitle_text,
-                dubbing_text=planned_text,
-                duration_sec=duration_sec,
-                max_words_vi=max_words_vi,
-                speech_cost=speech_cost,
-                voice_provider=voice_provider,
-            )
+            if existing_tts_text:
+                tts_text = existing_tts_text
+                validation_action = "manual_voice" if voice_edited else "accept"
+            else:
+                tts_text, validation_action = self._validate_initial_dubbing_text(
+                    source_text=source_text,
+                    subtitle_text=subtitle_text,
+                    dubbing_text=planned_text,
+                    duration_sec=duration_sec,
+                    max_words_vi=max_words_vi,
+                    speech_cost=speech_cost,
+                    voice_provider=voice_provider,
+                )
             spoken_words = self._count_spoken_words(planned_text, voice_provider=voice_provider)
-            if duration_sec < 0.8:
+            if voice_edited:
+                action_taken = "manual_voice"
+            elif duration_sec < 0.8:
                 action_taken = "keyword_only"
             elif validation_action != "accept":
                 action_taken = validation_action
@@ -713,6 +750,7 @@ class VoiceWorkflow:
             current["tts_text"] = tts_text
             current["dubbing_vi"] = tts_text
             current["subtitle_vi"] = subtitle_text
+            current["voice_edited"] = voice_edited
             final_spoken_words = self._count_spoken_words(tts_text, voice_provider=voice_provider)
             current["_tts_metrics"] = {
                 "duration_sec": round(duration_sec, 3),
@@ -727,6 +765,7 @@ class VoiceWorkflow:
                 "trimmed": bool(tts_text != subtitle_text),
                 "subtitle_vi": subtitle_text,
                 "dubbing_vi": tts_text,
+                "voice_edited": voice_edited,
             }
             prepared.append(current)
             print(
@@ -1412,6 +1451,13 @@ class VoiceWorkflow:
             source_language=source_language,
             style_instruction=dubbing_style_instruction,
             on_progress=on_progress,
+        )
+        self._update_manifest_entries(
+            tmp_dir=tmp_dir,
+            segments=segments,
+            wavs=wavs,
+            voice_name=voice_name,
+            provider_speed=provider_speed,
         )
         wavs = self._apply_safe_timing_polish(
             segments=segments,

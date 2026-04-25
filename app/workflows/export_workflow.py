@@ -33,19 +33,34 @@ class ExportWorkflow:
         self.project_service.save_project(state)
 
     def _subtitle_options(self, subtitle_style):
-        return {
-            "alignment": subtitle_style.get("alignment", 2),
-            "margin_v": subtitle_style.get("margin_v", 30),
-            "font_name": subtitle_style.get("font_name", "Arial"),
-            "font_size": subtitle_style.get("font_size", 18),
-            "font_color": subtitle_style.get("font_color", "&H00FFFFFF"),
-            "background_box": subtitle_style.get("background_box", False),
-            "animation": subtitle_style.get("animation", "Static"),
-            "custom_position_enabled": subtitle_style.get("custom_position_enabled", False),
-            "custom_position_x": subtitle_style.get("custom_position_x", 50),
-            "custom_position_y": subtitle_style.get("custom_position_y", 86),
-            "blur_region": subtitle_style.get("blur_region"),
-        }
+        style = dict(subtitle_style or {})
+        style.setdefault("alignment", 2)
+        style.setdefault("margin_v", 30)
+        style.setdefault("font_name", "Arial")
+        style.setdefault("font_size", 18)
+        style.setdefault("font_color", "&H00FFFFFF")
+        style.setdefault("background_box", False)
+        style.setdefault("animation", "Static")
+        style.setdefault("custom_position_enabled", False)
+        style.setdefault("custom_position_x", 50)
+        style.setdefault("custom_position_y", 86)
+        style.setdefault("highlight_color", style.get("font_color", "&H00FFFFFF"))
+        style.setdefault("outline_color", "&H00000000")
+        style.setdefault("outline_width", 2.0)
+        style.setdefault("shadow_color", "&H80000000")
+        style.setdefault("shadow_depth", 1.0)
+        style.setdefault("background_color", "&H80000000")
+        style.setdefault("background_alpha", 0.5)
+        style.setdefault("bold", False)
+        style.setdefault("preset_key", "")
+        style.setdefault("auto_keyword_highlight", False)
+        style.setdefault("animation_duration", 0.22)
+        style.setdefault("manual_highlights", [])
+        style.setdefault("word_timings", [])
+        style.setdefault("karaoke_timing_mode", "vietnamese")
+        style.setdefault("single_line", False)
+        style.setdefault("blur_region", None)
+        return style
 
     def _resolve_target_dimensions(self, video_path: str, output_quality: str, output_ratio: str = "source"):
         key = str(output_quality or "source").strip().lower()

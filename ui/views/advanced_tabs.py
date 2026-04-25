@@ -148,7 +148,6 @@ def _build_audio_mix_controls(gui, advanced_layout):
     timing_sync_row.addWidget(gui.voice_timing_sync_label)
     timing_sync_row.addWidget(gui.voice_timing_sync_combo, 1)
     timing_layout.addLayout(timing_sync_row)
-    timing_layout.addWidget(gui.voiceover_btn)
     advanced_layout.addWidget(timing_card)
 
 
@@ -189,7 +188,8 @@ def _build_hidden_runtime_widgets(gui):
     gui.ducking_amount_spin.setSingleStep(1.0)
     gui.ducking_amount_spin.setValue(-6.0)
 
-    gui.voiceover_btn = QPushButton("Generate Voice / Mix", gui)
+    if not hasattr(gui, "voiceover_btn"):
+        gui.voiceover_btn = QPushButton("Generate Voice / Mix", gui)
     gui.keep_timeline_cb = QCheckBox("Keep the current timeline when editing Vietnamese text", gui)
     gui.keep_timeline_cb.setChecked(True)
     gui.apply_translated_btn = QPushButton("Apply Edited Subtitle To Preview", gui)
