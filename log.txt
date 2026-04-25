@@ -1,0 +1,28 @@
+[Preview] media backend: libmpv
+D:\CodingTime\CapCap\ui\main_window.py:724: RuntimeWarning: Failed to disconnect (<bound method VideoTranslatorGUI.apply_preview_blur_region of <main_window.VideoTranslatorGUI(0x2980b60c8b0) at 0x00000298091D7A80>>) from signal "blurRegionChanged()".
+  self.video_view.blurRegionChanged.disconnect(self.apply_preview_blur_region)
+[Pipeline] Starting prepare workflow for: D:/Downloads/download.mp4
+--- Step 1: Extracting audio ---
+[Prepare Workflow] Reusing cached extracted audio: D:\CodingTime\CapCap\projects\download_b04217fe\source\extracted_audio.wav
+Success: Audio saved to D:\CodingTime\CapCap\projects\download_b04217fe\source\extracted_audio.wav
+[Timing] Extract audio: 0.00s
+[Audio Handling] Selected mode: clean
+
+--- Step 1.5: Separating vocals/background ---
+[Audio Handling] Clean Voice enabled: running Demucs stem separation before transcription.
+[Demucs] Using device: cuda
+Running Vocal Separation: C:\Users\Thach\AppData\Local\Programs\Python\Python311\python.exe -m demucs --device cuda --two-stems vocals -o D:\CodingTime\CapCap\projects\download_b04217fe\audio\separated 
+D:\CodingTime\CapCap\projects\download_b04217fe\source\extracted_audio.wav
+[Audio Handling] Using separated vocals for Whisper: D:\CodingTime\CapCap\projects\download_b04217fe\audio\separated\htdemucs\extracted_audio\vocals.wav
+[Audio Handling] Background music stem ready: D:\CodingTime\CapCap\projects\download_b04217fe\audio\separated\htdemucs\extracted_audio\no_vocals.wav
+[Timing] Demucs separation: 7.85s
+
+--- Step 2: Transcribing audio (Whisper) ---
+[ASR] Working audio duration: 35.60s
+[ASR] Using standard single-pass transcription for short audio.
+[Whisper] Loading faster-whisper with CUDA / int8_float16
+OMP: Error #15: Initializing libiomp5md.dll, but found libomp140.x86_64.dll already initialized.
+OMP: Hint This means that multiple copies of the OpenMP runtime have been linked into the program. That is dangerous, since it can degrade performance or cause incorrect results. The best thing to do is to ensure that only a single OpenMP runtime is linked into the process, e.g. by avoiding static linking of the OpenMP runtime in any library. As an unsafe, unsupported, undocumented workaround you can 
+set the environment variable KMP_DUPLICATE_LIB_OK=TRUE to allow the program to continue to execute, but that may cause crashes or silently produce incorrect results. For more information, please see http://www.intel.com/software/products/support/.
+QBasicTimer::stop: Failed. Possibly trying to stop from a different thread
+QBasicTimer::stop: Failed. Possibly trying to stop from a different thread

@@ -338,12 +338,13 @@ class MpvMediaPlayerBackend(QObject):
 
     def clear_audio(self):
         self._audio_path = ""
+        self._applied_audio_path = ""
         try:
-            # Setting audio to no or 0
             self._player.audio_delay = 0
-            self._player.command("audio-remove", "1") # Best effort
         except Exception:
             pass
+        self._remove_external_audio_tracks()
+        self._select_builtin_audio_track()
 
     def _apply_current_audio(self):
         if not self._source_path or not self._audio_path:
@@ -359,6 +360,48 @@ class MpvMediaPlayerBackend(QObject):
             self._player.command("audio-add", self._audio_path, "select")
             self._applied_audio_path = self._audio_path
             self.log(f"[Backend] External audio applied: {self._audio_path}")
+        except Exception:
+            pass
+
+    def _iter_audio_tracks(self):
+        try:
+            tracks = self._read_property("track-list", "track_list", []) or []
+        except Exception:
+            tracks = []
+        if not isinstance(tracks, list):
+            return []
+        return [track for track in tracks if isinstance(track, dict) and str(track.get("type", "")).lower() == "audio"]
+
+    def _remove_external_audio_tracks(self):
+        for track in self._iter_audio_tracks():
+            if not bool(track.get("external", False)):
+                continue
+            track_id = track.get("id")
+            if track_id in (None, ""):
+                continue
+            try:
+                self._player.command("audio-remove", str(track_id))
+            except Exception:
+                pass
+
+    def _select_builtin_audio_track(self):
+        for track in self._iter_audio_tracks():
+            if bool(track.get("external", False)):
+                continue
+            track_id = track.get("id")
+            if track_id in (None, ""):
+                continue
+            try:
+                self._player.audio = str(track_id)
+                return
+            except Exception:
+                try:
+                    self._player.command("set", "audio", str(track_id))
+                    return
+                except Exception:
+                    pass
+        try:
+            self._player.audio = "auto"
         except Exception:
             pass
 

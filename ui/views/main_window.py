@@ -157,6 +157,8 @@ def _connect_ui_signals(gui):
         gui.preview_volume_up_btn.clicked.connect(gui.preview_volume_up)
     if hasattr(gui, "preview_mute_btn"):
         gui.preview_mute_btn.clicked.connect(gui.toggle_preview_mute)
+    if hasattr(gui, "preview_audio_track_combo"):
+        gui.preview_audio_track_combo.currentIndexChanged.connect(gui.on_preview_audio_track_changed)
     if hasattr(gui, "preview_speed_combo"):
         gui.preview_speed_combo.currentIndexChanged.connect(gui.on_preview_speed_changed)
     gui.final_output_folder_edit.textChanged.connect(gui.voice_output_folder_edit.setText)
@@ -243,6 +245,8 @@ def _initialize_ui_state(gui):
     gui.last_exact_preview_5s_path = ""
     gui.last_exact_preview_frame_path = ""
     gui._preview_video_has_burned_subtitles = False
+    gui._preview_audio_track_mode = "original"
+    gui._preview_audio_track_switching = False
     gui.live_preview_subtitle_path = ""
     gui.live_preview_ass_path = ""
     gui.live_preview_segments = []

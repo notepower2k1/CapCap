@@ -142,6 +142,24 @@ def _build_audio_mix_controls(gui, advanced_layout):
     mix_layout.addLayout(preset_row)
     advanced_layout.addWidget(mix_card)
 
+    voice_card, voice_layout = _advanced_block("Voice Tuning")
+    speed_row = QHBoxLayout()
+    speed_row.addWidget(QLabel("Voice speed"))
+    speed_row.addWidget(gui.voice_speed_spin, 1)
+    voice_layout.addLayout(speed_row)
+
+    cleanup_row = QHBoxLayout()
+    cleanup_row.addWidget(QLabel("Audio cleanup"))
+    cleanup_row.addWidget(gui.audio_handling_combo, 1)
+    voice_layout.addLayout(cleanup_row)
+    if hasattr(gui, "audio_handling_hint_label"):
+        voice_layout.addWidget(gui.audio_handling_hint_label)
+
+    voice_layout.addWidget(gui.ai_dubbing_rewrite_cb)
+    if hasattr(gui, "ai_dubbing_rewrite_hint_label"):
+        voice_layout.addWidget(gui.ai_dubbing_rewrite_hint_label)
+    advanced_layout.addWidget(voice_card)
+
     timing_card, timing_layout = _advanced_block("Timing")
     timing_sync_row = QHBoxLayout()
     gui.voice_timing_sync_label = QLabel("Voice timing sync")

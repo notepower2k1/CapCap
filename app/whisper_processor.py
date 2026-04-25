@@ -10,6 +10,7 @@ from runtime_paths import models_path, workspace_root
 _WHISPER_MODEL_CACHE: dict[tuple[str, str, str], object] = {}
 _WHISPER_MODEL_LOCK = threading.Lock()
 _WHISPER_TRANSCRIBE_LOCK = threading.Lock()
+_OPENMP_WORKAROUND_APPLIED = False
 
 
 
@@ -133,6 +134,16 @@ def _ensure_cuda_runtime_on_path() -> None:
                 pass
 
 
+def _ensure_openmp_runtime_compat() -> None:
+    global _OPENMP_WORKAROUND_APPLIED
+    if _OPENMP_WORKAROUND_APPLIED:
+        return
+    # Windows wheels from Torch / CTranslate2 / Qt-adjacent deps can load different OpenMP runtimes.
+    # Allow process startup instead of aborting when both Intel and LLVM runtimes appear.
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+    _OPENMP_WORKAROUND_APPLIED = True
+
+
 def _faster_whisper_cache_dir():
     cache_dir = Path(models_path("faster_whisper"))
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -140,6 +151,7 @@ def _faster_whisper_cache_dir():
 
 
 def _detect_faster_whisper_runtime() -> dict:
+    _ensure_openmp_runtime_compat()
     _ensure_cuda_runtime_on_path()
     runtime = {
         "device": "cpu",
@@ -161,6 +173,7 @@ def _detect_faster_whisper_runtime() -> dict:
 
 
 def _load_whisper_model(model_name):
+    _ensure_openmp_runtime_compat()
     _ensure_cuda_runtime_on_path()
     try:
         from faster_whisper import WhisperModel

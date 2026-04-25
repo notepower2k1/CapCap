@@ -1646,6 +1646,20 @@ class VideoTranslatorGUI(QMainWindow):
         return ""
 
     def resolve_timeline_audio_visualization_path(self) -> str:
+        preview_mode = str(getattr(self, "_preview_audio_track_mode", "original") or "original").strip().lower()
+        if preview_mode == "original":
+            candidates = [
+                self.audio_source_edit.text().strip() if hasattr(self, "audio_source_edit") else "",
+                self.processed_artifacts.get("vocals"),
+                self.processed_artifacts.get("audio_extracted"),
+                self.last_vocals_path,
+                self.last_extracted_audio,
+            ]
+            for candidate in candidates:
+                normalized = self._normalize_local_file_path(candidate)
+                if normalized and os.path.exists(normalized):
+                    return normalized
+
         selected_audio = self.resolve_selected_audio_path()
         if selected_audio and os.path.exists(selected_audio):
             return selected_audio
@@ -1662,6 +1676,101 @@ class VideoTranslatorGUI(QMainWindow):
             if normalized and os.path.exists(normalized):
                 return normalized
         return ""
+
+    def _resolve_preview_original_video_path(self) -> str:
+        video_path = self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
+        normalized = self._normalize_local_file_path(video_path)
+        return normalized if normalized and os.path.exists(normalized) else ""
+
+    def _resolve_preview_dubbed_audio_path(self) -> str:
+        audio_path = self.resolve_selected_audio_path()
+        return audio_path if audio_path and os.path.exists(audio_path) else ""
+
+    def _preview_audio_track_choices(self) -> list[tuple[str, str]]:
+        choices = [("Original", "original")]
+        dubbed_audio = self._resolve_preview_dubbed_audio_path()
+        if dubbed_audio:
+            label = "Dubbed"
+            if self.using_existing_audio_source():
+                label = "Mixed"
+            choices.append((label, "dubbed"))
+        return choices
+
+    def _apply_preview_audio_track_selection(self):
+        if (
+            getattr(self, "_preview_audio_track_switching", False)
+            or not hasattr(self, "media_player")
+            or not getattr(self, "media_player", None)
+        ):
+            return
+        source_video = self._resolve_preview_original_video_path()
+        if not source_video:
+            self._refresh_preview_audio_controls()
+            return
+
+        dubbed_audio = self._resolve_preview_dubbed_audio_path()
+        selected_mode = str(getattr(self, "_preview_audio_track_mode", "original") or "original").strip().lower()
+        if selected_mode == "dubbed" and not dubbed_audio:
+            selected_mode = "original"
+            self._preview_audio_track_mode = "original"
+
+        try:
+            current_position = int(self.media_player.position())
+        except Exception:
+            current_position = 0
+        try:
+            was_playing = bool(self.media_player.is_playing())
+        except Exception:
+            was_playing = False
+
+        current_source = str(getattr(self.media_player, "_source_path", "") or "")
+        should_reset_source = not current_source or os.path.abspath(current_source) != os.path.abspath(source_video)
+        force_source_reload = selected_mode == "original"
+
+        self._preview_audio_track_switching = True
+        try:
+            if should_reset_source or force_source_reload:
+                try:
+                    self.media_player.pause()
+                except Exception:
+                    pass
+                self.media_player.setSource(QUrl.fromLocalFile(source_video))
+                self.refresh_video_dimensions(source_video)
+                self._preview_video_has_burned_subtitles = False
+                self.sync_live_subtitle_preview()
+            if selected_mode == "dubbed" and dubbed_audio:
+                self.media_player.set_audio_file(dubbed_audio)
+            else:
+                self.media_player.clear_audio()
+            if current_position > 0:
+                try:
+                    self.media_player.setPosition(current_position)
+                except Exception:
+                    pass
+            if was_playing:
+                try:
+                    self.media_player.play()
+                    if hasattr(self, "timeline"):
+                        self.timeline.set_playing(True)
+                except Exception:
+                    pass
+            else:
+                if hasattr(self, "timeline"):
+                    self.timeline.set_playing(False)
+            self.log(
+                f"[Preview] audio track: {'dubbed' if selected_mode == 'dubbed' and dubbed_audio else 'original'}"
+            )
+        finally:
+            self._preview_audio_track_switching = False
+        self.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
+        self._refresh_preview_audio_controls()
+
+    def on_preview_audio_track_changed(self, index: int):
+        if getattr(self, "_preview_audio_track_switching", False) or not hasattr(self, "preview_audio_track_combo"):
+            return
+        mode = str(self.preview_audio_track_combo.itemData(index) or "original").strip().lower()
+        self._preview_audio_track_mode = mode if mode in ("original", "dubbed") else "original"
+        self._apply_preview_audio_track_selection()
 
     def refresh_timeline_waveform(self):
         if not hasattr(self, "timeline"):
@@ -3480,6 +3589,12 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "subtitle_bg_alpha_spin"):
             self.subtitle_bg_alpha_spin.setEnabled(is_custom)
         self.subtitle_bold_cb.setEnabled(is_custom)
+        if hasattr(self, "style_library_card"):
+            self.style_library_card.setVisible(is_custom)
+        if hasattr(self, "highlight_card"):
+            self.highlight_card.setVisible(is_custom)
+        if hasattr(self, "custom_title_card"):
+            self.custom_title_card.setVisible(is_custom)
         if hasattr(self, "subtitle_preset_summary_label"):
             self.subtitle_preset_summary_label.setText(
                 f"{preset.get('label', 'Preset')}: {preset.get('summary', '')}"
@@ -4310,7 +4425,7 @@ class VideoTranslatorGUI(QMainWindow):
                 card.setObjectName("segmentInspectorCard")
                 card_layout = QVBoxLayout(card)
                 card_layout.setContentsMargins(12, 12, 12, 12)
-                card_layout.setSpacing(6)
+                card_layout.setSpacing(8)
 
                 timing_meta_layout = QHBoxLayout()
                 timing_meta_layout.setContentsMargins(0, 0, 0, 0)
@@ -4385,8 +4500,8 @@ class VideoTranslatorGUI(QMainWindow):
                 highlight_action_layout = QHBoxLayout()
                 highlight_action_layout.setContentsMargins(0, 0, 0, 0)
                 highlight_action_layout.setSpacing(8)
-                highlight_action_layout.addStretch()
                 highlight_action_layout.addWidget(highlight_btn)
+                highlight_action_layout.addStretch()
 
                 highlight_meta_layout = QHBoxLayout()
                 highlight_meta_layout.setContentsMargins(0, 0, 0, 0)
@@ -4408,11 +4523,16 @@ class VideoTranslatorGUI(QMainWindow):
                 card_layout.addWidget(divider)
                 card_layout.addWidget(subtitle_title)
                 card_layout.addWidget(translated_editor, 0)
+                card_layout.addLayout(highlight_action_layout)
+                card_layout.addLayout(highlight_meta_layout)
+                section_divider = QFrame(card)
+                section_divider.setFrameShape(QFrame.HLine)
+                section_divider.setStyleSheet("color: #20364d;")
+                card_layout.addWidget(section_divider)
                 card_layout.addWidget(spoken_title)
                 card_layout.addWidget(spoken_editor, 0)
                 card_layout.addLayout(spoken_action_layout)
-                card_layout.addLayout(highlight_action_layout)
-                card_layout.addLayout(highlight_meta_layout)
+                
                 for label in card.findChildren(QLabel):
                     if label.text().strip() in {"→", "â†’"}:
                         label.hide()
@@ -6711,6 +6831,28 @@ class VideoTranslatorGUI(QMainWindow):
                 self.preview_speed_combo.blockSignals(True)
                 self.preview_speed_combo.setCurrentIndex(index)
                 self.preview_speed_combo.blockSignals(False)
+        if hasattr(self, "preview_audio_track_combo"):
+            combo = self.preview_audio_track_combo
+            entries = self._preview_audio_track_choices()
+            current_mode = str(getattr(self, "_preview_audio_track_mode", "original") or "original").strip().lower()
+            if current_mode == "dubbed" and not any(value == "dubbed" for _label, value in entries):
+                current_mode = "original"
+                self._preview_audio_track_mode = "original"
+            existing = [(combo.itemText(i), str(combo.itemData(i) or "")) for i in range(combo.count())]
+            if existing != entries:
+                combo.blockSignals(True)
+                combo.clear()
+                for label, value in entries:
+                    combo.addItem(label, value)
+                combo.blockSignals(False)
+            target_index = combo.findData(current_mode)
+            if target_index < 0:
+                target_index = 0
+            if combo.currentIndex() != target_index:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(target_index)
+                combo.blockSignals(False)
+            combo.setEnabled(combo.count() > 1 and getattr(self, "media_player", None) is not None and getattr(self.media_player, "backend_name", "") == "libmpv")
 
     def preview_volume_down(self):
         self._preview_volume = max(0, int(getattr(self, "_preview_volume", 100)) - 10)

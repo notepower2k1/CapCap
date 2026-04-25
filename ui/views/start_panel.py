@@ -522,20 +522,14 @@ def build_start_group(gui, left_layout):
     voice_setup_layout.addWidget(gui.free_voice_combo)
     voice_setup_layout.addWidget(QLabel("Voice type"))
     voice_setup_layout.addWidget(gui.voice_gender_combo)
-    voice_setup_layout.addWidget(QLabel("Voice speed"))
-    voice_setup_layout.addWidget(gui.voice_speed_spin)
-    voice_setup_layout.addWidget(QLabel("Audio cleanup"))
-    voice_setup_layout.addWidget(gui.audio_handling_combo)
     gui.ai_dubbing_rewrite_cb = QCheckBox("Use AI Rewrite Dubbing for voice timing")
     gui.ai_dubbing_rewrite_cb.setChecked(True)
-    voice_setup_layout.addWidget(gui.ai_dubbing_rewrite_cb)
     gui.ai_dubbing_rewrite_hint_label = QLabel(
         "Keeps subtitle text readable, but lets AI create a shorter spoken version for TTS when timing is tight.",
         gui,
     )
     gui.ai_dubbing_rewrite_hint_label.setObjectName("helperLabel")
     gui.ai_dubbing_rewrite_hint_label.setWordWrap(True)
-    voice_setup_layout.addWidget(gui.ai_dubbing_rewrite_hint_label)
     voice_layout.addWidget(voice_setup_card)
 
     voice_preview_card, voice_preview_layout = _section_card()
@@ -586,6 +580,7 @@ def build_start_group(gui, left_layout):
     style_library_layout.addWidget(gui.save_subtitle_style_btn)
     style_library_layout.addWidget(gui.saved_subtitle_style_combo)
     subtitle_layout.addWidget(style_library_card)
+    gui.style_library_card = style_library_card
 
     highlight_card, highlight_card_layout = _build_collapsible_section("Keyword Highlight", start_expanded=False)
     gui.subtitle_keyword_highlight_cb = QCheckBox("Highlight key words")
@@ -606,6 +601,7 @@ def build_start_group(gui, left_layout):
     highlight_mode_row.addWidget(gui.subtitle_highlight_mode_combo, 1)
     highlight_card_layout.addLayout(highlight_mode_row)
     subtitle_layout.addWidget(highlight_card)
+    gui.highlight_card = highlight_card
 
     custom_title_card, custom_title_layout = _build_collapsible_section("Adjust Details", start_expanded=False)
     custom_wrapper = QFrame()
@@ -722,6 +718,7 @@ def build_start_group(gui, left_layout):
     custom_wrapper_layout.addWidget(gui.custom_settings_content)
     custom_title_layout.addWidget(custom_wrapper)
     subtitle_layout.addWidget(custom_title_card)
+    gui.custom_title_card = custom_title_card
 
     gui.subtitle_preset_summary_label = QLabel()
     gui.subtitle_preset_summary_label.setObjectName("helperLabel")
