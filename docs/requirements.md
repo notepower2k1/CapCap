@@ -15,16 +15,24 @@ No CUDA Toolkit installation is required when the CUDA runtime pack is installed
 
 ## Resource Manager
 
-Open **Manage Resources** from the launcher or Settings. It reports each resource as Ready, Partial, or Missing and provides download links.
+Open **Manage Resources** from the launcher or Settings. It reports each resource as Ready, Partial, or Missing and provides download links. Every entry shows the folder it installs into, and **Open Folder** opens that folder directly.
 
-| Resource | Target folder |
-| --- | --- |
-| Faster-Whisper models | `models/faster_whisper/` |
-| CUDA 12 runtime pack | `bin/cuda12_fw/` |
-| SenseVoice model | `models/sensevoice/` |
-| Vietnamese Piper voices | `models/piper/` |
-| English Piper voices | `models/piper-en/` |
-| Speaker diarization models | `models/pyannote/` |
+The SenseVoice model is required before **New Project** is enabled, in both CPU and GPU mode. The GPU Acceleration Pack is required only for GPU mode.
+
+| Resource | Extract the archive into | Files end up in |
+| --- | --- | --- |
+| Faster-Whisper models | `models/faster_whisper/` | `models/faster_whisper/models--Systran--.../` |
+| CUDA 12 runtime pack | `bin/` | `bin/cuda12_fw/` |
+| SenseVoice model | `models/sensevoice/` | `models/sensevoice/` |
+| Vietnamese Piper voices | `models/piper/` | `models/piper/` |
+| English Piper voices | `models/piper-en/` | `models/piper-en/` |
+| Speaker diarization models | `models/pyannote/` | `models/pyannote/` |
+
+### Installing a pack by hand
+
+The archives carry their own top-level folder. `cuda12_fw.zip`, for example, contains a `cuda12_fw/` directory, so it must be extracted into `bin/` and **not** into `bin/cuda12_fw/` - the latter produces `bin/cuda12_fw/cuda12_fw/`.
+
+CapCap now also accepts a pack nested one or two levels below its target folder, so an accidental extra folder no longer leaves the resource stuck on Missing. Press **Refresh** in Manage Resources after copying files in.
 
 ## Environment configuration
 

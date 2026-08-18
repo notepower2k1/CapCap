@@ -5,7 +5,7 @@ import threading
 import traceback
 from pathlib import Path
 
-from runtime_paths import bin_path, models_path, workspace_root, subprocess_hidden_kwargs
+from runtime_paths import find_resource_file, bin_path, models_path, workspace_root, subprocess_hidden_kwargs
 from services.resource_download_service import ResourceDownloadService
 
 
@@ -132,6 +132,13 @@ def _candidate_cuda_bin_dirs() -> list[str]:
     workspace_cuda_bin = _workspace_root() / "bin" / "cuda12_fw"
     if workspace_cuda_bin.exists():
         candidates.append(str(workspace_cuda_bin))
+    # Extracting cuda12_fw.zip into bin/cuda12_fw (rather than into bin/)
+    # nests the DLLs one level down. Detecting that layout is not enough --
+    # the loader needs the directory that actually holds the runtime.
+    for root in (bundled_cuda_bin, str(workspace_cuda_bin)):
+        located = find_resource_file(root, "cublas64_12.dll")
+        if located:
+            candidates.append(os.path.dirname(located))
     toolkit_root = str(os.getenv("CUDAToolkit_ROOT", "")).strip()
     if toolkit_root:
         candidates.append(os.path.join(toolkit_root, "bin"))

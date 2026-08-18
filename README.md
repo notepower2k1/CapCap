@@ -13,6 +13,16 @@ CapCap is a Windows desktop video-localization editor for creating Vietnamese or
 - Piper and Edge TTS, optional speaker diarization, and per-speaker voice assignment
 - Editor timeline with subtitles, blur, logo, mask, text, selection ranges, locks, and Fast Preview
 
+## Download
+
+There is no `.exe` file in this repository - the build is published as a ZIP on
+the [Releases page](https://github.com/notepower2k1/CapCap/releases/latest).
+Download the ZIP, extract it, and run `CapCap.exe` from the extracted folder.
+
+On first launch, open **Manage Resources** and install the packs marked
+*Missing*. The SenseVoice model is required before a project can be created in
+either CPU or GPU mode; the GPU Acceleration Pack is required only for GPU mode.
+
 ## Documentation
 
 - [How to Use](docs/how-to-use.md)
