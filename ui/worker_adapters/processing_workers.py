@@ -13,7 +13,13 @@ APP_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "app")
 if APP_PATH not in sys.path:
     sys.path.insert(0, APP_PATH)
 
-from runtime_paths import bin_path, subprocess_hidden_kwargs
+from runtime_paths import (
+    bin_path,
+    ffmpeg_path as resolve_ffmpeg,
+    ffprobe_path as resolve_ffprobe,
+    mpv_library_path,
+    subprocess_hidden_kwargs,
+)
 from services import EngineRuntime, ResourceDownloadService
 
 
@@ -115,7 +121,7 @@ class AlternateRangeTranscriptionWorker(QThread):
             else:
                 import tempfile
                 temp_audio = os.path.join(tempfile.gettempdir(), f"capcap_range_{int(self.start_time * 1000)}_{int(self.end_time * 1000)}.wav")
-                ffmpeg = bin_path("ffmpeg", "ffmpeg.exe")
+                ffmpeg = resolve_ffmpeg()
                 subprocess.run([
                     ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", str(self.start_time),
                     "-t", str(max(0.1, self.end_time - self.start_time)), "-i", self.video_path,
@@ -305,19 +311,26 @@ class RuntimeAssetsWorker(QThread):
             details = []
 
             self.progress.emit(5, "Checking bundled runtime assets...")
-            ffmpeg_path = Path(bin_path("ffmpeg", "ffmpeg.exe"))
-            if not ffmpeg_path.exists():
-                raise FileNotFoundError(f"Bundled FFmpeg is missing: {ffmpeg_path}")
-            details.append(f"FFmpeg ready: {ffmpeg_path}")
+            ffmpeg_exe = resolve_ffmpeg()
+            if not (os.path.isfile(ffmpeg_exe) or shutil.which(ffmpeg_exe)):
+                raise FileNotFoundError(
+                    "FFmpeg was not found. Install it and make sure it is on PATH, "
+                    f"or place it in the bin/ffmpeg folder (looked for: {ffmpeg_exe})."
+                )
+            details.append(f"FFmpeg ready: {ffmpeg_exe}")
             self.progress.emit(12, "FFmpeg is ready.")
 
-            mpv_path = Path(bin_path("mpv", "libmpv-2.dll"))
-            if not mpv_path.exists():
-                alt_mpv_path = Path(bin_path("mpv", "mpv-2.dll"))
-                if not alt_mpv_path.exists():
-                    raise FileNotFoundError(f"Bundled libmpv is missing: {mpv_path}")
-                mpv_path = alt_mpv_path
-            details.append(f"libmpv ready: {mpv_path}")
+            mpv_library = mpv_library_path()
+            if mpv_library:
+                details.append(f"libmpv ready: {mpv_library}")
+            elif os.name == "nt":
+                raise FileNotFoundError(
+                    f"Bundled libmpv is missing: {bin_path('mpv', 'libmpv-2.dll')}"
+                )
+            else:
+                # Linux/macOS load libmpv from the system package manager, so
+                # the loader — not a bundled file — decides availability.
+                details.append("libmpv: using the system installation.")
             self.progress.emit(20, "Preview runtime is ready.")
 
             from whisper_processor import load_whisper_model
@@ -392,7 +405,7 @@ class TimelineWaveformWorker(QThread):
                 temp_audio = self.temp_audio_path
                 if temp_audio and not os.path.exists(temp_audio):
                     os.makedirs(os.path.dirname(temp_audio), exist_ok=True)
-                    ffmpeg = os.path.join(bin_path("ffmpeg"), "ffmpeg.exe")
+                    ffmpeg = resolve_ffmpeg()
                     subprocess.run(
                         [
                             ffmpeg,
@@ -484,19 +497,8 @@ class TimelineThumbnailWorker(QThread):
                 self.finished.emit(self.request_signature, [], "")
                 return
 
-            ffmpeg_candidates = [
-                bin_path("ffmpeg", "ffmpeg.exe"),
-                bin_path("ffmpeg.exe"),
-                shutil.which("ffmpeg"),
-                shutil.which("ffmpeg.exe"),
-            ]
-            ffmpeg_path = ""
-            for candidate in ffmpeg_candidates:
-                if candidate and os.path.isfile(candidate):
-                    ffmpeg_path = candidate
-                    break
-
-            if not ffmpeg_path:
+            ffmpeg_path = resolve_ffmpeg()
+            if not (os.path.isfile(ffmpeg_path) or shutil.which(ffmpeg_path)):
                 self.finished.emit(self.request_signature, [], "")
                 return
 
@@ -1018,8 +1020,8 @@ class VoiceSamplePreviewWorker(QThread):
             return candidate
         try:
             normalized_path = os.path.join(temp_dir, f"{Path(candidate).stem}_normalized.wav")
-            ffmpeg_path = Path(bin_path("ffmpeg", "ffmpeg.exe"))
-            if ffmpeg_path.exists():
+            ffmpeg_path = resolve_ffmpeg()
+            if os.path.isfile(ffmpeg_path) or shutil.which(ffmpeg_path):
                 cmd = [
                     str(ffmpeg_path),
                     "-y",
@@ -1052,8 +1054,8 @@ class VoiceSamplePreviewWorker(QThread):
             return False
         if os.path.getsize(candidate) <= 44:
             return False
-        ffprobe_path = Path(bin_path("ffmpeg", "ffprobe.exe"))
-        if not ffprobe_path.exists():
+        ffprobe_path = resolve_ffprobe()
+        if not (os.path.isfile(ffprobe_path) or shutil.which(ffprobe_path)):
             return True
         try:
             proc = subprocess.run(

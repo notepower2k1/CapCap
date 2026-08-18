@@ -3,7 +3,7 @@
 ![CapCap Editor Preview](assets/preview.JPG)
 ### [Demo + Tutorial](https://www.tiktok.com/@nguyenthach617/video/7674305087023369493)
 
-CapCap is a Windows desktop video-localization editor for creating Vietnamese or English subtitles, translated video, voice-over, and timed visual layers.
+CapCap is a desktop video-localization editor for creating Vietnamese or English subtitles, translated video, voice-over, and timed visual layers. The packaged release is Windows-only; running from source also works on Linux and macOS with system FFmpeg and libmpv.
 
 ## Highlights
 
@@ -26,10 +26,20 @@ CapCap is a Windows desktop video-localization editor for creating Vietnamese or
 git clone https://github.com/notepower2k1/CapCap.git
 cd CapCap
 python -m venv venv
-venv\Scripts\activate
+venv\Scripts\activate          # Linux/macOS: source venv/bin/activate
 pip install -r requirements-local.txt
 python ui/gui.py
 ```
+
+On Linux and macOS, install FFmpeg and libmpv first - `bin/` only contains the
+Windows binaries:
+
+```bash
+sudo apt install ffmpeg libmpv2     # Debian/Ubuntu
+brew install ffmpeg mpv             # macOS
+```
+
+See [Requirements and Resources](docs/requirements.md) for the full platform notes.
 
 Copy `.env_example` to `.env` only if you need manual provider or remote-server configuration. Most settings are available in the app.
 

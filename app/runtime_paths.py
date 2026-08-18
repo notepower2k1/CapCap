@@ -1,7 +1,11 @@
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+IS_WINDOWS = os.name == "nt"
 
 
 def bundle_root() -> str:
@@ -47,12 +51,95 @@ def first_existing_path(*candidates: str) -> str:
     return str(candidates[0] if candidates else "")
 
 
+def _bin_roots() -> list:
+    return [
+        os.path.join(bundle_root(), "bin"),
+        join_root("bin"),
+        os.path.join(os.getcwd(), "bin"),
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "bin"),
+    ]
+
+
+def _part_variants(part: str) -> list:
+    """Return the acceptable spellings of a bundled file name on this OS.
+
+    The repository ships Windows binaries (``ffmpeg.exe``), so call sites name
+    them with the ``.exe`` suffix.  On Linux and macOS the same tool has no
+    extension, and a bundled ``.exe`` is a PE image that cannot be executed, so
+    the suffixed spelling must never be accepted there.
+    """
+    name = str(part or "")
+    if IS_WINDOWS or not name.lower().endswith(".exe"):
+        return [name]
+    return [name[: -len(".exe")]]
+
+
 def bin_path(*parts: str) -> str:
-    primary = os.path.join(bundle_root(), "bin", *parts)
-    workspace_fallback = join_root("bin", *parts)
-    cwd_fallback = os.path.join(os.getcwd(), "bin", *parts)
-    exe_fallback = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "bin", *parts)
-    return first_existing_path(primary, workspace_fallback, cwd_fallback, exe_fallback)
+    if parts:
+        tail_variants = _part_variants(parts[-1])
+        head = list(parts[:-1])
+    else:
+        tail_variants = []
+        head = []
+
+    candidates = []
+    for root in _bin_roots():
+        if tail_variants:
+            for variant in tail_variants:
+                candidates.append(os.path.join(root, *head, variant))
+        else:
+            candidates.append(root)
+    return first_existing_path(*candidates)
+
+
+def tool_path(name: str, *, subdir: str = "ffmpeg") -> str:
+    """Resolve a command-line tool such as ``ffmpeg`` or ``ffprobe``.
+
+    Bundled copies win so a packaged build stays self-contained.  When nothing
+    is bundled — the normal situation on Linux and macOS, where the ``.exe``
+    binaries in ``bin/`` are unusable — fall back to the copy on ``PATH`` and
+    finally to the bare name, which yields a readable "not found" error from
+    ``subprocess`` instead of a misleading missing-file path.
+    """
+    base = str(name or "").strip()
+    if not base:
+        return ""
+    filename = base + ".exe" if IS_WINDOWS else base
+
+    for candidate in (bin_path(subdir, filename), bin_path(filename)):
+        if candidate and os.path.isfile(candidate):
+            return candidate
+
+    found = shutil.which(base)
+    if found:
+        return found
+    return base
+
+
+def ffmpeg_path() -> str:
+    return tool_path("ffmpeg")
+
+
+def ffprobe_path() -> str:
+    return tool_path("ffprobe")
+
+
+def mpv_library_path() -> str:
+    """Locate the libmpv shared library that ships with the Windows bundle.
+
+    Linux and macOS are expected to use the system libmpv (``libmpv.so.2`` /
+    ``libmpv.2.dylib``), which ``python-mpv`` discovers on its own, so an empty
+    string there means "let the loader find it".
+    """
+    if IS_WINDOWS:
+        names = ("libmpv-2.dll", "mpv-2.dll")
+    else:
+        names = ("libmpv.so.2", "libmpv.so", "libmpv.2.dylib", "libmpv.dylib")
+    for name in names:
+        candidate = bin_path("mpv", name)
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return ""
 
 
 def models_path(*parts: str) -> str:

@@ -53,8 +53,10 @@ def _open_folder_dialog(gui_parent, path: str) -> None:
         return
     from PySide6.QtWidgets import QMessageBox
     try:
+        from utils.file_dialog_utils import open_path_externally
+
         os.makedirs(target, exist_ok=True)
-        os.startfile(os.path.abspath(target))
+        open_path_externally(target)
     except Exception as exc:
         QMessageBox.critical(gui_parent, "Error", f"Could not open folder:\n{exc}")
 

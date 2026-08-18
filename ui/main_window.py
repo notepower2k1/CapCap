@@ -2146,7 +2146,8 @@ class VideoTranslatorGUI(QMainWindow):
         from runtime_paths import models_path
         dir_path = models_path("vietnormalizer")
         os.makedirs(dir_path, exist_ok=True)
-        os.startfile(dir_path)
+        from utils.file_dialog_utils import open_path_externally
+        open_path_externally(dir_path)
 
     def _create_vietdict_template(self, resource_id: str):
         import csv
@@ -2171,7 +2172,8 @@ class VideoTranslatorGUI(QMainWindow):
                 w.writerow(["iPhone", "ai phôn"])
             print(f"[VietDict] Created template: {nonvn_path}")
 
-        os.startfile(dir_path)
+        from utils.file_dialog_utils import open_path_externally
+        open_path_externally(dir_path)
 
     def _vietdict_add_row(self, table):
         from PySide6.QtWidgets import QTableWidgetItem

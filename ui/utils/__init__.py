@@ -15,6 +15,7 @@ from .file_dialog_utils import (
     browse_voice_output_folder,
     cleanup_file_if_exists,
     open_folder,
+    open_path_externally,
 )
 from .media_utils import (
     browse_video,

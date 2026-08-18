@@ -2,10 +2,41 @@
 
 ## System requirements
 
-- Windows 10/11
+- Windows 10/11 for the packaged release build
 - Python 3.11 when running from source
-- FFmpeg and libmpv are included in the application resources
+- FFmpeg and libmpv are included in the Windows application resources
 - CPU mode works on systems without an NVIDIA GPU
+
+### Running from source on Linux and macOS
+
+Only the packaged release is Windows-only. Running from source works on Linux
+and macOS provided FFmpeg and libmpv come from the system package manager,
+because `bin/` ships Windows `.exe` and `.dll` files that those systems cannot
+load. CapCap looks for a bundled copy first and falls back to `PATH`.
+
+| Platform | Install command |
+| --- | --- |
+| Debian/Ubuntu | `sudo apt install ffmpeg libmpv2` (`libmpv1` on older releases) |
+| Fedora | `sudo dnf install ffmpeg mpv-libs` |
+| Arch | `sudo pacman -S ffmpeg mpv` |
+| macOS (Homebrew) | `brew install ffmpeg mpv` |
+
+Verify the tools resolve before starting the app:
+
+```bash
+ffmpeg -version
+ffprobe -version
+python -c "import mpv; print('libmpv OK')"
+```
+
+Platform notes:
+
+- GPU mode is CUDA-only, so Linux needs an NVIDIA GPU and macOS is CPU-only.
+  `requirements-base.txt` installs the CPU build of `onnxruntime` automatically
+  on macOS and on non-x86_64 machines.
+- Qt needs a desktop session. On a headless or WSL host, install the usual
+  `libxcb`/`xkbcommon` runtime packages, or run under an X/Wayland server.
+- The packaged `.exe` build and the CUDA runtime pack remain Windows-only.
 
 ## GPU mode
 
