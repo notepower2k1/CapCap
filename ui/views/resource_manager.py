@@ -279,10 +279,22 @@ def open_resource_manager(workspace_root: str = None, parent=None,
         dialog._resource_rows = {}
 
         resources = service.list_resources()
-        cpu_items = [r for r in resources if r.get("kind") in {"sensevoice", "whisper_cpu"}]
+        cpu_kinds = {"sensevoice", "whisper_cpu"}
         gpu_kinds = {"ai", "whisper", "cuda"}
+        diarization_kinds = {"diarization"}
+        voice_kinds = {"voice"}
+
+        cpu_items = [r for r in resources if r.get("kind") in cpu_kinds]
         gpu_items = [r for r in resources if r.get("kind") in gpu_kinds]
-        voice_items = [r for r in resources if r.get("kind") == "voice"]
+        diarization_items = [r for r in resources if r.get("kind") in diarization_kinds]
+        voice_items = [r for r in resources if r.get("kind") in voice_kinds]
+
+        # A resource whose kind matched no section used to be dropped without
+        # a trace, which is how the speaker-diarization entries stayed
+        # invisible while still being offered by the service. Collect the
+        # leftovers so adding a resource can never silently hide it again.
+        known_kinds = cpu_kinds | gpu_kinds | diarization_kinds | voice_kinds
+        other_items = [r for r in resources if r.get("kind") not in known_kinds]
 
         if cpu_items:
             cpu_card, cpu_layout = _make_section("CPU Resource", expanded=True)
@@ -301,8 +313,24 @@ def open_resource_manager(workspace_root: str = None, parent=None,
                 _add_card(item, gpu_layout)
             content_layout.addWidget(gpu_card)
 
+        if diarization_items:
+            # Optional: diarization only affects per-speaker voice assignment,
+            # so it starts collapsed like the GPU section.
+            diarization_card, diarization_layout = _make_section(
+                "Speaker Diarization (optional)", expanded=False
+            )
+            for item in diarization_items:
+                _add_card(item, diarization_layout)
+            content_layout.addWidget(diarization_card)
+
         for item in voice_items:
             _add_card(item, content_layout)
+
+        if other_items:
+            other_card, other_layout = _make_section("Other Resources", expanded=False)
+            for item in other_items:
+                _add_card(item, other_layout)
+            content_layout.addWidget(other_card)
 
         content_layout.addStretch()
 
