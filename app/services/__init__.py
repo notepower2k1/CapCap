@@ -11,6 +11,7 @@ __all__ = [
     "SegmentRegroupService",
     "SegmentService",
     "SpeakerDiarizationService",
+    "VideoDownloadService",
     "VoiceCatalogService",
     "WorkflowRuntime",
 ]
@@ -26,9 +27,11 @@ _MODULE_MAP = {
     "SegmentRegroupService": ".segment_regroup_service",
     "SegmentService": ".segment_service",
     "SpeakerDiarizationService": ".speaker_diarization_service",
+    "VideoDownloadService": ".video_download_service",
     "VoiceCatalogService": ".voice_catalog_service",
     "WorkflowRuntime": ".workflow_runtime",
 }
+
 
 
 def __getattr__(name):

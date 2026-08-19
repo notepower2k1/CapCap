@@ -9,7 +9,12 @@ import time
 import uuid
 from pathlib import Path
 
+<<<<<<< Updated upstream
 from runtime_paths import app_path, bin_path, bundle_root, join_root, models_path, subprocess_hidden_kwargs
+=======
+from runtime_paths import app_path, bin_path, join_root, models_path, subprocess_hidden_kwargs
+
+>>>>>>> Stashed changes
 
 
 class ResourceDownloadService:
@@ -317,14 +322,19 @@ class ResourceDownloadService:
         if not models_dir:
             return "missing"
         models_path_dir = os.path.join(models_dir, "models")
-        missing = [
-            m for m in self._OCR_REQUIRED_MODELS
-            if not os.path.isfile(os.path.join(models_path_dir, m))
-        ]
-        return "missing" if missing else "installed"
+        if not os.path.isdir(models_path_dir):
+            return "missing"
+        # Dynamically detect PP-OCR models (PP-OCRv4 / PP-OCRv6)
+        onnx_models = [f for f in os.listdir(models_path_dir) if f.endswith(".onnx")]
+        has_det = any("det" in f.lower() for f in onnx_models)
+        has_rec = any("rec" in f.lower() for f in onnx_models)
+        if has_det and has_rec:
+            return "installed"
+        return "missing"
 
     def is_ocr_ready(self) -> bool:
         return self._ocr_model_status() == "installed"
+
 
     @staticmethod
     def is_sensevoice_runtime_ready() -> bool:
@@ -494,6 +504,28 @@ class ResourceDownloadService:
     def list_resources(self) -> list[dict]:
         resources: list[dict] = [
             {
+                "id": "sensevoice:model",
+                "name": "SenseVoice Small (Chinese ASR)",
+                "kind": "sensevoice",
+                "status": "installed" if self.is_resource_installed("sensevoice:model") else "missing",
+                "target_dir": models_path("sensevoice"),
+                "download_url": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+                "expected_filename": "model.int8.onnx",
+                "auto_download_supported": True,
+                "description": "Fast, non-autoregressive speech recognition model for Chinese video transcription.",
+            },
+            {
+                "id": "vad:silero",
+                "name": "Silero VAD (Sherpa-ONNX)",
+                "kind": "sensevoice",
+                "status": "installed" if self.is_resource_installed("vad:silero") else "missing",
+                "target_dir": join_root("bin"),
+                "download_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+                "expected_filename": "silero_vad.onnx",
+                "auto_download_supported": True,
+                "description": "Voice activity detector model for accurate speech segmentation.",
+            },
+            {
                 "id": "whisper:base",
                 "name": "Whisper Base",
                 "kind": "whisper_cpu",
@@ -607,11 +639,27 @@ class ResourceDownloadService:
             fw_dir = join_root("bin", "cuda12_fw")
             return os.path.exists(os.path.join(fw_dir, "cublas64_12.dll"))
         if resource_id == "sensevoice:model":
-            return os.path.isfile(os.path.join(models_path("sensevoice"), "model.int8.onnx"))
+            sv_dir = models_path("sensevoice")
+            has_tokens = os.path.isfile(os.path.join(sv_dir, "tokens.txt"))
+            has_model = (
+                os.path.isfile(os.path.join(sv_dir, "model.int8.onnx"))
+                or os.path.isfile(os.path.join(sv_dir, "model.onnx"))
+                or (os.path.isdir(sv_dir) and any(f.endswith(".onnx") for f in os.listdir(sv_dir)))
+            )
+            return has_tokens and has_model
+        if resource_id == "vad:silero":
+            vad_candidates = [
+                os.path.join(bin_path(), "silero_vad.onnx"),
+                os.path.join(models_path(), "silero_vad.onnx"),
+                os.path.join(models_path("sensevoice"), "silero_vad.onnx"),
+                join_root("bin", "silero_vad.onnx"),
+            ]
+            return any(os.path.isfile(c) and os.path.getsize(c) > 0 for c in vad_candidates)
         if resource_id == "diarization:segmentation":
             return os.path.isfile(self._speaker_diarization_segmentation_path())
         if resource_id == "diarization:embedding":
             return os.path.isfile(self._speaker_diarization_embedding_path())
+
         if resource_id.startswith("whisper:"):
             model_name = resource_id.split(":", 1)[1].strip().lower()
             for model_dir in self._whisper_cache_dirs(model_name):
@@ -791,9 +839,69 @@ class ResourceDownloadService:
                 progress_cb(100, f"Voice {voice_id} is ready.")
             return
 
+        if resource_id == "sensevoice:model":
+            target_dir = models_path("sensevoice")
+            os.makedirs(target_dir, exist_ok=True)
+            if progress_cb:
+                progress_cb(5, "Downloading SenseVoice model (~120MB)...")
+            try:
+                from huggingface_hub import hf_hub_download
+                m_path = hf_hub_download(
+                    repo_id=self.SENSEVOICE_REPO,
+                    filename="model.int8.onnx",
+                    local_dir=target_dir,
+                )
+                if progress_cb:
+                    progress_cb(80, "Downloading SenseVoice vocabulary tokens...")
+                t_path = hf_hub_download(
+                    repo_id=self.SENSEVOICE_REPO,
+                    filename="tokens.txt",
+                    local_dir=target_dir,
+                )
+            except Exception as exc:
+                print(f"[SenseVoice Download] HF download failed: {exc}")
+                raise
+            if progress_cb:
+                progress_cb(100, "SenseVoice model is ready.")
+            return
+
+        if resource_id == "vad:silero":
+            import urllib.request
+            target_file = os.path.join(join_root("bin"), "silero_vad.onnx")
+            os.makedirs(os.path.dirname(target_file), exist_ok=True)
+            if progress_cb:
+                progress_cb(10, "Downloading Silero VAD model...")
+            url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+            try:
+                def _vad_rep(block_num, block_size, total_size):
+                    if progress_cb and total_size > 0:
+                        downloaded = block_num * block_size
+                        percent = min(99, int((downloaded / total_size) * 100))
+                        progress_cb(percent, f"Downloading Silero VAD ({percent}%)...")
+
+                urllib.request.urlretrieve(url, target_file, reporthook=_vad_rep)
+            except Exception as exc:
+                print(f"[VAD Download] Direct URL failed: {exc}, trying HuggingFace fallback...")
+                try:
+                    from huggingface_hub import hf_hub_download
+                    downloaded = hf_hub_download(
+                        repo_id=self.SENSEVOICE_REPO,
+                        filename="silero_vad.onnx",
+                        local_dir=join_root("bin"),
+                    )
+                    if os.path.isfile(downloaded) and os.path.abspath(downloaded) != os.path.abspath(target_file):
+                        shutil.copy2(downloaded, target_file)
+                except Exception as hf_exc:
+                    raise RuntimeError(f"Failed to download Silero VAD: {exc} | {hf_exc}") from hf_exc
+
+            if progress_cb:
+                progress_cb(100, "Silero VAD model is ready.")
+            return
+
         if resource_id in {self.NORMAL_AI_RESOURCE_ID, self.HIGH_AI_RESOURCE_ID}:
             raise ValueError(
                 f"Auto download is not supported for '{resource_id}'. Use 'Open Download Page' to get the file manually."
             )
 
         raise ValueError(f"Unsupported resource: {resource_id}")
+

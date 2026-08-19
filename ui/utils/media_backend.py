@@ -113,8 +113,15 @@ class QtMediaPlayerBackend(QObject):
         if isinstance(video_view, VideoView):
             self._player.setVideoOutput(video_view.video_item)
         self._player.positionChanged.connect(self.positionChanged.emit)
-        self._player.durationChanged.connect(self.durationChanged.emit)
-        self._player.stateChanged.connect(lambda s: self.stateChanged.emit(int(s.value)))
+        if hasattr(self._player, "playbackStateChanged"):
+            self._player.playbackStateChanged.connect(
+                lambda s: self.stateChanged.emit(int(s.value) if hasattr(s, "value") else int(s))
+            )
+        elif hasattr(self._player, "stateChanged"):
+            self._player.stateChanged.connect(
+                lambda s: self.stateChanged.emit(int(s.value) if hasattr(s, "value") else int(s))
+            )
+
         # When the clip reaches the end, the QMediaPlayer goes to
         # StoppedState — surface this so the timeline can stop too
         # (Bug 2: video not pausing at end, timeline keeps running).
@@ -179,20 +186,33 @@ class QtMediaPlayerBackend(QObject):
     def _clear_original_audio(self):
         return None
 
-    def set_blur_region(self, blur_region=None):
+    def set_blur_region(self, blur_region=None, *args, **kwargs):
         return None
 
-    def clear_blur_region(self):
+    def clear_blur_region(self, *args, **kwargs):
         return None
 
-    def set_color_filter_state(self, state=None):
+    def set_mask_region(self, *args, **kwargs):
         return None
 
-    def clear_color_filter(self):
+    def clear_mask_region(self, *args, **kwargs):
         return None
 
-    def set_preview_framing(self, source_ratio=None, canvas_ratio=None, scale_mode="fit", focus_x=0.5, focus_y=0.5):
+    def set_logo(self, *args, **kwargs):
         return None
+
+    def clear_logo(self, *args, **kwargs):
+        return None
+
+    def set_color_filter_state(self, state=None, *args, **kwargs):
+        return None
+
+    def clear_color_filter(self, *args, **kwargs):
+        return None
+
+    def set_preview_framing(self, source_ratio=None, canvas_ratio=None, scale_mode="fit", focus_x=0.5, focus_y=0.5, *args, **kwargs):
+        return None
+
 
     def set_volume(self, percent):
         value = max(0, min(100, int(percent)))

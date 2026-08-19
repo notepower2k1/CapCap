@@ -23,11 +23,40 @@ class SubtitleOverlayItem(QGraphicsItem):
         self.background_box = False
         self.background_color = QColor(0, 0, 0, 170)
         self.single_line = False
+        self.bold = True
+        self.shadow_color = QColor(0, 0, 0, 180)
+        self.shadow_depth = 0.0
         self.x_offset = 0
         self.bottom_offset = 30
         self.custom_position_enabled = False
         self.custom_x_percent = 50
-        self.custom_y_percent = 86
+        self.text_rendering = True
+        self._editable = False
+        self._suppressed = False
+
+    def set_editable(self, editable: bool, *args, **kwargs):
+        self._editable = bool(editable)
+
+    def set_suppressed(self, suppressed: bool, *args, **kwargs):
+        self._suppressed = bool(suppressed)
+
+    def attach_to_view(self, view, *args, **kwargs):
+        pass
+
+    def is_top_level_overlay(self, *args, **kwargs) -> bool:
+        return False
+
+    def sync_to_view(self, *args, **kwargs):
+        pass
+
+    def set_effects(self, *args, **kwargs):
+        pass
+
+    def set_text_rendering(self, enabled: bool):
+        enabled = bool(enabled)
+        if getattr(self, "text_rendering", True) != enabled:
+            self.text_rendering = enabled
+            self.update()
 
     def set_text(self, text):
         new_lines = [line for line in str(text or "").splitlines() if line] or ([] if not text else [str(text)])
@@ -59,7 +88,6 @@ class SubtitleOverlayItem(QGraphicsItem):
 
     def set_style(
         self,
-        *,
         font_name=None,
         font_size=None,
         font_color=None,
@@ -68,6 +96,11 @@ class SubtitleOverlayItem(QGraphicsItem):
         background_box=None,
         background_color=None,
         single_line=None,
+        bold=None,
+        shadow_color=None,
+        shadow_depth=None,
+        *args,
+        **kwargs,
     ):
         changed = False
         if font_name and font_name != self.font_name:
@@ -87,6 +120,15 @@ class SubtitleOverlayItem(QGraphicsItem):
         if outline_color is not None and outline_color != self.outline_color:
             self.outline_color = outline_color
             changed = True
+        if bold is not None and bool(bold) != self.bold:
+            self.bold = bool(bold)
+            changed = True
+        if shadow_color is not None:
+            self.shadow_color = QColor(shadow_color)
+            changed = True
+        if shadow_depth is not None and float(shadow_depth) != self.shadow_depth:
+            self.shadow_depth = max(0.0, float(shadow_depth))
+            changed = True
         if background_box is not None and bool(background_box) != self.background_box:
             self.background_box = bool(background_box)
             changed = True
@@ -98,6 +140,7 @@ class SubtitleOverlayItem(QGraphicsItem):
             changed = True
         if changed:
             self.update()
+
 
     def set_alignment(self, alignment: str):
         self.alignment = alignment or "Bottom Center"
@@ -126,10 +169,13 @@ class SubtitleOverlayItem(QGraphicsItem):
         return QRectF(0, 0, self.W, self.H)
 
     def paint(self, painter, option, widget):
+        if not getattr(self, "text_rendering", True):
+            return
         if not self.current_text and not self.current_lines and not self.isVisible():
             return
         painter.setRenderHint(QPainter.Antialiasing)
         rect = self.boundingRect()
+
 
         if not self.current_lines:
             return

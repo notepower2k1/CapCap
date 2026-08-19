@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -24,6 +25,12 @@ from PySide6.QtWidgets import (
 )
 
 from runtime_paths import asset_path, subprocess_hidden_kwargs, workspace_root
+
+
+def _thumbnail_name(video_path: str) -> str:
+    digest = hashlib.sha1(os.path.abspath(video_path).encode("utf-8")).hexdigest()[:12]
+    return f"thumb_{digest}.jpg"
+
 
 
 
@@ -128,40 +135,120 @@ class ProjectCard(QFrame):
         super().__init__(parent)
         self.video_path = video_path
         self._orig_pixmap = None
-        self.setObjectName("statusCard")
-        self.setMinimumSize(180, 184)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFixedSize(260, 224)
         self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet("ProjectCard:hover { border: 2px solid #4ecdc4; }")
+        self.setObjectName("projectCard")
+        self.setStyleSheet("""
+            #projectCard {
+                background-color: #0d1827;
+                border: 1px solid #1c304a;
+                border-radius: 10px;
+            }
+            #projectCard:hover {
+                background-color: #122238;
+                border: 1px solid #38bdf8;
+            }
+        """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        # 16:9 Thumbnail container
+        self.thumb_container = QWidget()
+        self.thumb_container.setFixedSize(240, 135)
+        self.thumb_container.setStyleSheet("background-color: #060b14; border-radius: 6px;")
+
+        thumb_layout = QVBoxLayout(self.thumb_container)
+        thumb_layout.setContentsMargins(0, 0, 0, 0)
 
         self.thumb_label = QLabel()
-        self.thumb_label.setMinimumSize(160, 120)
+        self.thumb_label.setFixedSize(240, 135)
         self.thumb_label.setAlignment(Qt.AlignCenter)
-        self.thumb_label.setStyleSheet("background-color: #0d1220; border-radius: 6px;")
-        self.thumb_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.thumb_label.setStyleSheet("background-color: transparent; border-radius: 6px; color: #64748b; font-size: 11px;")
+        thumb_layout.addWidget(self.thumb_label)
 
-        layout.addWidget(self.thumb_label)
+        # Duration badge overlaid at bottom right
+        self.duration_badge = QLabel(self.thumb_container)
+        self.duration_badge.setStyleSheet("""
+            background-color: rgba(6, 11, 20, 0.85);
+            color: #f1f5f9;
+            font-size: 10px;
+            font-weight: 700;
+            border-radius: 4px;
+            padding: 2px 6px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        """)
+        self.duration_badge.hide()
 
-        self.name_label = QLabel(os.path.basename(video_path))
+        layout.addWidget(self.thumb_container)
+
+        # Video title (clean 2-line wrap)
+        filename = os.path.basename(video_path)
+        self.name_label = QLabel(filename)
         self.name_label.setWordWrap(True)
         self.name_label.setMaximumHeight(36)
-        self.name_label.setStyleSheet("color: #e0e0e0; font-size: 11px; font-weight: 600;")
+        self.name_label.setToolTip(filename)
+        self.name_label.setStyleSheet("color: #f1f5f9; font-size: 12px; font-weight: 600;")
         layout.addWidget(self.name_label)
+
+        # Bottom info row
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        bottom_row.setSpacing(6)
 
         stage_text, stage_color = _project_pipeline_status(video_path)
         self.stage_badge = QLabel(stage_text)
         self.stage_badge.setAlignment(Qt.AlignCenter)
         self.stage_badge.setStyleSheet(
-            f"background-color: #142437; color: {stage_color}; border: 1px solid #2e4b68; "
-            "border-radius: 7px; padding: 3px 7px; font-size: 10px; font-weight: 700;"
+            f"background-color: #101c2d; color: {stage_color}; border: 1px solid #233b59; "
+            "border-radius: 5px; padding: 2px 8px; font-size: 10px; font-weight: 700;"
         )
-        layout.addWidget(self.stage_badge)
+        bottom_row.addWidget(self.stage_badge)
+        bottom_row.addStretch()
+
+        file_size_text = ""
+        try:
+            if os.path.exists(video_path):
+                size_mb = os.path.getsize(video_path) / (1024 * 1024)
+                if size_mb >= 1024:
+                    file_size_text = f"{size_mb / 1024:.1f} GB"
+                else:
+                    file_size_text = f"{size_mb:.1f} MB"
+        except Exception:
+            pass
+
+        if file_size_text:
+            self.size_label = QLabel(file_size_text)
+            self.size_label.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 500;")
+            bottom_row.addWidget(self.size_label)
+
+        layout.addLayout(bottom_row)
 
         self._load_thumb(thumbnail_cache_dir)
+        self._load_duration()
+
+    def _load_duration(self):
+        try:
+            duration_s = _get_video_duration(self.video_path)
+            if duration_s > 0:
+                mins = int(duration_s // 60)
+                secs = int(duration_s % 60)
+                hrs = int(mins // 60)
+                mins = mins % 60
+                if hrs > 0:
+                    text = f"{hrs:02d}:{mins:02d}:{secs:02d}"
+                else:
+                    text = f"{mins:02d}:{secs:02d}"
+                self.duration_badge.setText(text)
+                self.duration_badge.adjustSize()
+                self.duration_badge.move(
+                    self.thumb_container.width() - self.duration_badge.width() - 6,
+                    self.thumb_container.height() - self.duration_badge.height() - 6,
+                )
+                self.duration_badge.show()
+        except Exception:
+            pass
 
     def _load_thumb(self, cache_dir):
         thumb_path = os.path.join(cache_dir, _thumbnail_name(self.video_path))
@@ -169,27 +256,65 @@ class ProjectCard(QFrame):
             thumb_path = _extract_thumbnail(self.video_path, thumb_path)
         if os.path.exists(thumb_path):
             self._orig_pixmap = QPixmap(thumb_path)
-            self._update_thumb()
-        else:
-            self.thumb_label.setText("No Preview")
-
-    def _update_thumb(self):
-        if self._orig_pixmap is None or self._orig_pixmap.isNull():
-            return
-        w = self.thumb_label.width()
-        if w > 0:
-            self.thumb_label.setPixmap(self._orig_pixmap.scaled(w, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._update_thumb()
+            if not self._orig_pixmap.isNull():
+                scaled = self._orig_pixmap.scaled(
+                    240, 135, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+                )
+                crop_x = max(0, (scaled.width() - 240) // 2)
+                crop_y = max(0, (scaled.height() - 135) // 2)
+                cropped = scaled.copy(crop_x, crop_y, 240, 135)
+                self.thumb_label.setPixmap(cropped)
+                return
+        self.thumb_label.setText("No Preview")
 
     def mousePressEvent(self, event):
-        if not self.isEnabled():
-            event.ignore()
-            return
-        self.window().selected_video = self.video_path
-        self.window().accept()
+        if event.button() == Qt.LeftButton:
+            if not self.isEnabled():
+                event.ignore()
+                return
+            self.window().selected_video = self.video_path
+            self.window().accept()
+        super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #0f1928;
+                color: #e2e8f0;
+                border: 1px solid #233b59;
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 16px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #1e334e;
+                color: #38bdf8;
+            }
+        """)
+        open_action = menu.addAction("Open in Editor")
+        open_folder_action = menu.addAction("Open Video Folder")
+        menu.addSeparator()
+        remove_action = menu.addAction("Remove from List")
+
+        action = menu.exec(event.globalPos())
+        if action == open_action:
+            self.window().selected_video = self.video_path
+            self.window().accept()
+        elif action == open_folder_action:
+            folder = os.path.dirname(os.path.abspath(self.video_path))
+            if os.path.exists(folder) and hasattr(os, "startfile"):
+                os.startfile(folder)
+        elif action == remove_action:
+            projects = _load_recent_projects()
+            updated = [p for p in projects if p.get("video_path") != self.video_path]
+            _save_recent_projects(None, updated)
+            if hasattr(self.window(), "_load_recent"):
+                self.window()._load_recent()
+
 
 
 def _extract_waveform_audio(video_path: str, temp_root: str) -> str:
@@ -346,15 +471,32 @@ class LauncherWindow(QDialog):
         self.setMinimumSize(840, 540)
         self.setStyleSheet("""
             QDialog {
-                background-color: #0a101e;
-                color: #cfe6ff;
+                background-color: #070d18;
+                color: #e2e8f0;
+                font-family: 'Segoe UI', sans-serif;
             }
-            #statusCard {
-                background-color: #0f1928;
-                border: 1px solid #1e3045;
-                border-radius: 8px;
+            QScrollArea {
+                background-color: #070d18;
+                border: none;
+            }
+            QScrollArea > QWidget > QWidget {
+                background-color: #070d18;
+            }
+            QScrollBar:vertical {
+                background: #0b1320;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #1c304a;
+                border-radius: 4px;
+                min-height: 24px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #38bdf8;
             }
         """)
+
 
         self._build_ui()
         QTimer.singleShot(0, self._load_recent)
@@ -472,7 +614,31 @@ class LauncherWindow(QDialog):
         self.new_btn.clicked.connect(self._on_new_project)
         action_row_one.addWidget(self.new_btn)
 
+        self.download_btn = QPushButton("Download from URL")
+
+        self.download_btn.setMinimumHeight(44)
+        self.download_btn.setMinimumWidth(140)
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1a3a5c;
+                color: #38bdf8;
+                font-weight: 700;
+                font-size: 13px;
+                border-radius: 8px;
+                border: 1px solid #2e5b88;
+            }
+            QPushButton:hover {
+                background-color: #244b75;
+                color: #7dd3fc;
+                border-color: #38bdf8;
+            }
+        """)
+        self.download_btn.setToolTip("Download video from YouTube, Douyin, TikTok, Bilibili, Facebook...")
+        self.download_btn.clicked.connect(self._on_download_video)
+        action_row_one.addWidget(self.download_btn)
+
         self.split_btn = QPushButton("Split Video")
+
         self.split_btn.setMinimumHeight(44)
         self.split_btn.setMinimumWidth(120)
         self.split_btn.setStyleSheet("""
@@ -570,28 +736,58 @@ class LauncherWindow(QDialog):
         root.addLayout(header)
 
         self.section_label = QLabel("Recent Projects")
-        self.section_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #8ad7ff;")
+        self.section_label.setStyleSheet("font-size: 15px; font-weight: 700; color: #f8fafc;")
         root.addWidget(self.section_label)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: #070d18;
+                border: none;
+            }
+            QScrollArea > QWidget > QWidget {
+                background-color: #070d18;
+            }
+        """)
 
         self.grid_widget = QWidget()
+        self.grid_widget.setStyleSheet("background-color: #070d18;")
         self.grid = QGridLayout(self.grid_widget)
-        self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setSpacing(12)
+        self.grid.setContentsMargins(4, 4, 4, 4)
+        self.grid.setSpacing(16)
         self.grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
 
         scroll.setWidget(self.grid_widget)
         root.addWidget(scroll, 1)
 
-        self.empty_label = QLabel("No recent projects. Click \"+ New Project\" to start.")
-        self.empty_label.setAlignment(Qt.AlignCenter)
-        self.empty_label.setStyleSheet("color: #556677; font-size: 13px;")
-        self.empty_label.hide()
-        root.addWidget(self.empty_label)
+        self.empty_box = QFrame()
+        self.empty_box.setStyleSheet("""
+            QFrame {
+                background-color: #0c1524;
+                border: 1px dashed #1e334e;
+                border-radius: 12px;
+                padding: 40px 20px;
+            }
+        """)
+        empty_layout = QVBoxLayout(self.empty_box)
+        empty_layout.setAlignment(Qt.AlignCenter)
+        empty_layout.setSpacing(8)
+
+        empty_title = QLabel("No Recent Projects")
+        empty_title.setStyleSheet("color: #94a3b8; font-size: 14px; font-weight: 700;")
+        empty_title.setAlignment(Qt.AlignCenter)
+
+        empty_sub = QLabel("Click '+ New Project' or 'Download from URL' to start.")
+        empty_sub.setStyleSheet("color: #475569; font-size: 12px;")
+        empty_sub.setAlignment(Qt.AlignCenter)
+
+        empty_layout.addWidget(empty_title)
+        empty_layout.addWidget(empty_sub)
+        root.addWidget(self.empty_box)
+        self.empty_box.hide()
+
 
         self.loading_label = QLabel("Preparing video...")
         self.loading_label.setAlignment(Qt.AlignCenter)
@@ -736,6 +932,9 @@ class LauncherWindow(QDialog):
         device = self.selected_device
         is_ok, missing = service.validate_device(device)
         self.new_btn.setEnabled(is_ok)
+        if hasattr(self, "download_btn"):
+            self.download_btn.setEnabled(is_ok)
+
         if device == "cuda":
             has_gpu = True
             gpu_name = ""
@@ -793,25 +992,39 @@ class LauncherWindow(QDialog):
         os.makedirs(self._thumbnail_dir, exist_ok=True)
 
         for i in reversed(range(self.grid.count())):
-            widget = self.grid.itemAt(i).widget()
-            if widget:
-                widget.deleteLater()
+            item = self.grid.itemAt(i)
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+                else:
+                    self.grid.removeItem(item)
 
         existing = [p for p in projects if os.path.exists(p.get("video_path", ""))]
         if existing != projects:
             _save_recent_projects(None, existing)
 
-        if not existing:
-            self.empty_label.show()
+        count = len(existing)
+        if count == 0:
+            self.section_label.setText("Recent Projects")
+            if hasattr(self, "empty_box"):
+                self.empty_box.show()
             return
-        self.empty_label.hide()
 
-        columns = min(3, max(1, (self.grid_widget.width() - 24) // 242))
+        if hasattr(self, "empty_box"):
+            self.empty_box.hide()
+        self.section_label.setText(f"Recent Projects ({count})")
+
+        available_w = max(300, self.grid_widget.width() - 10)
+        card_w = 260
+        spacing = 16
+        columns = max(1, available_w // (card_w + spacing))
+
         for i, proj in enumerate(existing):
             card = ProjectCard(proj["video_path"], self._thumbnail_dir, self)
-            row, col = divmod(i, max(1, columns))
-            self.grid.addWidget(card, row, col)
-            self.grid.setColumnStretch(col, 1)
+            row, col = divmod(i, columns)
+            self.grid.addWidget(card, row, col, Qt.AlignTop | Qt.AlignLeft)
+
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -826,7 +1039,15 @@ class LauncherWindow(QDialog):
             self.selected_video = path
             self.accept()
 
+    def _on_download_video(self):
+        from views.video_download_dialog import VideoDownloadDialog
+        dlg = VideoDownloadDialog(self)
+        if dlg.exec() == QDialog.Accepted and dlg.downloaded_video_path:
+            self.selected_video = dlg.downloaded_video_path
+            self.accept()
+
     def _on_manage_resources(self):
+
         from views.resource_manager import open_resource_manager
         open_resource_manager(parent=self)
         self._validate_resources_for_device()

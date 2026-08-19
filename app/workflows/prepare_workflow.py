@@ -731,11 +731,17 @@ class PrepareWorkflow:
                         import sherpa_onnx
                     except ImportError:
                         raise RuntimeError("sherpa-onnx is not installed. Run: pip install sherpa-onnx")
+
+                    def _sv_progress(percent: int, message: str):
+                        print(f"[SenseVoice] {percent}% - {message}")
+
                     raw_segments = self.engine_runtime.transcribe_audio_sensevoice(
                         working_audio_path,
                         sensevoice_model_dir,
                         language=source_language,
+                        progress_callback=_sv_progress,
                     )
+
                 elif is_remote_profile():
                     print("[ASR] Remote API mode: using single-pass transcription and sending full working audio to the PC server.")
                     raw_segments = self.engine_runtime.transcribe_audio(

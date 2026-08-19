@@ -10,6 +10,20 @@ class VideoView(QGraphicsView):
     """Hosts video and subtitle overlay in one scene."""
 
     framingChanged = Signal(float, float)
+    subtitleDragStarted = Signal()
+    subtitlePositionChanged = Signal(int, int)
+    blurRegionChanged = Signal(object)
+    blurEditFinished = Signal()
+    maskRegionChanged = Signal()
+    maskEditFinished = Signal()
+    maskDeleted = Signal(str)
+    logoMoved = Signal(float, float, float, float)
+    logoEditFinished = Signal()
+    logoDeleted = Signal(str)
+    textLayerSelected = Signal(str)
+    textLayerMoved = Signal(str, float, float)
+
+
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,13 +44,21 @@ class VideoView(QGraphicsView):
         self.subtitle_item.hide()
         self.video_source_width = 0
         self.video_source_height = 0
+        self.subtitle_render_width = 0
+        self.subtitle_render_height = 0
         self.preview_aspect_key = "source"
         self.preview_scale_mode = "fit"
         self.preview_fill_focus_x = 0.5
         self.preview_fill_focus_y = 0.5
         self._framing_drag_active = False
+
         self._framing_drag_start = QPointF()
         self._framing_drag_focus = (0.5, 0.5)
+        self.text_overlay = None
+        self.blur_overlay = None
+        self.mask_overlay = None
+        self.logo_overlay = None
+
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -55,6 +77,12 @@ class VideoView(QGraphicsView):
         self.video_item.setPos(content_rect.topLeft())
         self.video_item.setSize(QSizeF(content_rect.width(), content_rect.height()))
         self.reposition_subtitle()
+
+    def set_subtitle_render_dimensions(self, width: int, height: int, *args, **kwargs):
+        self.subtitle_render_width = max(0, int(width or 0))
+        self.subtitle_render_height = max(0, int(height or 0))
+        self.reposition_subtitle()
+
 
     def set_preview_aspect_ratio(self, aspect_key: str):
         self.preview_aspect_key = str(aspect_key or "source").strip().lower() or "source"
@@ -291,5 +319,111 @@ class VideoView(QGraphicsView):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(12, 24, 38, 210))
             painter.drawRoundedRect(chip_rect, 9, 9)
-            painter.setPen(QColor(183, 227, 255))
             painter.drawText(chip_rect, Qt.AlignCenter, label)
+
+    # Blur & Subtitle & Text Layer Compatibility Methods
+    def set_blur_edit_enabled(self, *args, **kwargs):
+        pass
+
+    def add_blur_region(self, *args, **kwargs):
+        pass
+
+    def set_blur_regions_normalized(self, *args, **kwargs):
+        pass
+
+    def set_blur_regions(self, *args, **kwargs):
+        pass
+
+    def set_blur_active_index(self, *args, **kwargs):
+        pass
+
+    def clear_blur_region(self, *args, **kwargs):
+        pass
+
+    def clear_blur_regions(self, *args, **kwargs):
+        pass
+
+    def has_blur_region(self, *args, **kwargs) -> bool:
+        return False
+
+    def get_blur_region_normalized(self, *args, **kwargs):
+        return None
+
+    def get_blur_regions(self, *args, **kwargs):
+        return []
+
+    def remove_selected_blur_region(self, *args, **kwargs):
+        pass
+
+    def add_mask_region(self, *args, **kwargs):
+        pass
+
+    def set_mask_region(self, *args, **kwargs):
+        pass
+
+    def set_mask_regions(self, *args, **kwargs):
+        pass
+
+    def clear_mask_region(self, *args, **kwargs):
+        pass
+
+    def set_logo(self, *args, **kwargs):
+        pass
+
+    def set_logos(self, *args, **kwargs):
+        pass
+
+    def update_logo_rect(self, *args, **kwargs):
+        pass
+
+    def set_logo_opacity(self, *args, **kwargs):
+        pass
+
+    def set_logo_rotation(self, *args, **kwargs):
+        pass
+
+    def clear_logo(self, *args, **kwargs):
+        pass
+
+    def set_subtitle_editable(self, *args, **kwargs):
+        pass
+
+    def set_subtitle_suppressed(self, *args, **kwargs):
+        pass
+
+    def set_subtitle_positioning(self, **kwargs):
+        if hasattr(self, "subtitle_item"):
+            self.subtitle_item.set_positioning(**kwargs)
+            self.reposition_subtitle()
+
+    def set_subtitle_style(self, **kwargs):
+        if hasattr(self, "subtitle_item"):
+            self.subtitle_item.set_style(**kwargs)
+            self.reposition_subtitle()
+
+    def set_subtitle_alignment(self, alignment: str = "Bottom Center", *args, **kwargs):
+        if hasattr(self, "subtitle_item"):
+            self.subtitle_item.set_alignment(alignment)
+            self.reposition_subtitle()
+
+    def set_subtitle_text(self, text: str = "", *args, **kwargs):
+        if hasattr(self, "subtitle_item"):
+            self.subtitle_item.set_text(text)
+
+    def set_subtitle_lines(self, lines: list[str] | None = None, *args, **kwargs):
+        if hasattr(self, "subtitle_item"):
+            self.subtitle_item.set_lines(lines or [])
+
+    def set_text_layers(self, *args, **kwargs):
+        pass
+
+    def set_selected_text_layer(self, *args, **kwargs):
+        pass
+
+    def set_text_layer_editing_allowed(self, *args, **kwargs):
+        pass
+
+    def get_mpv_target_winid(self, *args, **kwargs) -> int:
+        return int(self.winId()) if hasattr(self, "winId") else 0
+
+

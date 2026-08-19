@@ -145,40 +145,8 @@
       "tags": ["local", "piper"]
     },
     {
-      "id": "thao",
-      "name": "Thảo",
-      "provider": "piper",
-      "provider_voice": "models/piper/thao.onnx",
-      "language": "vi",
-      "gender": "female",
-      "tier": "free",
-      "enabled": true,
-      "tags": ["local", "piper"]
-    },
-    {
-      "id": "trungkien",
-      "name": "Trung Kiên",
-      "provider": "piper",
-      "provider_voice": "models/piper/trungkien.onnx",
-      "language": "vi",
-      "gender": "male",
-      "tier": "free",
-      "enabled": true,
-      "tags": ["local", "piper"]
-    },
-    {
-      "id": "tuananh",
-      "name": "Tuấn Anh",
-      "provider": "piper",
-      "provider_voice": "models/piper/tuananh.onnx",
-      "language": "vi",
-      "gender": "male",
-      "tier": "free",
-      "enabled": true,
-      "tags": ["local", "piper"]
-    },
-    {
       "id": "vi_VN-vais1000-medium",
+
       "name": "Vàng",
       "provider": "piper",
       "provider_voice": "models/piper/vi_VN-vais1000-medium.onnx",

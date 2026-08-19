@@ -123,6 +123,10 @@ def _build_header_bar(gui):
     gui.preview_5s_action = more_menu.addAction("Fast Preview (5 seconds)")
     gui.preview_5s_action.triggered.connect(gui.preview_5s_btn.click)
     more_menu.addSeparator()
+    gui.download_video_link_action = more_menu.addAction("Download Video from Link…")
+
+    gui.download_video_link_action.triggered.connect(gui.open_video_download_dialog)
+    more_menu.addSeparator()
     gui.clean_project_action = more_menu.addAction("Clean")
     gui.clean_project_action.triggered.connect(gui.clean_current_project)
     gui.exit_project_action = more_menu.addAction("Exit")
@@ -132,6 +136,7 @@ def _build_header_bar(gui):
     more_menu.addSeparator()
     gui.normalizer_dict_action = more_menu.addAction("Normalizer Dictionary")
     gui.normalizer_dict_action.triggered.connect(gui.open_normalizer_dict_dialog)
+
 
     gui.more_actions_btn.setMenu(more_menu)
     layout.addWidget(gui.more_actions_btn)

@@ -14500,6 +14500,30 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception:
                 pass
 
+    def open_video_download_dialog(self):
+        from views.video_download_dialog import VideoDownloadDialog
+        dlg = VideoDownloadDialog(self)
+        if dlg.exec() == QDialog.Accepted and dlg.downloaded_video_path:
+            video_path = dlg.downloaded_video_path
+            self._current_video_path = os.path.abspath(video_path)
+            self.ensure_media_backend_ready()
+            if hasattr(self, "video_path_edit"):
+                self.video_path_edit.setText(video_path)
+            if hasattr(self, "media_player"):
+                self.media_player.setSource(QUrl.fromLocalFile(video_path))
+            if hasattr(self, "refresh_video_dimensions"):
+                self.refresh_video_dimensions(video_path)
+            self.current_project_state = self.ensure_current_project()
+            self.load_project_context(self.current_project_state)
+            if hasattr(self, "timeline") and hasattr(self.timeline, "set_video_source"):
+                try:
+                    dur = self.media_player.duration() / 1000.0
+                except Exception:
+                    dur = 60.0
+                self.timeline.set_video_source(self._current_video_path, dur)
+            self.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
+
+
 
 def _relaunch_launcher():
     from views.launcher import show_launcher, LauncherWindow

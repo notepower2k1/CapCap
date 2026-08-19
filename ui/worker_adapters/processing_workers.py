@@ -112,6 +112,21 @@ class AlternateRangeTranscriptionWorker(QThread):
                     start_seconds=self.start_time,
                     end_seconds=self.end_time,
                 )
+            elif self.engine_name == "sensevoice":
+                import tempfile
+                from runtime_paths import models_path
+                temp_audio = os.path.join(tempfile.gettempdir(), f"capcap_range_{int(self.start_time * 1000)}_{int(self.end_time * 1000)}.wav")
+                ffmpeg = bin_path("ffmpeg", "ffmpeg.exe")
+                subprocess.run([
+                    ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", str(self.start_time),
+                    "-t", str(max(0.1, self.end_time - self.start_time)), "-i", self.video_path,
+                    "-vn", "-ac", "1", "-ar", "16000", temp_audio,
+                ], check=True, **subprocess_hidden_kwargs())
+                model_dir = self.model_path or models_path("sensevoice")
+                segments = engine.transcribe_audio_sensevoice(temp_audio, model_dir, language=self.language)
+                for segment in segments or []:
+                    segment["start"] = round(float(segment.get("start", 0.0)) + self.start_time, 3)
+                    segment["end"] = round(float(segment.get("end", 0.0)) + self.start_time, 3)
             else:
                 import tempfile
                 temp_audio = os.path.join(tempfile.gettempdir(), f"capcap_range_{int(self.start_time * 1000)}_{int(self.end_time * 1000)}.wav")
@@ -126,6 +141,7 @@ class AlternateRangeTranscriptionWorker(QThread):
                     segment["start"] = float(segment.get("start", 0.0)) + self.start_time
                     segment["end"] = float(segment.get("end", 0.0)) + self.start_time
             self.completed.emit(list(segments or []), "")
+
         except Exception as exc:
             self.completed.emit([], str(exc))
         finally:
