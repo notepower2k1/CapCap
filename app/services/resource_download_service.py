@@ -9,7 +9,15 @@ import time
 import uuid
 from pathlib import Path
 
-from runtime_paths import app_path, bin_path, bundle_root, join_root, models_path, subprocess_hidden_kwargs
+from runtime_paths import (
+    app_path,
+    bin_path,
+    bundle_root,
+    find_resource_file,
+    join_root,
+    models_path,
+    subprocess_hidden_kwargs,
+)
 
 
 class ResourceDownloadService:
@@ -18,6 +26,10 @@ class ResourceDownloadService:
         "small": "models--Systran--faster-whisper-small.zip",
         "medium": "models--Systran--faster-whisper-medium.zip",
     }
+
+    # A single DLL that only ships inside the GPU pack, used to tell whether
+    # the pack is present regardless of how deeply it was extracted.
+    CUDA_RUNTIME_PROBE = "cublas64_12.dll"
 
     HF_RESOURCE_REPO = os.getenv("CAPCAP_RESOURCE_REPO", "Hacht/CapCapResource").strip() or "Hacht/CapCapResource"
     HF_RESOURCE_REVISION = os.getenv("CAPCAP_RESOURCE_REVISION", "main").strip() or "main"
@@ -245,6 +257,18 @@ class ResourceDownloadService:
                 continue
         return len(seen_names)
 
+    def _find_resource_file(self, root: str, filename: str, max_depth: int = 2) -> str:
+        return find_resource_file(root, filename, max_depth)
+
+    def cuda_runtime_dir(self) -> str:
+        """Return the folder that actually holds the CUDA runtime DLLs.
+
+        Faster-Whisper loads these through PATH, so a nested extraction has to
+        resolve to the real directory rather than just be detected.
+        """
+        located = self._find_resource_file(join_root("bin", "cuda12_fw"), self.CUDA_RUNTIME_PROBE)
+        return os.path.dirname(located) if located else ""
+
     def _whisper_cache_root(self) -> str:
         return models_path("faster_whisper")
 
@@ -252,16 +276,31 @@ class ResourceDownloadService:
         return models_path("pyannote")
 
     def _speaker_diarization_segmentation_path(self) -> str:
-        return os.path.join(
-            self._speaker_diarization_root(),
-            "model.int8.onnx",
-        )
+        return self._find_resource_file(self._speaker_diarization_root(), "model.int8.onnx")
 
     def _speaker_diarization_embedding_path(self) -> str:
-        return os.path.join(
+        return self._find_resource_file(
             self._speaker_diarization_root(),
             "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
         )
+
+    def _sensevoice_root(self) -> str:
+        return models_path("sensevoice")
+
+    def _sensevoice_model_path(self) -> str:
+        return self._find_resource_file(self._sensevoice_root(), "model.int8.onnx")
+
+    def _sensevoice_tokens_path(self) -> str:
+        return self._find_resource_file(self._sensevoice_root(), "tokens.txt")
+
+    def sensevoice_model_dir(self) -> str:
+        """Return the folder Sherpa should load SenseVoice from.
+
+        Falls back to the nominal folder so the loader still produces its own
+        error message when nothing is installed at all.
+        """
+        located = self._sensevoice_model_path()
+        return os.path.dirname(located) if located else self._sensevoice_root()
 
     def _whisper_cache_dirs(self, model_name: str) -> list[str]:
         root = Path(self._whisper_cache_root())
@@ -338,13 +377,17 @@ class ResourceDownloadService:
     def validate_sensevoice_runtime(self) -> list[tuple[str, str]]:
         """Return actionable first-run checks for the bundled default ASR."""
         issues: list[tuple[str, str]] = []
-        model_dir = models_path("sensevoice")
-        model_path = os.path.join(model_dir, "model.int8.onnx")
-        tokens_path = os.path.join(model_dir, "tokens.txt")
-        if not os.path.isfile(model_path):
-            issues.append(("sensevoice:model", f"SenseVoice model is missing: {model_path}"))
-        if not os.path.isfile(tokens_path):
-            issues.append(("sensevoice:tokens", f"SenseVoice tokens file is missing: {tokens_path}"))
+        model_dir = self._sensevoice_root()
+        if not self._sensevoice_model_path():
+            issues.append((
+                "sensevoice:model",
+                f"SenseVoice model (model.int8.onnx) is missing under: {model_dir}",
+            ))
+        if not self._sensevoice_tokens_path():
+            issues.append((
+                "sensevoice:tokens",
+                f"SenseVoice tokens file (tokens.txt) is missing under: {model_dir}",
+            ))
         try:
             import sherpa_onnx  # noqa: F401
         except Exception as exc:
@@ -527,16 +570,41 @@ class ResourceDownloadService:
                 "description": "Speech-recognition model used to create the original transcript.",
             },
             {
+                # SenseVoice gates New Project in both CPU and GPU mode, so it
+                # has to be installable from here. Without an entry the
+                # launcher pointed users at a screen that could not fix it.
+                "id": "sensevoice:model",
+                "name": "SenseVoice Model (default transcription)",
+                "kind": "sensevoice",
+                "required_for": "CPU Mode and GPU Mode",
+                "status": "installed" if self.is_resource_installed("sensevoice:model") else "missing",
+                "target_dir": self._sensevoice_root(),
+                "download_url": f"https://huggingface.co/{self.SENSEVOICE_REPO}/tree/main",
+                "expected_filename": "model.int8.onnx + tokens.txt",
+                "auto_download_supported": True,
+                "description": (
+                    "Default speech-recognition model. Required before a project can be created "
+                    "in either CPU or GPU mode."
+                ),
+            },
+            {
                 "id": "cuda:whisper",
                 "name": "GPU Acceleration Pack (CUDA 12, ~1.6 GB)",
                 "kind": "cuda",
                 "required_for": "GPU Mode",
                 "status": "installed" if self.is_resource_installed("cuda:whisper") else "missing",
-                "target_dir": join_root("bin", "cuda12_fw"),
+                # The archive contains its own cuda12_fw/ folder, so it must be
+                # extracted into bin/. Naming bin/cuda12_fw here sent manual
+                # installers one level too deep and the pack read as missing.
+                "target_dir": join_root("bin"),
                 "download_url": self._hf_blob_url("zipResource/cuda12_fw.zip"),
                 "expected_filename": "cuda12_fw.zip",
                 "auto_download_supported": True,
-                "description": "Required for GPU Mode. Provides the CUDA runtime used to accelerate supported local processing.",
+                "description": (
+                    "Required for GPU Mode. Provides the CUDA runtime used to accelerate supported "
+                    "local processing. Extract the ZIP into this folder - it creates the cuda12_fw "
+                    "subfolder itself."
+                ),
             },
             {
                 "id": "diarization:segmentation",
@@ -604,14 +672,13 @@ class ResourceDownloadService:
         if resource_id == "ocr:engine":
             return self.is_ocr_ready()
         if resource_id == "cuda:whisper":
-            fw_dir = join_root("bin", "cuda12_fw")
-            return os.path.exists(os.path.join(fw_dir, "cublas64_12.dll"))
+            return bool(self.cuda_runtime_dir())
         if resource_id == "sensevoice:model":
-            return os.path.isfile(os.path.join(models_path("sensevoice"), "model.int8.onnx"))
+            return bool(self._sensevoice_model_path())
         if resource_id == "diarization:segmentation":
-            return os.path.isfile(self._speaker_diarization_segmentation_path())
+            return bool(self._speaker_diarization_segmentation_path())
         if resource_id == "diarization:embedding":
-            return os.path.isfile(self._speaker_diarization_embedding_path())
+            return bool(self._speaker_diarization_embedding_path())
         if resource_id.startswith("whisper:"):
             model_name = resource_id.split(":", 1)[1].strip().lower()
             for model_dir in self._whisper_cache_dirs(model_name):
@@ -621,10 +688,12 @@ class ResourceDownloadService:
                 except Exception:
                     continue
             return False
+        # Match the count shown in Manage Resources: a language is usable as
+        # soon as one voice loads, not only when the whole catalog is present.
         if resource_id == "voice:pack":
-            return self._voice_pack_status("vi") == "installed"
+            return self._usable_piper_voice_count("vi") > 0
         if resource_id == "voice:pack-en":
-            return self._voice_pack_status("en") == "installed"
+            return self._usable_piper_voice_count("en") > 0
         if resource_id.startswith("voice:"):
             voice_id = resource_id.split(":", 1)[1].strip()
             voice_entry = self._find_voice_entry(voice_id)
@@ -699,6 +768,35 @@ class ResourceDownloadService:
             raise ValueError(
                 "Whisper models are downloaded manually. Use Open Download Page, then extract the ZIP into models/faster_whisper."
             )
+
+        if resource_id == "sensevoice:model":
+            try:
+                from huggingface_hub import hf_hub_download, hf_hub_url
+                from huggingface_hub.file_download import get_hf_file_metadata
+            except Exception as exc:
+                raise ImportError(
+                    "huggingface_hub is not installed. Run `pip install huggingface_hub` first."
+                ) from exc
+            target_dir = self._sensevoice_root()
+            os.makedirs(target_dir, exist_ok=True)
+            files = [("model.int8.onnx", 0, 90), ("tokens.txt", 90, 100)]
+            for filename, start_percent, end_percent in files:
+                self._download_hf_file(
+                    repo_id=self.SENSEVOICE_REPO,
+                    revision="main",
+                    filename=filename,
+                    local_dir=target_dir,
+                    hf_hub_download=hf_hub_download,
+                    hf_hub_url=hf_hub_url,
+                    get_hf_file_metadata=get_hf_file_metadata,
+                    progress_cb=progress_cb,
+                    start_percent=start_percent,
+                    end_percent=end_percent,
+                    label=f"Downloading {filename}",
+                )
+            if progress_cb:
+                progress_cb(100, "SenseVoice model is ready.")
+            return
 
         if resource_id == "cuda:whisper":
             zip_url = self._hf_blob_url("zipResource/cuda12_fw.zip")

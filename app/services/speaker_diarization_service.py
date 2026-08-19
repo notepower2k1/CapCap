@@ -4,7 +4,7 @@ import os
 
 import numpy as np
 
-from runtime_paths import models_path
+from runtime_paths import find_resource_file, models_path
 
 
 class SpeakerDiarizationService:
@@ -25,7 +25,12 @@ class SpeakerDiarizationService:
     @classmethod
     def _model_path(cls, env_name: str, filename: str) -> str:
         configured = str(os.getenv(env_name, "") or "").strip()
-        return os.path.abspath(configured) if configured else models_path(cls.DEFAULT_MODEL_DIR, filename)
+        if configured:
+            return os.path.abspath(configured)
+        # The Sherpa-ONNX archives carry their own folder, so accept the model
+        # whether it sits directly in models/pyannote or one level below.
+        located = find_resource_file(models_path(cls.DEFAULT_MODEL_DIR), filename)
+        return located or models_path(cls.DEFAULT_MODEL_DIR, filename)
 
     @classmethod
     def model_paths(cls) -> tuple[str, str]:
