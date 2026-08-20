@@ -1,5 +1,25 @@
+edge-tts
+soundfile
+numpy
+huggingface_hub
+faster-whisper
+vietnormalizer
+piper-tts
+# onnxruntime-gpu has no macOS wheel and no non-x86_64 wheel on PyPI, so a
+# plain `pip install` fails outright there. Fall back to the CPU package on
+# those platforms; CapCap already selects the CPU device when CUDA is absent.
+onnxruntime-gpu; platform_system != "Darwin" and platform_machine in "x86_64 AMD64"
+onnxruntime; platform_system == "Darwin" or platform_machine not in "x86_64 AMD64"
+scipy
+openai
+librosa
+rapidocr
+opencv-python-headless
+sherpa-onnx
 PySide6
 requests
 python-dotenv
 pydub
+# python-mpv is a binding only. Windows uses the libmpv shipped in bin/mpv;
+# Linux and macOS need libmpv from the system package manager.
 python-mpv

@@ -9,7 +9,15 @@ import time
 import uuid
 from pathlib import Path
 
-from runtime_paths import app_path, bin_path, bundle_root, join_root, models_path, subprocess_hidden_kwargs
+from runtime_paths import (
+    app_path,
+    bin_path,
+    bundle_root,
+    ffmpeg_path as resolve_ffmpeg,
+    join_root,
+    models_path,
+    subprocess_hidden_kwargs,
+)
 
 
 class ResourceDownloadService:
@@ -389,13 +397,17 @@ class ResourceDownloadService:
     def validate_pipeline_runtime(self) -> list[tuple[str, str]]:
         """Check local executables and writable working folders before a worker starts."""
         issues: list[tuple[str, str]] = []
-        ffmpeg_path = bin_path("ffmpeg", "ffmpeg.exe")
-        if not os.path.isfile(ffmpeg_path):
-            issues.append(("ffmpeg", f"FFmpeg is missing: {ffmpeg_path}"))
+        ffmpeg_exe = resolve_ffmpeg()
+        if not shutil.which(ffmpeg_exe) and not os.path.isfile(ffmpeg_exe):
+            issues.append((
+                "ffmpeg",
+                "FFmpeg was not found. Install it and make sure it is on PATH, "
+                f"or place it in the bin/ffmpeg folder (looked for: {ffmpeg_exe}).",
+            ))
         else:
             try:
                 result = subprocess.run(
-                    [ffmpeg_path, "-version"],
+                    [ffmpeg_exe, "-version"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=10,

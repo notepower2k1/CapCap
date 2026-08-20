@@ -10,6 +10,28 @@ def _normalize_selected_file_path(path: str) -> str:
     return os.path.normpath(os.path.abspath(value))
 
 
+def open_path_externally(path: str) -> bool:
+    """Reveal a file or folder in the platform file manager.
+
+    ``os.startfile`` only exists on Windows, so Linux and macOS go through Qt's
+    ``QDesktopServices``, which delegates to xdg-open / Finder.
+    """
+    target = str(path or "").strip()
+    if not target:
+        return False
+    target = os.path.abspath(target)
+
+    starter = getattr(os, "startfile", None)
+    if callable(starter):
+        starter(target)
+        return True
+
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+
+    return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(target)))
+
+
 def browse_audio_folder(gui):
     from PySide6.QtWidgets import QFileDialog
 
@@ -76,7 +98,7 @@ def open_folder(gui, path):
         if not path:
             return
         os.makedirs(path, exist_ok=True)
-        os.startfile(os.path.abspath(path))
+        open_path_externally(path)
     except Exception as exc:
         QMessageBox.critical(gui, "Error", f"Could not open folder:\n{exc}")
 

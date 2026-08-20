@@ -1,13 +1,19 @@
 import subprocess
 import os
 import re
+import sys
 import math
 import hashlib
 import threading
 from functools import lru_cache
 
 from new_highlight_selector import auto_select_matches
-from runtime_paths import asset_path, bin_path, temp_path
+from runtime_paths import (
+    asset_path,
+    ffmpeg_path as resolve_ffmpeg,
+    ffprobe_path as resolve_ffprobe,
+    temp_path,
+)
 from video_filter_chain import (
     build_video_color_chain,
     build_video_filter_chain,
@@ -23,11 +29,11 @@ from video_filter_chain import (
 def _ffmpeg_path(override=None):
     if override:
         return override
-    return bin_path("ffmpeg", "ffmpeg.exe")
+    return resolve_ffmpeg()
 
 
 def _ffprobe_path():
-    return bin_path("ffmpeg", "ffprobe.exe")
+    return resolve_ffprobe()
 
 
 def _subprocess_run_kwargs() -> dict:
@@ -66,7 +72,7 @@ def _subtitle_metric_font(font_name: str, pixel_size: int, bold: bool):
         return None
 
     requested = re.sub(r"[^a-z0-9]", "", str(font_name or "").lower())
-    font_dirs = [asset_path("fonts"), os.path.join(os.environ.get("WINDIR", r"C:\\Windows"), "Fonts")]
+    font_dirs = [asset_path("fonts")] + _system_font_dirs()
     candidates: list[tuple[int, str]] = []
     for directory in font_dirs:
         if not directory or not os.path.isdir(directory):
@@ -90,6 +96,24 @@ def _subtitle_metric_font(font_name: str, pixel_size: int, bold: bool):
         except OSError:
             continue
     return None
+
+
+def _system_font_dirs() -> list:
+    """Directories the OS keeps installed fonts in."""
+    if os.name == "nt":
+        return [os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")]
+    if sys.platform == "darwin":
+        return [
+            os.path.expanduser("~/Library/Fonts"),
+            "/Library/Fonts",
+            "/System/Library/Fonts",
+        ]
+    return [
+        os.path.expanduser("~/.local/share/fonts"),
+        os.path.expanduser("~/.fonts"),
+        "/usr/local/share/fonts",
+        "/usr/share/fonts",
+    ]
 
 
 def _ffmpeg_supports_encoder(ffmpeg_path: str, encoder_name: str) -> bool:
@@ -134,10 +158,10 @@ def _ass_filter_expression(ass_path: str) -> str:
     if os.path.isdir(bundled_fonts) and any(name.lower().endswith((".ttf", ".otf")) for name in os.listdir(bundled_fonts)):
         escaped_fonts = _escape_path_for_filter(bundled_fonts)
         return f"ass=filename='{escaped_ass}':fontsdir='{escaped_fonts}'"
-    windows_fonts = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
-    if os.path.isdir(windows_fonts):
-        escaped_fonts = _escape_path_for_filter(windows_fonts)
-        return f"ass=filename='{escaped_ass}':fontsdir='{escaped_fonts}'"
+    for system_fonts in _system_font_dirs():
+        if os.path.isdir(system_fonts):
+            escaped_fonts = _escape_path_for_filter(system_fonts)
+            return f"ass=filename='{escaped_ass}':fontsdir='{escaped_fonts}'"
     return f"ass=filename='{escaped_ass}'"
 
 

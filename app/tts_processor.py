@@ -8,7 +8,7 @@ import time
 import wave
 
 from dotenv import load_dotenv
-from runtime_paths import app_path, bin_path, bundle_root, models_path, temp_path
+from runtime_paths import app_path, bundle_root, ffmpeg_path, models_path, temp_path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(os.path.dirname(BASE_DIR), ".env")
 if os.path.exists(ENV_PATH):
@@ -63,7 +63,7 @@ def _get_cached_piper_voice(*, model_path: str, on_progress: callable = None):
 
 
 def _ffmpeg_path():
-    return bin_path("ffmpeg", "ffmpeg.exe")
+    return ffmpeg_path()
 
 
 def _subprocess_run_kwargs() -> dict:

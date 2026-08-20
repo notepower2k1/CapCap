@@ -94,14 +94,15 @@ def _extract_thumbnail(video_path: str, output_path: str) -> str:
 
 
 def _ffmpeg_path():
-    from runtime_paths import bin_path
-    return os.path.join(bin_path(), "ffmpeg", "ffmpeg.exe")
+    from runtime_paths import ffmpeg_path
+    return ffmpeg_path()
 
 
 def _get_video_duration(video_path: str) -> float:
     try:
         import subprocess
-        ffprobe = _ffmpeg_path().replace("ffmpeg.exe", "ffprobe.exe")
+        from runtime_paths import ffprobe_path
+        ffprobe = ffprobe_path()
         result = subprocess.run(
             [ffprobe, "-v", "error", "-show_entries", "format=duration",
              "-of", "csv=p=0", video_path],
@@ -835,13 +836,10 @@ class LauncherWindow(QDialog):
         from PySide6.QtWidgets import QMessageBox
         projects_dir = os.path.join(workspace_root(), "projects")
         try:
+            from utils.file_dialog_utils import open_path_externally
+
             os.makedirs(projects_dir, exist_ok=True)
-            if hasattr(os, "startfile"):
-                os.startfile(projects_dir)
-            else:
-                from PySide6.QtGui import QDesktopServices
-                from PySide6.QtCore import QUrl
-                QDesktopServices.openUrl(QUrl.fromLocalFile(projects_dir))
+            open_path_externally(projects_dir)
         except Exception as exc:
             message = QMessageBox(QMessageBox.Warning, "Open Project Folder",
                 f"Could not open the projects folder:\n\n{exc}", QMessageBox.Ok, self)

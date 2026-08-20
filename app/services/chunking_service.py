@@ -6,13 +6,13 @@ import subprocess
 import wave
 
 from core.models import AudioChunk
-from runtime_paths import bin_path
+from runtime_paths import ffmpeg_path
 
 
 class ChunkingService:
     def __init__(self, workspace_root: str):
         self.workspace_root = workspace_root
-        self.ffmpeg_path = bin_path("ffmpeg", "ffmpeg.exe")
+        self.ffmpeg_path = ffmpeg_path()
 
     def _subprocess_run_kwargs(self) -> dict:
         kwargs = {}

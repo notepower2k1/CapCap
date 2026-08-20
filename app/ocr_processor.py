@@ -6,7 +6,7 @@ import time
 import cv2
 import numpy as np
 
-from runtime_paths import bin_path, subprocess_hidden_kwargs
+from runtime_paths import ffmpeg_path, subprocess_hidden_kwargs
 
 _OCR_ENGINE = None
 _OCR_ENGINE_LOCK = None
@@ -121,7 +121,7 @@ def _get_lock():
 
 
 def _ffmpeg_path():
-    return os.path.join(bin_path("ffmpeg"), "ffmpeg.exe")
+    return ffmpeg_path()
 
 
 def _load_ocr_engine():

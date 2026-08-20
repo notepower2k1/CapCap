@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
-from runtime_paths import asset_path, bin_path, subprocess_hidden_kwargs
+from runtime_paths import asset_path, bin_path, ffprobe_path, mpv_library_path, subprocess_hidden_kwargs
 from video_processor import srt_to_ass
 try:
     # The normal launcher places ``app`` directly on sys.path.
@@ -80,8 +80,8 @@ def _realtime_color_graph(state=None) -> str:
 def _ffprobe_video_duration(video_path: str) -> float:
     """Get video duration using ffprobe as fallback."""
     try:
-        ffprobe = os.path.join(bin_path("ffmpeg"), "ffprobe.exe")
-        if not os.path.exists(ffprobe):
+        ffprobe = ffprobe_path()
+        if not ffprobe:
             return 0.0
         result = subprocess.run(
             [ffprobe, "-v", "error", "-show_entries", "format=duration",
@@ -1315,30 +1315,45 @@ def is_mpv_backend_available():
 
 
 def prepare_mpv_bundle():
+    """Make libmpv importable before ``python-mpv`` loads it.
+
+    Windows builds ship libmpv inside ``bin/mpv`` and must pre-load it so the
+    dependent runtime DLLs resolve.  Linux and macOS install libmpv through the
+    system package manager (``libmpv2`` / ``brew install mpv``), where the
+    dynamic loader already finds it, so a missing bundle there is not an error.
+    """
+    mpv_library = mpv_library_path()
+
+    if not sys.platform.startswith("win"):
+        # Honour a bundled library when one is present, otherwise defer to the
+        # system loader instead of failing the whole preview backend.
+        if mpv_library:
+            mpv_dir = str(Path(mpv_library).parent)
+            var = "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
+            existing = os.environ.get(var, "")
+            if mpv_dir not in existing.split(os.pathsep):
+                os.environ[var] = mpv_dir + (os.pathsep + existing if existing else "")
+        return
+
     mpv_dir = get_mpv_bundle_dir()
     if not mpv_dir.exists():
         raise FileNotFoundError(f"Bundled mpv directory not found: {mpv_dir}")
 
-    mpv_dll = mpv_dir / "libmpv-2.dll"
-    if not mpv_dll.exists():
-        alt_dll = mpv_dir / "mpv-2.dll"
-        if alt_dll.exists():
-            mpv_dll = alt_dll
-        else:
-            raise FileNotFoundError(f"Bundled libmpv DLL not found in {mpv_dir}")
+    if not mpv_library:
+        raise FileNotFoundError(f"Bundled libmpv DLL not found in {mpv_dir}")
+    mpv_dll = Path(mpv_library)
 
     if hasattr(os, "add_dll_directory"):
         os.add_dll_directory(str(mpv_dir))
 
     os.environ["PATH"] = str(mpv_dir) + os.pathsep + os.environ.get("PATH", "")
 
-    if sys.platform.startswith("win"):
-        try:
-            import ctypes
+    try:
+        import ctypes
 
-            ctypes.WinDLL(str(mpv_dll))
-        except OSError as exc:
-            raise RuntimeError(
-                f"Could not load bundled libmpv from {mpv_dll}. "
-                "The bundle may be missing dependent runtime DLLs."
-            ) from exc
+        ctypes.WinDLL(str(mpv_dll))
+    except OSError as exc:
+        raise RuntimeError(
+            f"Could not load bundled libmpv from {mpv_dll}. "
+            "The bundle may be missing dependent runtime DLLs."
+        ) from exc

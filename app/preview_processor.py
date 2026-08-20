@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from runtime_paths import bin_path
+from runtime_paths import ffmpeg_path
 from video_filter_chain import build_video_filter_chain, normalize_video_filter_state
 
 
@@ -9,7 +9,7 @@ _FFMPEG_ENCODER_CACHE = {}
 
 
 def _ffmpeg_path():
-    return bin_path("ffmpeg", "ffmpeg.exe")
+    return ffmpeg_path()
 
 
 def _subprocess_run_kwargs() -> dict:
