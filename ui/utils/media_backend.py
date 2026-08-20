@@ -114,7 +114,19 @@ class QtMediaPlayerBackend(QObject):
             self._player.setVideoOutput(video_view.video_item)
         self._player.positionChanged.connect(self.positionChanged.emit)
         self._player.durationChanged.connect(self.durationChanged.emit)
-        self._player.stateChanged.connect(lambda s: self.stateChanged.emit(int(s.value)))
+        # Qt 6 renamed QMediaPlayer.stateChanged to playbackStateChanged.
+        # Keep the fallback backend compatible with both bindings so a
+        # missing optional MPV bundle does not prevent a selected video from
+        # being loaded into the editor.
+        playback_state_signal = getattr(self._player, "playbackStateChanged", None)
+        if playback_state_signal is None:
+            playback_state_signal = getattr(self._player, "stateChanged", None)
+        if playback_state_signal is not None:
+            playback_state_signal.connect(
+                lambda state: self.stateChanged.emit(
+                    int(state.value) if hasattr(state, "value") else int(state)
+                )
+            )
         # When the clip reaches the end, the QMediaPlayer goes to
         # StoppedState — surface this so the timeline can stop too
         # (Bug 2: video not pausing at end, timeline keeps running).

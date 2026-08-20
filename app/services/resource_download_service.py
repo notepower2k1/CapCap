@@ -461,9 +461,11 @@ class ResourceDownloadService:
                 ("sensevoice:model", "SenseVoice model"),
                 ("sensevoice:runtime", "SenseVoice runtime"),
             ]
+        # GPU mode runs Faster-Whisper.  SenseVoice is an optional
+        # transcription engine selected later in the project settings, so
+        # its local model must not prevent the launcher from enabling GPU
+        # mode for a valid CUDA/Whisper setup.
         return [
-            ("sensevoice:model", "SenseVoice model"),
-            ("sensevoice:runtime", "SenseVoice runtime"),
             ("cuda:whisper", "CUDA runtime pack"),
             ("nvidia_driver", "NVIDIA driver"),
         ]

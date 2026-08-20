@@ -30,6 +30,11 @@ class VideoView(QGraphicsView):
         self.subtitle_item.hide()
         self.video_source_width = 0
         self.video_source_height = 0
+        # Keep the same authoring-canvas metadata as the MPV preview.  The
+        # fallback still lays the overlay out in view coordinates, but the
+        # main window updates these values whenever Ratio/Quality changes.
+        self.subtitle_render_width = 0
+        self.subtitle_render_height = 0
         self.preview_aspect_key = "source"
         self.preview_scale_mode = "fit"
         self.preview_fill_focus_x = 0.5
@@ -37,6 +42,58 @@ class VideoView(QGraphicsView):
         self._framing_drag_active = False
         self._framing_drag_start = QPointF()
         self._framing_drag_focus = (0.5, 0.5)
+        # The Qt Multimedia fallback has no native blur-overlay editor, but
+        # the main window shares this control API with the MPV preview.
+        self._blur_edit_enabled = False
+        self._blur_regions_normalized: list[dict] = []
+
+    def set_blur_edit_enabled(self, enabled: bool):
+        """Keep the shared preview API available in the Qt fallback.
+
+        Interactive blur handles are provided by the MPV backend.  Retaining
+        the requested state here lets the app start and safely fall back to
+        rendered previews when MPV is unavailable.
+        """
+        self._blur_edit_enabled = bool(enabled)
+
+    def clear_blur_region(self):
+        """Match the MPV preview cleanup API when using Qt fallback."""
+        self._blur_edit_enabled = False
+        self._blur_regions_normalized = []
+
+    def get_blur_region_normalized(self) -> list[dict] | None:
+        """Return saved blur geometry when the native MPV editor is absent.
+
+        Qt Multimedia cannot draw the interactive blur overlay, but preview
+        rendering must still receive an empty (or previously supplied) list
+        rather than failing while it prepares the FFmpeg preview command.
+        """
+        return list(self._blur_regions_normalized) or None
+
+    def set_blur_regions_normalized(self, regions):
+        """Retain blur-region metadata for the shared preview workflow."""
+        self._blur_regions_normalized = [
+            dict(region) for region in (regions or []) if isinstance(region, dict)
+        ]
+
+    def set_blur_active_index(self, _index: int):
+        """Interactive blur selection is only available with the MPV backend."""
+        return None
+
+    def _restore_subtitle_overlay(self):
+        """Restore the Qt subtitle item after a transient progress dialog."""
+        item = self.subtitle_item
+        if not bool(getattr(item, "_suppressed", False)) and (
+            bool(getattr(item, "current_text", ""))
+            or bool(getattr(item, "current_lines", []))
+        ):
+            item.show()
+
+    def set_subtitle_render_dimensions(self, width: int, height: int):
+        """Match the shared preview API used by subtitle-style updates."""
+        self.subtitle_render_width = max(0, int(width or 0))
+        self.subtitle_render_height = max(0, int(height or 0))
+        self.reposition_subtitle()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

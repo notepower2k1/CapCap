@@ -5493,7 +5493,9 @@ class VideoTranslatorGUI(QMainWindow):
             "word_timings": [list(seg.get("words", [])) for seg in (style_segments or [])],
             "blur_region": (
                 self.video_view.get_blur_region_normalized()
-                if hasattr(self, "video_view") and self._blur_effect_enabled()
+                if hasattr(self, "video_view")
+                and hasattr(self.video_view, "get_blur_region_normalized")
+                and self._blur_effect_enabled()
                 else None
             ),
             "render_subtitles": False,

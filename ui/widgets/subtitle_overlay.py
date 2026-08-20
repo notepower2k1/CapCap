@@ -14,11 +14,25 @@ class SubtitleOverlayItem(QGraphicsItem):
         self.setZValue(10)
         self.current_text = ""
         self.current_lines: list[str] = []
+        # The MPV backend renders styled subtitles itself.  Keep this Qt
+        # overlay alive in that mode for selection/dragging, but allow its
+        # text paint pass to be disabled so both renderers do not draw it.
+        self.render_text = True
+        self._suppressed = False
         self.font_name = "Segoe UI"
         self.font_size = 20
         self.font_color = QColor(255, 255, 255)
+        self.bold = True
         self.outline_width = 2
         self.outline_color = QColor(0, 0, 0, 220)
+        self.shadow_color = QColor(0, 0, 0, 0)
+        self.shadow_depth = 0.0
+        self.highlight_color = QColor("#FFD400")
+        self.highlight_phrases: list[str] = []
+        self.karaoke_word_index = -1
+        self.auto_keyword_highlight = False
+        self.animation_style = "static"
+        self.animation_progress = 1.0
         self.alignment = "Bottom Center"
         self.background_box = False
         self.background_color = QColor(0, 0, 0, 170)
@@ -49,6 +63,24 @@ class SubtitleOverlayItem(QGraphicsItem):
             self._update_height()
             self.update()
 
+    def set_text_rendering(self, enabled: bool):
+        """Enable or suppress only this item's text paint pass.
+
+        The method mirrors the MPV overlay API used by the main window.  It
+        intentionally keeps the graphics item present for subtitle selection
+        and positioning when libass is responsible for visible subtitles.
+        """
+        enabled = bool(enabled)
+        if self.render_text != enabled:
+            self.render_text = enabled
+            self.update()
+
+    def set_suppressed(self, suppressed: bool):
+        """Temporarily hide the fallback overlay behind a progress dialog."""
+        self._suppressed = bool(suppressed)
+        if self._suppressed:
+            self.hide()
+
     def _update_height(self):
         line_count = max(1, len(self.current_lines))
         line_height = max(24, int(self.font_size * self.LINE_HEIGHT_FACTOR))
@@ -68,6 +100,9 @@ class SubtitleOverlayItem(QGraphicsItem):
         background_box=None,
         background_color=None,
         single_line=None,
+        bold=None,
+        shadow_color=None,
+        shadow_depth=None,
     ):
         changed = False
         if font_name and font_name != self.font_name:
@@ -96,7 +131,50 @@ class SubtitleOverlayItem(QGraphicsItem):
         if single_line is not None and bool(single_line) != self.single_line:
             self.single_line = bool(single_line)
             changed = True
+        if bold is not None and bool(bold) != self.bold:
+            self.bold = bool(bold)
+            changed = True
+        if shadow_color is not None:
+            next_color = QColor(shadow_color)
+            if next_color != self.shadow_color:
+                self.shadow_color = next_color
+                changed = True
+        if shadow_depth is not None and float(shadow_depth) != self.shadow_depth:
+            self.shadow_depth = max(0.0, float(shadow_depth))
+            changed = True
         if changed:
+            self.update()
+
+    def set_effects(self, *, highlight_color=None, highlight_phrases=None,
+                    karaoke_word_index=-1, auto_keyword_highlight=False,
+                    animation_style="Static", animation_progress=1.0):
+        """Apply the preview controls shared with the MPV subtitle layer.
+
+        The Qt fallback implements the inexpensive subset (style state and
+        text visibility) and keeps the same method contract so it remains a
+        safe preview backend when MPV is not installed.
+        """
+        next_color = QColor(highlight_color or "#FFD400")
+        next_phrases = [str(value).strip() for value in (highlight_phrases or []) if str(value).strip()]
+        next_word_index = int(karaoke_word_index)
+        next_auto_highlight = bool(auto_keyword_highlight)
+        next_animation = str(animation_style or "Static").strip().lower()
+        next_progress = max(0.0, min(1.0, float(animation_progress)))
+        changed = (
+            self.highlight_color != next_color
+            or self.highlight_phrases != next_phrases
+            or self.karaoke_word_index != next_word_index
+            or self.auto_keyword_highlight != next_auto_highlight
+            or self.animation_style != next_animation
+            or abs(self.animation_progress - next_progress) > 0.0001
+        )
+        if changed:
+            self.highlight_color = next_color
+            self.highlight_phrases = next_phrases
+            self.karaoke_word_index = next_word_index
+            self.auto_keyword_highlight = next_auto_highlight
+            self.animation_style = next_animation
+            self.animation_progress = next_progress
             self.update()
 
     def set_alignment(self, alignment: str):
@@ -126,6 +204,8 @@ class SubtitleOverlayItem(QGraphicsItem):
         return QRectF(0, 0, self.W, self.H)
 
     def paint(self, painter, option, widget):
+        if self._suppressed or not self.render_text:
+            return
         if not self.current_text and not self.current_lines and not self.isVisible():
             return
         painter.setRenderHint(QPainter.Antialiasing)
@@ -137,7 +217,7 @@ class SubtitleOverlayItem(QGraphicsItem):
         painter.setPen(self.font_color)
         font = QFont(self.font_name)
         font.setPixelSize(max(1, int(self.font_size)))
-        font.setBold(True)
+        font.setBold(self.bold)
         painter.setFont(font)
         line_height = max(24, int(self.font_size * self.LINE_HEIGHT_FACTOR))
         single_line_flags = Qt.AlignCenter
@@ -181,6 +261,15 @@ class SubtitleOverlayItem(QGraphicsItem):
             for line_text, line_rect in zip(self.current_lines, line_rects):
                 for dx, dy in outline_offsets:
                     painter.drawText(line_rect.translated(dx, dy), int(wrap_flags), line_text)
+
+        if self.shadow_depth > 0 and self.shadow_color.alpha() > 0:
+            painter.setPen(self.shadow_color)
+            for line_text, line_rect in zip(self.current_lines, line_rects):
+                painter.drawText(
+                    line_rect.translated(self.shadow_depth, self.shadow_depth),
+                    int(wrap_flags),
+                    line_text,
+                )
 
         painter.setPen(self.font_color)
         for line_text, line_rect in zip(self.current_lines, line_rects):
