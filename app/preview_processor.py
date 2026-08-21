@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from runtime_paths import bin_path
+from runtime_paths import bin_path, subprocess_text_kwargs
 from video_filter_chain import build_video_filter_chain, normalize_video_filter_state
 
 
@@ -31,9 +31,8 @@ def _ffmpeg_supports_encoder(ffmpeg_path: str, encoder_name: str) -> bool:
         result = subprocess.run(
             [ffmpeg_path, "-hide_banner", "-encoders"],
             capture_output=True,
-            text=True,
             check=True,
-            **_subprocess_run_kwargs(),
+            **subprocess_text_kwargs(),
         )
         supported = encoder_name in (result.stdout or "")
     except Exception:
@@ -76,7 +75,7 @@ def _run_ffmpeg_with_h264_fallback(
 ) -> None:
     encoder_args = _preferred_h264_encoder_args(ffmpeg, fast=fast)
     cmd = [*base_cmd, *encoder_args, output_path]
-    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
+    proc = subprocess.run(cmd, capture_output=True, **subprocess_text_kwargs())
     if proc.returncode == 0:
         return
 
@@ -94,7 +93,7 @@ def _run_ffmpeg_with_h264_fallback(
             "yuv420p",
             output_path,
         ]
-        fallback_proc = subprocess.run(fallback_cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
+        fallback_proc = subprocess.run(fallback_cmd, capture_output=True, **subprocess_text_kwargs())
         if fallback_proc.returncode == 0:
             return
         raise RuntimeError(fallback_proc.stderr or fallback_proc.stdout or error_message)
@@ -270,7 +269,7 @@ def mux_audio_into_video_for_preview(
             "+faststart",
             output_video_path,
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
+        proc = subprocess.run(cmd, capture_output=True, **subprocess_text_kwargs())
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux failed.")
     return output_video_path
@@ -469,7 +468,7 @@ def render_subtitle_frame_preview(
         "1",
         output_image_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
+    proc = subprocess.run(cmd, capture_output=True, **subprocess_text_kwargs())
     try:
         if os.path.exists(ass_path):
             os.remove(ass_path)

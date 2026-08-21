@@ -5,7 +5,7 @@ import threading
 import traceback
 from pathlib import Path
 
-from runtime_paths import bin_path, models_path, workspace_root, subprocess_hidden_kwargs
+from runtime_paths import bin_path, models_path, workspace_root, subprocess_hidden_kwargs, subprocess_text_kwargs
 from services.resource_download_service import ResourceDownloadService
 
 
@@ -360,10 +360,9 @@ def _gpu_memory_mb() -> int:
     try:
         output = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            text=True,
             stderr=subprocess.DEVNULL,
             timeout=2,
-            **subprocess_hidden_kwargs(),
+            **subprocess_text_kwargs(),
         )
         return max(0, int(str(output).splitlines()[0].strip()))
     except Exception:

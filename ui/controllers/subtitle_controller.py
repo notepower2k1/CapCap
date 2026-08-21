@@ -2,7 +2,7 @@ import os
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QProgressDialog, QTextEdit, QVBoxLayout
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QProgressDialog, QTextEdit, QVBoxLayout
 
 from worker_adapters import RewriteTranslationWorker, TranscriptionWorker, TranslationWorker
 from translation import TranslationOrchestrator, load_prompt_options
@@ -295,6 +295,9 @@ class SubtitleController:
         )
 
     def run_rewrite_translation(self):
+        if hasattr(self.gui, "_translation_phase_complete") and not self.gui._translation_phase_complete():
+            QMessageBox.information(self.gui, "Rewrite Unavailable", "Complete the Translation phase before rewriting subtitles.")
+            return
         source_segments = list(self.gui.current_segments or [])
         translated_segments = list(self.gui.current_translated_segments or [])
         if not source_segments:
@@ -312,6 +315,9 @@ class SubtitleController:
         self._open_rewrite_dialog(source_segments, rewrite_segments)
 
     def run_rewrite_selected_segment(self):
+        if hasattr(self.gui, "_translation_phase_complete") and not self.gui._translation_phase_complete():
+            QMessageBox.information(self.gui, "Rewrite Unavailable", "Complete the Translation phase before rewriting subtitles.")
+            return
         source_segments = list(self.gui.current_segments or [])
         translated_segments = list(self.gui.current_translated_segments or [])
         if not source_segments:
@@ -325,12 +331,11 @@ class SubtitleController:
             QMessageBox.warning(self.gui, "Rewrite Unavailable", "Please select a subtitle block in the inspector first.")
             return
 
-        selected_source = [dict(source_segments[index])]
-        selected_translation = [dict(translated_segments[index])]
-        self.gui._rewrite_source_segments = selected_source
-        self.gui._rewrite_base_translated_segments = selected_translation
-        self.gui._rewrite_selected_segment_index = index
-        self._open_rewrite_dialog(selected_source, selected_translation)
+        # Kept as a compatibility entry point for old shortcuts/plugins. The
+        # visible UI now uses one Rewrite button with a scope selector.
+        self.gui._rewrite_initial_scope = "selected"
+        self.gui._rewrite_initial_segment_index = index
+        self._open_rewrite_dialog(source_segments, translated_segments, initial_scope="selected")
 
     def _validate_rewrite_srt(self, srt_text: str):
         normalized_text = str(srt_text or "").strip()
@@ -358,11 +363,12 @@ class SubtitleController:
             return
 
         if hasattr(self.gui, "_rewrite_preview_edit"):
+            self.gui._rewrite_preview_ready = True
             self.gui._rewrite_preview_edit.setPlainText(translated_srt)
         if hasattr(self.gui, "_rewrite_preview_status_updater"):
             self.gui._rewrite_preview_status_updater()
         if hasattr(self.gui, "_rewrite_status_label"):
-            self.gui._rewrite_status_label.setText("AI preview is ready. You can keep editing it, then press Apply when the SRT format is valid.")
+            self.gui._rewrite_status_label.setText("AI preview is ready. Review the read-only result, then press Apply to update the selected subtitles.")
             self.gui._rewrite_status_label.setStyleSheet("color: #8ad7ff; font-size: 12px; font-weight: 700;")
         self.gui.update_project_step("refine_translation", "done")
         self.gui.refresh_ui_state()
@@ -451,8 +457,25 @@ class SubtitleController:
         rewrite_source_segments = getattr(self.gui, "_rewrite_source_segments", None) or list(self.gui.current_segments or [])
         applied_segments = self._expand_rewrite_segments_for_current_layout(parsed_segments, rewrite_source_segments)
 
+        selected_indices = [
+            int(index)
+            for index in list(getattr(self.gui, "_rewrite_selected_indices", []) or [])
+            if 0 <= int(index) < len(self.gui.current_translated_segments or [])
+        ]
         segment_index = int(getattr(self.gui, "_rewrite_selected_segment_index", -1))
-        if segment_index >= 0 and segment_index < len(self.gui.current_translated_segments or []):
+        if selected_indices:
+            if len(applied_segments) != len(selected_indices):
+                QMessageBox.warning(
+                    self.gui,
+                    "Rewrite",
+                    "The AI returned a different number of cues than were checked. Nothing was changed.",
+                )
+                return
+            for target_index, replacement in zip(selected_indices, applied_segments):
+                self.gui.current_translated_segments[target_index] = replacement
+            self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(self.gui.current_translated_segments, translated=True)
+            normalized_srt = self.gui.format_to_srt(self.gui.current_translated_segments)
+        elif segment_index >= 0 and segment_index < len(self.gui.current_translated_segments or []):
             self.gui.current_translated_segments[segment_index] = applied_segments[0] if applied_segments else dict(self.gui.current_translated_segments[segment_index])
             self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(self.gui.current_translated_segments, translated=True)
             normalized_srt = self.gui.format_to_srt(self.gui.current_translated_segments)
@@ -491,10 +514,15 @@ class SubtitleController:
         QMessageBox.information(self.gui, "Rewrite Applied", "The rewritten SRT was applied to the subtitle editor.")
         self.gui.refresh_ui_state()
 
-    def _open_rewrite_dialog(self, source_segments, translated_segments):
-        is_single = len(source_segments) == 1 and len(translated_segments) == 1
+    def _open_rewrite_dialog(self, source_segments, translated_segments, *, initial_scope="all"):
+        source_segments = list(source_segments or [])
+        translated_segments = list(translated_segments or [])
+        selected_index = int(getattr(self.gui, "_rewrite_initial_segment_index", -1))
+        if not (0 <= selected_index < len(translated_segments)):
+            selected_index = int(getattr(self.gui, "_selected_segment_index", -1))
+        can_select_one = 0 <= selected_index < len(translated_segments) and selected_index < len(source_segments)
         dialog = QDialog(self.gui)
-        dialog.setWindowTitle("Rewrite Selected Subtitle" if is_single else "Rewrite Subtitle")
+        dialog.setWindowTitle("Rewrite Subtitles")
         dialog.setModal(True)
         dialog.setMinimumWidth(760)
         dialog.setMinimumHeight(640)
@@ -533,14 +561,27 @@ class SubtitleController:
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        title = QLabel("Rewrite selected subtitle" if is_single else "Rewrite subtitle")
+        title = QLabel("AI Rewrite")
         title.setObjectName("statusHeadline")
         layout.addWidget(title)
 
-        hint = QLabel("You can edit the Vietnamese subtitle directly here in SRT format. Use AI only if you want a rewrite suggestion, then review and apply it.")
+        hint = QLabel("Choose the rewrite scope and style, then ask AI for a revised subtitle. Review the read-only result and apply it when ready. For manual corrections, use Subtitle Editor.")
         hint.setObjectName("helperLabel")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+
+        scope_row = QHBoxLayout()
+        scope_row.addWidget(QLabel("Scope:"))
+        scope_combo = QComboBox(dialog)
+        scope_combo.addItem("All translated subtitles", "all")
+        scope_combo.addItem("Checked subtitles", "checked")
+        if str(initial_scope or "all").strip().lower() == "selected" and can_select_one:
+            scope_combo.setCurrentIndex(1)
+        scope_row.addWidget(scope_combo, 1)
+        scope_hint = QLabel("Use the checkboxes beside Rewrite SRT" if translated_segments else "No translated subtitles")
+        scope_hint.setObjectName("helperLabel")
+        scope_row.addWidget(scope_hint)
+        layout.addLayout(scope_row)
 
         style_combo = QComboBox(dialog)
         for label, instruction in load_prompt_options(self.REWRITE_STYLE_PRESETS_FILE):
@@ -557,22 +598,57 @@ class SubtitleController:
         custom_prompt.setVisible(False)
         layout.addWidget(custom_prompt)
 
-        status_label = QLabel("Edit the SRT below or generate an AI suggestion.")
+        status_label = QLabel("Choose a scope and generate an AI rewrite preview.")
         status_label.setObjectName("helperLabel")
         status_label.setWordWrap(True)
         layout.addWidget(status_label)
 
-        preview_label = QLabel("Rewrite SRT")
+        preview_label = QLabel("Rewrite SRT — select cues to rewrite")
         preview_label.setObjectName("sectionTitle")
         layout.addWidget(preview_label)
 
+        preview_split = QHBoxLayout()
+        preview_split.setSpacing(8)
+
+        check_list = QListWidget(dialog)
+        check_list.setMinimumWidth(285)
+        check_list.setMaximumWidth(360)
+        check_list.setMinimumHeight(96)
+        check_list.setStyleSheet(
+            "QListWidget { background: #132033; color: #eff6ff; border: 1px solid #2f4868; border-radius: 8px; padding: 3px; }"
+            "QListWidget::item { padding: 5px 4px; }"
+            "QListWidget::item:selected { background: #244d70; }"
+        )
+        for index, segment in enumerate(translated_segments):
+            excerpt = " ".join(str(segment.get("text", "") or "").split())
+            if len(excerpt) > 74:
+                excerpt = excerpt[:71] + "..."
+            start = float(segment.get("start", 0.0) or 0.0)
+            end = float(segment.get("end", start) or start)
+            start_ms = max(0, int(round(start * 1000)))
+            end_ms = max(start_ms, int(round(end * 1000)))
+            start_time = f"{start_ms // 3600000:02d}:{(start_ms // 60000) % 60:02d}:{(start_ms // 1000) % 60:02d},{start_ms % 1000:03d}"
+            end_time = f"{end_ms // 3600000:02d}:{(end_ms // 60000) % 60:02d}:{(end_ms // 1000) % 60:02d},{end_ms % 1000:03d}"
+            item = QListWidgetItem(f"{index + 1:03d}  {start_time} → {end_time}\n{excerpt}", check_list)
+            item.setData(Qt.UserRole, index)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            if str(initial_scope or "all").strip().lower() == "selected" and index == selected_index:
+                item.setCheckState(Qt.Checked)
+        preview_split.addWidget(check_list, 1)
+
         preview_edit = QTextEdit(dialog)
-        preview_edit.setPlaceholderText("Enter valid SRT content here.")
+        preview_edit.setPlaceholderText("The AI rewrite preview will appear here.")
         preview_edit.setPlainText(self.gui.format_to_srt(translated_segments))
-        layout.addWidget(preview_edit, 1)
+        preview_edit.setReadOnly(True)
+        preview_split.addWidget(preview_edit, 2)
+        layout.addLayout(preview_split, 1)
 
         self.gui._rewrite_dialog = dialog
         self.gui._rewrite_preview_edit = preview_edit
+        self.gui._rewrite_preview_ready = False
+        self.gui._rewrite_selected_segment_index = -1
+        self.gui._rewrite_selected_indices = []
 
         button_row = QHBoxLayout()
         button_row.addStretch()
@@ -598,6 +674,50 @@ class SubtitleController:
             extra_instruction = custom_prompt.toPlainText().strip() if custom_style_cb.isChecked() else ""
             return " ".join(part for part in [base_instruction, extra_instruction] if part).strip()
 
+        def _scope_segments():
+            if scope_combo.currentData() == "checked":
+                indices = [
+                    int(item.data(Qt.UserRole))
+                    for row in range(check_list.count())
+                    for item in [check_list.item(row)]
+                    if item.checkState() == Qt.Checked
+                ]
+                indices = [index for index in indices if 0 <= index < len(source_segments) and index < len(translated_segments)]
+                return [source_segments[index] for index in indices], [translated_segments[index] for index in indices]
+            return source_segments, translated_segments
+
+        def _scope_indices():
+            if scope_combo.currentData() != "checked":
+                return []
+            return [
+                int(item.data(Qt.UserRole))
+                for row in range(check_list.count())
+                for item in [check_list.item(row)]
+                if item.checkState() == Qt.Checked
+                and 0 <= int(item.data(Qt.UserRole)) < len(translated_segments)
+            ]
+
+        def _reset_scope_preview():
+            _source, _translated = _scope_segments()
+            selected_indices = _scope_indices()
+            self.gui._rewrite_selected_indices = selected_indices
+            self.gui._rewrite_selected_segment_index = selected_indices[0] if len(selected_indices) == 1 else -1
+            self.gui._rewrite_source_segments = _source
+            self.gui._rewrite_base_translated_segments = _translated
+            self.gui._rewrite_preview_ready = False
+            preview_edit.setPlainText(self.gui.format_to_srt(_translated))
+            if scope_combo.currentData() == "checked" and not selected_indices:
+                status_label.setText("Check at least one subtitle before generating an AI rewrite.")
+                scope_hint.setText("0 cues checked")
+            elif scope_combo.currentData() == "checked":
+                status_label.setText("Choose a scope and generate an AI rewrite preview.")
+                scope_hint.setText(f"{len(selected_indices)} cue(s) checked")
+            else:
+                status_label.setText("Choose a scope and generate an AI rewrite preview.")
+                scope_hint.setText("All translated subtitles")
+            status_label.setStyleSheet("")
+            apply_btn.setEnabled(False)
+
         def _update_preview_validity():
             current_text = preview_edit.toPlainText().strip()
             if not current_text:
@@ -607,15 +727,24 @@ class SubtitleController:
                 return
             is_valid_srt, parsed_segments, validation_mode, validation_error = self._validate_rewrite_srt(current_text)
             if is_valid_srt and validation_mode == "srt":
-                status_label.setText(f"Valid SRT. Segments: {len(parsed_segments)}.")
-                status_label.setStyleSheet("color: #78f0b0; font-size: 12px; font-weight: 700;")
-                apply_btn.setEnabled(True)
+                if getattr(self.gui, "_rewrite_preview_ready", False):
+                    status_label.setText(f"AI rewrite ready. Segments: {len(parsed_segments)}.")
+                    status_label.setStyleSheet("color: #78f0b0; font-size: 12px; font-weight: 700;")
+                    apply_btn.setEnabled(True)
+                else:
+                    status_label.setText("Current subtitles are shown for reference. Generate an AI rewrite to enable Apply.")
+                    status_label.setStyleSheet("color: #9fb3ca; font-size: 12px; font-weight: 600;")
+                    apply_btn.setEnabled(False)
             else:
                 status_label.setText(f"Invalid SRT. {validation_error or 'Keep standard blocks: index, time range, then subtitle text.'}")
                 status_label.setStyleSheet("color: #ff8f8f; font-size: 12px; font-weight: 700;")
                 apply_btn.setEnabled(False)
 
         def _start_preview_generation():
+            rewrite_source_segments, rewrite_base_segments = _scope_segments()
+            if not rewrite_base_segments:
+                QMessageBox.information(dialog, "Rewrite", "Check at least one subtitle before generating an AI rewrite.")
+                return
             style_instruction = _build_style_instruction()
             status_label.setText("Generating rewrite preview with AI...")
             apply_btn.setEnabled(False)
@@ -628,8 +757,10 @@ class SubtitleController:
 
             self.gui._rewrite_preview_status_updater = _update_preview_validity
 
-            rewrite_source_segments = getattr(self.gui, "_rewrite_source_segments", source_segments)
-            rewrite_base_segments = getattr(self.gui, "_rewrite_base_translated_segments", translated_segments)
+            self.gui._rewrite_source_segments = rewrite_source_segments
+            self.gui._rewrite_base_translated_segments = rewrite_base_segments
+            self.gui._rewrite_selected_indices = _scope_indices()
+            self.gui._rewrite_selected_segment_index = self.gui._rewrite_selected_indices[0] if len(self.gui._rewrite_selected_indices) == 1 else -1
             self.gui.rewrite_translation_thread = RewriteTranslationWorker(
                 rewrite_source_segments,
                 rewrite_base_segments,
@@ -649,17 +780,32 @@ class SubtitleController:
                 "_rewrite_preview_status_updater",
                 "_rewrite_source_segments",
                 "_rewrite_base_translated_segments",
+                "_rewrite_preview_ready",
+                "_rewrite_selected_segment_index",
+                "_rewrite_selected_indices",
+                "_rewrite_initial_scope",
+                "_rewrite_initial_segment_index",
             ):
                 if hasattr(self.gui, attr):
                     delattr(self.gui, attr)
 
         custom_style_cb.toggled.connect(_toggle_custom_instruction)
+        scope_combo.currentIndexChanged.connect(lambda _index: _reset_scope_preview())
+
+        def _handle_scope_item_changed(item):
+            if item.checkState() == Qt.Checked and scope_combo.currentData() != "checked":
+                scope_combo.setCurrentIndex(1)
+                return
+            if scope_combo.currentData() == "checked":
+                _reset_scope_preview()
+
+        check_list.itemChanged.connect(_handle_scope_item_changed)
         close_btn.clicked.connect(dialog.reject)
         generate_btn.clicked.connect(_start_preview_generation)
         apply_btn.clicked.connect(self.apply_rewrite_preview)
-        preview_edit.textChanged.connect(_update_preview_validity)
         dialog.finished.connect(lambda _result: _cleanup_dialog())
         self.gui._rewrite_preview_status_updater = _update_preview_validity
+        _reset_scope_preview()
         _update_preview_validity()
         dialog.exec()
 

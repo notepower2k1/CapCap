@@ -40,6 +40,11 @@ def _subprocess_run_kwargs() -> dict:
     return kwargs
 
 
+def _text_subprocess_run_kwargs() -> dict:
+    """Decode FFmpeg diagnostics independently of the Windows ANSI locale."""
+    return {"text": True, "encoding": "utf-8", "errors": "replace", **_subprocess_run_kwargs()}
+
+
 _FFMPEG_ENCODER_CACHE = {}
 # libass FontSize is not a one-to-one Pillow pixel size on Windows.  In the
 # current bundled libass/DirectWrite path it renders at roughly 64% of the
@@ -100,9 +105,8 @@ def _ffmpeg_supports_encoder(ffmpeg_path: str, encoder_name: str) -> bool:
         result = subprocess.run(
             [ffmpeg_path, '-hide_banner', '-encoders'],
             capture_output=True,
-            text=True,
             check=True,
-            **_subprocess_run_kwargs(),
+            **_text_subprocess_run_kwargs(),
         )
         supported = encoder_name in (result.stdout or '')
     except Exception:
@@ -691,8 +695,8 @@ def get_video_dimensions(video_path):
              '-show_entries', 'stream=width,height',
              '-of', 'csv=s=x:p=0',
              video_path],
-            capture_output=True, text=True, check=True,
-            **_subprocess_run_kwargs(),
+            capture_output=True, check=True,
+            **_text_subprocess_run_kwargs(),
         )
         w, h = result.stdout.strip().split('x')
         return int(w), int(h)
@@ -1783,7 +1787,7 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
     print(f"Executing ({encoder_name}): {' '.join(command)}")
 
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True, **_subprocess_run_kwargs())
+        result = subprocess.run(command, capture_output=True, check=True, **_text_subprocess_run_kwargs())
         font_selects = re.findall(r".*fontselect:.*", result.stderr or "", flags=re.IGNORECASE)
         if font_selects:
             print(f"[Subtitle Font] libass selected: {font_selects[-1].strip()}")
@@ -1807,7 +1811,7 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
             
             print(f"NVENC failed, retrying with libx264. Error:\n{e.stderr}")
             try:
-                result = subprocess.run(command, capture_output=True, text=True, check=True, **_subprocess_run_kwargs())
+                result = subprocess.run(command, capture_output=True, check=True, **_text_subprocess_run_kwargs())
                 font_selects = re.findall(r".*fontselect:.*", result.stderr or "", flags=re.IGNORECASE)
                 if font_selects:
                     print(f"[Subtitle Font] libass selected: {font_selects[-1].strip()}")
@@ -1993,7 +1997,7 @@ def extract_audio(video_path, audio_output_path, ffmpeg_path=None):
     ]
     print(f"Executing: {' '.join(command)}")
     try:
-        subprocess.run(command, capture_output=True, text=True, check=True, **_subprocess_run_kwargs())
+        subprocess.run(command, capture_output=True, check=True, **_text_subprocess_run_kwargs())
         print("Audio extraction successful.")
         return True
     except subprocess.CalledProcessError as e:

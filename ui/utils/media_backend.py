@@ -2,12 +2,13 @@ import os
 import math
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
-from runtime_paths import asset_path, bin_path, subprocess_hidden_kwargs
+from runtime_paths import asset_path, bin_path, subprocess_hidden_kwargs, temp_path
 from video_processor import srt_to_ass
 try:
     # The normal launcher places ``app`` directly on sys.path.
@@ -20,6 +21,141 @@ _REALTIME_COLOR_FIELDS = (
     "brightness", "contrast", "saturation", "temperature", "gamma", "hue",
     "highlights", "shadows",
 )
+
+
+# Retain the precise MPV failure even though the application deliberately
+# falls back to Qt preview.  The launcher/UI can show a concise explanation,
+# while the runtime log keeps the technical loader error for support.
+_MPV_STARTUP_DIAGNOSTIC: dict[str, str] = {}
+_MPV_DLL_DIRECTORY_HANDLE = None
+
+
+def _set_mpv_startup_diagnostic(stage: str, summary: str, error: Exception | str = "", *, details: str = "") -> None:
+    global _MPV_STARTUP_DIAGNOSTIC
+    error_text = str(error or "").strip()
+    _MPV_STARTUP_DIAGNOSTIC = {
+        "stage": str(stage or "unknown"),
+        "summary": str(summary or "Advanced Video Preview is unavailable."),
+        "error": error_text,
+        "details": str(details or ""),
+    }
+    # This is intentionally independent of the GUI logger: MPV preflight runs
+    # before the main window and its log panel are guaranteed to exist.
+    try:
+        log_path = temp_path("mpv_startup.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(f"[{datetime.now().isoformat(timespec='seconds')}] MPV startup failed\n")
+            handle.write(f"Stage: {_MPV_STARTUP_DIAGNOSTIC['stage']}\n")
+            handle.write(f"Summary: {_MPV_STARTUP_DIAGNOSTIC['summary']}\n")
+            if _MPV_STARTUP_DIAGNOSTIC["details"]:
+                handle.write(f"Details: {_MPV_STARTUP_DIAGNOSTIC['details']}\n")
+            if _MPV_STARTUP_DIAGNOSTIC["error"]:
+                handle.write(f"Error: {_MPV_STARTUP_DIAGNOSTIC['error']}\n")
+            handle.write("\n")
+    except OSError:
+        pass
+
+
+def get_mpv_startup_diagnostic() -> dict[str, str]:
+    """Return the most recent MPV startup failure, if Qt fallback was used."""
+    return dict(_MPV_STARTUP_DIAGNOSTIC)
+
+
+def _clear_mpv_startup_diagnostic() -> None:
+    _MPV_STARTUP_DIAGNOSTIC.clear()
+
+
+def _pe_import_dll_names(path: Path) -> list[str]:
+    """Read direct PE imports without adding a runtime dependency.
+
+    This cannot expose every transitive dependency, but it lets the diagnostic
+    distinguish a missing direct MPV DLL from the generic Windows error 126.
+    """
+    try:
+        data = path.read_bytes()
+        pe_offset = int.from_bytes(data[0x3C:0x40], "little")
+        if data[pe_offset:pe_offset + 4] != b"PE\0\0":
+            return []
+        section_count = int.from_bytes(data[pe_offset + 6:pe_offset + 8], "little")
+        optional_size = int.from_bytes(data[pe_offset + 20:pe_offset + 22], "little")
+        optional_offset = pe_offset + 24
+        magic = int.from_bytes(data[optional_offset:optional_offset + 2], "little")
+        directory_offset = optional_offset + (112 if magic == 0x20B else 96)
+        import_rva = int.from_bytes(data[directory_offset + 8:directory_offset + 12], "little")
+        if not import_rva:
+            return []
+        section_offset = optional_offset + optional_size
+        sections = []
+        for index in range(section_count):
+            offset = section_offset + index * 40
+            virtual_size = int.from_bytes(data[offset + 8:offset + 12], "little")
+            virtual_address = int.from_bytes(data[offset + 12:offset + 16], "little")
+            raw_size = int.from_bytes(data[offset + 16:offset + 20], "little")
+            raw_offset = int.from_bytes(data[offset + 20:offset + 24], "little")
+            sections.append((virtual_address, max(virtual_size, raw_size), raw_offset))
+
+        def rva_to_offset(rva: int) -> int | None:
+            for start, size, raw in sections:
+                if start <= rva < start + size:
+                    return raw + (rva - start)
+            return None
+
+        imports = []
+        descriptor_offset = rva_to_offset(import_rva)
+        while descriptor_offset is not None and descriptor_offset + 20 <= len(data):
+            descriptor = data[descriptor_offset:descriptor_offset + 20]
+            if descriptor == b"\0" * 20:
+                break
+            name_rva = int.from_bytes(descriptor[12:16], "little")
+            name_offset = rva_to_offset(name_rva)
+            if name_offset is not None:
+                end = data.find(b"\0", name_offset)
+                if end > name_offset:
+                    imports.append(data[name_offset:end].decode("ascii", errors="replace"))
+            descriptor_offset += 20
+        return imports
+    except (OSError, ValueError, IndexError):
+        return []
+
+
+def _missing_direct_mpv_dependencies(mpv_dir: Path, mpv_dll: Path) -> list[str]:
+    """Return missing direct DLL candidates from libmpv's PE import table."""
+    if not sys.platform.startswith("win"):
+        return []
+    windows_dir = Path(os.environ.get("WINDIR", r"C:\Windows"))
+    search_dirs = [mpv_dir, Path(sys.executable).resolve().parent, windows_dir / "System32"]
+    search_dirs.extend(Path(entry) for entry in os.environ.get("PATH", "").split(os.pathsep) if entry)
+    missing = []
+    for dependency in _pe_import_dll_names(mpv_dll):
+        lowered = dependency.lower()
+        # API-set DLLs are virtual Windows contracts, not files beside MPV.
+        if lowered.startswith(("api-ms-win-", "ext-ms-win-")):
+            continue
+        if not any((directory / dependency).is_file() for directory in search_dirs):
+            missing.append(dependency)
+    return sorted(set(missing), key=str.lower)
+
+
+def _describe_mpv_loader_error(mpv_dir: Path, mpv_dll: Path, exc: OSError) -> tuple[str, str]:
+    code = getattr(exc, "winerror", None) or getattr(exc, "errno", None)
+    missing = _missing_direct_mpv_dependencies(mpv_dir, mpv_dll)
+    details = f"Windows loader error {code}: {exc}" if code else str(exc)
+    if missing:
+        return (
+            "Bundled MPV is missing direct dependency: " + ", ".join(missing),
+            details + "; missing direct imports: " + ", ".join(missing),
+        )
+    if code == 126:
+        return (
+            "Windows could not load an MPV runtime dependency.",
+            details + "; no missing direct import was found (a transitive DLL or VC++ runtime may be missing).",
+        )
+    if code == 193:
+        return ("Bundled MPV has an incompatible Windows architecture.", details)
+    if code == 1114:
+        return ("MPV runtime initialization was blocked or failed.", details)
+    return ("Windows could not load bundled MPV.", details)
 
 
 def _escape_mpv_filter_path(path: str) -> str:
@@ -305,7 +441,15 @@ class MpvMediaPlayerBackend(QObject):
         self._mute_dubbed = False
 
         prepare_mpv_bundle()
-        import mpv
+        try:
+            import mpv
+        except Exception as exc:
+            _set_mpv_startup_diagnostic(
+                "Python MPV import",
+                "The bundled Python MPV component could not load.",
+                exc,
+            )
+            raise
 
         # gpu-next is the preferred production renderer. Set
         # MPV_GPU_NEXT_ENABLED=false/0 to force the stable gpu backend while
@@ -346,6 +490,11 @@ class MpvMediaPlayerBackend(QObject):
             self._player = mpv.MPV(**player_options)
         except Exception as exc:
             if not gpu_next_enabled:
+                _set_mpv_startup_diagnostic(
+                    "MPV video output",
+                    "MPV could not initialize the selected video output.",
+                    exc,
+                )
                 raise
             # gpu-next is experimental and may be unavailable with a
             # particular driver/libplacebo combination. Keep startup safe by
@@ -353,7 +502,16 @@ class MpvMediaPlayerBackend(QObject):
             self.log(f"[Preview] MPV gpu-next unavailable; falling back to gpu: {exc}")
             player_options["vo"] = "gpu"
             self._gpu_next_enabled = False
-            self._player = mpv.MPV(**player_options)
+            try:
+                self._player = mpv.MPV(**player_options)
+            except Exception as fallback_exc:
+                _set_mpv_startup_diagnostic(
+                    "MPV GPU/video output",
+                    "MPV could not initialize gpu-next or its compatible gpu fallback.",
+                    fallback_exc,
+                    details=f"gpu-next error: {exc}; gpu fallback error: {fallback_exc}",
+                )
+                raise
         if self._gpu_next_enabled:
             try:
                 self._gpu_lut = MpvGpuLutPrototype(
@@ -998,6 +1156,13 @@ class MpvMediaPlayerBackend(QObject):
             self._original_player.stop()
         except Exception:
             pass
+        # QMediaPlayer can retain an OS-level file handle after stop().
+        # Release the source explicitly so project cleanup can remove an
+        # extracted WAV on Windows without requiring a second attempt.
+        try:
+            self._original_player.setSource(QUrl())
+        except Exception:
+            pass
         self._apply_original_mute()
 
     def clear_audio(self):
@@ -1006,6 +1171,10 @@ class MpvMediaPlayerBackend(QObject):
         self._dubbed_loaded_path = ""
         try:
             self._dubbed_player.stop()
+        except Exception:
+            pass
+        try:
+            self._dubbed_player.setSource(QUrl())
         except Exception:
             pass
         self._apply_dubbed_mute()
@@ -1307,9 +1476,22 @@ class MpvMediaPlayerBackend(QObject):
 
 
 def create_media_backend(video_view):
+    # preview_panel selected VideoView only after MPV preflight failed. Do not
+    # retry MPV against that Qt-specific widget: it could obscure the original
+    # diagnostic and leave an incompatible player/view pairing.
+    if not hasattr(video_view, "get_mpv_target_winid"):
+        return QtMediaPlayerBackend(video_view)
     try:
-        return MpvMediaPlayerBackend(video_view)
-    except Exception:
+        backend = MpvMediaPlayerBackend(video_view)
+        _clear_mpv_startup_diagnostic()
+        return backend
+    except Exception as exc:
+        if not _MPV_STARTUP_DIAGNOSTIC:
+            _set_mpv_startup_diagnostic(
+                "MPV initialization",
+                "MPV could not initialize its video output.",
+                exc,
+            )
         return QtMediaPlayerBackend(video_view)
 
 
@@ -1320,13 +1502,39 @@ def get_mpv_bundle_dir():
 def is_mpv_backend_available():
     try:
         prepare_mpv_bundle()
-        import mpv  # noqa: F401
-        return True
-    except Exception:
+    except FileNotFoundError as exc:
+        _set_mpv_startup_diagnostic("MPV bundle", "Bundled MPV files are missing.", exc)
         return False
+    except RuntimeError as exc:
+        # prepare_mpv_bundle has already recorded the more precise loader
+        # diagnostic, including any direct dependency candidates.
+        if not _MPV_STARTUP_DIAGNOSTIC:
+            _set_mpv_startup_diagnostic("MPV DLL dependency", "Windows could not load bundled MPV.", exc)
+        return False
+    except OSError as exc:
+        mpv_dir = get_mpv_bundle_dir()
+        mpv_dll = mpv_dir / "libmpv-2.dll"
+        if not mpv_dll.exists():
+            mpv_dll = mpv_dir / "mpv-2.dll"
+        summary, details = _describe_mpv_loader_error(mpv_dir, mpv_dll, exc)
+        _set_mpv_startup_diagnostic("MPV DLL dependency", summary, exc, details=details)
+        return False
+    try:
+        import mpv  # noqa: F401
+    except Exception as exc:
+        _set_mpv_startup_diagnostic(
+            "Python MPV import",
+            "The bundled Python MPV component could not load.",
+            exc,
+        )
+        return False
+    else:
+        _clear_mpv_startup_diagnostic()
+        return True
 
 
 def prepare_mpv_bundle():
+    global _MPV_DLL_DIRECTORY_HANDLE
     mpv_dir = get_mpv_bundle_dir()
     if not mpv_dir.exists():
         raise FileNotFoundError(f"Bundled mpv directory not found: {mpv_dir}")
@@ -1339,8 +1547,11 @@ def prepare_mpv_bundle():
         else:
             raise FileNotFoundError(f"Bundled libmpv DLL not found in {mpv_dir}")
 
-    if hasattr(os, "add_dll_directory"):
-        os.add_dll_directory(str(mpv_dir))
+    if hasattr(os, "add_dll_directory") and _MPV_DLL_DIRECTORY_HANDLE is None:
+        # Keep the handle alive.  Dropping it immediately removes this DLL
+        # search path again, which can make later python-mpv loading depend on
+        # an individual machine's PATH/environment.
+        _MPV_DLL_DIRECTORY_HANDLE = os.add_dll_directory(str(mpv_dir))
 
     os.environ["PATH"] = str(mpv_dir) + os.pathsep + os.environ.get("PATH", "")
 
@@ -1350,7 +1561,8 @@ def prepare_mpv_bundle():
 
             ctypes.WinDLL(str(mpv_dll))
         except OSError as exc:
+            summary, details = _describe_mpv_loader_error(mpv_dir, mpv_dll, exc)
+            _set_mpv_startup_diagnostic("MPV DLL dependency", summary, exc, details=details)
             raise RuntimeError(
-                f"Could not load bundled libmpv from {mpv_dll}. "
-                "The bundle may be missing dependent runtime DLLs."
+                f"{summary} ({details})"
             ) from exc

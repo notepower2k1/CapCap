@@ -4,6 +4,7 @@ import base64
 import errno
 import json
 import os
+import sys
 import tempfile
 import traceback
 from datetime import datetime
@@ -11,6 +12,33 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 
 os.environ.setdefault("CAPCAP_RUNTIME_PROFILE", "local")
+
+
+def _configure_worker_text_streams() -> None:
+    """Keep Unicode paths in worker logs from aborting a Windows workflow.
+
+    A PyInstaller worker launched from a console can inherit a legacy Windows
+    code page such as CP1252.  The workflow logs full FFmpeg commands, which
+    include the source path; ``print()`` would then raise ``UnicodeEncodeError``
+    for Chinese, Vietnamese, and other non-ANSI path characters.  Configure
+    the process streams before importing workflow modules so every existing
+    diagnostic print is safe.  If a custom stream cannot be reconfigured, its
+    replacement policy still prevents logging from becoming a job failure.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError, TypeError):
+            try:
+                reconfigure(errors="backslashreplace")
+            except (OSError, ValueError, TypeError):
+                pass
+
+
+_configure_worker_text_streams()
 
 _QUIET = os.getenv("CAPCAP_QUIET", "").strip().lower() in ("1", "true", "yes")
 _GPU_LOCK = threading.Lock()
@@ -154,7 +182,13 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
                         f.write(f"[{datetime.now().isoformat()}] {self.path}\n{tb}\n\n")
                 except Exception:
                     pass
-            _json_response(self, 500, {"ok": False, "error": str(exc)})
+            error_message = str(exc)
+            if isinstance(exc, UnicodeError) or "charmap codec" in error_message.lower():
+                error_message = (
+                    "Windows text encoding failed while reading an external tool response. "
+                    "Please update CapCap; technical details were saved to capcap_remote_api_errors.log."
+                )
+            _json_response(self, 500, {"ok": False, "error": error_message})
 
     def log_message(self, format, *args):
         _log(f"[Remote API] {self.address_string()} - {format % args}")

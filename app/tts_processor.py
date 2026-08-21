@@ -8,7 +8,7 @@ import time
 import wave
 
 from dotenv import load_dotenv
-from runtime_paths import app_path, bin_path, bundle_root, models_path, temp_path
+from runtime_paths import app_path, bin_path, bundle_root, models_path, temp_path, subprocess_text_kwargs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(os.path.dirname(BASE_DIR), ".env")
 if os.path.exists(ENV_PATH):
@@ -347,7 +347,7 @@ def edge_tts_to_wav_16k_mono(
         "1",
         wav_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, **_subprocess_run_kwargs())
+    proc = subprocess.run(cmd, capture_output=True, **subprocess_text_kwargs())
     if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg conversion failed:\n{proc.stderr or proc.stdout}")
     return wav_path

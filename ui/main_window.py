@@ -75,6 +75,7 @@ from utils.media_utils import (
 from utils.settings_utils import load_user_settings as load_user_settings_impl, save_user_settings as save_user_settings_impl
 from views import build_main_window_ui
 from widgets.progress_dialog import BackgroundableProgressDialog
+from widgets.subtitle_editor_dialog import SubtitleEditorDialog
 from runtime_paths import app_path, asset_path, models_path, workspace_root
 from runtime_profile import is_remote_profile
 from worker_adapters import (
@@ -7763,13 +7764,14 @@ class VideoTranslatorGUI(QMainWindow):
         segments = self.get_active_segments() or []
         valid = 0 <= idx < len(segments)
         seg = segments[idx] if valid and isinstance(segments[idx], dict) else {}
+        translation_ready = self._translation_phase_complete()
         for attr in (
             "audio_inspector_use_voice_btn",
             "audio_inspector_regenerate_voice_btn",
         ):
             btn = getattr(self, attr, None)
             if btn is not None:
-                btn.setEnabled(valid)
+                btn.setEnabled(valid and translation_ready)
         # Shared section: Original text
         orig_lbl = getattr(self, "inspector_original_text_label", None)
         orig_widget = getattr(self, "inspector_shared_original_label", None)
@@ -7791,6 +7793,9 @@ class VideoTranslatorGUI(QMainWindow):
                 orig_widget.setVisible(bool(orig_text))
 
     def on_audio_inspector_regenerate_voice_clicked(self):
+        if not self._translation_phase_complete():
+            QMessageBox.information(self, "Voice Unavailable", "Complete the Translation phase before generating subtitle voice audio.")
+            return
         idx = int(getattr(self, "_selected_segment_index", -1))
         segments = self.get_active_segments() or []
         if not (0 <= idx < len(segments)):
@@ -9809,6 +9814,7 @@ class VideoTranslatorGUI(QMainWindow):
     def _update_subtitle_inspector_summary(self, rows=None):
         rows = rows if rows is not None else self._segment_editor_display_rows()
         count = len(rows or [])
+        translation_ready = self._translation_phase_complete()
         if not count:
             self._selected_segment_index = -1
             if hasattr(self, "subtitle_inspector_summary_label"):
@@ -9824,7 +9830,23 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "subtitle_inspector_summary_label"):
             self.subtitle_inspector_summary_label.setText(f"Selected subtitle: Block {selected_index + 1} / {count}")
         if hasattr(self, "rewrite_selected_segment_btn"):
-            self.rewrite_selected_segment_btn.setEnabled(True)
+            self.rewrite_selected_segment_btn.setEnabled(translation_ready)
+
+    def _translation_phase_complete(self) -> bool:
+        """Return whether translated subtitle data is a completed artifact."""
+        state = getattr(self, "current_project_state", None)
+        steps = getattr(state, "steps", {}) or {}
+        status = str(steps.get("translate_raw", "") or "").strip().lower()
+        if status in {"running", "failed", "cancelled", "pending"}:
+            return False
+        segments_ready = bool(getattr(self, "current_translated_segments", None))
+        artifacts = getattr(state, "artifacts", {}) or {}
+        artifact_path = str(artifacts.get("translation_final", "") or "").strip()
+        artifact_ready = bool(artifact_path and os.path.exists(artifact_path))
+        if not (segments_ready or artifact_ready):
+            return False
+        # Legacy projects may have the artifact but no explicit done status.
+        return status == "done" or artifact_ready
 
     def set_subtitle_inspector_details_visible(self, visible: bool, *, sync: bool = True):
         if not visible and self.is_inspector_anchored():
@@ -12342,6 +12364,7 @@ class VideoTranslatorGUI(QMainWindow):
         v_ok = bool(self.video_path_edit.text().strip()) and os.path.exists(self.video_path_edit.text().strip())
         a_ok = bool(self.audio_source_edit.text().strip()) and os.path.exists(self.audio_source_edit.text().strip())
         has_translated_text = bool(self.translated_text.toPlainText().strip())
+        translation_ready = self._translation_phase_complete()
         selected_audio_path = self.resolve_selected_audio_path()
         has_voice_audio = bool(selected_audio_path and os.path.exists(selected_audio_path))
         has_subtitle_track = bool(self.last_translated_srt_path and os.path.exists(self.last_translated_srt_path))
@@ -12364,17 +12387,23 @@ class VideoTranslatorGUI(QMainWindow):
             self.voice_speed_spin.setEnabled(mode != "off")
         self.transcribe_btn.setEnabled(a_ok)
         self.translate_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()))
-        self.apply_translated_btn.setEnabled(has_translated_text)
+        self.apply_translated_btn.setEnabled(translation_ready and has_translated_text)
         if hasattr(self, "rewrite_translation_btn"):
-            self.rewrite_translation_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()) and has_translated_text)
+            self.rewrite_translation_btn.setEnabled(
+                translation_ready and bool(self.transcript_text.toPlainText().strip()) and has_translated_text
+            )
+        if hasattr(self, "subtitle_editor_btn"):
+            self.subtitle_editor_btn.setEnabled(translation_ready and not review_mode)
         if hasattr(self, "rewrite_selected_segment_btn"):
             has_selected_segment = 0 <= int(getattr(self, "_selected_segment_index", -1)) < len(self.current_translated_segments or [])
             self.rewrite_selected_segment_btn.setEnabled(
-                bool(self.transcript_text.toPlainText().strip()) and has_translated_text and has_selected_segment
+                translation_ready and bool(self.transcript_text.toPlainText().strip()) and has_translated_text and has_selected_segment
             )
+        if hasattr(self, "_refresh_audio_inspector_dub_voice_buttons"):
+            self._refresh_audio_inspector_dub_voice_buttons()
         generated_mode = not self.using_existing_audio_source()
         if hasattr(self, "voiceover_btn"):
-            self.voiceover_btn.setEnabled(has_translated_text and generated_mode and mode in ("voice", "both"))
+            self.voiceover_btn.setEnabled(translation_ready and has_translated_text and generated_mode and mode in ("voice", "both"))
         preview_enabled = v_ok and not voice_running
         if hasattr(self, "quick_preview_btn"):
             self.quick_preview_btn.setEnabled(preview_enabled)
@@ -13428,6 +13457,172 @@ class VideoTranslatorGUI(QMainWindow):
             self.sync_segment_editor_rows()
             return result
 
+    def open_subtitle_editor(self):
+        """Open the staged, bulk translated-subtitle editor.
+
+        Unlike the small inspector editor this does not alter the project on
+        every keystroke.  It makes text-only changes explicit via Update.
+        """
+        if not self._translation_phase_complete():
+            QMessageBox.information(self, "Subtitle Editor", "Complete the Translation phase before editing translated subtitles.")
+            return
+        segments = list(self.current_translated_segments or [])
+        if not segments:
+            QMessageBox.information(
+                self,
+                "Subtitle Editor",
+                "Translated subtitles are not available yet. Run Translate or import a translated SRT first.",
+            )
+            return
+        editor_segments = copy.deepcopy(segments)
+        # Translation artifacts can intentionally omit source_text.  The
+        # source transcript remains index/timing aligned, so enrich only the
+        # editor copy for display without changing project metadata.
+        source_segments = list(self.current_segments or [])
+        source_by_time = {
+            (round(float(item.get("start", 0.0) or 0.0), 3), round(float(item.get("end", 0.0) or 0.0), 3)): item
+            for item in source_segments
+            if isinstance(item, dict)
+        }
+        for index, segment in enumerate(editor_segments):
+            if not str(segment.get("source_text") or segment.get("original_text") or "").strip():
+                key = (
+                    round(float(segment.get("start", 0.0) or 0.0), 3),
+                    round(float(segment.get("end", 0.0) or 0.0), 3),
+                )
+                source = source_by_time.get(key) or (source_segments[index] if index < len(source_segments) else {})
+                source_text = str(source.get("text", "") or "").strip()
+                if source_text:
+                    segment["source_text"] = source_text
+        dialog = SubtitleEditorDialog(
+            self,
+            editor_segments,
+            self._apply_subtitle_editor_changes,
+            self.run_rewrite_translation,
+        )
+        self._subtitle_editor_dialog = dialog
+        try:
+            dialog.exec()
+        finally:
+            if getattr(self, "_subtitle_editor_dialog", None) is dialog:
+                self._subtitle_editor_dialog = None
+
+    def _invalidate_dubbed_output_after_subtitle_edit(self):
+        """Stop old TTS/mix output from being used after subtitle edits.
+
+        Per-cue cache files deliberately remain: VoiceWorkflow keys those
+        files by text, voice and speed, so unchanged cues are cache hits on
+        the next TTS run.  The old assembled voice/mix is invalid because it
+        still contains deleted or changed cues and must never be exported.
+        """
+        state = self.ensure_current_project()
+        had_dubbed_output = bool(
+            getattr(self, "last_voice_vi_path", "")
+            or getattr(self, "last_mixed_vi_path", "")
+            or self.processed_artifacts.get("voice_vi")
+            or self.processed_artifacts.get("mixed_vi")
+        )
+        for key in ("voice_vi", "mixed_vi", "voice_segments"):
+            self.processed_artifacts.pop(key, None)
+            if state is not None:
+                state.artifacts.pop(key, None)
+        # The TS1 layer objects may still contain paths to the old assembled
+        # voice track.  Clear them too so neither preview nor export can use
+        # a deleted/obsolete cue before the next TTS run.
+        timeline_model = getattr(getattr(self, "timeline", None), "_timeline", None)
+        for track in list(getattr(timeline_model, "tracks", []) or []):
+            track_type = str(getattr(getattr(track, "type", ""), "value", getattr(track, "type", ""))).lower()
+            if track_type not in {"dub_subtitle", "subtitle"}:
+                continue
+            for layer in list(getattr(track, "layers", []) or []):
+                if hasattr(layer, "audio_path"):
+                    layer.audio_path = ""
+                if hasattr(layer, "tts_settings"):
+                    layer.tts_settings = {}
+                metadata = getattr(layer, "metadata", None)
+                if isinstance(metadata, dict):
+                    metadata.pop("_audio_end", None)
+        self.last_voice_vi_path = ""
+        self.last_mixed_vi_path = ""
+        if state is not None:
+            state.set_step_status("generate_tts", "pending")
+            state.set_step_status("mix_audio", "pending")
+            state.settings.pop("voice_signature", None)
+            self.project_service.save_project(state)
+        if had_dubbed_output:
+            self.log("[Subtitle Editor] Existing dubbed output invalidated; unchanged cues remain in the TTS cache.")
+            self.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
+
+    def _apply_subtitle_editor_changes(self, rows) -> bool:
+        """Apply staged content/deletion changes without rewriting cue metadata."""
+        source = list(self.current_translated_segments or [])
+        if len(rows or []) != len(source):
+            QMessageBox.warning(self, "Subtitle Editor", "The subtitle list changed while the editor was open. Reopen it and try again.")
+            return False
+
+        updated = []
+        changed_count = 0
+        deleted_count = 0
+        for row, original in zip(rows, source):
+            if bool(row.get("deleted")):
+                deleted_count += 1
+                continue
+            text = str(row.get("text", "") or "").strip()
+            if not text:
+                QMessageBox.warning(self, "Subtitle Editor", "Use Delete for an unnecessary segment instead of leaving translated text empty.")
+                return False
+            segment = copy.deepcopy(original)
+            old_text = str(segment.get("text", "") or "").strip()
+            if text != old_text:
+                changed_count += 1
+                segment["text"] = text
+                segment["subtitle_vi"] = text
+                # A changed subtitle must speak the changed text.  Do not
+                # retain a manual voice override from the old sentence.
+                segment["tts_text"] = ""
+                segment["dubbing_vi"] = ""
+                segment["voice_edited"] = False
+                self._reconcile_manual_highlights(segment)
+            updated.append(segment)
+
+        if not changed_count and not deleted_count:
+            return True
+
+        self.current_translated_segments = updated
+        self.current_translated_segment_models = self._dict_segments_to_models(updated, translated=True)
+        self._single_line_split_cache = None
+        self._voiceover_force_refresh = bool(changed_count or deleted_count)
+        self._sync_hidden_translated_text_from_segments()
+        self.refresh_auto_keyword_highlights(force=True)
+        self.apply_segments_to_timeline()
+        self._invalidate_dubbed_output_after_subtitle_edit()
+        self.persist_current_timeline_project_data()
+        # Keep the project-facing translated SRT in sync as well as the
+        # JSON/timeline state. Export can then use the edited result without
+        # relying on a later preview refresh to rewrite it incidentally.
+        self._regenerate_translated_srt_from_segments()
+        if not updated:
+            # persist_current_timeline_project_data intentionally skips an
+            # empty list. Persist an explicit empty translation artifact so
+            # a project reopened after "Delete All" cannot resurrect its
+            # former subtitles from translation_final.json.
+            self.persist_translation_project_data([], self.last_translated_srt_path)
+        self.schedule_live_subtitle_preview_refresh()
+        self.schedule_auto_frame_preview()
+        self.sync_segment_editor_rows()
+        self.refresh_ui_state()
+        self.log(
+            f"[Subtitle Editor] Updated translated subtitles: changed={changed_count}, deleted={deleted_count}, unchanged={len(updated) - changed_count}."
+        )
+        QMessageBox.information(
+            self,
+            "Subtitle Editor Updated",
+            f"Updated {changed_count} subtitle segment(s); deleted {deleted_count}.\n"
+            "Timeline timing, speaker assignments, and styles were preserved.\n"
+            "Run TTS again only if you need dubbed audio; unchanged lines reuse their cache.",
+        )
+        return True
+
 
 
     def setup_media_player(self):
@@ -14164,6 +14359,29 @@ class VideoTranslatorGUI(QMainWindow):
         # Otherwise a late worker/timer can recreate the selected project's
         # cache or timeline after it has just been removed.
         self._terminate_workers()
+        # Release MPV/QMediaPlayer handles before deleting extracted audio or
+        # project files. Windows keeps a stopped sidecar source locked until
+        # it is explicitly unloaded, which previously made the first cleanup
+        # attempt report WinError 32.
+        media_player = getattr(self, "media_player", None)
+        if media_player is not None:
+            try:
+                media_player.clear_audio()
+            except Exception:
+                pass
+            try:
+                media_player._clear_original_audio()
+            except Exception:
+                pass
+            try:
+                from PySide6.QtCore import QUrl
+                media_player.setSource(QUrl())
+            except Exception:
+                pass
+            try:
+                QApplication.processEvents()
+            except Exception:
+                pass
         persist_timer = getattr(self, "_timeline_persist_timer", None)
         if persist_timer is not None:
             persist_timer.stop()

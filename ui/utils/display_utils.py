@@ -13,7 +13,10 @@ def log_message(gui, message: str):
     # PyInstaller's windowed bootloader sets both __stdout__ and stdout to
     # None. Logging must never interrupt media/timeline initialization just
     # because there is no attached console.
-    stream = getattr(sys, "__stdout__", None) or getattr(sys, "stdout", None)
+    # Prefer the active stream. ``ui.gui`` replaces it with a tee that writes
+    # the packaged application's persistent CapCap\temp\capcap_runtime.log.
+    # Writing to ``__stdout__`` first bypassed that file entirely.
+    stream = getattr(sys, "stdout", None) or getattr(sys, "__stdout__", None)
     if stream is not None:
         try:
             stream.write(text + "\n")

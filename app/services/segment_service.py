@@ -32,11 +32,38 @@ class SegmentService:
     def apply_translations(self, base_models, translated_segments) -> list[Segment]:
         models: list[Segment] = []
         base_models = base_models or []
+        # An imported/edited SRT can add or remove cues.  Positional matching
+        # is only safe while both lists have the same shape; otherwise use
+        # the preserved cue timing to keep source text, speaker IDs, and
+        # word metadata attached to the correct translated cue.
+        base_by_timing = {}
+        if len(base_models) != len(translated_segments or []):
+            for base_model in base_models:
+                key = (
+                    round(float(getattr(base_model, "start", 0.0) or 0.0), 3),
+                    round(float(getattr(base_model, "end", 0.0) or 0.0), 3),
+                )
+                base_by_timing.setdefault(key, []).append(base_model)
         for idx, seg in enumerate(translated_segments or [], start=1):
             model = Segment.from_dict(seg, default_id=idx)
-            if idx - 1 < len(base_models):
+            base_model = None
+            if len(base_models) == len(translated_segments or []) and idx - 1 < len(base_models):
                 base_model = base_models[idx - 1]
-                if not model.original_text:
+            elif base_by_timing:
+                key = (
+                    round(float((seg or {}).get("start", 0.0) or 0.0), 3),
+                    round(float((seg or {}).get("end", 0.0) or 0.0), 3),
+                )
+                candidates = base_by_timing.get(key) or []
+                if candidates:
+                    base_model = candidates.pop(0)
+            if base_model is not None:
+                # Segment.from_dict treats its generic ``text`` field as an
+                # original-text fallback. For translations that field is the
+                # translated cue, so only an explicitly retained original
+                # should win over the source model.
+                explicit_original = str((seg or {}).get("original_text") or (seg or {}).get("source_text") or "").strip()
+                if not explicit_original:
                     model.original_text = base_model.original_text
                 source_words = base_model.metadata.get("words")
                 if source_words and "words" not in seg:

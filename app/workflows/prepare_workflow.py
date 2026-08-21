@@ -5,7 +5,7 @@ import re
 import subprocess
 import time
 
-from runtime_paths import bin_path, models_path, subprocess_hidden_kwargs
+from runtime_paths import bin_path, models_path, subprocess_hidden_kwargs, subprocess_text_kwargs
 from runtime_profile import is_remote_profile
 from services import ChunkingService, EngineRuntime, ProjectService, SegmentRegroupService, SegmentService
 from services.resource_download_service import ResourceDownloadService
@@ -75,8 +75,7 @@ class PrepareWorkflow:
             probe = subprocess.run(
                 [ffmpeg, "-hide_banner", "-i", source, "-af", "volumedetect", "-f", "null", "-"],
                 capture_output=True,
-                text=True,
-                check=False, **subprocess_hidden_kwargs(),
+                check=False, **subprocess_text_kwargs(),
             )
             output = f"{probe.stdout}\n{probe.stderr}"
             mean_match = re.search(r"mean_volume:\s*([-+]?\d+(?:\.\d+)?)\s*dB", output)
@@ -120,8 +119,7 @@ class PrepareWorkflow:
                         "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", normalized_path,
                     ],
                     capture_output=True,
-                    text=True,
-                    check=True, **subprocess_hidden_kwargs(),
+                    check=True, **subprocess_text_kwargs(),
                 )
                 profile["path"] = normalized_path
                 print(

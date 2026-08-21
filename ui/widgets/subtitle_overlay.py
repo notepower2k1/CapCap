@@ -42,6 +42,23 @@ class SubtitleOverlayItem(QGraphicsItem):
         self.custom_position_enabled = False
         self.custom_x_percent = 50
         self.custom_y_percent = 86
+        # The libmpv overlay exposes this same switch.  Keep the Qt fallback
+        # API-compatible so a machine that cannot load libmpv still starts.
+        self._text_rendering_enabled = True
+
+    def set_text_rendering(self, enabled: bool):
+        """Enable/disable Qt text painting while retaining the drag item.
+
+        MPV uses this when libass renders the visible subtitle underneath its
+        native surface.  On the Qt media fallback it remains enabled, but the
+        method must exist because the shared main-window code uses both
+        preview backends.
+        """
+        enabled = bool(enabled)
+        if enabled == self._text_rendering_enabled:
+            return
+        self._text_rendering_enabled = enabled
+        self.update()
 
     def set_text(self, text):
         new_lines = [line for line in str(text or "").splitlines() if line] or ([] if not text else [str(text)])

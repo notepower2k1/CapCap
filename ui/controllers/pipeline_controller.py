@@ -143,6 +143,11 @@ class PipelineController:
         env["CAPCAP_REMOTE_API_TOKEN"] = token
         env["CAPCAP_REMOTE_PRELOAD_MODELS"] = "0"
         env["CAPCAP_RUN_REMOTE_API_SERVER"] = "1" if getattr(sys, "frozen", False) else "0"
+        # The worker is a separate frozen Python process.  Force UTF-8 before
+        # it starts so any third-party code that still relies on Python's
+        # default text encoding cannot inherit a locale-specific ANSI codec.
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         env["CAPCAP_DEVICE"] = (
             "cuda" if str(processing_device or os.getenv("CAPCAP_DEVICE", "cpu")).strip().lower() == "cuda"
             else "cpu"

@@ -9,7 +9,7 @@ import time
 import uuid
 from pathlib import Path
 
-from runtime_paths import app_path, bin_path, bundle_root, join_root, models_path, subprocess_hidden_kwargs
+from runtime_paths import app_path, bin_path, bundle_root, join_root, models_path, subprocess_hidden_kwargs, subprocess_text_kwargs
 
 
 class ResourceDownloadService:
@@ -436,8 +436,8 @@ class ResourceDownloadService:
         try:
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                capture_output=True, text=True, timeout=10,
-                **subprocess_hidden_kwargs(),
+                capture_output=True, timeout=10,
+                **subprocess_text_kwargs(),
             )
             if result.returncode == 0 and result.stdout.strip():
                 return True

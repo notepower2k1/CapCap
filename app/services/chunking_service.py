@@ -23,6 +23,9 @@ class ChunkingService:
             kwargs["startupinfo"] = startupinfo
         return kwargs
 
+    def _text_subprocess_run_kwargs(self) -> dict:
+        return {"text": True, "encoding": "utf-8", "errors": "replace", **self._subprocess_run_kwargs()}
+
     def probe_wav_duration(self, audio_path: str) -> float:
         with wave.open(audio_path, "rb") as wav_file:
             frame_rate = wav_file.getframerate() or 16000
@@ -58,7 +61,7 @@ class ChunkingService:
             "null",
             "-",
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, **self._subprocess_run_kwargs())
+        proc = subprocess.run(cmd, capture_output=True, **self._text_subprocess_run_kwargs())
         stderr = proc.stderr or ""
 
         silence_start_pattern = re.compile(r"silence_start:\s*([0-9.]+)")

@@ -6,7 +6,7 @@ import time
 import cv2
 import numpy as np
 
-from runtime_paths import bin_path, subprocess_hidden_kwargs
+from runtime_paths import bin_path, subprocess_hidden_kwargs, subprocess_text_kwargs
 
 _OCR_ENGINE = None
 _OCR_ENGINE_LOCK = None
@@ -383,7 +383,7 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
         try:
             result = subprocess.run(
                 [_ffmpeg_path(), "-i", video_path, "-f", "null", "-"],
-                capture_output=True, text=True, **subprocess_hidden_kwargs(),
+                capture_output=True, **subprocess_text_kwargs(),
             )
             for line in (result.stderr or "").splitlines():
                 if "Duration:" in line:

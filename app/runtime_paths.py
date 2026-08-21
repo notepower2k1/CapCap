@@ -87,3 +87,21 @@ def subprocess_hidden_kwargs() -> dict:
         "startupinfo": startupinfo,
         "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
     }
+
+
+def subprocess_text_kwargs() -> dict:
+    """Return safe options for text captured from external Windows tools.
+
+    ``subprocess`` otherwise decodes captured output using the current Windows
+    ANSI code page (often reported by Python as ``charmap``).  FFmpeg and
+    FFprobe include the input path in diagnostics, so a Unicode file or user
+    path can make that implicit decode fail before the actual workflow starts.
+    Our bundled tools emit UTF-8 diagnostics; replacement is intentional for
+    diagnostic text so an unexpected third-party byte never aborts a job.
+    """
+    return {
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        **subprocess_hidden_kwargs(),
+    }
