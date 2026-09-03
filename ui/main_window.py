@@ -3872,6 +3872,16 @@ class VideoTranslatorGUI(QMainWindow):
         if getattr(self, "current_project_state", None) is not None:
             self.schedule_timeline_project_persist()
 
+    def _set_subtitle_item_text_rendering(self, enabled: bool) -> None:
+        video_view = getattr(self, "video_view", None)
+        subtitle_item = getattr(video_view, "subtitle_item", None)
+        setter = getattr(subtitle_item, "set_text_rendering", None)
+        if callable(setter):
+            try:
+                setter(bool(enabled))
+            except Exception:
+                pass
+
     def on_subtitle_drag_started(self):
         """Swap to the Qt layer only while dragging for immediate feedback."""
         if self._preview_is_playing():
@@ -3880,8 +3890,7 @@ class VideoTranslatorGUI(QMainWindow):
             return
         if hasattr(self, "media_player"):
             self.media_player.clear_subtitle()
-        if hasattr(self, "video_view"):
-            self.video_view.subtitle_item.set_text_rendering(True)
+        self._set_subtitle_item_text_rendering(True)
 
     def on_subtitle_position_dragged(self, x_percent: int, y_percent: int):
         """Commit a drag from the live subtitle overlay to style controls."""
@@ -12589,8 +12598,7 @@ class VideoTranslatorGUI(QMainWindow):
             self.media_player.set_subtitle_file(ass_path)
             self._loaded_live_ass_path = ass_path
             self._loaded_live_ass_signature = signature
-            if hasattr(self, "video_view"):
-                self.video_view.subtitle_item.set_text_rendering(False)
+            self._set_subtitle_item_text_rendering(False)
             self.update_playback_subtitle_highlight(int(self.media_player.position() or 0))
         except Exception as exc:
             self.runtime_log_received.emit(f"[Subtitle Background] Could not apply exact layout: {exc}")
@@ -12992,10 +13000,7 @@ class VideoTranslatorGUI(QMainWindow):
                         self.media_player.set_subtitle_file(ass_path)
                         self._loaded_live_ass_path = ass_path
                         self._loaded_live_ass_signature = getattr(self, "_live_preview_signature", None)
-                    if hasattr(self, "video_view"):
-                        # The Qt item remains present for dragging but MPV's
-                        # libass renderer supplies the visible subtitle.
-                        self.video_view.subtitle_item.set_text_rendering(False)
+                    self._set_subtitle_item_text_rendering(False)
                     position = int(self.media_player.position() or 0)
                     self.update_playback_subtitle_highlight(position)
                     return
@@ -13005,8 +13010,7 @@ class VideoTranslatorGUI(QMainWindow):
                 self.video_view.subtitle_item.hide()
             return
         self.media_player.clear_subtitle()
-        if hasattr(self, "video_view"):
-            self.video_view.subtitle_item.set_text_rendering(True)
+        self._set_subtitle_item_text_rendering(True)
         position = 0
         try:
             position = int(self.media_player.position())

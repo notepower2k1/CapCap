@@ -418,6 +418,23 @@ def _unload_models():
     _unload_whisper()
 
 
+class SafeThreadingHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer that avoids socket.getfqdn on Windows.
+
+    Python's standard http.server.HTTPServer.server_bind calls socket.getfqdn(host),
+    which crashes with UnicodeDecodeError on Windows if the machine's Computer Name
+    or network domain contains non-ASCII characters or invalid UTF-8 bytes (e.g. byte 0xa0).
+    """
+
+    def server_bind(self):
+        import socketserver
+
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host or "127.0.0.1")
+        self.server_port = port
+
+
 def main() -> None:
     host = str(os.getenv("CAPCAP_REMOTE_API_HOST", "0.0.0.0") or "0.0.0.0").strip()
     port_raw = str(os.getenv("CAPCAP_REMOTE_API_PORT", "8765") or "8765").strip()
@@ -438,7 +455,7 @@ def main() -> None:
             _log(f"[Remote API] Whisper pre-load failed (will load on demand): {exc}")
             _log("[Remote API] Tip: set CAPCAP_WHISPER_DEVICE=cpu in .env if CUDA hangs in thread.")
 
-    server = ThreadingHTTPServer((host, port), CapCapRemoteHandler)
+    server = SafeThreadingHTTPServer((host, port), CapCapRemoteHandler)
     _log(f"[Remote API] Listening on http://{host}:{port}")
     server.serve_forever()
 

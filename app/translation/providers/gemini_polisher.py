@@ -28,6 +28,36 @@ class OpenAICompatiblePolisherProvider:
             self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         return self._client
 
+    def _build_completion_kwargs(
+        self, system_msg: str, user_msg: str, max_tokens: int, timeout: int
+    ) -> dict:
+        is_gemini = "generativelanguage.googleapis.com" in self.base_url or "gemini" in self.model_name.lower()
+        is_reasoning_model = is_gemini or any(
+            self.model_name.lower().startswith(p) for p in ("o1", "o3", "deepseek-r1")
+        )
+
+        kwargs = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            "max_tokens": max(2048 if is_gemini else 1024, int(max_tokens or 4096)),
+            "timeout": timeout,
+        }
+
+        if is_gemini:
+            # Gemini 2.5/3.x models:
+            # 1. Custom temperature (< 1.0) is not supported for reasoning models and returns 400.
+            # 2. Set reasoning_effort to "low" to prevent reasoning tokens from causing timeouts on subtitle translation.
+            kwargs["reasoning_effort"] = "low"
+        elif is_reasoning_model:
+            kwargs["reasoning_effort"] = "low"
+        else:
+            kwargs["temperature"] = 0.2
+
+        return kwargs
+
     def polish_batch(
         self,
         *,
@@ -55,17 +85,21 @@ class OpenAICompatiblePolisherProvider:
         last_error = ""
         for attempt in range(1, max_retries + 1):
             try:
-                response = client.chat.completions.create(
-                    model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": user_msg},
-                    ],
-                    temperature=0.2,
-                    max_tokens=max(1024, int(max_tokens or 4096)),
+                kwargs = self._build_completion_kwargs(
+                    system_msg=system_msg,
+                    user_msg=user_msg,
+                    max_tokens=max_tokens,
                     timeout=timeout,
                 )
-                text = response.choices[0].message.content.strip()
+                try:
+                    response = client.chat.completions.create(**kwargs)
+                except Exception as api_err:
+                    if "reasoning_effort" in kwargs and "reasoning_effort" in str(api_err):
+                        kwargs.pop("reasoning_effort", None)
+                        response = client.chat.completions.create(**kwargs)
+                    else:
+                        raise
+                text = (response.choices[0].message.content or "").strip()
                 if not text:
                     raise Exception("Empty response text")
 

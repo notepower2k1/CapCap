@@ -228,7 +228,7 @@ class TranslationOrchestrator:
         if provider_type == "gemini":  # backward compatibility for saved settings
             provider_type = "google_ai_studio"
         definitions = {
-            "google_ai_studio": ("Google AI Studio", "GOOGLE_AI_STUDIO", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash"),
+            "google_ai_studio": ("Google AI Studio", "GOOGLE_AI_STUDIO", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-3.7-flash"),
             "openai": ("OpenAI", "OPENAI", "https://api.openai.com/v1/", "gpt-4o-mini"),
             "ollama": ("Ollama", "OPENAI", "http://localhost:11434/v1", "gemma4:31b-cloud"),
         }

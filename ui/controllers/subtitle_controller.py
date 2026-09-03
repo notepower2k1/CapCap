@@ -154,12 +154,28 @@ class SubtitleController:
                     self.gui.load_project_context(state)
                 self.gui.progress_bar.setValue(100)
                 self.gui.refresh_ui_state()
-                QMessageBox.information(
-                    self.gui,
-                    "Using Existing Translation",
-                    "Vietnamese subtitles are unchanged, so CapCap reused the existing generated result instead of calling AI again.",
+                msg_box = QMessageBox(self.gui)
+                msg_box.setWindowTitle("Existing Translation Found")
+                msg_box.setText(
+                    "Vietnamese subtitles already exist and the original transcript has not changed.\n\n"
+                    "Would you like to reuse the existing translation (saves time and AI tokens), or re-translate from scratch with AI?"
                 )
-                return
+                msg_box.setIcon(QMessageBox.Question)
+                btn_reuse = msg_box.addButton("Use Existing (Recommended)", QMessageBox.AcceptRole)
+                btn_retranslate = msg_box.addButton("Re-translate with AI", QMessageBox.ActionRole)
+                msg_box.setDefaultButton(btn_reuse)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == btn_retranslate:
+                    state.set_setting("translation_signature", "")
+                    state.set_step_status("translate_raw", "pending")
+                    state.set_step_status("refine_translation", "pending")
+                    if hasattr(self.gui, "project_service"):
+                        self.gui.project_service.save_project(state)
+                    self.gui.log("[Translation] Re-translate confirmed by user; bypassing cache.")
+                else:
+                    self.gui.log("[Translation] Reused existing translation result.")
+                    return
 
         model_path = None
         src_lang = self.gui.get_source_language_code()
