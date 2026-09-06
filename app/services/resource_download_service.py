@@ -68,6 +68,7 @@ class ResourceDownloadService:
         "diarization:embedding",
         "voice:pack",
         "voice:pack-en",
+        "voice:vieneu",
     }
 
     def __init__(self, workspace_root: str):
@@ -444,6 +445,41 @@ class ResourceDownloadService:
                 matches.append(str(child))
         return matches
 
+    def _is_vieneu_installed(self) -> bool:
+        """Check whether both VieNeu-TTS v3 Turbo and MOSS audio tokenizer are present."""
+        candidates = [
+            join_root("models", "vieneu", "hub"),
+            models_path("vieneu", "hub"),
+            join_root("models", "vieneu"),
+            models_path("vieneu"),
+            join_root("models", "huggingface", "hub"),
+            models_path("huggingface", "hub"),
+        ]
+        hf_home = os.environ.get("HF_HOME", "").strip()
+        if hf_home:
+            candidates.append(os.path.join(hf_home, "hub"))
+            candidates.append(hf_home)
+        candidates.append(r"D:\CodingTime\TTS_Resource\huggingface\hub")
+        candidates.append(os.path.join(str(Path.home()), ".cache", "huggingface", "hub"))
+
+        for hub in candidates:
+            if not os.path.isdir(hub):
+                continue
+            tok_dir = os.path.join(hub, "models--OpenMOSS-Team--MOSS-Audio-Tokenizer-Nano-ONNX", "snapshots")
+            v3_dir = os.path.join(hub, "models--pnnbao-ump--VieNeu-TTS-v3-Turbo", "snapshots")
+            if os.path.isdir(tok_dir) and os.path.isdir(v3_dir):
+                try:
+                    tok_snaps = [d for d in os.listdir(tok_dir) if os.path.isdir(os.path.join(tok_dir, d))]
+                    v3_snaps = [d for d in os.listdir(v3_dir) if os.path.isdir(os.path.join(v3_dir, d))]
+                    if tok_snaps and v3_snaps:
+                        has_tok = any(os.listdir(os.path.join(tok_dir, s)) for s in tok_snaps)
+                        has_v3 = any(os.listdir(os.path.join(v3_dir, s)) for s in v3_snaps)
+                        if has_tok and has_v3:
+                            return True
+                except OSError:
+                    continue
+        return False
+
     def _ocr_model_dir(self) -> str:
         # Do not make a lightweight availability check depend on importing the
         # entire RapidOCR runtime. In a frozen build a missing lazy submodule
@@ -541,7 +577,7 @@ class ResourceDownloadService:
     def validate_piper_voice_runtime(self, voice_id: str) -> list[tuple[str, str]]:
         """Check the chosen local Piper voice before a default Both run."""
         voice_id = str(voice_id or "").strip()
-        if not voice_id or voice_id.startswith(("edge:", "f5:")):
+        if not voice_id or voice_id.startswith(("edge:", "f5:", "vieneu:", "vieneu_clone:", "capcut:")):
             return []
         issues: list[tuple[str, str]] = []
         entry = self._find_voice_entry(voice_id)
@@ -710,8 +746,10 @@ class ResourceDownloadService:
                 "required_for": "GPU Mode",
                 "status": "installed" if self.is_resource_installed("cuda:whisper") else "missing",
                 "target_dir": join_root("bin", "cuda12_fw"),
-                "download_url": self._hf_blob_url("zipResource/cuda12_fw.zip"),
-                "expected_filename": "cuda12_fw.zip",
+                "link": f"https://huggingface.co/{self.repo_id}/tree/{self.revision}/cuda12_fw_new",
+                "download_url": f"https://huggingface.co/{self.repo_id}/tree/{self.revision}/zipResource/cuda12_fw_new.zip",
+                "open_url": f"https://huggingface.co/{self.repo_id}/tree/{self.revision}/zipResource/cuda12_fw_new.zip",
+                "expected_filename": "cuda12_fw_new.zip",
                 "auto_download_supported": True,
                 "description": "Required for GPU Mode. Provides the CUDA 12.8 runtime used to accelerate supported local processing.",
             },
@@ -785,8 +823,10 @@ class ResourceDownloadService:
                     "status": "installed" if count else "missing",
                     "status_label": f"{count} voice{'s' if count != 1 else ''} available",
                     "target_dir": join_root("models", "piper"),
-                    "download_url": f"https://huggingface.co/{self.repo_id}/tree/{self.revision}/piper-new",
-                    "expected_filename": "config.json + voices.json + *.onnx",
+                    "link": f"https://huggingface.co/{self.repo_id}/tree/{self.revision}/piper-new",
+                    "download_url": f"https://huggingface.co/{self.repo_id}/tree/{self.revision}/zipResource/piper-new.zip",
+                    "open_url": f"https://huggingface.co/{self.repo_id}/tree/{self.revision}/zipResource/piper-new.zip",
+                    "expected_filename": "piper-new.zip",
                     "auto_download_supported": True,
                     "description": (
                         "Offline Vietnamese Piper voices. The piper-new pack uses one shared "
@@ -812,14 +852,37 @@ class ResourceDownloadService:
                     "description": "Offline English voices detected in the Piper storage folder.",
                 }
             )
+        resources.append(
+            {
+                "id": "voice:vieneu",
+                "name": "VieNeu-TTS Models (v3 Turbo ONNX)",
+                "kind": "voice",
+                "status": "installed" if self.is_resource_installed("voice:vieneu") else "missing",
+                "target_dir": join_root("models", "vieneu"),
+                "download_url": "https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo",
+                "expected_filename": "VieNeu-TTS-v3-Turbo + MOSS-Audio-Tokenizer-Nano-ONNX",
+                "auto_download_supported": True,
+                "description": (
+                    "Offline VieNeu-TTS v3 Turbo neural voice models (ONNX CPU) and MOSS audio tokenizer. "
+                    "Supports natural Vietnamese speech synthesis and zero-shot voice cloning."
+                ),
+            }
+        )
         return resources
 
     def is_resource_installed(self, resource_id: str) -> bool:
+        if resource_id == "voice:capcut" or resource_id.startswith("voice:capcut:"):
+            return True
+        if resource_id == "voice:vieneu":
+            return self._is_vieneu_installed()
         if resource_id == "ocr:engine":
             return self.is_ocr_ready()
         if resource_id == "cuda:whisper":
-            fw_dir = join_root("bin", "cuda12_fw")
-            return os.path.exists(os.path.join(fw_dir, "cublas64_12.dll"))
+            for fw_name in ("cuda12_fw", "cuda12_fw_new"):
+                fw_dir = join_root("bin", fw_name)
+                if os.path.exists(os.path.join(fw_dir, "cublas64_12.dll")):
+                    return True
+            return False
         if resource_id == "sensevoice:model":
             model_dir = self._sensevoice_model_dir()
             return all(os.path.isfile(os.path.join(model_dir, name)) for name in ("model.int8.onnx", "tokens.txt"))
@@ -1075,6 +1138,68 @@ class ResourceDownloadService:
         if progress_cb:
             progress_cb(100, f"Piper voices ready ({len(usable)} voices available).")
 
+    def _download_vieneu_models(self, progress_cb=None) -> None:
+        """Download VieNeu-TTS v3 Turbo ONNX models and MOSS audio tokenizer from Hugging Face."""
+        try:
+            from huggingface_hub import snapshot_download
+            from huggingface_hub.utils import tqdm as hf_tqdm
+        except ImportError as exc:
+            raise ImportError(
+                "huggingface_hub is not installed. Run `pip install huggingface_hub` first."
+            ) from exc
+
+        target_dir = join_root("models", "vieneu")
+        os.makedirs(target_dir, exist_ok=True)
+        target_hub = os.path.join(target_dir, "hub")
+        os.makedirs(target_hub, exist_ok=True)
+        os.environ["HF_HOME"] = target_dir
+
+        def _make_progress_tqdm(start_pct: int, end_pct: int, label: str):
+            class _Tqdm(hf_tqdm):
+                def update(self, n=1):
+                    super().update(n)
+                    if progress_cb and self.total and self.total > 0:
+                        raw_pct = min(99, max(0, int((self.n / self.total) * 100)))
+                        scaled = start_pct + int((end_pct - start_pct) * raw_pct / 100)
+                        progress_cb(scaled, f"{label} ({scaled}%)")
+            return _Tqdm
+
+        if progress_cb:
+            progress_cb(0, "Downloading audio tokenizer...")
+
+        # 1. Download audio tokenizer (~90 MB)
+        snapshot_download(
+            repo_id="OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX",
+            cache_dir=target_hub,
+            tqdm_class=_make_progress_tqdm(0, 25, "Downloading audio tokenizer..."),
+        )
+        if progress_cb:
+            progress_cb(25, "Downloading VieNeu-TTS v3 Turbo ONNX model...")
+
+        # 2. Download VieNeu-TTS v3 Turbo ONNX (~550 MB, excluding redundant PyTorch weights)
+        allow_patterns = [
+            "*.json",
+            "*.onnx",
+            "*.data",
+            "*.npz",
+            "*.txt",
+            "onnx_update/*",
+            "onnx_int8/*",
+        ]
+        snapshot_download(
+            repo_id="pnnbao-ump/VieNeu-TTS-v3-Turbo",
+            cache_dir=target_hub,
+            allow_patterns=allow_patterns,
+            tqdm_class=_make_progress_tqdm(25, 100, "Downloading VieNeu-TTS ONNX model..."),
+        )
+
+        if not self.is_resource_installed("voice:vieneu"):
+            raise RuntimeError(
+                f"VieNeu download completed, but model files were not found in {target_hub}."
+            )
+        if progress_cb:
+            progress_cb(100, "VieNeu-TTS models are ready.")
+
     def download_resource(self, resource_id: str, progress_cb=None) -> None:
         if resource_id.startswith("whisper:"):
             model_name = resource_id.split(":", 1)[1].strip().lower()
@@ -1173,7 +1298,7 @@ class ResourceDownloadService:
             return
 
         if resource_id == "cuda:whisper":
-            zip_url = self._hf_blob_url("zipResource/cuda12_fw.zip")
+            zip_url = self._hf_blob_url("zipResource/cuda12_fw_new.zip")
             target_dir = join_root("bin")
             self._download_and_extract_zip(zip_url, target_dir, progress_cb)
             try:
@@ -1220,12 +1345,21 @@ class ResourceDownloadService:
 
         if resource_id.startswith("voice:"):
             if resource_id == "voice:pack":
-                self._download_piper_new_pack(progress_cb)
+                zip_url = self._hf_blob_url("zipResource/piper-new.zip")
+                target_dir = join_root("models")
+                try:
+                    self._download_and_extract_zip(zip_url, target_dir, progress_cb)
+                except Exception as zip_exc:
+                    print(f"[Piper] Zip download failed ({zip_exc}), falling back to pack sync...")
+                    self._download_piper_new_pack(progress_cb)
                 return
             if resource_id == "voice:pack-en":
                 zip_url = self._hf_blob_url("zipResource/piper-en.zip")
                 target_dir = join_root("models", "piper-en")
                 self._download_and_extract_zip(zip_url, target_dir, progress_cb)
+                return
+            if resource_id == "voice:vieneu":
+                self._download_vieneu_models(progress_cb)
                 return
 
             voice_id = resource_id.split(":", 1)[1].strip()

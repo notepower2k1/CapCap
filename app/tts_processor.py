@@ -528,13 +528,21 @@ def edge_tts_to_wav_16k_mono(
 
 
 def preload_tts_voice(voice: str, on_progress: callable = None) -> bool:
+    voice_to_search = str(voice).strip()
+    if voice_to_search.startswith(("vieneu:", "vieneu_clone:")):
+        try:
+            from vieneu_tts import get_cached_vieneu_model
+            get_cached_vieneu_model(on_progress=on_progress)
+            return True
+        except Exception:
+            return False
+
     catalog_path = _voice_catalog_path()
     with open(catalog_path, "r", encoding="utf-8") as f:
         catalog = json.load(f)
     catalog = _append_local_piper_manifest_voices(catalog)
 
     voice_entry = None
-    voice_to_search = str(voice).strip()
     for v in catalog.get("voices", []):
         if v["id"] == voice_to_search:
             voice_entry = v
@@ -552,6 +560,13 @@ def preload_tts_voice(voice: str, on_progress: callable = None) -> bool:
 
     provider = voice_entry.get("provider", "").strip().lower()
     provider_voice = str(voice_entry.get("provider_voice", "")).strip()
+    if provider == "vieneu":
+        try:
+            from vieneu_tts import get_cached_vieneu_model
+            get_cached_vieneu_model(on_progress=on_progress)
+            return True
+        except Exception:
+            return False
     if provider != "piper":
         return False
 
@@ -573,6 +588,35 @@ def synthesize_text_to_wav_16k_mono(
     on_progress: callable = None,
     normalizer_dictionary=None,
 ) -> str:
+    voice_to_search = str(voice).strip()
+
+    # Fast path for VieNeu voices
+    if voice_to_search.startswith(("vieneu:", "vieneu_clone:")):
+        from vieneu_tts import vieneu_synthesize_wav_16k_mono
+        return vieneu_synthesize_wav_16k_mono(
+            text=text,
+            wav_path=wav_path,
+            voice_id=voice_to_search,
+            speed=speed,
+            tmp_dir=tmp_dir,
+            on_progress=on_progress,
+        )
+
+    # Fast path for CapCut voices
+    if voice_to_search.startswith("capcut:"):
+        try:
+            from app.capcut import synthesize_capcut_tts_wav_16k_mono
+        except ImportError:
+            from capcut import synthesize_capcut_tts_wav_16k_mono
+        return synthesize_capcut_tts_wav_16k_mono(
+            text=text,
+            wav_path=wav_path,
+            voice_id=voice_to_search,
+            speed=speed,
+            tmp_dir=tmp_dir,
+            on_progress=on_progress,
+        )
+
     # Load voice catalog
     catalog_path = _voice_catalog_path()
     with open(catalog_path, "r", encoding="utf-8") as f:
@@ -581,7 +625,6 @@ def synthesize_text_to_wav_16k_mono(
     
     # Find voice in catalog
     voice_entry = None
-    voice_to_search = str(voice).strip()
     
     # First try exact match by ID
     for v in catalog.get("voices", []):
@@ -641,6 +684,15 @@ def synthesize_text_to_wav_16k_mono(
             rate=edge_rate,
             tmp_dir=tmp_dir,
         )
+    elif provider == "vieneu":
+        from vieneu_tts import vieneu_synthesize_wav_16k_mono
+        return vieneu_synthesize_wav_16k_mono(
+            text=text,
+            wav_path=wav_path,
+            voice_id=provider_voice or voice_entry.get("id", voice_to_search),
+            speed=speed,
+            tmp_dir=tmp_dir,
+            on_progress=on_progress,
+        )
     else:
-        raise ValueError(f"Unsupported TTS provider: {provider}. Only 'piper' and 'edge' are supported.")
-
+        raise ValueError(f"Unsupported TTS provider: {provider}. Only 'piper', 'edge', and 'vieneu' are supported.")

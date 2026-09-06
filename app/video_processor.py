@@ -115,16 +115,30 @@ def _ffmpeg_supports_encoder(ffmpeg_path: str, encoder_name: str) -> bool:
     return supported
 
 
-def _preferred_h264_encoder_args(ffmpeg_path: str, fast: bool = False) -> list[str]:
+def _resolve_quality_levels(video_quality: str = "medium") -> dict[str, str]:
+    key = str(video_quality or "medium").strip().lower().replace(" ", "_").replace("-", "_")
+    if key in ("low", "fast", "economic"):
+        return {"crf": "26", "cq": "28", "nvenc_preset": "p2", "x264_preset": "veryfast"}
+    elif key in ("high",):
+        return {"crf": "18", "cq": "22", "nvenc_preset": "p4", "x264_preset": "medium"}
+    elif key in ("very_high", "veryhigh", "ultra", "max"):
+        return {"crf": "15", "cq": "18", "nvenc_preset": "p5", "x264_preset": "slow"}
+    else:  # default medium
+        return {"crf": "22", "cq": "25", "nvenc_preset": "p3", "x264_preset": "fast"}
+
+
+def _preferred_h264_encoder_args(ffmpeg_path: str, fast: bool = False, video_quality: str = "medium") -> list[str]:
+    levels = _resolve_quality_levels(video_quality)
     if _ffmpeg_supports_encoder(ffmpeg_path, 'h264_nvenc'):
-        return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23', '-pix_fmt', 'yuv420p']
-    preset = 'veryfast' if fast else 'medium'
-    return ['-c:v', 'libx264', '-preset', preset, '-crf', '18', '-pix_fmt', 'yuv420p']
+        preset = 'p2' if fast else levels["nvenc_preset"]
+        return ['-c:v', 'h264_nvenc', '-preset', preset, '-cq', levels["cq"], '-pix_fmt', 'yuv420p']
+    preset = 'veryfast' if fast else levels["x264_preset"]
+    return ['-c:v', 'libx264', '-preset', preset, '-crf', levels["crf"], '-pix_fmt', 'yuv420p']
 
 
 def _escape_path_for_filter(path):
     """Escape a file path for use inside an FFmpeg -vf filter value."""
-    clean = path.replace("\\", "/")
+    clean = str(path or "").replace("\\", "/")
     if ":" in clean:
         drive, rest = clean.split(":", 1)
         return f"{drive}\\:{rest}"
@@ -1643,9 +1657,9 @@ def _append_text_image_filter_parts(filter_parts, current_label, text_image_laye
     return current_label
 
 
-def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False):
+def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False, video_quality="medium"):
     """Burn subtitles into video using an already-prepared ASS file."""
-    print(f"[FFmpeg] embed_ass_subtitles called with mask_regions={mask_regions}, logo_layers={logo_layers}")
+    print(f"[FFmpeg] embed_ass_subtitles called with mask_regions={mask_regions}, logo_layers={logo_layers}, video_quality={video_quality}")
     ffmpeg = _ffmpeg_path(ffmpeg_path)
     if not os.path.exists(ffmpeg):
         raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
@@ -1699,6 +1713,7 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
             output_fps, video_filter_state, text_ass_path, text_image_layers,
             source_width=source_w, source_height=source_h,
             audio_gain_db=audio_gain_db,
+            video_quality=video_quality,
         )
     else:
         # Simple filter chain (no logos)
@@ -1742,7 +1757,7 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
         filter_parts.append(f"[{current_label}]null[out]")
         filter_complex = ";".join(part for part in filter_parts if part)
         
-        video_encoder_args = _preferred_h264_encoder_args(ffmpeg, fast=fast)
+        video_encoder_args = _preferred_h264_encoder_args(ffmpeg, fast=fast, video_quality=video_quality)
 
         command = [
             ffmpeg,
@@ -1799,15 +1814,16 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
         if encoder_name != 'libx264':
             # Retry with libx264
             command = [c if c != 'h264_nvenc' else 'libx264' for c in command]
+            levels = _resolve_quality_levels(video_quality)
             if '-preset' in command:
                 idx = command.index('-preset')
                 if idx + 1 < len(command):
-                    command[idx + 1] = 'medium'
+                    command[idx + 1] = levels["x264_preset"]
             if '-cq' in command:
                 idx = command.index('-cq')
                 command[idx] = '-crf'
                 if idx + 1 < len(command):
-                    command[idx + 1] = '18'
+                    command[idx + 1] = levels["crf"]
             
             print(f"NVENC failed, retrying with libx264. Error:\n{e.stderr}")
             try:
@@ -1828,7 +1844,8 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
                                  blur_region, mask_regions, video_w, video_h,
                                  scale_chain, blur_chain, mask_chain,
                                  output_fps, video_filter_state, text_ass_path="", text_image_layers=None,
-                                 source_width=None, source_height=None, audio_gain_db=0.0):
+                                 source_width=None, source_height=None, audio_gain_db=0.0,
+                                 video_quality="medium"):
     """Build FFmpeg command with logo overlay using filter_complex."""
     
     # Start building the command with video input
@@ -1952,7 +1969,7 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
     filter_complex = ";".join(filter_parts)
     
     # Complete the command
-    video_encoder_args = _preferred_h264_encoder_args(ffmpeg)
+    video_encoder_args = _preferred_h264_encoder_args(ffmpeg, video_quality=video_quality)
     command += [
         '-filter_complex', filter_complex,
         '-map', '[final]',
@@ -2045,7 +2062,8 @@ def embed_subtitles(video_path, srt_path, output_path,
                      ffmpeg_path=None,
                     video_filter_state=None,
                     audio_gain_db=0.0,
-                    fast=False):
+                    fast=False,
+                    video_quality="medium"):
     """Burn subtitles into video using a properly-styled ASS file.
 
     Workflow:
@@ -2113,6 +2131,7 @@ def embed_subtitles(video_path, srt_path, output_path,
         video_filter_state=video_filter_state,
         audio_gain_db=audio_gain_db,
         fast=fast,
+        video_quality=video_quality,
     )
 
     # Step 4: clean up temp ASS

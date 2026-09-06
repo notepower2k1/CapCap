@@ -157,6 +157,7 @@ class ExportWorkflow:
         text_ass_path="",
         text_image_layers=None,
         original_audio_gain_db=0.0,
+        video_quality="medium",
     ):
         print(f"[Export] _export_subtitle_video: mask_regions={mask_regions}, logo_layers={logo_layers}")
         print(f"[Export] ass_path={ass_path}, exists={os.path.exists(ass_path) if ass_path else False}")
@@ -180,6 +181,7 @@ class ExportWorkflow:
                 output_fps=output_fps,
                 video_filter_state=video_filter_state,
                 audio_gain_db=original_audio_gain_db,
+                video_quality=video_quality,
             )
         else:
             ok = self.engine_runtime.embed_subtitles(
@@ -198,6 +200,7 @@ class ExportWorkflow:
                 output_fps=output_fps,
                 video_filter_state=video_filter_state,
                 audio_gain_db=original_audio_gain_db,
+                video_quality=video_quality,
             )
         if not ok:
             raise RuntimeError("Failed to burn subtitles into the output video.")
@@ -545,6 +548,7 @@ class ExportWorkflow:
         project_state_path: str = "",
         project_temp_dir: str = "",
         on_progress=None,
+        video_quality: str = "medium",
     ) -> str:
         subtitle_style = subtitle_style or {}
         target_w, target_h = self._resolve_target_dimensions(video_path, output_quality, output_ratio)
@@ -634,6 +638,7 @@ class ExportWorkflow:
                     blur_regions=blur_regions,
                     text_image_layers=text_image_layers,
                     original_audio_gain_db=original_audio_gain_db,
+                    video_quality=video_quality,
                 )
             elif mode == "voice":
                 self._emit_progress(on_progress, 25, "Muxing Vietnamese audio into the video...")
@@ -659,6 +664,7 @@ class ExportWorkflow:
                     focus_y=output_fill_focus_y,
                     output_fps=None if voice_output != output_path else target_fps,
                     video_filter_state={} if voice_output != output_path else video_filter_state,
+                    video_quality=video_quality,
                 )
                 if voice_output != output_path:
                     self._export_subtitle_video(
@@ -678,6 +684,7 @@ class ExportWorkflow:
                         logo_layers=logo_layers,
                         blur_regions=blur_regions,
                         text_image_layers=text_image_layers,
+                        video_quality=video_quality,
                     )
             elif mode == "both":
                 tmp_mux_path = self._build_temp_mux_path(project_temp_dir)
@@ -691,6 +698,7 @@ class ExportWorkflow:
                     focus_x=output_fill_focus_x,
                     focus_y=output_fill_focus_y,
                     output_fps=target_fps,
+                    video_quality=video_quality,
                 )
                 self._emit_progress(on_progress, 62, "Burning styled subtitles into the final video...")
                 self._export_subtitle_video(
@@ -710,6 +718,7 @@ class ExportWorkflow:
                     logo_layers=logo_layers,
                     blur_regions=blur_regions,
                     text_image_layers=text_image_layers,
+                    video_quality=video_quality,
                 )
             else:
                 raise ValueError(f"Unsupported export mode: {mode}")

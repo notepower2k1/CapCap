@@ -41,15 +41,28 @@ def _ffmpeg_supports_encoder(ffmpeg_path: str, encoder_name: str) -> bool:
     return supported
 
 
-def _preferred_h264_encoder_args(ffmpeg_path: str, *, fast: bool = False) -> list[str]:
+def _resolve_quality_levels(video_quality: str = "medium") -> dict[str, str]:
+    key = str(video_quality or "medium").strip().lower().replace(" ", "_").replace("-", "_")
+    if key in ("low", "fast", "economic"):
+        return {"crf": "26", "cq": "28", "nvenc_preset": "p2", "x264_preset": "veryfast"}
+    elif key in ("high",):
+        return {"crf": "18", "cq": "22", "nvenc_preset": "p4", "x264_preset": "medium"}
+    elif key in ("very_high", "veryhigh", "ultra", "max"):
+        return {"crf": "15", "cq": "18", "nvenc_preset": "p5", "x264_preset": "slow"}
+    else:  # default medium
+        return {"crf": "22", "cq": "25", "nvenc_preset": "p3", "x264_preset": "fast"}
+
+
+def _preferred_h264_encoder_args(ffmpeg_path: str, *, fast: bool = False, video_quality: str = "medium") -> list[str]:
+    levels = _resolve_quality_levels(video_quality)
     if _ffmpeg_supports_encoder(ffmpeg_path, "h264_nvenc"):
         return [
             "-c:v",
             "h264_nvenc",
             "-preset",
-            "p5" if fast else "p4",
+            "p2" if fast else levels["nvenc_preset"],
             "-cq",
-            "23",
+            levels["cq"],
             "-pix_fmt",
             "yuv420p",
         ]
@@ -57,9 +70,9 @@ def _preferred_h264_encoder_args(ffmpeg_path: str, *, fast: bool = False) -> lis
         "-c:v",
         "libx264",
         "-preset",
-        "veryfast" if fast else "medium",
+        "veryfast" if fast else levels["x264_preset"],
         "-crf",
-        "18",
+        levels["crf"],
         "-pix_fmt",
         "yuv420p",
     ]
@@ -71,9 +84,11 @@ def _run_ffmpeg_with_h264_fallback(
     output_path: str,
     *,
     fast: bool = False,
+    video_quality: str = "medium",
     error_message: str = "FFmpeg command failed.",
 ) -> None:
-    encoder_args = _preferred_h264_encoder_args(ffmpeg, fast=fast)
+    levels = _resolve_quality_levels(video_quality)
+    encoder_args = _preferred_h264_encoder_args(ffmpeg, fast=fast, video_quality=video_quality)
     cmd = [*base_cmd, *encoder_args, output_path]
     proc = subprocess.run(cmd, capture_output=True, **subprocess_text_kwargs())
     if proc.returncode == 0:
@@ -86,9 +101,9 @@ def _run_ffmpeg_with_h264_fallback(
             "-c:v",
             "libx264",
             "-preset",
-            "veryfast" if fast else "medium",
+            "veryfast" if fast else levels["x264_preset"],
             "-crf",
-            "18",
+            levels["crf"],
             "-pix_fmt",
             "yuv420p",
             output_path,
@@ -185,6 +200,7 @@ def mux_audio_into_video_for_preview(
     focus_y=0.5,
     output_fps=None,
     video_filter_state=None,
+    video_quality: str = "medium",
 ) -> str:
     """Create a video by replacing audio.
 
@@ -254,6 +270,7 @@ def mux_audio_into_video_for_preview(
             base_cmd,
             output_video_path,
             fast=True,
+            video_quality=video_quality,
             error_message="FFmpeg mux failed.",
         )
     else:

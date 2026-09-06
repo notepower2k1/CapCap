@@ -321,7 +321,7 @@ class PipelineProgressDialog(QDialog):
         if step_id in self.steps:
             self.steps[step_id].set_status("skipped")
 
-    def set_completed(self):
+    def set_completed(self, message: str = ""):
         self.stop_btn.hide()
         for step_id in self.step_order:
             widget = self.steps.get(step_id)
@@ -332,9 +332,11 @@ class PipelineProgressDialog(QDialog):
             elif widget.status == "pending":
                 widget.set_status("skipped")
         self.overall_progress.setValue(100)
-        self.footer.setText("✨ Pipeline execution complete! Video is ready.")
+        self.footer.setText(message or "✨ Pipeline execution complete! Video is ready.")
         self.footer.setStyleSheet("color: #00FF88; font-weight: bold; font-size: 14px; margin-top: 15px;")
         self._stop_total_timer()
+        self.raise_()
+        self.activateWindow()
 
     def _update_total_time(self):
         if self.workflow_start_time is None:

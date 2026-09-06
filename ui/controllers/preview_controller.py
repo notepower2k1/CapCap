@@ -1,4 +1,4 @@
-﻿import os
+import os
 import hashlib
 import json
 import re
@@ -6,12 +6,193 @@ import shutil
 import subprocess
 import time
 
-from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+)
 
 from runtime_paths import bin_path
 from worker_adapters import ExactFramePreviewWorker, FinalExportWorker, PreviewMuxWorker, QuickPreviewWorker
+
+
+
+class ExportSummaryDialog(QDialog):
+    QUALITY_DESCRIPTIONS = {
+        "medium": "Balanced (Recommended): Standard sharpness for social media, fast export (p3/fast, CRF 22 / CQ 25).",
+        "high": "High Quality: Maximum detail retention, standard export speed (p4/medium, CRF 18 / CQ 22).",
+        "very_high": "Master / Ultra Quality: Near-lossless, thorough frame analysis (p5/slow, CRF 15 / CQ 18).",
+        "low": "Compact / Economic: Maximum compression, smallest file size, fastest export (p2/veryfast, CRF 26 / CQ 28).",
+    }
+
+    def __init__(self, parent, summary_text: str):
+        super().__init__(parent)
+        self.setWindowTitle("Export Summary")
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(540)
+        self.selected_quality = "medium"
+        self._init_ui(summary_text)
+        self._apply_styles()
+
+    def _init_ui(self, summary_text: str):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Review Export Details")
+        title.setObjectName("dialogTitle")
+        layout.addWidget(title)
+
+        subtitle = QLabel("Review details and choose video compression quality before starting.")
+        subtitle.setObjectName("dialogSubtitle")
+        layout.addWidget(subtitle)
+
+        # Summary box
+        self.text_edit = QTextEdit()
+        self.text_edit.setReadOnly(True)
+        self.text_edit.setPlainText(summary_text)
+        layout.addWidget(self.text_edit, stretch=1)
+
+        # Quality selector section
+        quality_label = QLabel("Video Quality / Compression:")
+        quality_label.setObjectName("fieldLabel")
+        layout.addWidget(quality_label)
+
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItem("Medium (Recommended - Balanced)", "medium")
+        self.quality_combo.addItem("High (High Quality)", "high")
+        self.quality_combo.addItem("Very High (Maximum Quality)", "very_high")
+        self.quality_combo.addItem("Low (Fastest - Smallest File Size)", "low")
+
+        settings = QSettings("CapCap", "CapCap")
+        saved_quality = str(settings.value("export_video_quality", "medium")).strip().lower()
+        idx = self.quality_combo.findData(saved_quality)
+        if idx >= 0:
+            self.quality_combo.setCurrentIndex(idx)
+        else:
+            self.quality_combo.setCurrentIndex(0)
+
+        layout.addWidget(self.quality_combo)
+
+        self.hint_label = QLabel()
+        self.hint_label.setObjectName("fieldHint")
+        self.hint_label.setWordWrap(True)
+        layout.addWidget(self.hint_label)
+
+        self.quality_combo.currentIndexChanged.connect(self._on_quality_changed)
+        self._on_quality_changed()
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        start_btn = QPushButton("Start Export")
+        start_btn.setObjectName("primaryBtn")
+        start_btn.setDefault(True)
+        start_btn.clicked.connect(self._on_start)
+        btn_row.addWidget(start_btn)
+
+        layout.addLayout(btn_row)
+
+    def _on_quality_changed(self):
+        quality = self.quality_combo.currentData() or "medium"
+        self.selected_quality = str(quality).strip().lower()
+        desc = self.QUALITY_DESCRIPTIONS.get(self.selected_quality, "")
+        self.hint_label.setText(desc)
+
+    def _on_start(self):
+        settings = QSettings("CapCap", "CapCap")
+        settings.setValue("export_video_quality", self.selected_quality)
+        self.accept()
+
+    def _apply_styles(self):
+        self.setStyleSheet("""
+            QDialog {
+                background: #0f1724;
+                color: #e8f0fa;
+            }
+            QLabel#dialogTitle {
+                color: #f1f5f9;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QLabel#dialogSubtitle {
+                color: #94a3b8;
+                font-size: 12px;
+                margin-bottom: 4px;
+            }
+            QLabel#fieldLabel {
+                color: #cbd5e1;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QLabel#fieldHint {
+                color: #38bdf8;
+                font-size: 12px;
+                line-height: 1.4;
+            }
+            QTextEdit {
+                background: #1e293b;
+                color: #cbd5e1;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 8px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 12px;
+            }
+            QComboBox {
+                background: #1e293b;
+                color: #f8fafc;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+            QComboBox:focus {
+                border: 1px solid #38bdf8;
+            }
+            QComboBox QAbstractItemView {
+                background: #1e293b;
+                color: #f8fafc;
+                selection-background-color: #0284c7;
+                selection-color: #ffffff;
+                border: 1px solid #334155;
+            }
+            QPushButton {
+                background: #334155;
+                color: #f8fafc;
+                border: 1px solid #475569;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background: #475569;
+            }
+            QPushButton#primaryBtn {
+                background: #0284c7;
+                color: #ffffff;
+                border: none;
+                font-weight: 600;
+                padding: 8px 24px;
+            }
+            QPushButton#primaryBtn:hover {
+                background: #0369a1;
+            }
+        """)
 
 
 class PreviewController:
@@ -668,15 +849,10 @@ class PreviewController:
             f"Layers: {self._active_export_layer_summary()}",
         ])
 
-        box = QMessageBox(self.gui)
-        box.setIcon(QMessageBox.Information)
-        box.setWindowTitle("Export Summary")
-        box.setText("Review export details before starting.")
-        box.setInformativeText("\n".join(summary_lines))
-        start_btn = box.addButton("Start Export", QMessageBox.AcceptRole)
-        box.addButton("Cancel", QMessageBox.RejectRole)
-        box.exec()
-        return box.clickedButton() is start_btn
+        dialog = ExportSummaryDialog(self.gui, "\n".join(summary_lines))
+        if dialog.exec() == QDialog.Accepted:
+            return dialog.selected_quality
+        return None
 
     def _check_audio_freshness(self, audio_path: str) -> bool:
         """Check if the audio file matches current voice settings.
@@ -982,12 +1158,13 @@ class PreviewController:
         if chosen_dir:
             self.gui.final_output_folder_edit.setText(chosen_dir)
 
-        if not self._confirm_export_summary(
+        chosen_quality = self._confirm_export_summary(
             video_path=video_path,
             output_path=output_path,
             mode=mode,
             audio_path=chosen_audio,
-        ):
+        )
+        if not chosen_quality:
             return
 
         # Persist timeline data before export so mask/logo layers are available
@@ -1028,6 +1205,7 @@ class PreviewController:
             original_audio_gain_db=original_audio_gain_db,
             project_state_path=project_state_path,
             project_temp_dir=self.gui.get_project_temp_dir("export"),
+            video_quality=chosen_quality,
         )
         self.gui.export_thread.progress.connect(self.gui.on_export_progress)
         self.gui.export_thread.finished.connect(self.gui.on_export_finished)

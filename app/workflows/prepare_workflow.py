@@ -337,6 +337,7 @@ class PrepareWorkflow:
         if speaker_diarization_num_speakers < 2:
             speaker_diarization_num_speakers = -1
         is_sensevoice = transcription_engine == "sensevoice"
+        is_capcut = transcription_engine == "capcut"
 
         # The GUI runs the same checks before launching the worker.  Repeat
         # them here because a frozen worker can have a different import or
@@ -682,9 +683,9 @@ class PrepareWorkflow:
                 project_state.set_step_status("diarize", "skipped")
                 self.project_service.save_project(project_state)
 
-            engine_name = "SenseVoice" if is_sensevoice else "Whisper"
+            engine_name = "CapCut" if is_capcut else ("SenseVoice" if is_sensevoice else "Whisper")
             print(f"\n--- Step 2: Transcribing audio ({engine_name}) ---")
-            if not is_sensevoice:
+            if not is_sensevoice and not is_capcut:
                 print(f"[Whisper] Requested model: {whisper_model}")
             if step_callback: step_callback("transcription")
             transcribe_started = time.perf_counter()
@@ -733,6 +734,13 @@ class PrepareWorkflow:
                         working_audio_path,
                         sensevoice_model_dir,
                         language=source_language,
+                    )
+                elif is_capcut:
+                    print("[ASR] Using CapCut Online Speech-to-Text API (Beta).")
+                    raw_segments = self.engine_runtime.transcribe_audio_capcut(
+                        working_audio_path,
+                        language=source_language,
+                        on_progress=step_callback,
                     )
                 elif is_remote_profile():
                     print("[ASR] Remote API mode: using single-pass transcription and sending full working audio to the PC server.")

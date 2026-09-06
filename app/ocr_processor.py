@@ -159,6 +159,8 @@ def _load_ocr_engine():
 
         from runtime_paths import join_root
         cuda_bin = join_root("bin", "cuda12_fw")
+        if not os.path.isdir(cuda_bin):
+            cuda_bin = join_root("bin", "cuda12_fw_new")
         if os.path.isdir(cuda_bin):
             if hasattr(os, "add_dll_directory"):
                 try:

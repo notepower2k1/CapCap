@@ -5,6 +5,7 @@ import os
 import glob as _glob
 import faster_whisper
 import rapidocr
+import vieneu
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 project_root = Path(r"D:\CodingTime\CapCap")
@@ -45,6 +46,8 @@ datas = [
     # them from imports alone.
     (os.path.join(os.path.dirname(rapidocr.__file__), "config.yaml"), "rapidocr"),
     (os.path.join(os.path.dirname(rapidocr.__file__), "default_models.yaml"), "rapidocr"),
+    (os.path.join(os.path.dirname(vieneu.__file__), "assets"), "vieneu/assets"),
+    (str(project_root / "models" / "vieneu"), "models/vieneu"),
     (str(project_root / "ui" / "views" / "editor"), "views/editor"),
 ]
 datas += collect_data_files("piper")
@@ -52,6 +55,8 @@ datas += collect_data_files("piper")
 # them in the frozen build; project dictionaries are stored separately in
 # each project's state.json and are not bundled.
 datas += collect_data_files("vietnormalizer")
+datas += collect_data_files("vieneu")
+datas += collect_data_files("vieneu_utils")
 
 # RapidOCR selects its ONNX implementation through runtime configuration.
 # Listing only ``rapidocr`` misses these dynamically imported modules in a
@@ -59,6 +64,7 @@ datas += collect_data_files("vietnormalizer")
 # unavailable. Collect the package's submodules, while leaving the unused
 # Torch backend excluded by the existing package exclusions below.
 rapidocr_hiddenimports = collect_submodules("rapidocr")
+vieneu_hiddenimports = collect_submodules("vieneu") + collect_submodules("vieneu_utils")
 
 # Exclude heavy packages we don't use
 excludes = [
@@ -126,7 +132,17 @@ a = Analysis(
         "engines.translator_adapter",
         "engines.tts_adapter",
         "engines.demucs_adapter",
-        "engines.ocr_adapter",
+        # CapCut online API (STT & TTS)
+        "app.capcut",
+        "app.capcut.signing",
+        "app.capcut.device",
+        "app.capcut.stt",
+        "app.capcut.tts",
+        "capcut",
+        "capcut.signing",
+        "capcut.device",
+        "capcut.stt",
+        "capcut.tts",
         # Lazy-loaded translation providers
         "translation.providers.gemini_polisher",
         "translation.providers.google_web_translator",
@@ -154,6 +170,12 @@ a = Analysis(
         "dotenv",
         "huggingface_hub",
         "tts_processor",
+        "vieneu_tts",
+        "app.vieneu_tts",
+        "ui.widgets.voice_clone_dialog",
+        "tokenizers",
+        "kaldi_native_fbank",
+        "soxr",
         "vietnormalizer",
         "vietnormalizer.normalizer",
         "vietnormalizer.processor",
@@ -176,7 +198,7 @@ a = Analysis(
         "cv2",
         "omegaconf",
         "pyclipper",
-    ] + rapidocr_hiddenimports,
+    ] + rapidocr_hiddenimports + vieneu_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

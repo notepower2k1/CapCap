@@ -1,0 +1,121 @@
+[
+  {
+    "name": "Trung Caha",
+    "gender": "male",
+    "audio_path": "trung_caha.mp3",
+    "description": "Middle aged Vietnamese male voice. Great for conversations.",
+    "text_ref": "Lợi nói chẳng mất tiền mua, lựa lợi mà nói cho vua lòng nhau"
+  },
+  {
+    "name": "Triều Dương",
+    "gender": "male",
+    "audio_path": "trieu_duong.mp3",
+    "description": "A young male from Ho Chi Minh City with a southern accent and a soft voice. perfect choice for narrative and storytelling.",
+    "text_ref": "Người ta là hỏa đất, học ăn học nói, học gói học mở"
+  },
+  {
+    "name": "Thắm",
+    "gender": "female",
+    "audio_path": "tham.mp3",
+    "description": "Trẻ trung, nhẹ nhàng, ấm áp, tạo cảm giác gần gũi và tin cậy.",
+    "text_ref": "Mùa thu Hà Nội như một bản nhạc dịu êm khẽ chạm vào lòng người. Gió nhẹ len qua từng con phố nhỏ, mang theo hương hoa sữa nồng nàn và vị ngọt lành"
+  },
+  {
+    "name": "Quỳnh Anh",
+    "gender": "female",
+    "audio_path": "quynh_anh.mp3",
+    "description": "Young Newsbroadcasting female voice.",
+    "text_ref": "Cái nết đánh chết cái đẹp. Đức tính quý hơn hình thức"
+  },
+  {
+    "name": "Phương",
+    "gender": "female",
+    "audio_path": "phuong.mp3",
+    "description": "Smooth Female Vietnamese - A silky-smooth Vietnamese female voice designed to comfort and captivate. Gentle, soothing, and natural, this voice is perfect for storytelling, audiobooks, bedtime tales, and meditation content. Its calm tone also makes it ideal for advertisements, brand videos, and social media campaigns that aim to inspire trust and relaxation. Best used when you want listeners to feel at ease, immersed, and emotionally connected.",
+    "text_ref": "Trăng lên đỉnh núi, gió nhẹ đưa hương. Người yên giấc ngủ, mộng lành theo mây"
+  },
+  {
+    "name": "Nhung",
+    "gender": "female",
+    "audio_path": "nhung.mp3",
+    "description": "Young woman from Hanoi with a Northern accent. Used for formal settings, such as narration, and broadcasting.",
+    "text_ref": "Đây là Đài Tiếng nói Việt Nam, phát thanh từ thủ đô Hà Nội, nước Cộng hòa xã hội chủ nghĩa Việt Nam"
+  },
+  {
+    "name": "Nhật",
+    "gender": "female",
+    "audio_path": "nhat.mp3",
+    "description": "Articulate Vietnamese voice suited for news reports, documentaries, and compelling story narration.",
+    "text_ref": "Xin kính chào quý bạn và các vị. Mong rằng giọng nói này sẽ phù hợp với bất kỳ dự án nào của bạn. Cảm ơn đã lựa chọn. Hãy thử ngay nhé!"
+  },
+  {
+    "name": "Ngân Nguyễn",
+    "gender": "female",
+    "audio_path": "ngan_nguyen.mp3",
+    "description": "Warm Mid-Bright Inspirational Narrator - A clear and expressive mid-high female voice, ideal for storytelling, podcasting, emotional narration, and professional presentations. It balances brightness with emotional depth, perfect for commercials, e-learning, personal intros, and digital content. This voice inspires trust, evokes emotion, and brings your message to life with warmth and clarity.",
+    "text_ref": "Khi bạn trở về với chính mình, bạn sẽ thấy bên trong đã luôn có đủ sức mạnh, tình thương và cả câu trả lời"
+  },
+  {
+    "name": "Ngân Lê",
+    "gender": "female",
+    "audio_path": "ngan_le.mp3",
+    "description": "Authentic and Bubbly Female Voice.",
+    "text_ref": "Này mình vừa thử quán này lần đầu và bất ngờ luôn. Muốn tìm chỗ ấm cúng, cà phê ngon á"
+  },
+  {
+    "name": "Mai",
+    "gender": "female",
+    "audio_path": "mai.mp3",
+    "description": "Natural, Accurate & Bright",
+    "text_ref": "Hy vọng chất giọng sáng, chuẩn, tự nhiên này sẽ có giá trị cho bất kỳ dự án nào bạn đang thực hiện. Chúc bạn thành công!"
+  },
+  {
+    "name": "Liam",
+    "gender": "male",
+    "audio_path": "liam.mp3",
+    "description": "Middle-aged Vietnamese male voice. Great for conversation.",
+    "text_ref": "Đoàn kết thì sống, chia rẽ thì chết. Một lòng một dạ"
+  },
+  {
+    "name": "Foxy",
+    "gender": "female",
+    "audio_path": "foxy.mp3",
+    "description": "A young, soft Northern Vietnamese female voice, cute and alluring — tender, storytelling, and confiding in tone.",
+    "text_ref": "Mình mong rằng chất giọng trong sáng, ấm áp này sẽ làm những câu chuyện mà bạn kể thêm phần cuốn hút và đáng nhớ hơn bao giờ hết. Cảm ơn bạn đã nghe"
+  },
+  {
+    "name": "Ái Hạnh",
+    "gender": "female",
+    "audio_path": "ai_hanh.mp3",
+    "description": "Young woman from Hanoi. Used for advertising, commercials, and entertainment.",
+    "text_ref": "Với năng lượng xanh, bạn sẽ cảm nhận khác biệt ngay lần đầu. Hãy yêu thương và chăm sóc làn da của bạn ngay hôm nay"
+  },
+  {
+    "name": "Ninh Đôn",
+    "gender": "male",
+    "audio_path": "ninh_don.mp3",
+    "description": "Young conversational male voice.",
+    "text_ref": "Xin chào, đây là giọng nam truyền cảm hứng với chất giọng trầm ấm, rõ ràng và tự nhiên."
+  },
+  {
+    "name": "Nhu",
+    "gender": "female",
+    "audio_path": "nhu.mp3",
+    "description": "Calm and Confident",
+    "text_ref": "Giọng nữ, chuẩn Hà Nội. Phù hợp với sách nói, quảng cáo, bài giảng và nội dung đa dạng. Cảm ơn bạn đã lắng nghe."
+  },
+  {
+    "name": "Tùng",
+    "gender": "male",
+    "audio_path": "tung.mp3",
+    "description": "A deep, warm voice of a Vietnamese man in his early 30s—perfect for communication, education, storytelling, and short videos. His voice exudes clarity and warmth, making every word engaging and easy to connect with.",
+    "text_ref": "Đôi ba lần chạy theo cuộc vui của tuổi trẻ, chút sai lầm cơ cực cả thanh xuân"
+  },
+  {
+    "name": "Lan",
+    "gender": "female",
+    "audio_path": "lan.wav",
+    "description": "Giọng nữ nhẹ nhàng",
+    "text_ref": "cả hai bên hãy cố gắng hiểu cho nhau"
+  }
+]

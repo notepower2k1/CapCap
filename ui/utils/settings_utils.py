@@ -86,6 +86,14 @@ def load_user_settings(gui):
     gui.audio_source_edit.setText(s.value("audio_source", gui.audio_source_edit.text()))
     gui.bg_music_edit.setText(s.value("background_audio", gui.bg_music_edit.text()))
     gui.mixed_audio_edit.setText(s.value("mixed_audio", gui.mixed_audio_edit.text()))
+    for env_k, s_k, def_v in (
+        ("CAPCUT_STT_CHUNK_SECONDS", "capcut_stt_chunk_seconds", "300"),
+        ("CAPCUT_STT_WORKERS", "capcut_stt_workers", "5"),
+        ("CAPCUT_TTS_BATCH_SIZE", "capcut_tts_batch_size", "60"),
+        ("CAPCUT_TTS_WORKERS", "capcut_tts_workers", "30"),
+    ):
+        v = str(s.value(s_k, os.getenv(env_k, def_v)) or def_v).strip()
+        os.environ[env_k] = v
     # Voice selection, audio mode, subtitle style, and filters use the widget
     # defaults for a new session/project; they are not inherited globally.
     if hasattr(gui, "use_premium_voice_radio"):

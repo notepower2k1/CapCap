@@ -58,7 +58,9 @@ def toggle_play(gui):
     try:
         if hasattr(gui, "ensure_media_backend_ready"):
             gui.ensure_media_backend_ready()
-        if hasattr(gui, "audio_preview_player"):
+        if hasattr(gui, "stop_audio_preview"):
+            gui.stop_audio_preview()
+        elif hasattr(gui, "audio_preview_player"):
             gui.audio_preview_player.stop()
 
         video_path = ""
@@ -166,7 +168,9 @@ def toggle_play(gui):
 def stop_video(gui):
     if hasattr(gui, "ensure_media_backend_ready"):
         gui.ensure_media_backend_ready()
-    if hasattr(gui, "audio_preview_player"):
+    if hasattr(gui, "stop_audio_preview"):
+        gui.stop_audio_preview()
+    elif hasattr(gui, "audio_preview_player"):
         gui.audio_preview_player.stop()
     gui.media_player.stop()
     if hasattr(gui, "refresh_play_button_icon"):

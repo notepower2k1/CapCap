@@ -87,6 +87,25 @@ class VoiceCatalogService:
                     continue
                 normalized_voices.append(self._normalize_loaded_voice(voice))
 
+            # Include VieNeu voices (presets + cloned voices)
+            try:
+                from vieneu_tts import list_all_vieneu_voices
+                for vv in list_all_vieneu_voices():
+                    normalized_voices.append(self._normalize_loaded_voice(vv))
+            except Exception as e:
+                print(f"[VoiceCatalog] Failed to load VieNeu voices: {e}")
+
+            # Include CapCut voices
+            try:
+                try:
+                    from app.capcut import list_capcut_voices
+                except ImportError:
+                    from capcut import list_capcut_voices
+                for cv in list_capcut_voices():
+                    normalized_voices.append(self._normalize_loaded_voice(cv))
+            except Exception as e:
+                print(f"[VoiceCatalog] Failed to load CapCut voices: {e}")
+
             return normalized_voices
         except Exception as exc:
             print(f"[VoiceCatalog] ERROR loading catalog: {exc}")

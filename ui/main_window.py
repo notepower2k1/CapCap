@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (
                              QFileDialog, QTextEdit, QComboBox,
                              QFrame, QProgressBar, QMessageBox,
                              QScrollArea,
-                             QColorDialog, QTabWidget, QDialog, QSizePolicy, QInputDialog, QLayout)
+                             QColorDialog, QTabWidget, QDialog, QSizePolicy, QInputDialog, QLayout,
+                             QSpinBox)
 from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QEvent, Signal, QPoint, QRect
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QIcon, QKeySequence, QPixmap, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -1126,10 +1127,31 @@ class VideoTranslatorGUI(QMainWindow):
         self._preview_audio_signals_bound = True
         self.audio_preview_player = QMediaPlayer(self)
         self.audio_preview_output = QAudioOutput(self)
+        self.audio_preview_output.setVolume(1.0)
+        self.audio_preview_output.setMuted(False)
+        try:
+            from PySide6.QtMultimedia import QMediaDevices
+            self.audio_preview_output.setDevice(QMediaDevices.defaultAudioOutput())
+        except Exception:
+            pass
         self.audio_preview_player.setAudioOutput(self.audio_preview_output)
+        self.audio_preview_player.errorOccurred.connect(
+            lambda err, msg: self.log(f"[Audio Preview] player error: {msg} ({err})")
+        )
+
         self.voice_preview_library_player = QMediaPlayer(self)
         self.voice_preview_library_output = QAudioOutput(self)
+        self.voice_preview_library_output.setVolume(1.0)
+        self.voice_preview_library_output.setMuted(False)
+        try:
+            from PySide6.QtMultimedia import QMediaDevices
+            self.voice_preview_library_output.setDevice(QMediaDevices.defaultAudioOutput())
+        except Exception:
+            pass
         self.voice_preview_library_player.setAudioOutput(self.voice_preview_library_output)
+        self.voice_preview_library_player.playbackStateChanged.connect(
+            lambda state: self._stop_voice_library_preview() if state != QMediaPlayer.PlaybackState.PlayingState else None
+        )
         self.voice_preview_dialog = None
         self._voice_preview_row_buttons = {}
 
@@ -1141,12 +1163,16 @@ class VideoTranslatorGUI(QMainWindow):
             return entry_id
         if provider == "edge":
             return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
+        if provider in ("vieneu", "capcut"):
+            return entry_id
         return ""
 
     def _voice_provider_label(self, provider: str) -> str:
         provider_key = str(provider or "").strip().lower()
         if provider_key == "piper":
-            return "Local"
+            return "Piper"
+        if provider_key == "vieneu":
+            return "VieNeu"
         if provider_key == "edge":
             return "Edge"
         return str(provider or "Other").strip().title() or "Other"
@@ -1200,20 +1226,23 @@ class VideoTranslatorGUI(QMainWindow):
     def _current_voice_engine_key(self) -> str:
         combo = getattr(self, "voice_engine_combo", None)
         if combo is None:
-            return "fast"
-        return str(combo.currentData() or "fast").strip().lower() or "fast"
+            return "piper"
+        key = str(combo.currentData() or "piper").strip().lower() or "piper"
+        if key in ("fast", "piper"):
+            return "piper"
+        return key
 
     def get_transcription_engine(self) -> str:
         """Return the recognition source for the open project, never a stale global preference."""
         state = getattr(self, "current_project_state", None)
         settings = getattr(state, "settings", {}) if state is not None else {}
         value = str(settings.get("transcription_engine", "") or "").strip().lower()
-        return value if value in {"whisper", "sensevoice", "ocr"} else _default_asr_engine()
+        return value if value in {"whisper", "sensevoice", "ocr", "capcut"} else _default_asr_engine()
 
     def set_project_transcription_engine(self, engine: str) -> None:
         """Apply a project-local source choice and clear incompatible range state."""
         engine = str(engine or "").strip().lower()
-        if engine not in {"whisper", "sensevoice", "ocr"}:
+        if engine not in {"whisper", "sensevoice", "ocr", "capcut"}:
             engine = _default_asr_engine()
         previous = self.get_transcription_engine()
         os.environ["TRANSCRIPTION_ENGINE"] = engine
@@ -1221,6 +1250,12 @@ class VideoTranslatorGUI(QMainWindow):
         if state is not None:
             state.set_setting("transcription_engine", engine)
             self.project_service.save_project(state)
+        if hasattr(self, "audio_source_combo"):
+            idx = self.audio_source_combo.findData(engine)
+            if idx >= 0 and self.audio_source_combo.currentIndex() != idx:
+                self.audio_source_combo.blockSignals(True)
+                self.audio_source_combo.setCurrentIndex(idx)
+                self.audio_source_combo.blockSignals(False)
         if engine != previous:
             # A new OCR project needs the crop editor immediately. Existing
             # projects with completed OCR remain unobstructed until the user
@@ -1259,12 +1294,35 @@ class VideoTranslatorGUI(QMainWindow):
         free_value = str(self.free_voice_combo.currentData() or "").strip() if hasattr(self, "free_voice_combo") else ""
         if free_value and free_value.startswith("edge:"):
             return free_value
+        if free_value and (free_value.startswith("vieneu:") or free_value.startswith("vieneu_clone:")):
+            return free_value
+        if free_value and free_value.startswith("capcut:"):
+            return free_value
         if free_value and free_value in getattr(self, "voice_catalog_map", {}):
             return free_value
         # A gender filter can legitimately leave the selector empty. Do not
         # silently fall back to a voice outside the user's selected filter.
         combo_has_items = bool(hasattr(self, "free_voice_combo") and self.free_voice_combo.count())
         target_language = self.get_target_language_code()
+        current_engine = self._current_voice_engine_key()
+        if current_engine == "vieneu":
+            if hasattr(self, "free_voice_combo") and self.free_voice_combo.count() > 0:
+                fallback_value = str(self.free_voice_combo.itemData(0) or "").strip()
+                if fallback_value:
+                    return fallback_value
+                fallback_entry_id = str(self.free_voice_combo.itemData(0, self.VOICE_ENTRY_ID_ROLE) or "").strip()
+                if fallback_entry_id:
+                    return fallback_entry_id
+            return "vieneu:Minh Đức"
+        if current_engine == "capcut":
+            if hasattr(self, "free_voice_combo") and self.free_voice_combo.count() > 0:
+                fallback_value = str(self.free_voice_combo.itemData(0) or "").strip()
+                if fallback_value:
+                    return fallback_value
+                fallback_entry_id = str(self.free_voice_combo.itemData(0, self.VOICE_ENTRY_ID_ROLE) or "").strip()
+                if fallback_entry_id:
+                    return fallback_entry_id
+            return "capcut:BV421_vivn_streaming"
         if (
             combo_has_items
             and target_language == "vi"
@@ -1288,8 +1346,18 @@ class VideoTranslatorGUI(QMainWindow):
                 return fallback_entry_id
         return ""
 
-    def on_voice_engine_changed(self):
+    def on_voice_engine_changed(self, *args):
         self._voiceover_force_refresh = True
+        if not getattr(self, "voice_catalog_entries_all", None):
+            self.load_voice_preview_catalog()
+            return
+        engine = self._current_voice_engine_key()
+        if hasattr(self, "voice_selector_label"):
+            self.voice_selector_label.setText("Voice model")
+        if hasattr(self, "create_voice_clone_btn"):
+            self.create_voice_clone_btn.setVisible(engine == "vieneu")
+        self.refresh_voice_catalog_combos()
+        self._update_voice_preview_meta()
 
     def load_voice_preview_catalog(self):
         self._auto_sync_piper_voices_to_catalog()
@@ -1651,14 +1719,22 @@ class VideoTranslatorGUI(QMainWindow):
     def refresh_voice_catalog_combos(self):
         self.voice_catalog_entries = []
         target_language = self.get_target_language_code()
+        current_engine = self._current_voice_engine_key()
         for entry in (self.voice_catalog_entries_all or []):
             if not entry or not isinstance(entry, dict):
                 continue
             if not entry.get("enabled", True):
                 continue
             provider = str(entry.get("provider", "")).strip().lower()
-            if provider not in {"piper", "edge"}:
-                continue
+            if current_engine == "vieneu":
+                if provider != "vieneu":
+                    continue
+            elif current_engine == "capcut":
+                if provider != "capcut":
+                    continue
+            else:
+                if provider not in {"piper", "edge"}:
+                    continue
             entry_language = str(entry.get("language", "")).strip().lower().split("-", 1)[0]
             if entry_language and entry_language != target_language:
                 continue
@@ -1685,8 +1761,18 @@ class VideoTranslatorGUI(QMainWindow):
 
         if self.free_voice_combo.count() > 0:
             self.free_voice_combo.setCurrentIndex(0)
-        if previous_free:
+        if previous_free and self.free_voice_combo.findData(previous_free) >= 0:
             self.set_voice_combo_value(self.free_voice_combo, previous_free)
+        elif current_engine == "vieneu":
+            if self.free_voice_combo.findData("vieneu:Minh Đức") >= 0:
+                self.set_voice_combo_value(self.free_voice_combo, "vieneu:Minh Đức")
+            elif self.free_voice_combo.count() > 0:
+                self.free_voice_combo.setCurrentIndex(0)
+        elif current_engine == "capcut":
+            if self.free_voice_combo.findData("capcut:BV421_vivn_streaming") >= 0:
+                self.set_voice_combo_value(self.free_voice_combo, "capcut:BV421_vivn_streaming")
+            elif self.free_voice_combo.count() > 0:
+                self.free_voice_combo.setCurrentIndex(0)
         elif target_language == "vi" and "ngochuyen" in self.voice_catalog_map:
             self.set_voice_combo_value(self.free_voice_combo, "ngochuyen")
         elif target_language == "vi" and "vi_VN-vais1000-medium" in self.voice_catalog_map:
@@ -1719,7 +1805,7 @@ class VideoTranslatorGUI(QMainWindow):
         entry_id = str(self.free_voice_combo.currentData(self.VOICE_ENTRY_ID_ROLE) or '').strip() if hasattr(self, 'free_voice_combo') else ''
         entry = self.voice_catalog_map.get(entry_id) if hasattr(self, 'voice_catalog_map') else None
         provider = str((entry or {}).get('provider', '')).strip().lower()
-        if provider != 'piper':
+        if provider not in ('piper', 'vieneu'):
             return
         current_token = voice_name.strip()
         if getattr(self, '_voice_preload_inflight', '') == current_token or getattr(self, '_voice_preloaded_name', '') == current_token:
@@ -2474,7 +2560,9 @@ class VideoTranslatorGUI(QMainWindow):
 
         if include_whisper and not is_remote_profile():
             engine = self.get_transcription_engine()
-            if engine == "sensevoice":
+            if engine == "capcut":
+                pass
+            elif engine == "sensevoice":
                 missing.extend(service.validate_sensevoice_runtime())
             else:
                 model_name = self.get_whisper_model_name()
@@ -2484,7 +2572,14 @@ class VideoTranslatorGUI(QMainWindow):
 
         if include_voice and not is_remote_profile():
             voice_name = self.get_active_voice_name()
-            if voice_name and not str(voice_name).startswith("edge:") and not str(voice_name).startswith("f5:"):
+            if (
+                voice_name
+                and not str(voice_name).startswith("edge:")
+                and not str(voice_name).startswith("f5:")
+                and not str(voice_name).startswith("vieneu:")
+                and not str(voice_name).startswith("vieneu_clone:")
+                and not str(voice_name).startswith("capcut:")
+            ):
                 resource_id = f"voice:{voice_name}"
                 if not service.is_resource_installed(resource_id):
                     voice_label = voice_name
@@ -2497,7 +2592,16 @@ class VideoTranslatorGUI(QMainWindow):
             missing.extend(service.validate_ocr_runtime())
 
         if include_voice and not is_remote_profile():
-            missing.extend(service.validate_piper_voice_runtime(self.get_active_voice_name()))
+            active_v = self.get_active_voice_name()
+            if (
+                active_v
+                and not str(active_v).startswith("edge:")
+                and not str(active_v).startswith("f5:")
+                and not str(active_v).startswith("vieneu:")
+                and not str(active_v).startswith("vieneu_clone:")
+                and not str(active_v).startswith("capcut:")
+            ):
+                missing.extend(service.validate_piper_voice_runtime(active_v))
 
         if validate_pipeline_runtime and not is_remote_profile():
             missing.extend(service.validate_pipeline_runtime())
@@ -2691,36 +2795,6 @@ class VideoTranslatorGUI(QMainWindow):
                     "track_name": name or "A2 Music",
                     "legacy": False,
                 })
-        # Projects created before Music Layer became a first-class timeline
-        # track may still persist the selected background stem as the
-        # project-level ``music`` artifact.  Keep that audio usable instead
-        # of silently falling back to A1 Original only.  A real A2 Music
-        # track always wins, so this cannot duplicate a current layer.
-        if not tracks:
-            legacy_path = self._normalize_local_file_path(
-                str(getattr(self, "last_music_path", "") or "")
-            )
-            if legacy_path and os.path.exists(legacy_path):
-                try:
-                    legacy_volume = float(
-                        self.audio_music_volume_slider.value()
-                        if hasattr(self, "audio_music_volume_slider")
-                        else 30.0
-                    )
-                except (TypeError, ValueError):
-                    legacy_volume = 30.0
-                tracks.append({
-                    "path": legacy_path,
-                    "start": 0.0,
-                    "end": max(0.0, float(getattr(model, "duration", 0.0) or 0.0)),
-                    "source_start": 0.0,
-                    "volume": legacy_volume,
-                    "muted": False,
-                    "solo": False,
-                    "loop": True,
-                    "track_name": "A2 Music",
-                    "legacy": True,
-                })
         return tracks
 
     def _tts_audio_track_state(self) -> dict:
@@ -2909,24 +2983,12 @@ class VideoTranslatorGUI(QMainWindow):
         return ""
 
     def _resolve_preview_background_audio_path(self) -> str:
-        # A Music Layer is the only source that should be mixed with TTS.
-        # Never silently substitute the source video's extracted audio here:
+        # A Music Layer on the timeline is the only source that should be mixed with TTS.
+        # Never silently substitute the source video's extracted audio or separated stems:
         # A1 remains an independent track and can be muted separately.
         music_tracks = self._music_audio_tracks()
         if music_tracks:
             return str(music_tracks[0].get("path", "") or "")
-        # Keep a narrow legacy fallback for projects created before Music
-        # Layer existed.  Explicitly selected background audio is stored in
-        # bg_music_edit/last_music_path; the ordinary extracted A1 audio is
-        # deliberately not considered a background bed anymore.
-        candidates = [
-            self.bg_music_edit.text().strip() if hasattr(self, "bg_music_edit") else "",
-            self.last_music_path,
-        ]
-        for candidate in candidates:
-            normalized = self._normalize_local_file_path(candidate)
-            if normalized and os.path.exists(normalized):
-                return normalized
         return ""
 
     def _resolve_preview_mixed_audio_path(self) -> str:
@@ -4642,20 +4704,11 @@ class VideoTranslatorGUI(QMainWindow):
             self.refresh_timeline_video_thumbnails()
 
     def resolve_background_audio_path(self) -> str:
-        # Voice generation receives only an explicitly added Music Layer (or
-        # the legacy manually selected background path).  The source video's
-        # extracted A1 audio is never implicitly treated as music.
+        # Voice generation receives only an explicitly added Music Layer from the timeline.
+        # The source video's extracted A1 audio and separated stems are never implicitly treated as music.
         music_tracks = self._music_audio_tracks()
         if music_tracks:
             return str(music_tracks[0].get("path", "") or "")
-        manual_candidate = self.bg_music_edit.text().strip() if hasattr(self, "bg_music_edit") else ""
-        candidates = [manual_candidate, getattr(self, "last_music_path", "")]
-        for candidate in candidates:
-            normalized = self._normalize_local_file_path(candidate)
-            if normalized and os.path.exists(normalized):
-                self.last_music_path = normalized
-                self.processed_artifacts["music"] = normalized
-                return normalized
         return ""
 
     def has_reusable_voice_inputs(self) -> bool:
@@ -5300,7 +5353,7 @@ class VideoTranslatorGUI(QMainWindow):
         return "fast"
 
     def is_speaker_diarization_enabled(self) -> bool:
-        engine = str(os.getenv("TRANSCRIPTION_ENGINE", _default_asr_engine()) or "").strip().lower()
+        engine = self.get_transcription_engine()
         return bool(
             engine != "ocr"
             and hasattr(self, "speaker_diarization_cb")
@@ -5324,7 +5377,7 @@ class VideoTranslatorGUI(QMainWindow):
         speakers_combo = getattr(self, "speaker_diarization_speakers_combo", None)
         if checkbox is None:
             return
-        engine = str(os.getenv("TRANSCRIPTION_ENGINE", _default_asr_engine()) or "").strip().lower()
+        engine = self.get_transcription_engine()
         available = engine != "ocr"
         if not available:
             checkbox.setChecked(False)
@@ -10908,6 +10961,19 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception:
                 pass
 
+    def stop_audio_preview(self):
+        if os.name == "nt":
+            try:
+                import winsound
+                winsound.PlaySound(None, winsound.SND_PURGE)
+            except Exception:
+                pass
+        if hasattr(self, "audio_preview_player") and self.audio_preview_player is not None:
+            try:
+                self.audio_preview_player.stop()
+            except Exception:
+                pass
+
     def play_audio_preview_file(self, audio_path: str):
         if not audio_path or not os.path.exists(audio_path):
             raise FileNotFoundError("Audio preview file was not found.")
@@ -10917,10 +10983,35 @@ class VideoTranslatorGUI(QMainWindow):
             self.media_player.pause()
             if hasattr(self, "timeline"):
                 self.timeline.set_playing(False)
-        self.audio_preview_player.stop()
-        self.audio_preview_player.setSource(QUrl.fromLocalFile(audio_path))
-        self.audio_preview_player.play()
-        self._last_audio_preview_path = audio_path
+
+        abs_path = os.path.abspath(audio_path)
+        self._last_audio_preview_path = abs_path
+        self.stop_audio_preview()
+
+        # On Windows, try native winsound for WAV files (direct to Windows audio device, highly reliable)
+        played_native = False
+        if os.name == "nt" and abs_path.lower().endswith(".wav"):
+            try:
+                import winsound
+                winsound.PlaySound(abs_path, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+                played_native = True
+            except Exception as exc:
+                self.log(f"[Voice Preview] native winsound failed: {exc}")
+
+        if not played_native:
+            if not hasattr(self, "audio_preview_player") or self.audio_preview_player is None:
+                self.setup_audio_preview_player()
+            if hasattr(self, "audio_preview_output") and self.audio_preview_output is not None:
+                try:
+                    from PySide6.QtMultimedia import QMediaDevices
+                    self.audio_preview_output.setDevice(QMediaDevices.defaultAudioOutput())
+                    self.audio_preview_output.setVolume(1.0)
+                    self.audio_preview_output.setMuted(False)
+                except Exception:
+                    pass
+            self.audio_preview_player.stop()
+            self.audio_preview_player.setSource(QUrl.fromLocalFile(abs_path))
+            self.audio_preview_player.play()
 
     def preview_current_audio_track(self):
         audio_path = self.resolve_selected_audio_path()
@@ -11845,6 +11936,12 @@ class VideoTranslatorGUI(QMainWindow):
         raise RuntimeError("This voice does not have preview media configured yet.")
 
     def _stop_voice_library_preview(self):
+        if os.name == "nt":
+            try:
+                import winsound
+                winsound.PlaySound(None, winsound.SND_PURGE)
+            except Exception:
+                pass
         try:
             self.voice_preview_library_player.stop()
             self.voice_preview_library_player.setSource(QUrl())
@@ -11857,8 +11954,19 @@ class VideoTranslatorGUI(QMainWindow):
         try:
             source = self._resolve_voice_preview_source(entry)
             self._stop_voice_library_preview()
-            self.voice_preview_library_player.setSource(source)
-            self.voice_preview_library_player.play()
+            played_native = False
+            if source.isLocalFile():
+                abs_path = os.path.abspath(source.toLocalFile())
+                if os.name == "nt" and abs_path.lower().endswith(".wav"):
+                    try:
+                        import winsound
+                        winsound.PlaySound(abs_path, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+                        played_native = True
+                    except Exception as exc:
+                        self.log(f"[Voice Preview] native winsound failed: {exc}")
+            if not played_native:
+                self.voice_preview_library_player.setSource(source)
+                self.voice_preview_library_player.play()
             if button is not None:
                 button.setText("Playing...")
             self.log(f"[Voice Preview] playing clip for {entry.get('name', 'voice')}")
@@ -12035,7 +12143,7 @@ class VideoTranslatorGUI(QMainWindow):
     def on_voice_sample_preview_ready(self, audio_path: str, error: str):
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setEnabled(True)
-            self.preview_voice_btn.setText("Preview voice")
+            self.preview_voice_btn.setText("Preview Selected Voice")
         self._voice_sample_preview_thread = None
 
         if error:
@@ -12050,6 +12158,19 @@ class VideoTranslatorGUI(QMainWindow):
             self.log(f"[Voice Preview] playing generated sample: {audio_path}")
         except Exception as exc:
             self.show_error("Voice Preview Failed", "Could not play the generated preview audio.", str(exc))
+
+    def open_create_voice_clone_dialog(self):
+        from widgets.voice_clone_dialog import CreateVoiceCloneDialog
+
+        dialog = CreateVoiceCloneDialog(self)
+        if dialog.exec():
+            entry = dialog.created_voice_entry
+            if entry and isinstance(entry, dict):
+                voice_id = entry.get("id")
+                self.load_voice_preview_catalog()
+                if voice_id and hasattr(self, "free_voice_combo"):
+                    self.set_voice_combo_value(self.free_voice_combo, voice_id)
+                self.log(f"[VieNeu] Added new cloned voice: {entry.get('name', voice_id)}")
 
     def preview_segment_audio(self, index: int):
         if index < 0 or index >= len(self.current_translated_segments or self.current_segments):
@@ -13048,8 +13169,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.extract_btn.setEnabled(v_ok)
         self.vocal_sep_btn.setEnabled(a_ok)
         if hasattr(self, "voice_timing_sync_combo") and hasattr(self, "voice_speed_spin"):
-            mode = self.voice_timing_sync_combo.currentText().strip().lower()
-            self.voice_speed_spin.setEnabled(mode != "off")
+            sync_mode = self.voice_timing_sync_combo.currentText().strip().lower()
+            self.voice_speed_spin.setEnabled(sync_mode != "off")
         self.transcribe_btn.setEnabled(a_ok)
         self.translate_btn.setEnabled(bool(self.transcript_text.toPlainText().strip()))
         self.apply_translated_btn.setEnabled(translation_ready and has_translated_text)
@@ -13151,13 +13272,11 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "ocr_translator_btn"):
             self.ocr_translator_btn.setEnabled(v_ok)
         self._sync_blur_controls()
+        voice_controls_enabled = generated_mode and (mode in ("voice", "both") or not hasattr(self, "output_mode_combo"))
         if hasattr(self, "free_voice_combo"):
-            self.free_voice_combo.setEnabled(
-                generated_mode
-                and mode in ("voice", "both")
-            )
+            self.free_voice_combo.setEnabled(voice_controls_enabled)
         if hasattr(self, "voice_engine_combo"):
-            self.voice_engine_combo.setEnabled(generated_mode and mode in ("voice", "both"))
+            self.voice_engine_combo.setEnabled(voice_controls_enabled)
         if hasattr(self, "premium_voice_combo"):
             self.premium_voice_combo.setEnabled(False)
         if hasattr(self, "bg_music_edit"):
@@ -13434,12 +13553,12 @@ class VideoTranslatorGUI(QMainWindow):
             self.audio_source_edit.setText(vocal)
             self.last_extracted_audio = vocal
             self.last_vocals_path = vocal
-            self.last_music_path = music
+            self.last_no_vocals_path = music
             self.processed_artifacts["vocals"] = vocal
             self.update_project_artifact("vocals", vocal)
             if music:
-                self.processed_artifacts["music"] = music
-                self.update_project_artifact("music", music)
+                self.processed_artifacts["no_vocals"] = music
+                self.update_project_artifact("no_vocals", music)
             self.update_project_step("separate_audio", "done")
             QMessageBox.information(self, "Success", 
                 f"Audio stems separated!\n\nVocals: {os.path.basename(vocal)}\nBackground: {os.path.basename(music)}\n\nVocals are now selected for transcription.")
@@ -13578,7 +13697,10 @@ class VideoTranslatorGUI(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Settings")
         dialog.setModal(True)
-        dialog.setMinimumWidth(450)
+        dialog.setMinimumWidth(580)
+        parent_height = self.height() if (hasattr(self, "height") and self.height() > 200) else 850
+        dialog.setMinimumHeight(int(parent_height * 0.80))
+        dialog.resize(600, int(parent_height * 0.85))
         dialog.setStyleSheet(
             """
             QDialog {
@@ -13597,7 +13719,7 @@ class VideoTranslatorGUI(QMainWindow):
                 color: #9fb3ca;
                 font-size: 12px;
             }
-            QComboBox, QLineEdit {
+            QComboBox, QLineEdit, QSpinBox {
                 background-color: #132033;
                 color: #f8fbff;
                 border: 1px solid #2f4868;
@@ -13633,20 +13755,40 @@ class VideoTranslatorGUI(QMainWindow):
             }
             """
         )
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        layout.setSizeConstraint(QLayout.SetFixedSize)
+        main_dialog_layout = QVBoxLayout(dialog)
+        main_dialog_layout.setContentsMargins(14, 16, 14, 12)
+        main_dialog_layout.setSpacing(10)
+
+        scroll_area = QScrollArea(dialog)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollBar:vertical { background: #0b1220; width: 8px; border-radius: 4px; }"
+            "QScrollBar::handle:vertical { background: #2f4868; border-radius: 4px; min-height: 20px; }"
+            "QScrollBar::handle:vertical:hover { background: #456894; }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
+        )
+
+        content_widget = QWidget()
+        content_widget.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(content_widget)
+        layout.setContentsMargins(4, 2, 8, 2)
+        layout.setSpacing(14)
+        scroll_area.setWidget(content_widget)
+        main_dialog_layout.addWidget(scroll_area, 1)
 
         remote_mode = is_remote_profile()
         # Transcription Engine Section
-        engine_title = QLabel("Subtitle source")
+        engine_title = QLabel("Audio source")
         engine_title.setObjectName("statusHeadline")
         layout.addWidget(engine_title)
 
         engine_combo = QComboBox(dialog)
         engine_combo.addItem("Audio (SenseVoice) - Speed", "sensevoice")
         engine_combo.addItem("Audio (Whisper) - Quality", "whisper")
+        engine_combo.addItem("CapCut API (Beta)", "capcut")
         engine_combo.addItem("Video (OCR)", "ocr")
         current_engine = self.get_transcription_engine()
         idx = engine_combo.findData(current_engine)
@@ -13705,6 +13847,76 @@ class VideoTranslatorGUI(QMainWindow):
         whisper_combo.setCurrentIndex(whisper_index if whisper_index >= 0 else 0)
         whisper_combo.setVisible(is_whisper)
         layout.addWidget(whisper_combo)
+
+        # CapCut API Settings Section
+        is_capcut = (current_engine == "capcut") or (str(getattr(self, "selected_voice_engine", "") or (self.voice_engine_combo.currentData() if hasattr(self, "voice_engine_combo") else "")).strip().lower() == "capcut")
+        capcut_settings_widget = QWidget(dialog)
+        capcut_settings_layout = QVBoxLayout(capcut_settings_widget)
+        capcut_settings_layout.setContentsMargins(0, 0, 0, 0)
+        capcut_settings_layout.setSpacing(10)
+
+        capcut_title = QLabel("CapCut API Settings")
+        capcut_title.setObjectName("statusHeadline")
+        capcut_settings_layout.addWidget(capcut_title)
+
+        capcut_chunk_row = QHBoxLayout()
+        capcut_chunk_label = QLabel("STT Chunk duration:")
+        capcut_chunk_combo = QComboBox(dialog)
+        capcut_chunk_combo.addItem("5 minutes (default)", "300")
+        capcut_chunk_combo.addItem("10 minutes", "600")
+        capcut_chunk_combo.addItem("15 minutes", "900")
+        capcut_chunk_combo.addItem("20 minutes", "1200")
+        capcut_chunk_combo.addItem("30 minutes", "1800")
+        current_chunk = str(os.getenv("CAPCUT_STT_CHUNK_SECONDS", self.settings.value("capcut_stt_chunk_seconds", "300"))).strip()
+        idx = capcut_chunk_combo.findData(current_chunk)
+        capcut_chunk_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        capcut_chunk_row.addWidget(capcut_chunk_label)
+        capcut_chunk_row.addWidget(capcut_chunk_combo, 1)
+        capcut_settings_layout.addLayout(capcut_chunk_row)
+
+        capcut_stt_workers_row = QHBoxLayout()
+        capcut_stt_workers_label = QLabel("STT Workers:")
+        capcut_stt_workers_combo = QComboBox(dialog)
+        for w in ("1", "2", "3", "4", "5", "8", "10"):
+            capcut_stt_workers_combo.addItem(f"{w} workers" + (" (default)" if w == "5" else "") if w != "1" else "1 worker", w)
+        current_stt_workers = str(os.getenv("CAPCUT_STT_WORKERS", self.settings.value("capcut_stt_workers", "5"))).strip()
+        idx = capcut_stt_workers_combo.findData(current_stt_workers)
+        capcut_stt_workers_combo.setCurrentIndex(idx if idx >= 0 else 4)
+        capcut_stt_workers_row.addWidget(capcut_stt_workers_label)
+        capcut_stt_workers_row.addWidget(capcut_stt_workers_combo, 1)
+        capcut_settings_layout.addLayout(capcut_stt_workers_row)
+
+        capcut_tts_batch_row = QHBoxLayout()
+        capcut_tts_batch_label = QLabel("TTS Batch size:")
+        capcut_tts_batch_combo = QComboBox(dialog)
+        for b in ("1", "4", "8", "16", "30", "32", "60"):
+            capcut_tts_batch_combo.addItem(f"{b} line / req" if b == "1" else (f"{b} lines / req" + (" (default)" if b == "60" else "")), b)
+        current_tts_batch = str(os.getenv("CAPCUT_TTS_BATCH_SIZE", self.settings.value("capcut_tts_batch_size", "60"))).strip()
+        idx = capcut_tts_batch_combo.findData(current_tts_batch)
+        capcut_tts_batch_combo.setCurrentIndex(idx if idx >= 0 else 6)
+        capcut_tts_batch_row.addWidget(capcut_tts_batch_label)
+        capcut_tts_batch_row.addWidget(capcut_tts_batch_combo, 1)
+        capcut_settings_layout.addLayout(capcut_tts_batch_row)
+
+        capcut_tts_workers_row = QHBoxLayout()
+        capcut_tts_workers_label = QLabel("TTS Workers:")
+        capcut_tts_workers_combo = QComboBox(dialog)
+        for w in ("1", "5", "10", "15", "20", "30", "45", "60"):
+            capcut_tts_workers_combo.addItem(f"{w} workers" + (" (default)" if w == "30" else "") if w != "1" else "1 worker", w)
+        current_tts_workers = str(os.getenv("CAPCUT_TTS_WORKERS", self.settings.value("capcut_tts_workers", "30"))).strip()
+        idx = capcut_tts_workers_combo.findData(current_tts_workers)
+        capcut_tts_workers_combo.setCurrentIndex(idx if idx >= 0 else 5)
+        capcut_tts_workers_row.addWidget(capcut_tts_workers_label)
+        capcut_tts_workers_row.addWidget(capcut_tts_workers_combo, 1)
+        capcut_settings_layout.addLayout(capcut_tts_workers_row)
+
+        capcut_hint = QLabel("Batching subtitle lines and running concurrent workers speeds up dubbing by 5-10x and reduces HTTP requests.")
+        capcut_hint.setObjectName("helperLabel")
+        capcut_hint.setWordWrap(True)
+        capcut_settings_layout.addWidget(capcut_hint)
+
+        capcut_settings_widget.setVisible(is_capcut)
+        layout.addWidget(capcut_settings_widget)
 
         divider = QFrame()
         divider.setFrameShape(QFrame.HLine)
@@ -13830,6 +14042,28 @@ class VideoTranslatorGUI(QMainWindow):
         base_url_edit.setVisible(not remote_mode)
         layout.addLayout(base_url_layout)
 
+        batch_size_layout = QHBoxLayout()
+        batch_size_label = QLabel("Batch Size (Lines/req):")
+        batch_size_spin = QSpinBox(dialog)
+        batch_size_spin.setRange(5, 200)
+        batch_size_spin.setSingleStep(5)
+        env_batch = str(os.getenv("CAPCAP_AI_TRANSLATION_MAX_SEGMENTS", "")).strip()
+        if env_batch.isdigit() and int(env_batch) > 0:
+            batch_size_spin.setValue(int(env_batch))
+        else:
+            batch_size_spin.setValue(40 if current_provider == "ollama" else 80)
+        batch_size_layout.addWidget(batch_size_label)
+        batch_size_layout.addWidget(batch_size_spin, 1)
+        batch_size_label.setVisible(not remote_mode)
+        batch_size_spin.setVisible(not remote_mode)
+        layout.addLayout(batch_size_layout)
+
+        batch_size_hint = QLabel("Subtitle lines sent per AI request (Recommended: 80 for Gemini/OpenAI, 20-40 for Ollama).")
+        batch_size_hint.setObjectName("helperLabel")
+        batch_size_hint.setWordWrap(True)
+        batch_size_hint.setVisible(not remote_mode)
+        layout.addWidget(batch_size_hint)
+
         provider_hint = QLabel("Get an API key at https://aistudio.google.com/apikey")
         provider_hint.setObjectName("helperLabel")
         provider_hint.setWordWrap(True)
@@ -13850,6 +14084,9 @@ class VideoTranslatorGUI(QMainWindow):
             _toggle_visible(key_section_widget, is_google_ai_studio or is_openai)
             _toggle_visible(base_url_label, not remote_mode and is_ai)
             _toggle_visible(base_url_edit, not remote_mode and is_ai)
+            _toggle_visible(batch_size_label, not remote_mode and is_ai)
+            _toggle_visible(batch_size_spin, not remote_mode and is_ai)
+            _toggle_visible(batch_size_hint, not remote_mode and is_ai)
             _toggle_visible(test_btn, not remote_mode and is_ai)
             _toggle_visible(test_status, not remote_mode and is_ai)
             _toggle_visible(model_label, not remote_mode and is_ai)
@@ -13866,7 +14103,9 @@ class VideoTranslatorGUI(QMainWindow):
                 model_edit.setText(model)
                 base_url_edit.setText(base_url or "https://generativelanguage.googleapis.com/v1beta/openai/")
                 if not model_edit.text().strip():
-                    model_edit.setText("gemini-2.5-flash")
+                    model_edit.setText("gemini-3.7-flash")
+                if batch_size_spin.value() == 40:
+                    batch_size_spin.setValue(80)
                 provider_hint.setText("Use a Google AI Studio Gemini API key: https://aistudio.google.com/apikey")
             elif is_openai:
                 model_label.setText("AI Model:")
@@ -13876,12 +14115,16 @@ class VideoTranslatorGUI(QMainWindow):
                 base_url_edit.setText(base_url or "https://api.openai.com/v1/")
                 if not model_edit.text().strip():
                     model_edit.setText("gpt-4o-mini")
+                if batch_size_spin.value() == 40:
+                    batch_size_spin.setValue(80)
                 provider_hint.setText("Get an API key at https://platform.openai.com/api-keys")
             elif p == "ollama":
                 model_label.setText("AI Model:")
                 base_url_edit.setText("http://localhost:11434/v1")
                 key_edit.clear()
                 model_edit.setText("gemma4:31b-cloud")
+                if batch_size_spin.value() == 80:
+                    batch_size_spin.setValue(40)
                 provider_hint.setText("Requires a running Ollama server. Default model: gemma4:31b-cloud")
             model_edit.setReadOnly(False)
             dialog.layout().invalidate()
@@ -13940,16 +14183,19 @@ class VideoTranslatorGUI(QMainWindow):
             engine_val = engine_combo.currentData()
             is_ocr = engine_val == "ocr"
             is_whisper = engine_val == "whisper"
+            is_capcut_engine = engine_val == "capcut"
+            is_capcut_voice = str(getattr(self, "selected_voice_engine", "") or (self.voice_engine_combo.currentData() if hasattr(self, "voice_engine_combo") else "")).strip().lower() == "capcut"
             _toggle_visible(whisper_title, is_whisper)
             _toggle_visible(whisper_combo, is_whisper)
             _toggle_visible(region_label, is_ocr)
             _toggle_visible(region_combo, is_ocr)
             _toggle_visible(sampling_label, is_ocr)
             _toggle_visible(sampling_combo, is_ocr)
-            dialog.layout().invalidate()
-            dialog.adjustSize()
+            _toggle_visible(capcut_settings_widget, is_capcut_engine or is_capcut_voice)
+            content_widget.layout().invalidate()
 
         engine_combo.currentIndexChanged.connect(update_engine_fields)
+        update_engine_fields()
 
         local_download_layout = QHBoxLayout()
         manage_resources_btn = QPushButton("Manage Resources", dialog)
@@ -13994,12 +14240,13 @@ class VideoTranslatorGUI(QMainWindow):
 
         # Buttons
         button_row = QHBoxLayout()
+        button_row.setContentsMargins(8, 4, 8, 4)
         button_row.addStretch()
         cancel_btn = QPushButton("Cancel", dialog)
         save_btn = QPushButton("Save", dialog)
         button_row.addWidget(cancel_btn)
         button_row.addWidget(save_btn)
-        layout.addLayout(button_row)
+        main_dialog_layout.addLayout(button_row)
 
         cancel_btn.clicked.connect(dialog.reject)
         save_btn.clicked.connect(dialog.accept)
@@ -14034,7 +14281,22 @@ class VideoTranslatorGUI(QMainWindow):
         new_base_url = base_url_edit.text().strip()
 
         self.selected_whisper_model_name = new_whisper
-        
+
+        new_capcut_chunk = str(capcut_chunk_combo.currentData() or "300").strip()
+        new_capcut_stt_workers = str(capcut_stt_workers_combo.currentData() or "5").strip()
+        new_capcut_tts_batch = str(capcut_tts_batch_combo.currentData() or "60").strip()
+        new_capcut_tts_workers = str(capcut_tts_workers_combo.currentData() or "30").strip()
+
+        os.environ["CAPCUT_STT_CHUNK_SECONDS"] = new_capcut_chunk
+        os.environ["CAPCUT_STT_WORKERS"] = new_capcut_stt_workers
+        os.environ["CAPCUT_TTS_BATCH_SIZE"] = new_capcut_tts_batch
+        os.environ["CAPCUT_TTS_WORKERS"] = new_capcut_tts_workers
+
+        self.settings.setValue("capcut_stt_chunk_seconds", new_capcut_chunk)
+        self.settings.setValue("capcut_stt_workers", new_capcut_stt_workers)
+        self.settings.setValue("capcut_tts_batch_size", new_capcut_tts_batch)
+        self.settings.setValue("capcut_tts_workers", new_capcut_tts_workers)
+
         # Transcription engine settings (apply to all modes)
         # The subtitle source is project-local.  Do not write it into .env,
         # otherwise opening another project can inherit a stale OCR/Audio
@@ -14042,6 +14304,10 @@ class VideoTranslatorGUI(QMainWindow):
         _engine_updates = {
             "OCR_SUBTITLE_REGION": new_ocr_region,
             "OCR_SAMPLING_FPS": new_ocr_sampling_fps,
+            "CAPCUT_STT_CHUNK_SECONDS": new_capcut_chunk,
+            "CAPCUT_STT_WORKERS": new_capcut_stt_workers,
+            "CAPCUT_TTS_BATCH_SIZE": new_capcut_tts_batch,
+            "CAPCUT_TTS_WORKERS": new_capcut_tts_workers,
         }
         
         # Write back to .env
@@ -14056,6 +14322,7 @@ class VideoTranslatorGUI(QMainWindow):
                 "CAPCAP_REMOTE_API_TOKEN": remote_token_edit.text().strip(),
             }
         else:
+            new_batch_size = str(batch_size_spin.value())
             if new_provider == "google":
                 updates = {
                     "AI_POLISHER_PROVIDER": "google",
@@ -14066,8 +14333,9 @@ class VideoTranslatorGUI(QMainWindow):
                     "AI_POLISHER_PROVIDER": "google_ai_studio",
                     "OPENAI_PROVIDER": "google_ai_studio",
                     "GOOGLE_AI_STUDIO_API_KEY": new_key,
-                    "GOOGLE_AI_STUDIO_MODEL": new_model or "gemini-2.5-flash",
+                    "GOOGLE_AI_STUDIO_MODEL": new_model or "gemini-3.7-flash",
                     "GOOGLE_AI_STUDIO_BASE_URL": new_base_url or "https://generativelanguage.googleapis.com/v1beta/openai/",
+                    "CAPCAP_AI_TRANSLATION_MAX_SEGMENTS": new_batch_size,
                 }
             elif new_provider == "ollama":
                 updates = {
@@ -14076,6 +14344,7 @@ class VideoTranslatorGUI(QMainWindow):
                     "OPENAI_API_KEY": "ollama",
                     "OPENAI_MODEL": new_model,
                     "OPENAI_BASE_URL": new_base_url or "http://localhost:11434/v1",
+                    "CAPCAP_AI_TRANSLATION_MAX_SEGMENTS": new_batch_size,
                 }
             else:
                 updates = {
@@ -14084,6 +14353,7 @@ class VideoTranslatorGUI(QMainWindow):
                     "OPENAI_API_KEY": new_key,
                     "OPENAI_MODEL": new_model or "gpt-4o-mini",
                     "OPENAI_BASE_URL": new_base_url or "https://api.openai.com/v1/",
+                    "CAPCAP_AI_TRANSLATION_MAX_SEGMENTS": new_batch_size,
                 }
         
         updates.update(_engine_updates)
@@ -14396,6 +14666,8 @@ class VideoTranslatorGUI(QMainWindow):
 
     def run_voiceover(self):
         if not self.ensure_required_resources("Voice generation", include_voice=True):
+            if getattr(self, "_pipeline_active", False):
+                self._pipeline_fail("Missing resources")
             return
         state = self.ensure_current_project()
         if state and not self.translated_text.toPlainText().strip():
@@ -14403,11 +14675,15 @@ class VideoTranslatorGUI(QMainWindow):
 
         translated_srt = self.translated_text.toPlainText().strip()
         if not translated_srt:
+            if getattr(self, "_pipeline_active", False):
+                self._pipeline_fail("No translated SRT available")
             QMessageBox.warning(self, "Error", "No translated SRT available. Please run translation first (STEP 3).")
             return
 
         segments = self._get_voiceover_segments()
         if not segments:
+            if getattr(self, "_pipeline_active", False):
+                self._pipeline_fail("Translated SRT could not be parsed to segments")
             QMessageBox.warning(self, "Error", "Translated SRT could not be parsed to segments.")
             return
 
@@ -14416,6 +14692,8 @@ class VideoTranslatorGUI(QMainWindow):
         audio_handling_mode = self.get_audio_handling_mode()
         voice_name = self._resolve_active_voice_name(persist_new_clone=True)
         if not voice_name:
+            if getattr(self, "_pipeline_active", False):
+                self._pipeline_fail("Missing voice")
             QMessageBox.warning(self, "Missing Voice", "Choose a voice first.")
             return
         if state is not None and state.settings.get("tts_skipped", False):
@@ -14699,8 +14977,11 @@ class VideoTranslatorGUI(QMainWindow):
         self._voiceover_force_refresh = False
         self._pending_voice_signature = ""
 
+        pipeline_advanced = False
         try:
-            self._pipeline_advance("voiceover")
+            if getattr(self, "_pipeline_active", False):
+                self._pipeline_advance("voiceover")
+                pipeline_advanced = True
         except Exception as exc:
             self.log(f"[Voiceover] pipeline_advance failed: {exc}")
             self.refresh_ui_state()
@@ -14713,6 +14994,13 @@ class VideoTranslatorGUI(QMainWindow):
         self.schedule_timeline_visual_refresh(waveform=True, thumbnails=False)
         self.refresh_ui_state()
         self.sync_preview_audio_track_to_output()
+
+        if not getattr(self, "_pipeline_active", False) and not pipeline_advanced:
+            QMessageBox.information(
+                self,
+                "Success",
+                "AI Voiceover generation finished successfully!\n\nThe new voice track is loaded and ready on the timeline.",
+            )
 
     def preview_video(self):
         self.preview_controller.preview_video()
@@ -14738,7 +15026,24 @@ class VideoTranslatorGUI(QMainWindow):
     def run_voiceover_with_progress(self, target_stage="full"):
         existing = getattr(self, "voice_thread", None)
         if existing and existing.isRunning():
-            return
+            try:
+                if hasattr(existing, "stop"):
+                    existing.stop()
+                if hasattr(existing, "finished"):
+                    existing.finished.disconnect()
+                if hasattr(existing, "progress"):
+                    existing.progress.disconnect()
+            except Exception:
+                pass
+            try:
+                existing.quit()
+                existing.wait(300)
+                if existing.isRunning():
+                    existing.terminate()
+                    existing.wait(200)
+            except Exception:
+                pass
+            self.voice_thread = None
         self._pipeline_active = True
         self._pipeline_step = "voiceover"
         self.pipeline_controller.target_stage = str(target_stage or "full")

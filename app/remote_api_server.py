@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+for _p in (_ROOT, _HERE):
+    if _p and _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import base64
 import errno
 import json
@@ -100,7 +109,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            if self.path == "/health":
+            if self.path in ("/health", "/v1/health"):
                 _json_response(
                     self,
                     200,

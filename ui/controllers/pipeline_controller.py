@@ -148,6 +148,11 @@ class PipelineController:
         # default text encoding cannot inherit a locale-specific ANSI codec.
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
+        pythonpath_entries = [app_root, os.path.join(app_root, "app")]
+        current_pythonpath = env.get("PYTHONPATH", "")
+        if current_pythonpath:
+            pythonpath_entries.append(current_pythonpath)
+        env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
         env["CAPCAP_DEVICE"] = (
             "cuda" if str(processing_device or os.getenv("CAPCAP_DEVICE", "cpu")).strip().lower() == "cuda"
             else "cpu"
@@ -211,6 +216,30 @@ class PipelineController:
                 self.progress_dialog.cancel_stop_request()
                 return
 
+        # Stop any running voiceover worker thread
+        if hasattr(self.gui, "voice_thread") and self.gui.voice_thread:
+            thread = self.gui.voice_thread
+            try:
+                if hasattr(thread, "stop"):
+                    thread.stop()
+                if hasattr(thread, "finished"):
+                    thread.finished.disconnect()
+                if hasattr(thread, "progress"):
+                    thread.progress.disconnect()
+            except Exception:
+                pass
+            try:
+                if thread.isRunning():
+                    thread.quit()
+                    thread.wait(300)
+                    if thread.isRunning():
+                        thread.terminate()
+                        thread.wait(200)
+            except Exception:
+                pass
+            self.gui.voice_thread = None
+
+        current_step = getattr(self.gui, "_pipeline_step", "prepare")
         self.gui._pipeline_active = False
         self.gui._pipeline_step = ""
         self.prepare_run_id += 1
@@ -218,7 +247,8 @@ class PipelineController:
         self._mark_running_project_steps_stopped()
         self._stop_local_worker_server()
         if self.progress_dialog:
-            self.progress_dialog.fail_step("ai_process")
+            step_to_fail = "voiceover" if current_step == "voiceover" else ("preview" if current_step == "preview" else "ai_process")
+            self.progress_dialog.fail_step(step_to_fail)
             self.progress_dialog.footer.setText("Pipeline stopped.")
             self.progress_dialog.footer.setStyleSheet("color: #FFB86B; font-weight: bold; font-size: 14px; margin-top: 15px;")
             self.progress_dialog.stop_btn.setEnabled(False)
@@ -229,7 +259,7 @@ class PipelineController:
         self.gui.progress_bar.setRange(0, 100)
         self.gui.progress_bar.setValue(0)
         self.gui.refresh_ui_state()
-        self.gui.log("[Pipeline] Stop requested. Local worker process killed.")
+        self.gui.log("[Pipeline] Stop requested. Background worker processes killed.")
 
     
     def _whisper_model_cached(self, model_name: str) -> bool:
@@ -302,6 +332,8 @@ class PipelineController:
         self.progress_dialog.add_step("voiceover", "Synthesizing AI Voiceover")
         self.progress_dialog.add_step("preview", "Preparing Video Preview")
         self.progress_dialog.show()
+        self.progress_dialog.raise_()
+        self.progress_dialog.activateWindow()
 
     def run_all_pipeline(self, video_path=None, requires_separation=None, target_stage="full"):
         """Entry point for the full generation process."""
@@ -521,7 +553,14 @@ class PipelineController:
                 self.pipeline_done()
                 if self.progress_dialog:
                     self.progress_dialog.skip_step("preview")
-                    self.progress_dialog.set_completed()
+                    self.progress_dialog.set_completed("✨ AI Voiceover complete! Audio track is ready.")
+                    self.progress_dialog.raise_()
+                    self.progress_dialog.activateWindow()
+                QMessageBox.information(
+                    self.gui,
+                    "Success",
+                    "AI Voiceover generation finished successfully!\n\nThe new voice track is loaded and ready on the timeline.",
+                )
                 return
             self.gui._pipeline_step = "preview"
             if self.progress_dialog and self.progress_dialog.isVisible():

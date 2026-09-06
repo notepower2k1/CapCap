@@ -93,6 +93,13 @@ class EngineRuntime:
     def transcribe_audio_sensevoice(self, audio_path: str, model_path: str, *, language: str = "auto"):
         return self.sensevoice.transcribe(audio_path, model_path, language=language)
 
+    def transcribe_audio_capcut(self, audio_path: str, *, language: str = "auto", on_progress: callable = None):
+        try:
+            from app.capcut import transcribe_audio_capcut
+        except ImportError:
+            from capcut import transcribe_audio_capcut
+        return transcribe_audio_capcut(audio_path, language=language, on_progress=on_progress)
+
     def translate_srt(
         self,
         srt_text: str,
@@ -146,7 +153,7 @@ class EngineRuntime:
             style_instruction=style_instruction,
         )
 
-    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False) -> bool:
+    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False, video_quality="medium") -> bool:
         return self.ffmpeg.embed_subtitles(
             video_path,
             srt_path,
@@ -165,9 +172,10 @@ class EngineRuntime:
             video_filter_state=video_filter_state,
             audio_gain_db=audio_gain_db,
             fast=fast,
+            video_quality=video_quality,
         )
 
-    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False) -> bool:
+    def embed_ass_subtitles(self, video_path: str, ass_path: str, output_path: str, *, blur_region=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False, video_quality="medium") -> bool:
         return self.ffmpeg.embed_ass_subtitles(
             video_path,
             ass_path,
@@ -186,6 +194,7 @@ class EngineRuntime:
             video_filter_state=video_filter_state,
             audio_gain_db=audio_gain_db,
             fast=fast,
+            video_quality=video_quality,
         )
 
     def get_video_dimensions(self, video_path: str):
@@ -325,7 +334,7 @@ class EngineRuntime:
             sample_rate=sample_rate,
         )
 
-    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_scale_mode="fit", focus_x=0.5, focus_y=0.5, output_fps=None, video_filter_state=None) -> str:
+    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_scale_mode="fit", focus_x=0.5, focus_y=0.5, output_fps=None, video_filter_state=None, video_quality="medium") -> str:
         return self.preview.mux_audio_for_preview(
             video_path,
             audio_path,
@@ -337,6 +346,7 @@ class EngineRuntime:
             focus_y=focus_y,
             output_fps=output_fps,
             video_filter_state=video_filter_state,
+            video_quality=video_quality,
         )
 
     def trim_video_clip(self, video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:

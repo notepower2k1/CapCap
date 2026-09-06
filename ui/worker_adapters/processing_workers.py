@@ -68,16 +68,24 @@ class ExtractionWorker(QThread):
 class TranscriptionWorker(QThread):
     finished = Signal(list, str)
 
-    def __init__(self, audio_path, model_path, language):
+    def __init__(self, audio_path, model_path, language, engine_name: str = "whisper"):
         super().__init__()
         self.audio_path = audio_path
         self.model_path = model_path
         self.language = language
+        self.engine_name = str(engine_name or "whisper").strip().lower()
 
     def run(self):
         try:
             engine = EngineRuntime()
-            segments = engine.transcribe_audio(self.audio_path, self.model_path, language=self.language)
+            if self.engine_name == "capcut":
+                segments = engine.transcribe_audio_capcut(self.audio_path, language=self.language)
+            elif self.engine_name == "sensevoice":
+                from runtime_paths import models_path
+                sensevoice_model_dir = models_path("sensevoice")
+                segments = engine.transcribe_audio_sensevoice(self.audio_path, sensevoice_model_dir, language=self.language)
+            else:
+                segments = engine.transcribe_audio(self.audio_path, self.model_path, language=self.language)
             self.finished.emit(segments if segments else [], "")
         except Exception as exc:
             details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
@@ -121,6 +129,19 @@ class AlternateRangeTranscriptionWorker(QThread):
                     start_seconds=self.start_time,
                     end_seconds=self.end_time,
                 )
+            elif self.engine_name == "capcut":
+                import tempfile
+                temp_audio = os.path.join(tempfile.gettempdir(), f"capcap_range_{int(self.start_time * 1000)}_{int(self.end_time * 1000)}.wav")
+                ffmpeg = bin_path("ffmpeg", "ffmpeg.exe")
+                subprocess.run([
+                    ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", str(self.start_time),
+                    "-t", str(max(0.1, self.end_time - self.start_time)), "-i", self.video_path,
+                    "-vn", "-ac", "1", "-ar", "16000", temp_audio,
+                ], check=True, **subprocess_hidden_kwargs())
+                segments = engine.transcribe_audio_capcut(temp_audio, language=self.language)
+                for segment in segments or []:
+                    segment["start"] = float(segment.get("start", 0.0)) + self.start_time
+                    segment["end"] = float(segment.get("end", 0.0)) + self.start_time
             else:
                 import tempfile
                 temp_audio = os.path.join(tempfile.gettempdir(), f"capcap_range_{int(self.start_time * 1000)}_{int(self.end_time * 1000)}.wav")
@@ -718,6 +739,14 @@ class VoiceOverWorker(QThread):
         self.ai_rewrite_dubbing = ai_rewrite_dubbing
         self.dubbing_style_instruction = dubbing_style_instruction
         self.source_language = source_language
+        self._is_cancelled = False
+        self.workflow = None
+
+    def stop(self):
+        self._is_cancelled = True
+        wf = getattr(self, "workflow", None)
+        if wf is not None and hasattr(wf, "cancel"):
+            wf.cancel()
 
     def run(self):
         try:
@@ -748,6 +777,8 @@ class VoiceOverWorker(QThread):
                     },
                     timeout=3600,
                 )
+                if self._is_cancelled:
+                    return
                 result = response.get("result", {})
                 self.finished.emit(
                     result.get("voice_track", ""),
@@ -758,6 +789,7 @@ class VoiceOverWorker(QThread):
             else:
                 from workflows.voice_workflow import VoiceWorkflow
                 workflow = VoiceWorkflow(self.workspace_root)
+                self.workflow = workflow
                 result = workflow.run(
                     segments=self.segments,
                     output_dir=self.output_dir,
@@ -774,7 +806,10 @@ class VoiceOverWorker(QThread):
                     dubbing_style_instruction=self.dubbing_style_instruction,
                     source_language=self.source_language,
                     on_progress=self.progress.emit,
+                    is_cancelled=lambda: getattr(self, "_is_cancelled", False),
                 )
+                if self._is_cancelled:
+                    return
                 self.finished.emit(
                     result.get("voice_track", ""),
                     result.get("mixed_path", ""),
@@ -782,6 +817,8 @@ class VoiceOverWorker(QThread):
                     "",
                 )
         except Exception as exc:
+            if self._is_cancelled:
+                return
             print(f"[VoiceOverWorker ERROR] {str(exc)}")
             self.finished.emit("", "", [], str(exc))
 
@@ -790,7 +827,7 @@ class FinalExportWorker(QThread):
     finished = Signal(str, str)
     progress = Signal(int, str)
 
-    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", output_ratio="source", output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, original_audio_gain_db=0.0, project_state_path="", project_temp_dir=""):
+    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", output_ratio="source", output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, original_audio_gain_db=0.0, project_state_path="", project_temp_dir="", video_quality="medium"):
         super().__init__()
         self.workspace_root = workspace_root
         self.video_path = video_path
@@ -810,6 +847,7 @@ class FinalExportWorker(QThread):
         self.original_audio_gain_db = float(original_audio_gain_db or 0.0)
         self.project_state_path = project_state_path
         self.project_temp_dir = project_temp_dir
+        self.video_quality = video_quality
 
     def run(self):
         try:
@@ -838,6 +876,7 @@ class FinalExportWorker(QThread):
                         "original_audio_gain_db": self.original_audio_gain_db,
                         "project_state_path": self.project_state_path,
                         "project_temp_dir": self.project_temp_dir,
+                        "video_quality": self.video_quality,
                     },
                     timeout=3600,
                 )
@@ -865,6 +904,7 @@ class FinalExportWorker(QThread):
                     project_state_path=self.project_state_path,
                     project_temp_dir=self.project_temp_dir,
                     on_progress=self.progress.emit,
+                    video_quality=self.video_quality,
                 )
                 self.finished.emit(output_path, "")
         except Exception as exc:

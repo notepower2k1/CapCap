@@ -44,6 +44,11 @@ def _open_url(url: str) -> bool:
     target = str(url or "").strip()
     if not target:
         return False
+    if "huggingface.co" in target and "/tree/" in target:
+        path_part = target.split("/tree/", 1)[1]
+        ext = os.path.splitext(path_part)[1].lower()
+        if ext in (".zip", ".tar", ".bz2", ".gz", ".7z", ".onnx", ".bin", ".txt", ".json"):
+            target = target.replace("/tree/", "/blob/", 1)
     return QDesktopServices.openUrl(QUrl(target))
 
 
@@ -282,7 +287,7 @@ def open_resource_manager(workspace_root: str = None, parent=None,
         button_row.setSpacing(8)
         button_row.addStretch(1)
 
-        download_url = str(item.get("download_url", "")).strip()
+        download_url = str(item.get("open_url", "") or item.get("download_url", "")).strip()
         download_btn = QPushButton("Open Download Page", dialog)
         download_btn.setObjectName("primaryBtn")
         download_btn.setEnabled(bool(download_url))
@@ -313,6 +318,7 @@ def open_resource_manager(workspace_root: str = None, parent=None,
             "diarization:embedding": "Download Speaker Model",
             "voice:pack": "Download Voices",
             "voice:pack-en": "Download Voices",
+            "voice:vieneu": "Download VieNeu Models",
         }.get(resource_id, "Download")
         if download_supported:
             resource_download_btn = QPushButton(download_label, dialog)

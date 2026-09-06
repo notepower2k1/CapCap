@@ -85,6 +85,11 @@ class VoiceWorkflow:
         self.workspace_root = workspace_root
         self.project_service = ProjectService(workspace_root)
         self.engine_runtime = EngineRuntime()
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
     def _load_state(self, project_state_path: str = ""):
         return self.project_service.load_project(project_state_path) if project_state_path else None
 
@@ -1230,6 +1235,7 @@ class VoiceWorkflow:
         index_offset: int = 0,
         normalizer_dictionary=None,
         log: bool = True,
+        is_cancelled: callable = None,
     ):
         segments = list(segments or [])
         manifest = self._load_manifest(tmp_dir)
@@ -1322,7 +1328,18 @@ class VoiceWorkflow:
                     pass
             elif pending_providers == {"edge"}:
                 worker_count = 1
+            elif pending_providers == {"capcut"}:
+                try:
+                    capcut_workers = max(1, int(os.getenv("CAPCUT_TTS_WORKERS", "30")))
+                except (TypeError, ValueError):
+                    capcut_workers = 30
+                try:
+                    capcut_batch_size = max(1, int(os.getenv("CAPCUT_TTS_BATCH_SIZE", "60")))
+                except (TypeError, ValueError):
+                    capcut_batch_size = 60
+                worker_count = max(1, min(capcut_workers, len(pending_jobs)))
             else:
+                capcut_batch_size = 1
                 worker_count = max(1, min(self.MAX_TTS_WORKERS, len(pending_jobs)))
             if log:
                 print(
@@ -1331,11 +1348,120 @@ class VoiceWorkflow:
                 )
             if on_progress:
                 on_progress(f"Synthesizing {len(pending_jobs)} subtitle segments (using {worker_count} workers)...")
-            if not pending_jobs:
-                manifest["segments"] = manifest_segments
-                manifest["by_cache_key"] = manifest_by_cache_key
-                self._save_manifest(tmp_dir, manifest)
-                return wavs
+        def _is_stopped():
+            return bool(self._cancelled or (is_cancelled and is_cancelled()))
+
+        if _is_stopped():
+            return wavs
+
+        if not pending_jobs:
+            if log:
+                print(f"[Voice Workflow] TTS synth jobs: pending=0, cache_hits={cache_hits}, workers=0, native_speed={provider_speed:.2f}")
+            manifest["segments"] = manifest_segments
+            manifest["by_cache_key"] = manifest_by_cache_key
+            self._save_manifest(tmp_dir, manifest)
+            return wavs
+        if pending_providers == {"capcut"} and capcut_batch_size > 1:
+            from collections import defaultdict
+            try:
+                from app.capcut.tts import synthesize_capcut_tts_batch
+            except ImportError:
+                from capcut.tts import synthesize_capcut_tts_batch
+
+            jobs_by_voice = defaultdict(list)
+            for job in pending_jobs:
+                jobs_by_voice[job["voice_name"]].append(job)
+
+            batches = []
+            for v_name, v_jobs in jobs_by_voice.items():
+                for i in range(0, len(v_jobs), capcut_batch_size):
+                    batches.append(v_jobs[i : i + capcut_batch_size])
+
+            batch_workers = max(1, min(capcut_workers, len(batches)))
+            if log:
+                print(
+                    f"[Voice Workflow] CapCut TTS batch mode: {len(pending_jobs)} segments into "
+                    f"{len(batches)} batches (batch_size={capcut_batch_size}, workers={batch_workers})"
+                )
+
+            def _run_batch(batch_items):
+                if _is_stopped():
+                    return []
+                normalized_batch = []
+                for item in batch_items:
+                    item_copy = dict(item)
+                    if normalizer_dictionary and hasattr(self.engine_runtime, "_normalize_text_for_tts"):
+                        item_copy["text"] = self.engine_runtime._normalize_text_for_tts(item["text"], normalizer_dictionary)
+                    normalized_batch.append(item_copy)
+                voice_target = batch_items[0]["voice_name"]
+                synthesize_capcut_tts_batch(
+                    normalized_batch,
+                    voice_id=voice_target,
+                    speed=provider_speed,
+                    tmp_dir=tmp_dir,
+                    on_progress=on_progress,
+                    is_cancelled=_is_stopped,
+                )
+                return batch_items
+
+            with ThreadPoolExecutor(max_workers=batch_workers) as executor:
+                future_map = {
+                    executor.submit(_run_batch, b): b
+                    for b in batches
+                }
+                for future in as_completed(future_map):
+                    if _is_stopped():
+                        try:
+                            executor.shutdown(wait=False, cancel_futures=True)
+                        except Exception:
+                            pass
+                        break
+                    batch = future_map[future]
+                    try:
+                        future.result()
+                        for job in batch:
+                            idx = int(job["idx"])
+                            txt = str(job["text"])
+                            seg_wav = str(job["wav_path"])
+                            if not (os.path.exists(seg_wav) and os.path.getsize(seg_wav) > 100):
+                                target_duration = max(
+                                    0.2,
+                                    float(segments[idx].get("end", 0.0)) - float(segments[idx].get("start", 0.0)),
+                                )
+                                self._write_silence_wav(seg_wav, target_duration)
+                            manifest_segments[str(job["global_idx"])] = {
+                                "cache_key": str(job["cache_key"]),
+                                "wav_path": seg_wav,
+                                "text": txt,
+                                "voice_name": job["voice_name"],
+                                "provider_speed": provider_speed,
+                                "normalizer_signature": normalizer_signature,
+                            }
+                            manifest_by_cache_key[str(job["cache_key"])] = dict(manifest_segments[str(job["global_idx"])])
+                            wavs[idx] = seg_wav
+                    except Exception as exc:
+                        print(f"[Voice Workflow] CapCut batch execution exception: {exc}")
+                        for job in batch:
+                            idx = int(job["idx"])
+                            txt = str(job["text"])
+                            seg_wav = str(job["wav_path"])
+                            if not (os.path.exists(seg_wav) and os.path.getsize(seg_wav) > 100):
+                                target_duration = max(
+                                    0.2,
+                                    float(segments[idx].get("end", 0.0)) - float(segments[idx].get("start", 0.0)),
+                                )
+                                self._write_silence_wav(seg_wav, target_duration)
+                            manifest_segments[str(job["global_idx"])] = {
+                                "cache_key": str(job["cache_key"]),
+                                "wav_path": seg_wav,
+                                "text": txt,
+                                "voice_name": job["voice_name"],
+                                "provider_speed": provider_speed,
+                                "normalizer_signature": normalizer_signature,
+                            }
+                            manifest_by_cache_key[str(job["cache_key"])] = dict(manifest_segments[str(job["global_idx"])])
+                            wavs[idx] = seg_wav
+        else:
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 future_map = {
                     executor.submit(
@@ -1352,6 +1478,12 @@ class VoiceWorkflow:
                 }
                 completed_count = 0
                 for future in as_completed(future_map):
+                    if _is_stopped():
+                        try:
+                            executor.shutdown(wait=False, cancel_futures=True)
+                        except Exception:
+                            pass
+                        break
                     job = future_map[future]
                     idx = int(job["idx"])
                     txt = str(job["text"])
@@ -1384,8 +1516,6 @@ class VoiceWorkflow:
                     }
                     manifest_by_cache_key[str(job["cache_key"])] = dict(manifest_segments[str(job["global_idx"])])
                     wavs[idx] = seg_wav
-        elif log:
-            print(f"[Voice Workflow] TTS synth jobs: pending=0, cache_hits={cache_hits}, workers=0, native_speed={provider_speed:.2f}")
 
         manifest["segments"] = manifest_segments
         manifest["by_cache_key"] = manifest_by_cache_key
@@ -1456,8 +1586,11 @@ class VoiceWorkflow:
         dubbing_style_instruction: str = "",
         source_language: str = "auto",
         on_progress: callable = None,
+        is_cancelled: callable = None,
     ):
         workflow_started = time.perf_counter()
+        if self._cancelled or (is_cancelled and is_cancelled()):
+            return {"voice_track": "", "mixed_path": "", "segments": []}
         state = self._load_state(project_state_path)
         normalizer_dictionary = self._normalizer_dictionary_from_state(state)
         normalizer_signature = self._normalizer_signature(normalizer_dictionary)
@@ -1497,6 +1630,9 @@ class VoiceWorkflow:
             else safe_voice_speed
         )
 
+        if self._cancelled or (is_cancelled and is_cancelled()):
+            return {"voice_track": "", "mixed_path": "", "segments": []}
+
         synth_started = time.perf_counter()
         wavs = self._synthesize_segment_wavs(
             segments=segments,
@@ -1506,7 +1642,10 @@ class VoiceWorkflow:
             voice_provider=voice_provider,
             on_progress=on_progress,
             normalizer_dictionary=normalizer_dictionary,
+            is_cancelled=is_cancelled,
         )
+        if self._cancelled or (is_cancelled and is_cancelled()):
+            return {"voice_track": "", "mixed_path": "", "segments": []}
         self._update_manifest_entries(
             tmp_dir=tmp_dir,
             segments=segments,
@@ -1538,6 +1677,9 @@ class VoiceWorkflow:
             "[Voice Workflow] Speed plan: "
             f"requested={safe_voice_speed:.2f}, native={provider_speed:.2f}, residual={residual_speed:.2f}"
         )
+
+        if self._cancelled or (is_cancelled and is_cancelled()):
+            return {"voice_track": "", "mixed_path": "", "segments": []}
 
         voice_track = os.path.join(tmp_dir, "voice_vi.wav")
         build_started = time.perf_counter()

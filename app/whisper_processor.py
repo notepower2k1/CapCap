@@ -126,12 +126,13 @@ def _candidate_cuda_bin_dirs() -> list[str]:
     candidates = []
     # In a PyInstaller build the canonical bundled pack lives under
     # _internal/bin. Keep it first so Faster-Whisper uses that single copy.
-    bundled_cuda_bin = bin_path("cuda12_fw")
-    if bundled_cuda_bin:
-        candidates.append(str(bundled_cuda_bin))
-    workspace_cuda_bin = _workspace_root() / "bin" / "cuda12_fw"
-    if workspace_cuda_bin.exists():
-        candidates.append(str(workspace_cuda_bin))
+    for fw_name in ("cuda12_fw", "cuda12_fw_new"):
+        bundled_cuda_bin = bin_path(fw_name)
+        if bundled_cuda_bin:
+            candidates.append(str(bundled_cuda_bin))
+        workspace_cuda_bin = _workspace_root() / "bin" / fw_name
+        if workspace_cuda_bin.exists():
+            candidates.append(str(workspace_cuda_bin))
     toolkit_root = str(os.getenv("CUDAToolkit_ROOT", "")).strip()
     if toolkit_root:
         candidates.append(os.path.join(toolkit_root, "bin"))

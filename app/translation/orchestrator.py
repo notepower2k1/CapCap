@@ -48,8 +48,13 @@ class TranslationOrchestrator:
                 try:
                     mode_label = self._describe_ai_provider(provider_type)
                     merged_style = str(style_instruction or "")
+                    env_batch_str = (os.getenv("CAPCAP_AI_TRANSLATION_MAX_SEGMENTS") or "").strip()
+                    if env_batch_str.isdigit() and int(env_batch_str) > 0:
+                        effective_batch_size = int(env_batch_str)
+                    else:
+                        effective_batch_size = min(40, polish_batch_size) if provider_type == "ollama" else polish_batch_size
                     print(
-                        f"[AI Translation] Starting translation (provider: {mode_label}, batch_size={polish_batch_size})..."
+                        f"[AI Translation] Starting translation (provider: {mode_label}, batch_size={effective_batch_size})..."
                     )
                     translated_texts, providers_used, batch_warnings = self._run_ai_batches(
                         polisher=polisher,
@@ -59,7 +64,7 @@ class TranslationOrchestrator:
                         src_lang=normalized_src,
                         target_lang=target_lang,
                         style_instruction=merged_style,
-                        polish_batch_size=polish_batch_size,
+                        polish_batch_size=effective_batch_size,
                     )
                     warnings.extend(batch_warnings)
 
@@ -162,6 +167,11 @@ class TranslationOrchestrator:
         normalized_src = self._normalize_source_language(src_lang)
 
         try:
+            env_batch_str = (os.getenv("CAPCAP_AI_TRANSLATION_MAX_SEGMENTS") or "").strip()
+            if env_batch_str.isdigit() and int(env_batch_str) > 0:
+                rewrite_batch_size = min(int(env_batch_str), len(source_texts))
+            else:
+                rewrite_batch_size = min(40, len(source_texts)) if provider_type == "ollama" else len(source_texts)
             rewritten_texts, providers_used, warnings = self._run_ai_batches(
                 polisher=polisher,
                 provider_type=provider_type,
@@ -170,7 +180,7 @@ class TranslationOrchestrator:
                 src_lang=normalized_src,
                 target_lang=target_lang,
                 style_instruction=style_instruction,
-                polish_batch_size=len(source_texts),
+                polish_batch_size=rewrite_batch_size,
             )
             if not validate_texts(rewritten_texts, len(source_segments)):
                 raise TranslationValidationError("AI rewrite returned an invalid number of segments.")
@@ -273,6 +283,7 @@ class TranslationOrchestrator:
             source_texts=source_texts,
             translated_texts=translated_texts,
             requested_max_segments=polish_batch_size,
+            provider_type=provider_type,
         )
         if not full_context_request:
             print(
@@ -298,6 +309,7 @@ class TranslationOrchestrator:
                 translated_texts=translated_texts,
                 requested_max_segments=polish_batch_size,
                 force_ordered=True,
+                provider_type=provider_type,
             )
             print(
                 "[AI Translation] Ordered batch retry: "
@@ -364,6 +376,7 @@ class TranslationOrchestrator:
         translated_texts: list[str] | None,
         requested_max_segments: int,
         force_ordered: bool = False,
+        provider_type: str = "",
     ) -> tuple[list[tuple[list[str], list[str] | None, int]], bool]:
         """Create ordered AI batches with both cue and prompt-size limits.
 
@@ -402,9 +415,25 @@ class TranslationOrchestrator:
         # Translation can expand compact CJK dialogue considerably.  This
         # leaves response room without assuming a specific destination language.
         response_tokens = max(512, math.ceil(max(source_token_estimate, draft_token_estimate) * 1.8) + (10 * len(source_texts)))
-        context_limit = max(4096, _env_int("CAPCAP_AI_TRANSLATION_CONTEXT_TOKENS", 24000))
-        output_limit = max(1024, _env_int("CAPCAP_AI_TRANSLATION_MAX_OUTPUT_TOKENS", 8192))
-        if not force_ordered and input_tokens + response_tokens <= context_limit and response_tokens <= output_limit:
+
+        is_ollama = (provider_type or "").strip().lower() == "ollama"
+        default_context_limit = 3000 if is_ollama else 24000
+        default_output_limit = 2048 if is_ollama else 8192
+        context_limit = max(2048, _env_int("CAPCAP_AI_TRANSLATION_CONTEXT_TOKENS", default_context_limit))
+        output_limit = max(1024, _env_int("CAPCAP_AI_TRANSLATION_MAX_OUTPUT_TOKENS", default_output_limit))
+        default_segments = 40 if is_ollama else 80
+        try:
+            configured_max = int(os.getenv("CAPCAP_AI_TRANSLATION_MAX_SEGMENTS", str(default_segments)))
+        except ValueError:
+            configured_max = default_segments
+        max_segments = max(1, min(int(requested_max_segments or default_segments), max(1, configured_max)))
+
+        if (
+            not force_ordered
+            and (not is_ollama or len(source_texts) <= max_segments)
+            and input_tokens + response_tokens <= context_limit
+            and response_tokens <= output_limit
+        ):
             print(
                 "[AI Translation] Full-context request: "
                 f"input~{input_tokens} tokens, output~{response_tokens} tokens."
@@ -412,11 +441,6 @@ class TranslationOrchestrator:
             return ([(list(source_texts), list(translated_texts) if translated_texts is not None else None,
                      min(output_limit, max(1024, response_tokens)))], True)
 
-        try:
-            configured_max = int(os.getenv("CAPCAP_AI_TRANSLATION_MAX_SEGMENTS", "80"))
-        except ValueError:
-            configured_max = 80
-        max_segments = max(1, min(int(requested_max_segments or 80), max(1, configured_max)))
         max_chars = _env_int("CAPCAP_AI_TRANSLATION_MAX_CHARS", 18000)
         # Draft rewriting sends both source and translated text in the prompt.
         max_chars = max(2000, max_chars // (2 if translated_texts is not None else 1))

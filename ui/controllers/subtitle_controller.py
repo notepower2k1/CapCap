@@ -81,7 +81,8 @@ class SubtitleController:
         self.gui.progress_bar.setValue(40)
         self.gui.update_project_step("transcribe", "running")
 
-        self.gui.transcription_thread = TranscriptionWorker(audio_src, model_path, lang)
+        engine_name = self.gui.get_transcription_engine()
+        self.gui.transcription_thread = TranscriptionWorker(audio_src, model_path, lang, engine_name=engine_name)
         self.gui.transcription_thread.finished.connect(self.gui.on_transcription_finished)
         self.gui.transcription_thread.start()
 
