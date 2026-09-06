@@ -16,10 +16,11 @@ CapCap hỗ trợ tạo **phụ đề tiếng Việt và tiếng Anh**, dịch n
 * Chuyển giọng nói thành văn bản với **Faster-Whisper** hoặc **SenseVoice**
 * Trích xuất phụ đề có sẵn trong video bằng **OCR**
 * Hỗ trợ nhiều dịch vụ dịch thuật qua Cloud/API, với **Google Translate** làm phương án dự phòng
-* Hỗ trợ tạo giọng đọc bằng **Piper TTS** và **Edge TTS**
-* Tùy chọn nhận diện người nói và gán giọng đọc riêng cho từng người
+* Hỗ trợ tạo giọng đọc đa dạng: **Piper TTS**, **Edge TTS**, **CapCut TTS** và **VieNeu TTS**
+* Tính năng **Voice Cloning** (nhân bản giọng nói) và thư viện mẫu giọng đọc phong phú
+* Tùy chọn nhận diện người nói (Speaker Diarization) và gán giọng đọc riêng cho từng người
+* Hỗ trợ xuất trực tiếp sang **CapCut Draft** để tiếp tục hậu kỳ và chỉnh sửa nâng cao
 * Timeline biên tập với nhiều loại lớp nội dung:
-
   * Phụ đề
   * Vùng làm mờ
   * Logo
@@ -28,6 +29,7 @@ CapCap hỗ trợ tạo **phụ đề tiếng Việt và tiếng Anh**, dịch n
   * Vùng chọn
 * Hỗ trợ khóa lớp để tránh chỉnh sửa ngoài ý muốn
 * **Fast Preview** giúp xem nhanh kết quả mà không cần xuất toàn bộ video
+* **Tùy chọn chất lượng xuất thông minh**: Hỗ trợ nhiều profile (**Low, Medium, High, Very High**) tự động tối ưu hóa mã hóa phần cứng (NVIDIA NVENC / CPU libx264) giúp tối ưu dung lượng và tốc độ render
 
 ## 🚀 Tính năng sắp tới
 

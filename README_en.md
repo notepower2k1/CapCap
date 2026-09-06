@@ -16,10 +16,11 @@ It supports creating **Vietnamese and English subtitles**, translating video con
 * Speech-to-text transcription with **Faster-Whisper** or **SenseVoice**
 * Extract existing subtitles from video using **OCR**
 * Support for multiple cloud/API translation providers, with **Google Translate** as a fallback
-* Text-to-speech with **Piper TTS** and **Edge TTS**
+* Versatile Text-to-Speech engines: **Piper TTS**, **Edge TTS**, **CapCut TTS**, and **VieNeu TTS**
+* **Voice Cloning** support with a rich library of voice samples
 * Optional speaker diarization and per-speaker voice assignment
+* Direct export to **CapCut Draft** for advanced post-production editing
 * Timeline-based editor with support for:
-
   * Subtitles
   * Blur regions
   * Logos
@@ -28,6 +29,7 @@ It supports creating **Vietnamese and English subtitles**, translating video con
   * Selection ranges
 * Layer locking to prevent accidental edits
 * **Fast Preview** for quickly reviewing edits without a full export
+* **Intelligent Export Quality Profiles**: Flexible export options (**Low, Medium, High, Very High**) with automatic hardware acceleration (NVIDIA NVENC / CPU libx264) to optimize file size and render speed
 
 ## 🚀 Upcoming Features
 
