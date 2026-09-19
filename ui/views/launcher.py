@@ -489,7 +489,7 @@ class LauncherWindow(QDialog):
         root.setSpacing(16)
 
         header = QHBoxLayout()
-        self._title_label = QLabel("CapCap V7")
+        self._title_label = QLabel("CapCap V8")
         title = self._title_label
         title.setStyleSheet("font-size: 26px; font-weight: 800; color: #ffffff;")
         self._subtitle_label = QLabel("Video Translation & Voiceover Studio")
@@ -804,7 +804,7 @@ class LauncherWindow(QDialog):
         """Refresh launcher copy and cards after an immediate language change."""
         localize_widget_tree(self)
         self.setWindowTitle(t("CapCap - Video Translator"))
-        self._title_label.setText(t("CapCap V7"))
+        self._title_label.setText(t("CapCap V8"))
         self._subtitle_label.setText(t("Video Translation & Voiceover Studio"))
         self._language_label.setText(t("Language"))
         self.cpu_btn.setText(t("CPU"))
@@ -918,10 +918,20 @@ class LauncherWindow(QDialog):
     def _on_visual_cache_done(self):
         if hasattr(self, "_prep_timeout_timer"):
             self._prep_timeout_timer.stop()
-        QTimer.singleShot(150, self._finish_accept)
+        worker = getattr(self, "_cache_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.wait(2000)
+        QTimer.singleShot(50, self._finish_accept)
 
     def _on_prep_timeout(self):
         print("[Launcher] Visual cache preparation timed out; continuing to editor.")
+        worker = getattr(self, "_cache_worker", None)
+        if worker is not None and worker.isRunning():
+            try:
+                worker.requestInterruption()
+                worker.wait(1000)
+            except Exception:
+                pass
         self._finish_accept()
 
     def _finish_accept(self):
@@ -931,8 +941,8 @@ class LauncherWindow(QDialog):
         worker = getattr(self, "_cache_worker", None)
         if worker is not None and worker.isRunning():
             try:
-                worker.terminate()
-                worker.wait(500)
+                worker.requestInterruption()
+                worker.wait(1000)
             except Exception:
                 pass
         super().closeEvent(event)
@@ -1233,7 +1243,7 @@ class LauncherWindow(QDialog):
         dialog.setMinimumSize(650, 650)
         dialog.setStyleSheet("QDialog { background: #0a101e; color: #d7e3f4; }")
         layout = QVBoxLayout(dialog)
-        title = QLabel("CapCap V7 — Tool Information", dialog)
+        title = QLabel(t("CapCap V8 — Tool Information"), dialog)
         title.setStyleSheet("font-size: 18px; font-weight: 800; color: #ffffff;")
         layout.addWidget(title)
 
@@ -1473,6 +1483,13 @@ def show_launcher(settings_or_none, project_loader=None):
     w = LauncherWindow()
     result = w.exec()
     selected_video = str(getattr(w, "selected_video", "") or "")
+    worker = getattr(w, "_cache_worker", None)
+    if worker is not None and worker.isRunning():
+        try:
+            worker.requestInterruption()
+            worker.wait(2000)
+        except Exception:
+            pass
     try:
         w.close()
         w.deleteLater()

@@ -71,8 +71,11 @@ def _build_header_bar(gui):
     logo_label = QLabel()
     logo_label.setFixedSize(34, 34)
     logo_label.setAlignment(Qt.AlignCenter)
-    if os.path.exists(getattr(gui, "logo_path", "")):
-        logo_pixmap = QPixmap(gui.logo_path)
+    raw_logo = getattr(gui, "logo_path", "")
+    png_logo = os.path.splitext(raw_logo)[0] + ".png" if raw_logo else ""
+    effective_logo = png_logo if os.path.exists(png_logo) else raw_logo
+    if os.path.exists(effective_logo):
+        logo_pixmap = QPixmap(effective_logo)
         if not logo_pixmap.isNull():
             white_logo = _tint_pixmap(logo_pixmap, QColor("#FFFFFF"))
             logo_label.setPixmap(white_logo.scaled(30, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation))

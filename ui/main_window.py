@@ -3699,12 +3699,19 @@ class VideoTranslatorGUI(QMainWindow):
         worker = TimelineWaveformWorker(
             request_signature, video_path, "", self._waveform_temp_path(), duration_s=duration_s
         )
-        worker.finished.connect(self._on_timeline_waveform_ready)
+        worker.setParent(self)
+        worker.completed.connect(self._on_timeline_waveform_ready)
+        worker.finished.connect(self._on_timeline_waveform_worker_finished)
         self._timeline_waveform_worker = worker
         worker.start()
 
-    def _on_timeline_waveform_ready(self, request_signature, waveform, duration_s, error):
+    def _on_timeline_waveform_worker_finished(self):
+        worker = getattr(self, "_timeline_waveform_worker", None)
         self._timeline_waveform_worker = None
+        if worker is not None:
+            worker.deleteLater()
+
+    def _on_timeline_waveform_ready(self, request_signature, waveform, duration_s, error):
         if request_signature != self._desired_timeline_waveform_request:
             self.refresh_timeline_waveform()
             return
@@ -16624,6 +16631,8 @@ class VideoTranslatorGUI(QMainWindow):
             "quick_preview_thread",
             "frame_preview_thread",
             "preview_thread",
+            "_timeline_waveform_worker",
+            "_timeline_thumbnail_worker",
         ]
         for name in attrs:
             worker = getattr(self, name, None)
@@ -16855,14 +16864,19 @@ def _relaunch_launcher():
     # 5. Defer media backend loading slightly so the entire UI paints first on screen
     # before MPV initializes and renders into the settled video canvas
     def _deferred_load_media():
-        new_window.ensure_media_backend_ready()
-        new_window.media_player.setSource(QUrl.fromLocalFile(video_path))
-        if hasattr(new_window, "refresh_video_dimensions"):
-            new_window.refresh_video_dimensions(video_path)
-        if hasattr(new_window, "sync_preview_audio_track_to_output"):
-            new_window.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
-        if hasattr(new_window, "_sync_preview_framing_to_player"):
-            new_window._sync_preview_framing_to_player()
+        try:
+            if not new_window.isVisible():
+                return
+            new_window.ensure_media_backend_ready()
+            new_window.media_player.setSource(QUrl.fromLocalFile(video_path))
+            if hasattr(new_window, "refresh_video_dimensions"):
+                new_window.refresh_video_dimensions(video_path)
+            if hasattr(new_window, "sync_preview_audio_track_to_output"):
+                new_window.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
+            if hasattr(new_window, "_sync_preview_framing_to_player"):
+                new_window._sync_preview_framing_to_player()
+        except Exception as exc:
+            print(f"[Preview] Deferred media load error: {exc}")
 
     QTimer.singleShot(50, _deferred_load_media)
 

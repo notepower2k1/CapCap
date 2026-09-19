@@ -107,10 +107,42 @@ class TestRuntimeBugfixes(unittest.TestCase):
         ico_path = asset_path("capcap.ico")
         self.assertTrue(os.path.exists(ico_path), "capcap.ico must exist in assets")
 
-        icon = build_contrasting_window_icon(ico_path, is_dark_bg=True)
-        self.assertIsInstance(icon, QIcon)
-        sizes = icon.availableSizes()
+        # Check dark bg (white icon for dark title bar / taskbar)
+        icon_dark_bg = build_contrasting_window_icon(ico_path, is_dark_bg=True)
+        self.assertIsInstance(icon_dark_bg, QIcon)
+        sizes = icon_dark_bg.availableSizes()
         self.assertGreaterEqual(len(sizes), 4, f"capcap.ico should have multiple sizes, got {sizes}")
+        p32 = icon_dark_bg.pixmap(32, 32).toImage()
+        white_pixels = [
+            p32.pixelColor(x, y).getRgb()
+            for y in range(32)
+            for x in range(32)
+            if p32.pixelColor(x, y).alpha() > 200
+        ]
+        self.assertTrue(len(white_pixels) > 0)
+        self.assertTrue(
+            all(r == 255 and g == 255 and b == 255 for r, g, b, a in white_pixels),
+            "Dark background icon should be tinted white for high contrast",
+        )
+
+        # Check light bg (original dark silhouette)
+        icon_light_bg = build_contrasting_window_icon(ico_path, is_dark_bg=False)
+        p32_dark = icon_light_bg.pixmap(32, 32).toImage()
+        dark_pixels = [
+            p32_dark.pixelColor(x, y).getRgb()
+            for y in range(32)
+            for x in range(32)
+            if p32_dark.pixelColor(x, y).alpha() > 200
+        ]
+        self.assertTrue(len(dark_pixels) > 0)
+        self.assertTrue(
+            any(r < 100 and g < 100 and b < 100 for r, g, b, a in dark_pixels),
+            "Light background icon should remain dark silhouette",
+        )
+
+        # Check default auto-detection
+        icon_auto = build_contrasting_window_icon(ico_path)
+        self.assertGreaterEqual(len(icon_auto.availableSizes()), 4)
 
     def test_sea_g2p_db_path_patch_and_resolution(self):
         from vieneu_tts import _patch_sea_g2p_db_path

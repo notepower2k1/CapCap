@@ -534,7 +534,9 @@ class ResourceDownloadWorker(QThread):
 
 
 class TimelineWaveformWorker(QThread):
-    finished = Signal(object, object, float, str)
+    # Do not shadow QThread.finished. The native signal is needed to retain
+    # and safely dispose of the worker only after run() has actually exited.
+    completed = Signal(object, object, float, str)
 
     def __init__(self, request_signature, video_path, audio_path, temp_audio_path, duration_s: float = 0.0):
         super().__init__()
@@ -548,12 +550,12 @@ class TimelineWaveformWorker(QThread):
         try:
             max_visual_dur = float(os.environ.get("CAPCAP_TIMELINE_VISUALS_MAX_DURATION", 3600.0))
             if self.duration_s > max_visual_dur:
-                self.finished.emit(self.request_signature, [], self.duration_s, "")
+                self.completed.emit(self.request_signature, [], self.duration_s, "")
                 return
 
             source_media = (self.audio_path if self.audio_path and os.path.exists(self.audio_path) else "") or self.video_path
             if not source_media or not os.path.exists(source_media):
-                self.finished.emit(self.request_signature, [], 0.0, "")
+                self.completed.emit(self.request_signature, [], 0.0, "")
                 return
 
             # Try native in-process streaming waveform first
@@ -561,12 +563,12 @@ class TimelineWaveformWorker(QThread):
                 from app.media_decode import build_waveform, has_audio_stream
                 audio_status = has_audio_stream(source_media)
                 if audio_status is False:
-                    self.finished.emit(self.request_signature, [], float(self.duration_s), "")
+                    self.completed.emit(self.request_signature, [], float(self.duration_s), "")
                     return
                 if audio_status is True:
                     wf, dur = build_waveform(source_media)
                     dur_s = max(dur, self.duration_s)
-                    self.finished.emit(self.request_signature, wf or [], dur_s, "")
+                    self.completed.emit(self.request_signature, wf or [], dur_s, "")
                     return
             except Exception:
                 pass
@@ -604,7 +606,7 @@ class TimelineWaveformWorker(QThread):
                     audio_path = temp_audio
 
             if not audio_path or not os.path.exists(audio_path):
-                self.finished.emit(self.request_signature, [], 0.0, "")
+                self.completed.emit(self.request_signature, [], 0.0, "")
                 return
 
             from audio_mixer import _require_pydub
@@ -616,19 +618,19 @@ class TimelineWaveformWorker(QThread):
             audio = AudioSegment.from_file(audio_path).set_channels(1)
             duration_s = max(0.0, len(audio) / 1000.0)
             if duration_s > max_visual_dur:
-                self.finished.emit(self.request_signature, [], duration_s, "")
+                self.completed.emit(self.request_signature, [], duration_s, "")
                 return
 
             samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
 
             if not samples.size:
-                self.finished.emit(self.request_signature, [], duration_s, "")
+                self.completed.emit(self.request_signature, [], duration_s, "")
                 return
 
             samples = samples.astype(np.float32)
             peak = float(np.max(np.abs(samples))) if samples.size else 0.0
             if peak <= 0.0:
-                self.finished.emit(self.request_signature, [], duration_s, "")
+                self.completed.emit(self.request_signature, [], duration_s, "")
                 return
             samples /= max(1.0, peak)
 
@@ -652,10 +654,10 @@ class TimelineWaveformWorker(QThread):
                 value = max(peak_value, rms_value * 1.15)
                 waveform.append(min(1.0, max(0.03, value ** 0.85)))
 
-            self.finished.emit(self.request_signature, waveform, duration_s, "")
+            self.completed.emit(self.request_signature, waveform, duration_s, "")
         except Exception as exc:
             details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
-            self.finished.emit(self.request_signature, [], 0.0, details or str(exc))
+            self.completed.emit(self.request_signature, [], 0.0, details or str(exc))
 
 
 class TimelineThumbnailWorker(QThread):

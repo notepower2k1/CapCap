@@ -755,3 +755,9 @@ class PreviewAudioEngine(QObject):
             self._worker_thread.quit()
             self._worker_thread.wait(2000)
 
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+

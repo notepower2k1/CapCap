@@ -164,37 +164,62 @@ def apply_windows_dark_title_bar(widget) -> bool:
         return False
 
 
-def build_contrasting_window_icon(image_path: str, is_dark_bg: bool = True):
-    """Generate a multi-resolution QIcon that contrasts with the title bar background.
+def is_windows_system_dark_theme() -> bool:
+    """Check whether Windows system/taskbar theme is currently in dark mode."""
+    if sys.platform != "win32":
+        return True
+    try:
+        import winreg
 
-    When the title bar is dark, tints the dark silhouette logo to crisp white (#FFFFFF)
-    so it stands out clearly on the window title bar, taskbar, and Alt-Tab switcher.
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        )
+        val, _ = winreg.QueryValueEx(key, "SystemUsesLightTheme")
+        return val == 0
+    except Exception:
+        return True
+
+
+def build_contrasting_window_icon(image_path: str, is_dark_bg: bool = None):
+    """Generate a multi-resolution QIcon that contrasts with the title bar and taskbar background.
+
+    When the background is dark (default on Windows dark mode / dark title bar),
+    tints the dark silhouette logo to crisp white (#FFFFFF) so it stands out clearly
+    on the window title bar, Windows taskbar, and Alt-Tab switcher.
     """
     from PySide6.QtCore import Qt
-    from PySide6.QtGui import QIcon, QImage, QPainter, QPixmap
+    from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 
-    if not os.path.exists(image_path):
+    if not image_path or not os.path.exists(image_path):
         return QIcon()
-    if str(image_path).lower().endswith(".ico"):
+
+    if is_dark_bg is None:
+        is_dark_bg = is_windows_system_dark_theme()
+
+    # Prefer PNG sibling if available for clean vector/raster downscaling
+    png_candidate = os.path.splitext(image_path)[0] + ".png"
+    if os.path.exists(png_candidate):
+        master_pixmap = QPixmap(png_candidate)
+    elif str(image_path).lower().endswith(".ico"):
+        master_pixmap = QIcon(image_path).pixmap(256, 256)
+    else:
+        master_pixmap = QPixmap(image_path)
+
+    if master_pixmap.isNull():
         return QIcon(image_path)
-    pixmap = QPixmap(image_path)
-    if pixmap.isNull():
-        return QIcon()
 
     if is_dark_bg:
-        img = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
-        tinted = QImage(img.size(), QImage.Format_ARGB32)
+        tinted = QPixmap(master_pixmap.size())
         tinted.fill(Qt.transparent)
-        for y in range(img.height()):
-            for x in range(img.width()):
-                pixel = img.pixelColor(x, y)
-                alpha = pixel.alpha()
-                if alpha > 0:
-                    pixel.setRgb(255, 255, 255, alpha)
-                    tinted.setPixelColor(x, y, pixel)
-        base_pixmap = QPixmap.fromImage(tinted)
+        painter = QPainter(tinted)
+        painter.drawPixmap(0, 0, master_pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(tinted.rect(), QColor(255, 255, 255))
+        painter.end()
+        base_pixmap = tinted
     else:
-        base_pixmap = pixmap
+        base_pixmap = master_pixmap
 
     icon = QIcon()
     for size in (16, 20, 24, 32, 48, 64, 128, 256):

@@ -252,14 +252,19 @@ def launch_editor_for_video(target_video: str, runtime_logs=None) -> VideoTransl
     # 5. Defer media backend loading slightly so the entire UI paints first on screen
     # before MPV initializes and renders into the settled video canvas
     def _deferred_load_media():
-        win.ensure_media_backend_ready()
-        win.media_player.setSource(QUrl.fromLocalFile(target_video))
-        if hasattr(win, "refresh_video_dimensions"):
-            win.refresh_video_dimensions(target_video)
-        if hasattr(win, "sync_preview_audio_track_to_output"):
-            win.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
-        if hasattr(win, "_sync_preview_framing_to_player"):
-            win._sync_preview_framing_to_player()
+        try:
+            if not win.isVisible():
+                return
+            win.ensure_media_backend_ready()
+            win.media_player.setSource(QUrl.fromLocalFile(target_video))
+            if hasattr(win, "refresh_video_dimensions"):
+                win.refresh_video_dimensions(target_video)
+            if hasattr(win, "sync_preview_audio_track_to_output"):
+                win.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
+            if hasattr(win, "_sync_preview_framing_to_player"):
+                win._sync_preview_framing_to_player()
+        except Exception as exc:
+            print(f"[Preview] Deferred media load error: {exc}")
 
     QTimer.singleShot(50, _deferred_load_media)
 
@@ -276,12 +281,13 @@ if __name__ == "__main__":
 
     from PySide6.QtGui import QIcon
     from runtime_paths import asset_path
+    from utils.display_utils import build_contrasting_window_icon
 
     app_icon_path = asset_path("capcap.ico")
     if not os.path.exists(app_icon_path):
         app_icon_path = asset_path("capcap.png")
     if os.path.exists(app_icon_path):
-        app.setWindowIcon(QIcon(app_icon_path))
+        app.setWindowIcon(build_contrasting_window_icon(app_icon_path))
 
     from views.launcher import show_launcher, LauncherWindow
 

@@ -210,7 +210,7 @@ class TestTimelineVisuals(unittest.TestCase):
         )
 
         results = []
-        worker.finished.connect(lambda sig, wf, dur, err: results.append((sig, wf, dur, err)))
+        worker.completed.connect(lambda sig, wf, dur, err: results.append((sig, wf, dur, err)))
 
         with patch("subprocess.Popen", side_effect=AssertionError("CLI invoked")), \
              patch("subprocess.run", side_effect=AssertionError("CLI invoked")):
@@ -392,7 +392,7 @@ class TestTimelineVisuals(unittest.TestCase):
         )
 
         results = []
-        worker.finished.connect(lambda sig, wf, dur, err: results.append((sig, wf, dur, err)))
+        worker.completed.connect(lambda sig, wf, dur, err: results.append((sig, wf, dur, err)))
 
         with patch("subprocess.Popen", side_effect=AssertionError("CLI invoked")), \
              patch("subprocess.run", side_effect=AssertionError("CLI invoked")):
@@ -575,6 +575,35 @@ class TestTimelineVisuals(unittest.TestCase):
         self.assertEqual(len(completed_events), 1)
         self.assertEqual(completed_events[0][0], "req_cycle")
         self.assertEqual(len(finished_events), 1, "Native QThread.finished must be emitted")
+
+    def test_timeline_waveform_worker_native_finished_lifecycle(self):
+        """Ensure TimelineWaveformWorker completed is separate from native QThread.finished."""
+        from ui.worker_adapters.processing_workers import TimelineWaveformWorker
+
+        audio_path = self._create_synthetic_audio(duration_s=1.0)
+        worker = TimelineWaveformWorker(
+            "req_wf_cycle",
+            "",
+            audio_path,
+            os.path.join(self.temp_dir, "temp_wf.wav"),
+            1.0,
+        )
+
+        completed_events = []
+        finished_events = []
+
+        worker.completed.connect(lambda sig, wf, dur, err: completed_events.append((sig, len(wf), dur, err)))
+        worker.finished.connect(lambda: finished_events.append("finished"))
+
+        # Run worker in real QThread execution
+        worker.start()
+        worker.wait(5000)
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+
+        self.assertEqual(len(completed_events), 1)
+        self.assertEqual(completed_events[0][0], "req_wf_cycle")
+        self.assertEqual(len(finished_events), 1, "Native QThread.finished must be emitted for waveform worker")
 
 
 if __name__ == "__main__":
