@@ -45,8 +45,20 @@ if __name__ == "__main__" and ("--worker-server" in sys.argv or os.getenv("CAPCA
     remote_api_server_main()
     raise SystemExit(0)
 
-if __name__ == "__main__" and not _acquire_single_instance():
-    raise SystemExit(0)
+def _set_windows_app_user_model_id():
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("notepower2k1.CapCap.App")
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    _set_windows_app_user_model_id()
+    if not _acquire_single_instance():
+        raise SystemExit(0)
 
 from main_window import VideoTranslatorGUI
 from utils.display_utils import apply_application_dark_theme
@@ -261,6 +273,15 @@ if __name__ == "__main__":
     runtime_logs = _capture_runtime_output()
     app = QApplication(sys.argv)
     apply_application_dark_theme(app)
+
+    from PySide6.QtGui import QIcon
+    from runtime_paths import asset_path
+
+    app_icon_path = asset_path("capcap.ico")
+    if not os.path.exists(app_icon_path):
+        app_icon_path = asset_path("capcap.png")
+    if os.path.exists(app_icon_path):
+        app.setWindowIcon(QIcon(app_icon_path))
 
     from views.launcher import show_launcher, LauncherWindow
 

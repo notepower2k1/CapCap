@@ -455,7 +455,8 @@ class LauncherWindow(QDialog):
 
         from runtime_paths import asset_path
         from utils.display_utils import build_contrasting_window_icon
-        logo = asset_path("capcap.png")
+        ico = asset_path("capcap.ico")
+        logo = ico if os.path.exists(ico) else asset_path("capcap.png")
         if os.path.exists(logo):
             self.setWindowIcon(build_contrasting_window_icon(logo, is_dark_bg=True))
 

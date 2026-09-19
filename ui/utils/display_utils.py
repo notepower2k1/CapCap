@@ -175,6 +175,8 @@ def build_contrasting_window_icon(image_path: str, is_dark_bg: bool = True):
 
     if not os.path.exists(image_path):
         return QIcon()
+    if str(image_path).lower().endswith(".ico"):
+        return QIcon(image_path)
     pixmap = QPixmap(image_path)
     if pixmap.isNull():
         return QIcon()

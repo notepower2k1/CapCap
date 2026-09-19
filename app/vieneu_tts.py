@@ -3,11 +3,90 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import unicodedata
 from pathlib import Path
 
-from runtime_paths import app_path, asset_path, bin_path, models_path, temp_path, subprocess_text_kwargs
+from runtime_paths import (
+    app_path,
+    asset_path,
+    bin_path,
+    bundle_root,
+    models_path,
+    temp_path,
+    workspace_root,
+    subprocess_text_kwargs,
+)
+
+
+def _patch_sea_g2p_db_path() -> bool:
+    """Patch sea_g2p.g2p.G2P to locate sea_g2p.bin in frozen PyInstaller environments.
+
+    In frozen environments (onedir), pure Python files reside in base_library.zip,
+    making os.path.dirname(__file__) point inside the zip archive where native C/Rust
+    file opening fails with OSError: The system cannot find the file specified.
+    """
+    try:
+        import sea_g2p.g2p
+        from sea_g2p.sea_g2p_rs import G2P as _RustG2P
+
+        if getattr(sea_g2p.g2p.G2P, "_capcap_patched", False):
+            return True
+
+        def _resolve_sea_g2p_bin(passed_db=None):
+            candidates = []
+            if passed_db:
+                candidates.append(passed_db)
+
+            # PyInstaller bundle root (_internal or _MEIPASS)
+            candidates.append(os.path.join(bundle_root(), "sea_g2p", "sea_g2p.bin"))
+            candidates.append(os.path.join(bundle_root(), "_internal", "sea_g2p", "sea_g2p.bin"))
+            candidates.append(os.path.join(workspace_root(), "sea_g2p", "sea_g2p.bin"))
+            candidates.append(os.path.join(workspace_root(), "_internal", "sea_g2p", "sea_g2p.bin"))
+
+            meipass = getattr(sys, "_MEIPASS", "")
+            if meipass:
+                candidates.append(os.path.join(str(meipass), "sea_g2p", "sea_g2p.bin"))
+                candidates.append(os.path.join(str(meipass), "_internal", "sea_g2p", "sea_g2p.bin"))
+
+            # Development / virtualenv package location
+            try:
+                import sea_g2p
+                if hasattr(sea_g2p, "__file__") and sea_g2p.__file__:
+                    candidates.append(os.path.join(os.path.dirname(sea_g2p.__file__), "sea_g2p.bin"))
+            except Exception:
+                pass
+
+            try:
+                if hasattr(sea_g2p.g2p, "__file__") and sea_g2p.g2p.__file__:
+                    candidates.append(os.path.join(os.path.dirname(sea_g2p.g2p.__file__), "sea_g2p.bin"))
+            except Exception:
+                pass
+
+            for candidate in candidates:
+                if candidate and os.path.isfile(candidate):
+                    return candidate
+            return None
+
+        def patched_init(self, lang: str = "vi", db_path: str = None):
+            if lang not in sea_g2p.g2p.SUPPORTED_LANGS:
+                raise ValueError(f"lang must be one of {sea_g2p.g2p.SUPPORTED_LANGS}, got {lang!r}")
+            self.lang = lang
+            resolved = _resolve_sea_g2p_bin(db_path)
+            if not resolved:
+                resolved = os.path.join(os.path.dirname(sea_g2p.g2p.__file__), "sea_g2p.bin")
+            self._rust_engine = _RustG2P(resolved)
+            sea_g2p.g2p.logger.debug(f"Initialized Rust G2P engine with {resolved}")
+
+        sea_g2p.g2p.G2P.__init__ = patched_init
+        sea_g2p.g2p.G2P._capcap_patched = True
+        return True
+    except Exception:
+        return False
+
+
+_patch_sea_g2p_db_path()
 
 _VIENEU_MODEL = None
 _VIENEU_MODEL_LOCK = threading.Lock()
@@ -122,16 +201,12 @@ def setup_vieneu_hf_env():
         return
     local_vieneu = models_path("vieneu")
     local_hf = models_path("huggingface")
-    shared_hf = r"D:\CodingTime\TTS_Resource\huggingface"
     local_vieneu_hub = os.path.join(local_vieneu, "hub", "models--pnnbao-ump--VieNeu-TTS-v3-Turbo")
     local_hf_hub = os.path.join(local_hf, "hub", "models--pnnbao-ump--VieNeu-TTS-v3-Turbo")
-    shared_hub = os.path.join(shared_hf, "hub", "models--pnnbao-ump--VieNeu-TTS-v3-Turbo")
     if os.path.isdir(local_vieneu_hub) or os.path.isdir(os.path.join(local_vieneu, "models--pnnbao-ump--VieNeu-TTS-v3-Turbo")):
         os.environ["HF_HOME"] = local_vieneu
     elif os.path.isdir(local_hf_hub):
         os.environ["HF_HOME"] = local_hf
-    elif os.path.isdir(shared_hub):
-        os.environ["HF_HOME"] = shared_hf
     elif os.path.isdir(local_vieneu):
         os.environ["HF_HOME"] = local_vieneu
     else:
@@ -157,6 +232,7 @@ def get_cached_vieneu_model(on_progress: callable = None):
         if _VIENEU_MODEL is None:
             if on_progress:
                 on_progress("Loading VieNeu-TTS v3 Turbo (ONNX)...")
+            _patch_sea_g2p_db_path()
             setup_vieneu_hf_env()
             from vieneu import Vieneu
             precision = os.getenv("CAPCAP_VIENEU_PRECISION", "int8").strip().lower()
@@ -408,6 +484,7 @@ def vieneu_synthesize_wav_16k_mono(
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(wav_path)), exist_ok=True)
 
+    _patch_sea_g2p_db_path()
     model = get_cached_vieneu_model(on_progress=on_progress)
 
     clean_voice = str(voice_id or "").strip()

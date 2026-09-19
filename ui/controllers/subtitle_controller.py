@@ -213,11 +213,17 @@ class TranslationPromptDialog(QDialog):
 
     def _on_preset_changed(self):
         preset_id = self.preset_combo.currentData() or "general_default"
-        rendered = render_preset_prompt(
-            preset_id,
-            source_lang=self.src_lang,
-            target_lang=self.target_lang,
-        )
+        try:
+            rendered = render_preset_prompt(
+                preset_id,
+                source_lang=self.src_lang,
+                target_lang=self.target_lang,
+            )
+        except Exception as exc:
+            rendered = (
+                "You are an expert subtitle translator. Translate the given subtitles accurately, "
+                f"naturally, and concisely into {self.target_lang}."
+            )
         self._rendered_preset_text = rendered.strip()
         self.prompt_edit.setPlainText(rendered)
 
@@ -895,15 +901,20 @@ class SubtitleController:
         chosen_review_context = False
 
         if show_prompt_dialog:
-            dialog = TranslationPromptDialog(self.gui, src_lang=src_lang, target_lang=target_lang)
-            if dialog.exec() != QDialog.Accepted:
-                self.gui.log("[Translation] Translation canceled by user.")
-                return
-            chosen_provider = dialog.selected_provider
-            chosen_batch_size = getattr(dialog, "selected_batch_size", None)
-            chosen_prompt = dialog.selected_prompt
-            chosen_auto_context = getattr(dialog, "selected_auto_context", True)
-            chosen_review_context = getattr(dialog, "selected_review_context", False)
+            try:
+                dialog = TranslationPromptDialog(self.gui, src_lang=src_lang, target_lang=target_lang)
+                if dialog.exec() != QDialog.Accepted:
+                    self.gui.log("[Translation] Translation canceled by user.")
+                    return
+                chosen_provider = dialog.selected_provider
+                chosen_batch_size = getattr(dialog, "selected_batch_size", None)
+                chosen_prompt = dialog.selected_prompt
+                chosen_auto_context = getattr(dialog, "selected_auto_context", True)
+                chosen_review_context = getattr(dialog, "selected_review_context", False)
+            except Exception as exc:
+                self.gui.log(f"[Translation] Warning: Could not open translation settings dialog ({exc}). Using defaults.")
+                import traceback
+                traceback.print_exc()
         else:
             settings = getattr(self.gui, "settings", None) or QSettings("CapCap", "CapCap")
             saved_auto = settings.value("auto_translation_context", os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1"))

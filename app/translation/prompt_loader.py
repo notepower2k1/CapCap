@@ -13,7 +13,46 @@ class PromptTemplateError(RuntimeError):
 
 
 def prompt_directory() -> Path:
-    return Path(__file__).resolve().parent / "prompts"
+    candidates: list[Path] = []
+    try:
+        from runtime_paths import app_path, bundle_root, workspace_root
+
+        candidates.extend(
+            [
+                Path(app_path("translation", "prompts")),
+                Path(bundle_root()) / "app" / "translation" / "prompts",
+                Path(bundle_root()) / "translation" / "prompts",
+                Path(workspace_root()) / "app" / "translation" / "prompts",
+            ]
+        )
+    except Exception:
+        try:
+            from app.runtime_paths import app_path, bundle_root, workspace_root
+
+            candidates.extend(
+                [
+                    Path(app_path("translation", "prompts")),
+                    Path(bundle_root()) / "app" / "translation" / "prompts",
+                    Path(bundle_root()) / "translation" / "prompts",
+                    Path(workspace_root()) / "app" / "translation" / "prompts",
+                ]
+            )
+        except Exception:
+            pass
+
+    this_dir = Path(__file__).resolve().parent
+    candidates.extend(
+        [
+            this_dir / "prompts",
+            this_dir.parent / "translation" / "prompts",
+            this_dir.parent / "app" / "translation" / "prompts",
+        ]
+    )
+
+    for c in candidates:
+        if c.is_dir():
+            return c
+    return this_dir / "prompts"
 
 
 def load_prompt(template_name: str) -> str:
@@ -93,7 +132,14 @@ def render_preset_prompt(preset_id: str, **values) -> str:
     if not full_path.exists():
         full_path = prompt_directory() / "subtitle_translation.system.md"
 
-    template = full_path.read_text(encoding="utf-8").strip()
+    if full_path.exists():
+        template = full_path.read_text(encoding="utf-8").strip()
+    else:
+        template = (
+            "You are an expert subtitle translator. Translate the given subtitles accurately, "
+            "naturally, and concisely into {{target_lang}} while preserving original meaning, tone, "
+            "and subtitle line numbers. {{style_clause}}\n{{context_guidance}}"
+        )
     merged_values = {
         "source_lang": "auto",
         "target_lang": "vi",

@@ -225,7 +225,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.settings = QSettings("CapCap", "VideoTranslatorGUI")
         apply_application_dark_theme(self)
         self.setAcceptDrops(True)
-        self.logo_path = asset_path("capcap.png")
+        ico_candidate = asset_path("capcap.ico")
+        self.logo_path = ico_candidate if os.path.exists(ico_candidate) else asset_path("capcap.png")
         if os.path.exists(self.logo_path):
             self.setWindowIcon(build_contrasting_window_icon(self.logo_path, is_dark_bg=True))
         

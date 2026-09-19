@@ -23,12 +23,16 @@ VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 ISS_SCRIPT_PATH = INSTALLER_DIR / "CapCap_Setup.iss"
 DIST_APP_DIR = ROOT_DIR / "dist" / "CapCap"
 
+local_appdata = os.environ.get("LOCALAPPDATA", "")
 INNO_SETUP_SEARCH_PATHS = [
+    Path(local_appdata) / "Programs/Inno Setup 6/ISCC.exe" if local_appdata else None,
+    Path(local_appdata) / "Programs/Inno Setup 5/ISCC.exe" if local_appdata else None,
     Path("C:/Program Files (x86)/Inno Setup 6/ISCC.exe"),
     Path("C:/Program Files/Inno Setup 6/ISCC.exe"),
     Path("C:/Program Files (x86)/Inno Setup 5/ISCC.exe"),
     Path("C:/Program Files/Inno Setup 5/ISCC.exe"),
 ]
+INNO_SETUP_SEARCH_PATHS = [p for p in INNO_SETUP_SEARCH_PATHS if p is not None]
 
 
 def ensure_vc_redist() -> bool:
@@ -63,18 +67,33 @@ def find_iscc() -> Path | None:
     return None
 
 
+def build_app(windowed: bool = True) -> bool:
+    spec_file = "CapCap_gui.spec" if windowed else "CapCap.spec"
+    print(f"\n[*] Đang đóng gói ứng dụng bằng PyInstaller ({spec_file})...")
+    python_exe = sys.executable
+    cmd = [python_exe, "-m", "PyInstaller", "--clean", "-y", str(ROOT_DIR / spec_file)]
+    res = subprocess.run(cmd, cwd=str(ROOT_DIR))
+    if res.returncode != 0:
+        print(f"\n[Error] PyInstaller thất bại với mã lỗi {res.returncode}")
+        return False
+    print("\n[OK] Đóng gói ứng dụng thành công!")
+    return True
+
+
 def build_installer() -> None:
     print("=" * 60)
     print("  CapCap Installer Builder (Inno Setup)")
     print("=" * 60)
 
-    # 1. Kiểm tra dist/CapCap
-    if not DIST_APP_DIR.exists() or not (DIST_APP_DIR / "CapCap.exe").exists():
-        print(f"[Warning] Thư mục ứng dụng {DIST_APP_DIR} chưa có file CapCap.exe!")
-        print("  Hãy chạy PyInstaller trước để tạo thư mục dist/CapCap:")
-        print("  pyinstaller --clean CapCap.spec")
-        proceed = input("\nBạn có muốn tiếp tục không? (y/n): ").strip().lower()
-        if proceed != "y":
+    should_build_app = "--build-app" in sys.argv or "-b" in sys.argv
+    is_windowed = "--console" not in sys.argv
+
+    # 1. Kiểm tra hoặc đóng gói dist/CapCap
+    app_exe = DIST_APP_DIR / "CapCap.exe"
+    if should_build_app or not app_exe.exists():
+        if not app_exe.exists():
+            print(f"[*] Thư mục ứng dụng {DIST_APP_DIR} chưa có file CapCap.exe. Tự động đóng gói...")
+        if not build_app(windowed=is_windowed):
             return
 
     # 2. Đảm bảo có vc_redist.x64.exe

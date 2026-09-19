@@ -6,6 +6,7 @@ import glob as _glob
 import faster_whisper
 import rapidocr
 import vieneu
+import sea_g2p
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 project_root = Path(r"D:\CodingTime\CapCap")
@@ -22,6 +23,7 @@ datas = [
     (str(project_root / "app" / "voice_download_catalog.json"), "app"),
     (str(project_root / "app" / "voice_preview_catalog.release.json"), "app"),
     (str(project_root / "app" / "translation" / "prompts"), "app/translation/prompts"),
+    (str(project_root / "app" / "translation" / "prompts"), "translation/prompts"),
     (str(project_root / "models" / "piper" / "ngochuyen.onnx"), "models/piper"),
     # piper-new uses one shared config/voice manifest for all Vietnamese
     # models; PiperVoice receives this config explicitly at runtime.
@@ -47,7 +49,8 @@ datas = [
     (os.path.join(os.path.dirname(rapidocr.__file__), "config.yaml"), "rapidocr"),
     (os.path.join(os.path.dirname(rapidocr.__file__), "default_models.yaml"), "rapidocr"),
     (os.path.join(os.path.dirname(vieneu.__file__), "assets"), "vieneu/assets"),
-    (str(project_root / "models" / "vieneu"), "models/vieneu"),
+    (os.path.join(os.path.dirname(sea_g2p.__file__), "sea_g2p.bin"), "sea_g2p"),
+    (str(project_root / "models" / "vieneu" / "README.txt"), "models/vieneu"),
     (str(project_root / "ui" / "views" / "editor"), "views/editor"),
 ]
 datas += collect_data_files("piper")
@@ -57,6 +60,7 @@ datas += collect_data_files("piper")
 datas += collect_data_files("vietnormalizer")
 datas += collect_data_files("vieneu")
 datas += collect_data_files("vieneu_utils")
+datas += collect_data_files("sea_g2p")
 datas += collect_data_files("av")
 
 # RapidOCR selects its ONNX implementation through runtime configuration.
@@ -65,7 +69,11 @@ datas += collect_data_files("av")
 # unavailable. Collect the package's submodules, while leaving the unused
 # Torch backend excluded by the existing package exclusions below.
 rapidocr_hiddenimports = collect_submodules("rapidocr")
-vieneu_hiddenimports = collect_submodules("vieneu") + collect_submodules("vieneu_utils")
+vieneu_hiddenimports = (
+    collect_submodules("vieneu")
+    + collect_submodules("vieneu_utils")
+    + collect_submodules("sea_g2p")
+)
 av_hiddenimports = collect_submodules("av")
 
 # Exclude heavy packages we don't use

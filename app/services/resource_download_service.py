@@ -447,20 +447,16 @@ class ResourceDownloadService:
 
     def _is_vieneu_installed(self) -> bool:
         """Check whether both VieNeu-TTS v3 Turbo and MOSS audio tokenizer are present."""
+        ws = getattr(self, "workspace_root", None) or join_root()
         candidates = [
-            join_root("models", "vieneu", "hub"),
-            models_path("vieneu", "hub"),
-            join_root("models", "vieneu"),
-            models_path("vieneu"),
-            join_root("models", "huggingface", "hub"),
-            models_path("huggingface", "hub"),
+            os.path.join(ws, "models", "vieneu", "hub"),
+            os.path.join(ws, "models", "vieneu"),
+            os.path.join(ws, "models", "huggingface", "hub"),
         ]
         hf_home = os.environ.get("HF_HOME", "").strip()
         if hf_home:
             candidates.append(os.path.join(hf_home, "hub"))
             candidates.append(hf_home)
-        candidates.append(r"D:\CodingTime\TTS_Resource\huggingface\hub")
-        candidates.append(os.path.join(str(Path.home()), ".cache", "huggingface", "hub"))
 
         for hub in candidates:
             if not os.path.isdir(hub):
@@ -472,8 +468,14 @@ class ResourceDownloadService:
                     tok_snaps = [d for d in os.listdir(tok_dir) if os.path.isdir(os.path.join(tok_dir, d))]
                     v3_snaps = [d for d in os.listdir(v3_dir) if os.path.isdir(os.path.join(v3_dir, d))]
                     if tok_snaps and v3_snaps:
-                        has_tok = any(os.listdir(os.path.join(tok_dir, s)) for s in tok_snaps)
-                        has_v3 = any(os.listdir(os.path.join(v3_dir, s)) for s in v3_snaps)
+                        has_tok = any(
+                            any(f.endswith((".onnx", ".bin", ".json")) for f in os.listdir(os.path.join(tok_dir, s)))
+                            for s in tok_snaps
+                        )
+                        has_v3 = any(
+                            any(f.endswith((".onnx", ".json")) or os.path.isdir(os.path.join(v3_dir, s, f)) for f in os.listdir(os.path.join(v3_dir, s)))
+                            for s in v3_snaps
+                        )
                         if has_tok and has_v3:
                             return True
                 except OSError:
@@ -858,7 +860,7 @@ class ResourceDownloadService:
                 "name": "VieNeu-TTS Models (v3 Turbo ONNX)",
                 "kind": "voice",
                 "status": "installed" if self.is_resource_installed("voice:vieneu") else "missing",
-                "target_dir": join_root("models", "vieneu"),
+                "target_dir": os.path.join(self.workspace_root, "models", "vieneu"),
                 "download_url": "https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo",
                 "expected_filename": "VieNeu-TTS-v3-Turbo + MOSS-Audio-Tokenizer-Nano-ONNX",
                 "auto_download_supported": True,
@@ -1148,7 +1150,7 @@ class ResourceDownloadService:
                 "huggingface_hub is not installed. Run `pip install huggingface_hub` first."
             ) from exc
 
-        target_dir = join_root("models", "vieneu")
+        target_dir = os.path.join(self.workspace_root, "models", "vieneu")
         os.makedirs(target_dir, exist_ok=True)
         target_hub = os.path.join(target_dir, "hub")
         os.makedirs(target_hub, exist_ok=True)

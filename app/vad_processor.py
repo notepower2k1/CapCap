@@ -26,8 +26,8 @@ def _ensure_vad():
         config = sherpa_onnx.VadModelConfig()
         config.silero_vad.model = model
         config.silero_vad.threshold = 0.5
-        config.silero_vad.min_silence_duration = 0.02
-        config.silero_vad.min_speech_duration = 0.02
+        config.silero_vad.min_silence_duration = 0.28
+        config.silero_vad.min_speech_duration = 0.10
         config.sample_rate = 16000
         config.num_threads = 1
 
