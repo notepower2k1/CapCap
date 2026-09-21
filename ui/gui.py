@@ -77,11 +77,8 @@ class _RuntimeLogCollector:
         # session log beside the executable so startup failures are not
         # silently lost before the in-app Logs panel is available.
         try:
-            root = (
-                os.path.dirname(os.path.abspath(sys.executable))
-                if getattr(sys, "frozen", False)
-                else os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-            )
+            from runtime_paths import workspace_root
+            root = workspace_root()
             log_dir = os.path.join(root, "temp")
             os.makedirs(log_dir, exist_ok=True)
             self._file_path = os.path.join(log_dir, "capcap_runtime.log")
@@ -175,6 +172,8 @@ def _capture_runtime_output():
     return collector
 
 
+
+
 def _app_root() -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
@@ -182,25 +181,35 @@ def _app_root() -> str:
 
 
 def _bootstrap_env(app_root: str) -> None:
-    env_path = os.path.join(app_root, ".env")
+    from runtime_paths import workspace_root
+    env_dir = workspace_root()
+    env_path = os.path.join(env_dir, ".env")
     env_example_path = os.path.join(app_root, ".env_example")
 
     if not os.path.exists(env_path) and os.path.exists(env_example_path):
-        shutil.copyfile(env_example_path, env_path)
+        try:
+            shutil.copyfile(env_example_path, env_path)
+        except OSError:
+            pass
 
     if not os.path.exists(env_path):
-        return
+        env_path = os.path.join(app_root, ".env")
+        if not os.path.exists(env_path):
+            return
 
-    with open(env_path, "r", encoding="utf-8") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            if not key:
-                continue
-            os.environ.setdefault(key, value.strip())
+    try:
+        with open(env_path, "r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if not key:
+                    continue
+                os.environ.setdefault(key, value.strip())
+    except OSError:
+        pass
 
 
 try:

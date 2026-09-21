@@ -36,6 +36,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+[Dirs]
+Name: "{app}"; Permissions: users-modify
+
 [Files]
 ; Bo source ung dung tu PyInstaller dist
 Source: "..\dist\CapCap\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

@@ -294,6 +294,24 @@ class TestRuntimeBugfixes(unittest.TestCase):
         import onnxruntime
         self.assertTrue(hasattr(onnxruntime, "InferenceSession"))
 
+    def test_workspace_root_permissions_fallback(self):
+        import tempfile
+        from unittest.mock import patch
+        from runtime_paths import _is_dir_writable, workspace_root
+
+        # 1. Test _is_dir_writable
+        with tempfile.TemporaryDirectory() as td:
+            self.assertTrue(_is_dir_writable(td))
+        self.assertFalse(_is_dir_writable(r"C:\Windows\System32\NonExistentDirectory_12345"))
+
+        # 2. Test frozen mode with read-only exe dir (e.g. C:\Program Files\CapCap)
+        with patch("sys.frozen", True, create=True), \
+             patch("sys.executable", r"C:\Program Files\CapCap\CapCap.exe"), \
+             patch("runtime_paths._is_dir_writable", return_value=False):
+            ws = workspace_root()
+            self.assertNotIn("Program Files", ws)
+            self.assertTrue("CapCap" in ws)
+
 
 if __name__ == "__main__":
     unittest.main()

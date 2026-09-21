@@ -15,9 +15,34 @@ def bundle_root() -> str:
     return str(Path(__file__).resolve().parents[1])
 
 
+def _is_dir_writable(path: str) -> bool:
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        test_file = os.path.join(path, f".capcap_write_test_{os.getpid()}")
+        with open(test_file, "w") as f:
+            f.write("1")
+        os.remove(test_file)
+        return True
+    except (OSError, PermissionError):
+        return False
+
+
 def workspace_root() -> str:
     if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        if _is_dir_writable(exe_dir):
+            return exe_dir
+        # If installed in Program Files or a read-only directory, use LocalAppData
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if not local_appdata:
+            local_appdata = os.path.expanduser("~")
+        user_data_dir = os.path.join(local_appdata, "CapCap")
+        try:
+            os.makedirs(user_data_dir, exist_ok=True)
+        except OSError:
+            pass
+        return user_data_dir
     return str(Path(__file__).resolve().parents[1])
 
 
@@ -26,16 +51,20 @@ def join_root(*parts: str) -> str:
 
 
 def asset_path(*parts: str) -> str:
+    exe_assets = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "assets", *parts) if getattr(sys, "frozen", False) else ""
     return first_existing_path(
         join_root("assets", *parts),
         os.path.join(bundle_root(), "assets", *parts),
+        exe_assets,
     )
 
 
 def app_path(*parts: str) -> str:
+    exe_app = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "app", *parts) if getattr(sys, "frozen", False) else ""
     return first_existing_path(
         join_root("app", *parts),
         os.path.join(bundle_root(), "app", *parts),
+        exe_app,
     )
 
 
@@ -58,6 +87,7 @@ def bin_path(*parts: str) -> str:
 def models_path(*parts: str) -> str:
     writable = join_root("models", *parts)
     bundled = os.path.join(bundle_root(), "models", *parts)
+    exe_models = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "models", *parts) if getattr(sys, "frozen", False) else ""
 
     # Packaged builds create writable placeholder directories so optional
     # resources can be downloaded after installation.  For SenseVoice that
@@ -65,11 +95,11 @@ def models_path(*parts: str) -> str:
     # Keep the normal writable-first behavior for every other model family.
     if parts and str(parts[0]).strip().lower() == "sensevoice":
         required = ("model.int8.onnx", "tokens.txt")
-        for candidate in (writable, bundled):
-            if all(os.path.isfile(os.path.join(candidate, name)) for name in required):
+        for candidate in (writable, bundled, exe_models):
+            if candidate and all(os.path.isfile(os.path.join(candidate, name)) for name in required):
                 return candidate
 
-    return first_existing_path(writable, bundled)
+    return first_existing_path(writable, bundled, exe_models)
 
 
 def temp_path(*parts: str) -> str:
