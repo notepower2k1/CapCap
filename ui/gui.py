@@ -203,12 +203,23 @@ def _bootstrap_env(app_root: str) -> None:
             os.environ.setdefault(key, value.strip())
 
 
-def launch_editor_for_video(target_video: str, runtime_logs=None) -> VideoTranslatorGUI:
+try:
+    from i18n import t
+except ImportError:
+    from ui.i18n import t
+
+
+def launch_editor_for_video(target_video: str, runtime_logs=None, on_progress=None) -> VideoTranslatorGUI:
+    if callable(on_progress):
+        on_progress(t("Building interface components..."), 80)
     win = VideoTranslatorGUI()
     if runtime_logs is not None:
         runtime_logs.attach(win)
     win._current_video_path = os.path.abspath(target_video)
     win.video_path_edit.setText(target_video)
+
+    if callable(on_progress):
+        on_progress(t("Loading project data..."), 90)
 
     # 1. Resolve video dimensions before show so the canvas matches exact video aspect ratio
     if hasattr(win, "refresh_video_dimensions"):
@@ -238,6 +249,9 @@ def launch_editor_for_video(target_video: str, runtime_logs=None) -> VideoTransl
 
     # 3. Resolve initial layout geometry while hidden so first paint is already settled
     win.prepare_initial_editor_layout()
+
+    if callable(on_progress):
+        on_progress(t("Displaying editor..."), 98)
 
     # 4. Show the complete editor UI cohesively as one window and paint immediately
     win.show()
@@ -291,11 +305,22 @@ if __name__ == "__main__":
 
     from views.launcher import show_launcher, LauncherWindow
 
-    video_path = show_launcher(None)
+    loaded_window = [None]
+
+    def _project_loader(video_file, on_progress=None):
+        LauncherWindow.add_recent(None, video_file)
+        loaded_window[0] = launch_editor_for_video(video_file, runtime_logs, on_progress=on_progress)
+        return loaded_window[0]
+
+    video_path = show_launcher(None, project_loader=_project_loader)
     if not video_path:
         sys.exit(0)
 
-    LauncherWindow.add_recent(None, video_path)
+    if loaded_window[0] is None:
+        LauncherWindow.add_recent(None, video_path)
+        loaded_window[0] = launch_editor_for_video(video_path, runtime_logs)
 
-    window = launch_editor_for_video(video_path, runtime_logs)
+    window = loaded_window[0]
+    window.raise_()
+    window.activateWindow()
     sys.exit(app.exec())

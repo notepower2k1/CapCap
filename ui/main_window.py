@@ -16861,73 +16861,94 @@ class VideoTranslatorGUI(QMainWindow):
 def _relaunch_launcher():
     from views.launcher import show_launcher, LauncherWindow, _get_video_duration
 
-    video_path = show_launcher(None)
-    QApplication.setQuitOnLastWindowClosed(True)
-    if not video_path:
-        QApplication.quit()
-        return
-    LauncherWindow.add_recent(None, video_path)
+    reloaded_window = [None]
 
-    new_window = VideoTranslatorGUI()
-    new_window._current_video_path = os.path.abspath(video_path)
-    new_window.video_path_edit.setText(video_path)
+    def _loader(vpath, on_progress=None):
+        LauncherWindow.add_recent(None, vpath)
+        if callable(on_progress):
+            on_progress(t("Building interface components..."), 80)
+        new_window = VideoTranslatorGUI()
+        new_window._current_video_path = os.path.abspath(vpath)
+        new_window.video_path_edit.setText(vpath)
 
-    # 1. Resolve video dimensions before show so the canvas matches exact video aspect ratio
-    if hasattr(new_window, "refresh_video_dimensions"):
-        new_window.refresh_video_dimensions(video_path)
+        if callable(on_progress):
+            on_progress(t("Loading project data..."), 90)
 
-    # 2. Load project state and timeline metadata
-    new_window.current_project_state = new_window.ensure_current_project()
-    new_window.load_project_context(new_window.current_project_state)
+        # 1. Resolve video dimensions before show so the canvas matches exact video aspect ratio
+        if hasattr(new_window, "refresh_video_dimensions"):
+            new_window.refresh_video_dimensions(vpath)
 
-    if hasattr(new_window, "timeline") and hasattr(new_window.timeline, "set_video_source"):
-        dur = 0.0
+        # 2. Load project state and timeline metadata
+        new_window.current_project_state = new_window.ensure_current_project()
+        new_window.load_project_context(new_window.current_project_state)
+
+        if hasattr(new_window, "timeline") and hasattr(new_window.timeline, "set_video_source"):
+            dur = 0.0
+            try:
+                dur = float(_get_video_duration(new_window._current_video_path) or 0.0)
+            except Exception:
+                pass
+            if dur <= 0.0:
+                dur = 60.0
+            new_window.timeline.set_video_source(new_window._current_video_path, dur)
+            ensure_tracks = getattr(new_window.timeline, "_ensure_tracks_populated", None)
+            if callable(ensure_tracks):
+                ensure_tracks()
+            redraw = getattr(new_window.timeline, "_redraw", None)
+            if callable(redraw):
+                redraw()
+        new_window.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
+
+        # 3. Resolve initial layout geometry while hidden so first paint is already settled
+        new_window.prepare_initial_editor_layout()
+
+        if callable(on_progress):
+            on_progress(t("Displaying editor..."), 98)
+
+        # 4. Show the complete editor UI cohesively as one window and paint immediately
+        new_window.show()
+        new_window.raise_()
+        new_window.activateWindow()
+        new_window.setFocus()
         try:
-            dur = float(_get_video_duration(new_window._current_video_path) or 0.0)
+            new_window.repaint()
         except Exception:
             pass
-        if dur <= 0.0:
-            dur = 60.0
-        new_window.timeline.set_video_source(new_window._current_video_path, dur)
-        ensure_tracks = getattr(new_window.timeline, "_ensure_tracks_populated", None)
-        if callable(ensure_tracks):
-            ensure_tracks()
-        redraw = getattr(new_window.timeline, "_redraw", None)
-        if callable(redraw):
-            redraw()
-    new_window.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
 
-    # 3. Resolve initial layout geometry while hidden so first paint is already settled
-    new_window.prepare_initial_editor_layout()
+        # 5. Defer media backend loading slightly so the entire UI paints first on screen
+        # before MPV initializes and renders into the settled video canvas
+        def _deferred_load_media():
+            try:
+                if not new_window.isVisible():
+                    return
+                new_window.ensure_media_backend_ready()
+                new_window.media_player.setSource(QUrl.fromLocalFile(vpath))
+                if hasattr(new_window, "refresh_video_dimensions"):
+                    new_window.refresh_video_dimensions(vpath)
+                if hasattr(new_window, "sync_preview_audio_track_to_output"):
+                    new_window.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
+                if hasattr(new_window, "_sync_preview_framing_to_player"):
+                    new_window._sync_preview_framing_to_player()
+            except Exception as exc:
+                print(f"[Preview] Deferred media load error: {exc}")
 
-    # 4. Show the complete editor UI cohesively as one window and paint immediately
-    new_window.show()
-    new_window.raise_()
-    new_window.activateWindow()
-    new_window.setFocus()
-    try:
-        new_window.repaint()
-    except Exception:
-        pass
+        QTimer.singleShot(50, _deferred_load_media)
+        reloaded_window[0] = new_window
+        return new_window
 
-    # 5. Defer media backend loading slightly so the entire UI paints first on screen
-    # before MPV initializes and renders into the settled video canvas
-    def _deferred_load_media():
-        try:
-            if not new_window.isVisible():
-                return
-            new_window.ensure_media_backend_ready()
-            new_window.media_player.setSource(QUrl.fromLocalFile(video_path))
-            if hasattr(new_window, "refresh_video_dimensions"):
-                new_window.refresh_video_dimensions(video_path)
-            if hasattr(new_window, "sync_preview_audio_track_to_output"):
-                new_window.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
-            if hasattr(new_window, "_sync_preview_framing_to_player"):
-                new_window._sync_preview_framing_to_player()
-        except Exception as exc:
-            print(f"[Preview] Deferred media load error: {exc}")
+    video_path = show_launcher(None, project_loader=_loader)
+    QApplication.setQuitOnLastWindowClosed(True)
+    if not video_path:
+        if reloaded_window[0] is None:
+            QApplication.quit()
+        return
 
-    QTimer.singleShot(50, _deferred_load_media)
+    if reloaded_window[0] is not None:
+        reloaded_window[0].raise_()
+        reloaded_window[0].activateWindow()
+        return
+
+    _loader(video_path)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
