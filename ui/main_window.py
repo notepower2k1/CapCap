@@ -5227,7 +5227,7 @@ class VideoTranslatorGUI(QMainWindow):
         if overlay is not None:
             overlay._requested_visible = bool(checked)
             overlay.set_editable(bool(checked))
-            if checked:
+            if checked and not getattr(overlay, "_is_suppressed", lambda: False)():
                 overlay.sync_to_view()
                 overlay.raise_()
                 QTimer.singleShot(0, overlay.sync_to_view)

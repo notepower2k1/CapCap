@@ -189,6 +189,66 @@ class TestRuntimeBugfixes(unittest.TestCase):
         import ocr_processor
         self.assertTrue(hasattr(ocr_processor, "transcribe_video_ocr"))
 
+    def test_ocr_overlay_suppressed_during_pipeline_and_progress_dialog(self):
+        from PySide6.QtWidgets import QWidget
+        from PySide6.QtCore import QEvent
+        from ui.views.preview_panel import OcrRegionOverlay, OcrTranslatorOverlay
+        from ui.widgets.progress_dialog import PipelineProgressDialog
+
+        # Create a mock main window and target view
+        main_win = QWidget()
+        target_view = QWidget(main_win)
+        target_view.resize(640, 480)
+        main_win.video_view = target_view
+        main_win._pipeline_active = False
+        main_win._ocr_overlay_visible = True
+        main_win._tracked_progress_dialogs = []
+
+        ocr_overlay = OcrRegionOverlay()
+        ocr_overlay.attach_to_view(target_view)
+        main_win.ocr_region_overlay = ocr_overlay
+
+        ocr_translator = OcrTranslatorOverlay()
+        ocr_translator.attach_to_view(target_view)
+        main_win.ocr_translator_overlay = ocr_translator
+
+        # Initially, with pipeline inactive and no progress dialog, OCR is not suppressed
+        self.assertFalse(ocr_overlay._is_suppressed())
+        self.assertFalse(ocr_translator._is_suppressed())
+
+        # Create PipelineProgressDialog
+        progress_dlg = PipelineProgressDialog(main_win)
+        main_win.pipeline_controller = type("MockPipelineController", (), {"progress_dialog": progress_dlg})()
+
+        # Simulate showEvent on progress dialog
+        progress_dlg._set_preview_overlays_suppressed(True)
+        self.assertTrue(ocr_overlay._is_suppressed())
+        self.assertTrue(ocr_translator._is_suppressed())
+        self.assertFalse(ocr_overlay.isVisible())
+
+        # Attempt to show or sync_to_view during suppression
+        ocr_overlay.show()
+        self.assertFalse(ocr_overlay.isVisible())
+        ocr_overlay.sync_to_view()
+        self.assertFalse(ocr_overlay.isVisible())
+
+        # Simulate WindowActivate event on main window (e.g. tabbing in)
+        activate_event = QEvent(QEvent.WindowActivate)
+        ocr_overlay.eventFilter(main_win, activate_event)
+        self.assertFalse(ocr_overlay.isVisible(), "OCR overlay must NOT show on WindowActivate while progress dialog is active")
+
+        # Now simulate pipeline active flag
+        progress_dlg._set_preview_overlays_suppressed(False)
+        main_win._pipeline_active = True
+        self.assertTrue(ocr_overlay._is_suppressed())
+        ocr_overlay.sync_to_view()
+        self.assertFalse(ocr_overlay.isVisible(), "OCR overlay must NOT show while pipeline is active")
+
+        # When pipeline is done and progress dialog is gone, suppression is lifted
+        main_win._pipeline_active = False
+        main_win.pipeline_controller.progress_dialog = None
+        self.assertFalse(ocr_overlay._is_suppressed())
+
 
 if __name__ == "__main__":
     unittest.main()

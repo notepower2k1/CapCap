@@ -47,9 +47,19 @@ def clear_log(gui):
 def show_error(gui, title: str, short_msg: str, details: str = ""):
     if details:
         print(f"[{title}] {details}")
-        QMessageBox.critical(gui, t(title), t(short_msg))
-    else:
-        QMessageBox.critical(gui, t(title), t(short_msg))
+    parent = gui
+    if hasattr(gui, "pipeline_controller") and getattr(gui.pipeline_controller, "progress_dialog", None) is not None:
+        dlg = gui.pipeline_controller.progress_dialog
+        if dlg.isVisible():
+            parent = dlg
+    elif hasattr(gui, "_active_progress_dialogs"):
+        try:
+            active = gui._active_progress_dialogs()
+            if active:
+                parent = active[-1]
+        except Exception:
+            pass
+    QMessageBox.critical(parent, t(title), t(short_msg))
 
 
 def show_frame_preview_dialog(gui, image_path: str, qpixmap_cls, qt):

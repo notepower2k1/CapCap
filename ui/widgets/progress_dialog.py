@@ -274,17 +274,44 @@ class PipelineProgressDialog(QDialog):
     def _set_preview_overlays_suppressed(self, suppressed: bool):
         """Keep top-level video overlays below this non-modal pipeline window."""
         parent = self.parentWidget()
-        video_view = getattr(parent, "video_view", None)
-        if video_view is None:
+        if parent is None:
             return
-        subtitle = getattr(video_view, "subtitle_item", None)
-        text_overlay = getattr(video_view, "text_overlay", None)
-        if subtitle is not None:
-            subtitle.set_suppressed(suppressed)
-        if text_overlay is not None:
-            text_overlay.set_suppressed(suppressed)
-        if not suppressed:
-            QTimer.singleShot(0, video_view._restore_subtitle_overlay)
+        video_view = getattr(parent, "video_view", None)
+        if video_view is not None:
+            subtitle = getattr(video_view, "subtitle_item", None)
+            text_overlay = getattr(video_view, "text_overlay", None)
+            blur_overlay = getattr(video_view, "blur_overlay", None)
+            mask_overlay = getattr(video_view, "mask_overlay", None)
+            logo_overlay = getattr(video_view, "logo_overlay", None)
+            if subtitle is not None:
+                subtitle.set_suppressed(suppressed)
+            if text_overlay is not None:
+                text_overlay.set_suppressed(suppressed)
+            if blur_overlay is not None and hasattr(blur_overlay, "hide"):
+                if suppressed:
+                    blur_overlay.hide()
+            if mask_overlay is not None and hasattr(mask_overlay, "hide"):
+                if suppressed:
+                    mask_overlay.hide()
+            if logo_overlay is not None and hasattr(logo_overlay, "hide"):
+                if suppressed:
+                    logo_overlay.hide()
+            if not suppressed and hasattr(video_view, "_restore_subtitle_overlay"):
+                QTimer.singleShot(0, video_view._restore_subtitle_overlay)
+
+        ocr_overlay = getattr(parent, "ocr_region_overlay", None)
+        if ocr_overlay is not None:
+            if hasattr(ocr_overlay, "set_suppressed"):
+                ocr_overlay.set_suppressed(suppressed)
+            elif suppressed:
+                ocr_overlay.hide()
+
+        ocr_translator = getattr(parent, "ocr_translator_overlay", None)
+        if ocr_translator is not None:
+            if hasattr(ocr_translator, "set_suppressed"):
+                ocr_translator.set_suppressed(suppressed)
+            elif suppressed:
+                ocr_translator.hide()
 
     def showEvent(self, event):
         self._set_preview_overlays_suppressed(True)

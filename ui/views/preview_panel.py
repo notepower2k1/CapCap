@@ -140,18 +140,62 @@ class OcrRegionOverlay(QWidget):
         else:
             btn.setStyleSheet("QPushButton { color: #6ee7d6; font-weight: bold; font-size: 10px; padding: 0; }")
 
+    def set_suppressed(self, suppressed: bool):
+        self._suppressed = bool(suppressed)
+        if self._suppressed:
+            self.hide()
+
+    def _is_suppressed(self) -> bool:
+        if getattr(self, "_suppressed", False):
+            return True
+        w = self._main_window
+        if w is None and self._target_view is not None:
+            w = self._target_view.window()
+        if w is not None:
+            if bool(getattr(w, "_suspend_ocr_overlay", False)):
+                return True
+            if bool(getattr(w, "_pipeline_active", False)):
+                return True
+            pc = getattr(w, "pipeline_controller", None)
+            if pc is not None and getattr(pc, "progress_dialog", None) is not None:
+                if pc.progress_dialog.isVisible():
+                    return True
+            if hasattr(w, "_active_progress_dialogs"):
+                try:
+                    if w._active_progress_dialogs():
+                        return True
+                except Exception:
+                    pass
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                modal = app.activeModalWidget()
+                if modal is not None and modal.isVisible():
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def show(self):
+        if self._is_suppressed():
+            return
+        super().show()
+
     def _is_requested_visible(self) -> bool:
-        if hasattr(self, "_requested_visible"):
-            return bool(self._requested_visible)
+        if self._is_suppressed():
+            return False
         w = self._main_window
         if w is None and self._target_view is not None:
             w = self._target_view.window()
             if w is not None:
                 self._main_window = w
                 self._main_window.installEventFilter(self)
-        if w is None:
-            return True
-        return bool(getattr(w, "_ocr_overlay_visible", True))
+        if w is not None and not bool(getattr(w, "_ocr_overlay_visible", True)):
+            return False
+        if hasattr(self, "_requested_visible"):
+            return bool(self._requested_visible)
+        return True
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape and self._editable:
@@ -178,7 +222,8 @@ class OcrRegionOverlay(QWidget):
         except Exception:
             pass
         try:
-            if self._main_window is not None and obj is self._main_window:
+            w = getattr(self, "_main_window", None)
+            if w is not None and obj is w:
                 if event.type() == QtCore.QEvent.WindowDeactivate:
                     self.hide()
                 elif event.type() in (QtCore.QEvent.WindowActivate, QtCore.QEvent.Resize, QtCore.QEvent.Move, QtCore.QEvent.Show):
@@ -186,7 +231,7 @@ class OcrRegionOverlay(QWidget):
                         self.sync_to_view()
                     else:
                         self.hide()
-        except (RuntimeError, ReferenceError):
+        except (RuntimeError, ReferenceError, AttributeError):
             return False
         return False
 
@@ -197,10 +242,7 @@ class OcrRegionOverlay(QWidget):
         if self._main_window is None and self._target_view.window() is not None:
             self._main_window = self._target_view.window()
             self._main_window.installEventFilter(self)
-        if self._main_window is not None and bool(getattr(self._main_window, "_suspend_ocr_overlay", False)):
-            self.hide()
-            return
-        if not self._is_requested_visible():
+        if self._is_suppressed() or not self._is_requested_visible():
             self.hide()
             return
         cpu_mode = os.getenv("CAPCAP_DEVICE", "cuda").strip().lower() == "cpu"
@@ -431,6 +473,48 @@ class OcrTranslatorOverlay(QWidget):
             return
         self._set_rect(self._selection_rect(), emit=False)
 
+    def set_suppressed(self, suppressed: bool):
+        self._suppressed = bool(suppressed)
+        if self._suppressed:
+            self.hide()
+
+    def _is_suppressed(self) -> bool:
+        if getattr(self, "_suppressed", False):
+            return True
+        w = self._main_window
+        if w is None and self._target_view is not None:
+            w = self._target_view.window()
+        if w is not None:
+            if bool(getattr(w, "_suspend_ocr_overlay", False)):
+                return True
+            if bool(getattr(w, "_pipeline_active", False)):
+                return True
+            pc = getattr(w, "pipeline_controller", None)
+            if pc is not None and getattr(pc, "progress_dialog", None) is not None:
+                if pc.progress_dialog.isVisible():
+                    return True
+            if hasattr(w, "_active_progress_dialogs"):
+                try:
+                    if w._active_progress_dialogs():
+                        return True
+                except Exception:
+                    pass
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                modal = app.activeModalWidget()
+                if modal is not None and modal.isVisible():
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def show(self):
+        if self._is_suppressed():
+            return
+        super().show()
+
     def eventFilter(self, obj, event):
         try:
             import shiboken6
@@ -439,13 +523,14 @@ class OcrTranslatorOverlay(QWidget):
         except Exception:
             pass
         try:
-            if self._main_window is not None and obj is self._main_window:
+            w = getattr(self, "_main_window", None)
+            if w is not None and obj is w:
                 if event.type() == QtCore.QEvent.WindowDeactivate:
                     self.hide()
                 elif event.type() in (QtCore.QEvent.WindowActivate, QtCore.QEvent.Resize, QtCore.QEvent.Move, QtCore.QEvent.Show):
-                    if bool(getattr(self._main_window, "_ocr_translator_active", False)):
+                    if bool(getattr(w, "_ocr_translator_active", False)) and not self._is_suppressed():
                         self.sync_to_view()
-        except (RuntimeError, ReferenceError):
+        except (RuntimeError, ReferenceError, AttributeError):
             return False
         return False
 
@@ -460,7 +545,11 @@ class OcrTranslatorOverlay(QWidget):
             self._main_window = current_window
             if self._main_window is not None:
                 self._main_window.installEventFilter(self)
-        if self._main_window is None or not bool(getattr(self._main_window, "_ocr_translator_active", False)):
+        if (
+            self._main_window is None
+            or self._is_suppressed()
+            or not bool(getattr(self._main_window, "_ocr_translator_active", False))
+        ):
             self.hide()
             return
         top_left = self._target_view.mapToGlobal(QtCore.QPoint(0, 0))

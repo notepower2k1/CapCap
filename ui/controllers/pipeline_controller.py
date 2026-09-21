@@ -447,6 +447,11 @@ class PipelineController:
         self._setup_progress_dialog(includes_separation=requires_separation)
         self.progress_dialog.start_step("ai_process")
 
+        overlay = getattr(self.gui, "ocr_region_overlay", None)
+        if overlay is not None:
+            overlay.set_editable(False)
+            overlay.hide()
+
         # Start the background worker
         self.gui.log(f"[Pipeline] Starting prepare workflow for: {video_path}")
         try:
@@ -584,6 +589,8 @@ class PipelineController:
 
         if error or not project_state_path:
             self.pipeline_fail(f"Prepare workflow failed: {error}")
+            if self.gui.get_transcription_engine() == "ocr":
+                self.gui.toggle_ocr_overlay_visibility(False)
             self.gui.show_error(t("Prepare Failed"), t("Could not complete project preparation."), str(error))
             return
 
@@ -707,6 +714,10 @@ class PipelineController:
             self.progress_dialog.footer.setStyleSheet("color: #FF4444; font-weight: bold;")
 
         # Restore UI
+        overlay = getattr(self.gui, "ocr_region_overlay", None)
+        if overlay is not None:
+            overlay.hide()
+
         if hasattr(self.gui, "run_all_btn"):
             self.gui.run_all_btn.setEnabled(True)
             self.gui.run_all_btn.setText(t("Generate"))
