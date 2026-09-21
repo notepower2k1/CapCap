@@ -446,7 +446,7 @@ class PrepareWorkflow:
             self.project_service.save_project(project_state)
             ocr_region = (os.getenv("OCR_SUBTITLE_REGION") or "bottom").strip().lower()
             ocr_signature = self.project_service.build_ocr_transcription_signature(
-                video_path, region=ocr_region,
+                video_path, region=ocr_region, language=source_language,
             )
             cached_ocr_signature = str(project_state.settings.get("ocr_transcription_signature", "") or "")
             cached_raw_path = project_state.artifacts.get("transcript_raw", "")
@@ -467,7 +467,9 @@ class PrepareWorkflow:
                 def _on_ocr_progress(pct: int, msg: str = "", detail: str = ""):
                     _report_step("transcription", detail or msg, pct)
 
-                raw_segments = self.engine_runtime.transcribe_video_ocr(video_path, region=ocr_region, on_progress=_on_ocr_progress)
+                raw_segments = self.engine_runtime.transcribe_video_ocr(
+                    video_path, region=ocr_region, language=source_language, on_progress=_on_ocr_progress
+                )
                 if not raw_segments:
                     project_state.set_step_status("transcribe", "failed")
                     self.project_service.save_project(project_state)

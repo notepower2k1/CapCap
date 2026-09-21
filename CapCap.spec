@@ -13,6 +13,11 @@ project_root = Path(r"D:\CodingTime\CapCap")
 ui_root = project_root / "ui"
 app_root = project_root / "app"
 
+import sys
+for _p in (str(project_root), str(ui_root), str(app_root)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 datas = [
     (str(project_root / "assets"), "assets"),
     (str(project_root / "bin" / "ffmpeg"), "bin/ffmpeg"),
@@ -62,6 +67,7 @@ datas += collect_data_files("vieneu")
 datas += collect_data_files("vieneu_utils")
 datas += collect_data_files("sea_g2p")
 datas += collect_data_files("av")
+datas += collect_data_files("winrt")
 
 # RapidOCR selects its ONNX implementation through runtime configuration.
 # Listing only ``rapidocr`` misses these dynamically imported modules in a
@@ -69,6 +75,18 @@ datas += collect_data_files("av")
 # unavailable. Collect the package's submodules, while leaving the unused
 # Torch backend excluded by the existing package exclusions below.
 rapidocr_hiddenimports = collect_submodules("rapidocr")
+winocr_hiddenimports = [
+    "winocr",
+    "winrt",
+    "winrt.runtime",
+    "winrt.system",
+    "winrt.windows.foundation",
+    "winrt.windows.foundation.collections",
+    "winrt.windows.globalization",
+    "winrt.windows.graphics.imaging",
+    "winrt.windows.media.ocr",
+    "winrt.windows.storage.streams",
+] + collect_submodules("winrt") + collect_submodules("winocr")
 vieneu_hiddenimports = (
     collect_submodules("vieneu")
     + collect_submodules("vieneu_utils")
@@ -246,7 +264,7 @@ a = Analysis(
         "cv2",
         "omegaconf",
         "pyclipper",
-    ] + rapidocr_hiddenimports + vieneu_hiddenimports + av_hiddenimports + engines_hiddenimports + services_hiddenimports + workflows_hiddenimports + translation_hiddenimports + capcut_hiddenimports,
+    ] + rapidocr_hiddenimports + winocr_hiddenimports + vieneu_hiddenimports + av_hiddenimports + engines_hiddenimports + services_hiddenimports + workflows_hiddenimports + translation_hiddenimports + capcut_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

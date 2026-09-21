@@ -14789,6 +14789,48 @@ class VideoTranslatorGUI(QMainWindow):
             engine_combo.setCurrentIndex(idx)
         layout.addWidget(engine_combo)
 
+        # OCR Backend combo (RapidOCR vs Windows Media OCR)
+        ocr_backend_label = QLabel(t("OCR Engine:"))
+        ocr_backend_label.setVisible(current_engine == "ocr")
+        ocr_backend_combo = QComboBox(dialog)
+        ocr_backend_combo.addItem("RapidOCR (Default)", "rapidocr")
+        ocr_backend_combo.addItem("Windows Media OCR (Native)", "winocr")
+        current_ocr_backend = str(os.getenv("OCR_BACKEND", self.settings.value("ocr_backend", "rapidocr")) or "rapidocr").strip().lower()
+        idx = ocr_backend_combo.findData(current_ocr_backend)
+        if idx >= 0:
+            ocr_backend_combo.setCurrentIndex(idx)
+        ocr_backend_combo.setVisible(current_engine == "ocr")
+        layout.addWidget(ocr_backend_label)
+        layout.addWidget(ocr_backend_combo)
+
+        # OCR note for Windows OCR
+        ocr_backend_note = QLabel()
+        ocr_backend_note.setWordWrap(True)
+        ocr_backend_note.setStyleSheet("color: #888888; font-size: 11px; margin-top: 2px; margin-bottom: 6px;")
+
+        def update_ocr_backend_note():
+            backend = str(ocr_backend_combo.currentData() or "rapidocr").strip().lower()
+            is_winocr = backend in ("winocr", "windows", "windows_ocr")
+            is_ocr = engine_combo.currentData() == "ocr"
+            if is_winocr and is_ocr:
+                try:
+                    from app.ocr_processor import get_windows_ocr_languages
+                    langs = get_windows_ocr_languages()
+                except Exception:
+                    langs = []
+                langs_str = ", ".join(langs) if langs else t("None detected")
+                ocr_backend_note.setText(
+                    t("Note: Windows Media OCR requires language packs installed in Windows Settings (Time & Language → Language → Add Language / OCR).\nCurrently installed: {langs}", langs=langs_str)
+                )
+                ocr_backend_note.setVisible(True)
+            else:
+                ocr_backend_note.setText("")
+                ocr_backend_note.setVisible(False)
+
+        ocr_backend_combo.currentIndexChanged.connect(update_ocr_backend_note)
+        update_ocr_backend_note()
+        layout.addWidget(ocr_backend_note)
+
         # OCR Region combo (only visible when OCR selected)
         region_label = QLabel("Subtitle position:")
         region_label.setVisible(current_engine == "ocr")
@@ -15213,6 +15255,9 @@ class VideoTranslatorGUI(QMainWindow):
             is_capcut_voice = str(getattr(self, "selected_voice_engine", "") or (self.voice_engine_combo.currentData() if hasattr(self, "voice_engine_combo") else "")).strip().lower() == "capcut"
             _toggle_visible(whisper_title, is_whisper)
             _toggle_visible(whisper_combo, is_whisper)
+            _toggle_visible(ocr_backend_label, is_ocr)
+            _toggle_visible(ocr_backend_combo, is_ocr)
+            update_ocr_backend_note()
             _toggle_visible(region_label, is_ocr)
             _toggle_visible(region_combo, is_ocr)
             _toggle_visible(sampling_label, is_ocr)
@@ -15299,6 +15344,7 @@ class VideoTranslatorGUI(QMainWindow):
         # Save Logic
         new_whisper = str(whisper_combo.currentData() or "small").strip().lower()
         new_engine = str(engine_combo.currentData() or "sensevoice").strip().lower()
+        new_ocr_backend = str(ocr_backend_combo.currentData() or "rapidocr").strip().lower()
         new_ocr_region = str(region_combo.currentData() or "bottom").strip().lower()
         new_ocr_sampling_fps = str(sampling_combo.currentData() or "auto").strip().lower()
         new_key = key_edit.text().strip()
@@ -15307,6 +15353,8 @@ class VideoTranslatorGUI(QMainWindow):
         new_base_url = base_url_edit.text().strip()
 
         self.selected_whisper_model_name = new_whisper
+        self.settings.setValue("ocr_backend", new_ocr_backend)
+        os.environ["OCR_BACKEND"] = new_ocr_backend
 
         new_capcut_chunk = str(capcut_chunk_combo.currentData() or "300").strip()
         new_capcut_stt_workers = str(capcut_stt_workers_combo.currentData() or "5").strip()
@@ -15328,6 +15376,7 @@ class VideoTranslatorGUI(QMainWindow):
         # otherwise opening another project can inherit a stale OCR/Audio
         # choice from an earlier session.
         _engine_updates = {
+            "OCR_BACKEND": new_ocr_backend,
             "OCR_SUBTITLE_REGION": new_ocr_region,
             "OCR_SAMPLING_FPS": new_ocr_sampling_fps,
             "CAPCUT_STT_CHUNK_SECONDS": new_capcut_chunk,

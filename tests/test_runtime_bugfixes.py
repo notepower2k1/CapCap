@@ -249,6 +249,51 @@ class TestRuntimeBugfixes(unittest.TestCase):
         main_win.pipeline_controller.progress_dialog = None
         self.assertFalse(ocr_overlay._is_suppressed())
 
+    def test_windows_media_ocr_integration(self):
+        from app.ocr_processor import get_windows_ocr_languages, WindowsMediaOcrEngine, WindowsMediaOcrResult
+        import numpy as np
+        import cv2
+
+        # 1. get_windows_ocr_languages returns a list of installed language tags
+        langs = get_windows_ocr_languages()
+        self.assertIsInstance(langs, list)
+
+        # 2. WindowsMediaOcrEngine with auto or first available language
+        try:
+            engine = WindowsMediaOcrEngine(lang="auto")
+            self.assertIsNotNone(engine._target_lang)
+
+            # Test with empty image
+            empty_img = np.zeros((100, 100, 3), dtype=np.uint8)
+            result = engine(empty_img)
+            self.assertIsInstance(result, WindowsMediaOcrResult)
+            self.assertEqual(result.txts, [])
+
+            # Test with synthetic English text image if en-US or en is available
+            has_en = any("en" in tag.lower() for tag in langs)
+            if has_en:
+                en_engine = WindowsMediaOcrEngine(lang="en")
+                test_img = np.zeros((100, 400, 3), dtype=np.uint8)
+                test_img.fill(255)
+                cv2.putText(test_img, "HELLO OCR", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3)
+                en_result = en_engine(test_img)
+                self.assertIsInstance(en_result, WindowsMediaOcrResult)
+                combined = " ".join(en_result.txts).upper()
+                self.assertIn("HELLO", combined)
+
+            # 3. Test that requesting an unsupported/uninstalled language raises RuntimeError
+            with self.assertRaises(RuntimeError) as ctx:
+                WindowsMediaOcrEngine(lang="non_existent_lang_12345")
+            self.assertIn("Windows Media OCR", str(ctx.exception))
+            self.assertIn("Windows Settings", str(ctx.exception))
+        except RuntimeError as e:
+            # If winocr or winrt is unavailable on the machine, verify error message
+            self.assertIn("winocr", str(e).lower())
+
+        # 4. Verify onnxruntime remains functional after winocr operations (no DLL conflict)
+        import onnxruntime
+        self.assertTrue(hasattr(onnxruntime, "InferenceSession"))
+
 
 if __name__ == "__main__":
     unittest.main()

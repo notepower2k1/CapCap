@@ -253,18 +253,20 @@ class ProjectService:
             }
         )
 
-    def build_ocr_transcription_signature(self, video_path: str, *, region: str = "bottom") -> str:
+    def build_ocr_transcription_signature(self, video_path: str, *, region: str = "bottom", language: str = "auto") -> str:
         """Fingerprint all inputs that affect video-subtitle OCR output."""
         return self._hash_payload(
             {
                 # OCR text filtering and temporal merging are part of the
                 # transcription result, not just a display concern.
-                "version": 5,
+                "version": 6,
                 "video": self._file_signature(video_path),
                 "region": str(region or "bottom").strip().lower(),
                 "subtitle_rect": str(os.getenv("OCR_SUBTITLE_RECT") or "").strip(),
                 "crop_ratio": str(os.getenv("OCR_CROP_RATIO") or "0.25").strip(),
                 "sampling_fps": str(os.getenv("OCR_SAMPLING_FPS") or "auto").strip().lower(),
+                "backend": str(os.getenv("OCR_BACKEND") or "rapidocr").strip().lower(),
+                "language": str(language or "auto").strip().lower(),
             }
         )
 

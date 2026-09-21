@@ -151,8 +151,92 @@ def _ocr_model_variant(model_dir):
     return ""
 
 
-def _load_ocr_engine():
+class WindowsMediaOcrResult:
+    def __init__(self, txts=None):
+        self.txts = txts or []
+
+
+def get_windows_ocr_languages() -> list[str]:
+    """Return a list of language tags installed and available for Windows Media OCR."""
+    try:
+        # Guarantee onnxruntime is loaded first if available to avoid DLL conflicts
+        try:
+            import onnxruntime  # noqa: F401
+        except Exception:
+            pass
+        import winrt.windows.media.ocr as wmo
+        return [str(lang.language_tag) for lang in wmo.OcrEngine.available_recognizer_languages]
+    except Exception:
+        return []
+
+
+class WindowsMediaOcrEngine:
+    """Wrapper around Windows Media OCR (winocr / WinRT) compatible with RapidOCR interface."""
+
+    def __init__(self, lang: str = ""):
+        # Guarantee onnxruntime is loaded first if available to prevent DLL conflicts
+        try:
+            import onnxruntime  # noqa: F401
+        except Exception:
+            pass
+        try:
+            import winocr
+            self._winocr = winocr
+        except ImportError:
+            raise RuntimeError(
+                "Windows OCR library 'winocr' is not installed. Please install it with: pip install winocr"
+            )
+
+        self._available_langs = get_windows_ocr_languages()
+        self._target_lang = self._resolve_language_tag(lang)
+
+    def _resolve_language_tag(self, lang: str) -> str:
+        if not lang or lang.lower() == "auto":
+            return self._available_langs[0] if self._available_langs else "en-US"
+
+        target = lang.strip().lower()
+        # Direct match
+        for tag in self._available_langs:
+            if tag.lower() == target:
+                return tag
+
+        # Prefix match (e.g. 'zh' matches 'zh-Hans-CN' or 'zh-CN', 'en' matches 'en-US', 'ja' matches 'ja')
+        for tag in self._available_langs:
+            if tag.lower().startswith(target) or target.startswith(tag.lower().split("-")[0]):
+                return tag
+
+        installed_str = ", ".join(self._available_langs) if self._available_langs else "None"
+        raise RuntimeError(
+            f"Windows Media OCR: Ngôn ngữ '{lang}' chưa có gói OCR trong Windows.\n"
+            f"Các ngôn ngữ OCR hiện có trên máy: {installed_str}.\n"
+            f"Vui lòng vào Windows Settings → Time & Language → Language để tải gói ngôn ngữ tương ứng, "
+            f"hoặc chuyển sang dùng RapidOCR."
+        )
+
+    def __call__(self, image, **kwargs):
+        if image is None or image.size == 0:
+            return WindowsMediaOcrResult([])
+        try:
+            res = self._winocr.recognize_cv2_sync(image, lang=self._target_lang)
+            lines = [str(line.get("text", "")).strip() for line in res.get("lines", []) if str(line.get("text", "")).strip()]
+            return WindowsMediaOcrResult(lines)
+        except Exception as exc:
+            msg = str(exc)
+            if "Add-WindowsCapability" in msg or "Language.OCR" in msg:
+                raise RuntimeError(
+                    f"Windows Media OCR: Thiếu gói ngôn ngữ '{self._target_lang}' trong Windows.\n"
+                    f"Cài đặt bằng lệnh PowerShell (Admin): {msg}\n"
+                    f"Hoặc chuyển sang dùng RapidOCR trong Settings."
+                )
+            return WindowsMediaOcrResult([])
+
+
+def _load_ocr_engine(backend: str = "", lang: str = ""):
     global _OCR_ENGINE
+    backend = str(backend or os.getenv("OCR_BACKEND", "rapidocr") or "rapidocr").strip().lower()
+    if backend in ("winocr", "windows", "windows_ocr"):
+        return WindowsMediaOcrEngine(lang=lang or os.getenv("OCR_LANGUAGE", ""))
+
     with _get_lock():
         if _OCR_ENGINE is not None:
             return _OCR_ENGINE
@@ -350,7 +434,7 @@ def ocr_frame(engine, image, profiling=None):
 
     postprocess_started = time.perf_counter()
     texts = []
-    for raw_text in (result.txts or []):
+    for raw_text in (getattr(result, "txts", []) or []):
         cleaned = _sanitize_ocr_line(raw_text)
         if cleaned:
             texts.append(cleaned)
@@ -398,7 +482,7 @@ def extract_ocr_text_from_video_region(video_path, position_seconds, normalized_
     result = engine(crop, use_cls=False, text_score=0.45, box_thresh=0.35)
     # Unlike subtitle OCR, retain short labels and UI text: this utility is
     # meant for any visible text rather than only spoken subtitles.
-    lines = [" ".join(str(value or "").split()) for value in (result.txts or [])]
+    lines = [" ".join(str(value or "").split()) for value in (getattr(result, "txts", []) or [])]
     return "\n".join(line for line in lines if line).strip()
 
 
@@ -408,7 +492,7 @@ def _texts_equal(current_texts, prev_texts):
     return all(a == b for a, b in zip(current_texts, prev_texts))
 
 
-def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=None, start_seconds=0.0, end_seconds=None, on_progress=None):
+def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=None, start_seconds=0.0, end_seconds=None, on_progress=None, language="auto", **kwargs):
     workflow_started = time.perf_counter()
     profiling = {
         "engine_init": 0.0,
@@ -488,7 +572,7 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
     try:
         if ocr_engine is None:
             engine_started = time.perf_counter()
-            ocr_engine = _load_ocr_engine()
+            ocr_engine = _load_ocr_engine(lang=language)
             profiling["engine_init"] = time.perf_counter() - engine_started
 
         segments = []
