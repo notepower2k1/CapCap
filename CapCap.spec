@@ -75,6 +75,11 @@ vieneu_hiddenimports = (
     + collect_submodules("sea_g2p")
 )
 av_hiddenimports = collect_submodules("av")
+engines_hiddenimports = collect_submodules("engines")
+services_hiddenimports = collect_submodules("services")
+workflows_hiddenimports = collect_submodules("workflows")
+translation_hiddenimports = collect_submodules("translation")
+capcut_hiddenimports = collect_submodules("capcut")
 
 # Exclude heavy packages we don't use
 excludes = [
@@ -142,6 +147,10 @@ a = Analysis(
         "engines.translator_adapter",
         "engines.tts_adapter",
         "engines.demucs_adapter",
+        "engines.ocr_adapter",
+        "engines.remote_whisper_adapter",
+        "engines.remote_translator_adapter",
+        "engines.remote_tts_adapter",
         # CapCut online API (STT & TTS)
         "app.capcut",
         "app.capcut.signing",
@@ -181,14 +190,30 @@ a = Analysis(
         "onnxruntime",
         "openai",
         "audio_mixer",
+        "app.audio_mixer",
         "vocal_processor",
+        "app.vocal_processor",
         "whisper_processor",
+        "app.whisper_processor",
+        "sensevoice_processor",
+        "app.sensevoice_processor",
+        "ocr_processor",
+        "app.ocr_processor",
+        "translator",
+        "app.translator",
+        "vad_processor",
+        "app.vad_processor",
+        "video_filter_chain",
+        "app.video_filter_chain",
+        "new_highlight_selector",
+        "app.new_highlight_selector",
         "faster_whisper",
         "ctranslate2",
         "edge_tts",
         "dotenv",
         "huggingface_hub",
         "tts_processor",
+        "app.tts_processor",
         "vieneu_tts",
         "app.vieneu_tts",
         "ui.widgets.voice_clone_dialog",
@@ -202,14 +227,18 @@ a = Analysis(
         "vietnormalizer.detector",
         "vietnormalizer.data",
         "preview_processor",
+        "app.preview_processor",
         "video_processor",
+        "app.video_processor",
         "subtitle_builder",
+        "app.subtitle_builder",
         "runtime_paths",
         # Explicitly include the namespace-package module imported by the
         # timeline at runtime.  PyInstaller does not reliably discover
         # modules beneath the project-level ``app`` namespace automatically.
         "app.runtime_paths",
         "runtime_profile",
+        "app.runtime_profile",
         # OCR engine
         "rapidocr",
         "sherpa_onnx",
@@ -217,7 +246,7 @@ a = Analysis(
         "cv2",
         "omegaconf",
         "pyclipper",
-    ] + rapidocr_hiddenimports + vieneu_hiddenimports + av_hiddenimports,
+    ] + rapidocr_hiddenimports + vieneu_hiddenimports + av_hiddenimports + engines_hiddenimports + services_hiddenimports + workflows_hiddenimports + translation_hiddenimports + capcut_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -164,6 +164,31 @@ class TestRuntimeBugfixes(unittest.TestCase):
         finally:
             sea_g2p.g2p.__file__ = orig_file
 
+    def test_engine_runtime_and_adapters_importable(self):
+        from services.engine_runtime import EngineRuntime
+        from importlib import import_module
+
+        # Verify all adapters registered in EngineRuntime._ADAPTERS can be imported
+        for key, (mod_name, cls_name) in EngineRuntime._ADAPTERS.items():
+            mod = import_module(mod_name)
+            cls = getattr(mod, cls_name)
+            self.assertIsNotNone(cls, f"Adapter class {cls_name} in {mod_name} must exist")
+
+        # Verify remote adapters can also be imported
+        remote_adapters = [
+            ("engines.remote_whisper_adapter", "RemoteWhisperAdapter"),
+            ("engines.remote_translator_adapter", "RemoteTranslatorAdapter"),
+            ("engines.remote_tts_adapter", "RemoteTTSAdapter"),
+        ]
+        for mod_name, cls_name in remote_adapters:
+            mod = import_module(mod_name)
+            cls = getattr(mod, cls_name)
+            self.assertIsNotNone(cls, f"Remote adapter class {cls_name} in {mod_name} must exist")
+
+        # Verify ocr_processor can be imported
+        import ocr_processor
+        self.assertTrue(hasattr(ocr_processor, "transcribe_video_ocr"))
+
 
 if __name__ == "__main__":
     unittest.main()
