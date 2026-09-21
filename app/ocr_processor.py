@@ -218,7 +218,12 @@ class WindowsMediaOcrEngine:
             return WindowsMediaOcrResult([])
         try:
             res = self._winocr.recognize_cv2_sync(image, lang=self._target_lang)
-            lines = [str(line.get("text", "")).strip() for line in res.get("lines", []) if str(line.get("text", "")).strip()]
+            raw_lines = [str(line.get("text", "")).strip() for line in res.get("lines", []) if str(line.get("text", "")).strip()]
+            # Normalize whitespace between CJK characters (WinRT OCR inserts spaces between individual Chinese/Japanese characters)
+            lines = [
+                re.sub(r'(?<=[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff])\s+(?=[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff])', '', line)
+                for line in raw_lines
+            ]
             return WindowsMediaOcrResult(lines)
         except Exception as exc:
             msg = str(exc)
