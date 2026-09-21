@@ -11,7 +11,7 @@ faster-whisper
 ctranslate2>=4.6.3,<5
 vietnormalizer
 piper-tts
-onnxruntime-gpu
+onnxruntime-gpu==1.20.2
 scipy
 openai
 librosa

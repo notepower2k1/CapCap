@@ -1031,6 +1031,45 @@ class TestPreviewTransport(unittest.TestCase):
             self.assertTrue(tw_kwargs.get("include_audio"))
             mock_copy.assert_called_once()
 
+    def test_find_active_segment_indices_boundary_and_no_stale_stacking(self):
+        """Verify _find_active_segment_indices transitions immediately on cue boundaries without multi-segment stacking."""
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock()
+        gui._playback_subtitle_activity_cache = {}
+        gui._find_active_segment_indices = lambda pos, segs: VideoTranslatorGUI._find_active_segment_indices(gui, pos, segs)
+
+        segments = [
+            {"start": 0.0, "end": 2.0, "text": "Segment 0"},
+            {"start": 2.0, "end": 4.0, "text": "Segment 1"},
+            {"start": 4.5, "end": 6.0, "text": "Segment 2"},
+        ]
+
+        # 1. Inside segment 0
+        res_0 = VideoTranslatorGUI._find_active_segment_indices(gui, 1000, segments)
+        self.assertEqual(res_0, [0])
+        self.assertEqual(VideoTranslatorGUI._find_active_segment_index(gui, 1000, segments), 0)
+
+        # 2. Exactly at boundary 2.0s: segment 1 must be active, segment 0 must NOT be active
+        res_boundary = VideoTranslatorGUI._find_active_segment_indices(gui, 2000, segments)
+        self.assertEqual(res_boundary, [1])
+        self.assertEqual(VideoTranslatorGUI._find_active_segment_index(gui, 2000, segments), 1)
+
+        # 3. Inside segment 1 (e.g. at 2.5s) via cache: must return ONLY segment 1
+        res_1 = VideoTranslatorGUI._find_active_segment_indices(gui, 2500, segments)
+        self.assertEqual(res_1, [1])
+        self.assertEqual(VideoTranslatorGUI._find_active_segment_index(gui, 2500, segments), 1)
+
+        # 4. In gap between segment 1 and segment 2 (e.g. 4.2s): must return empty
+        res_gap = VideoTranslatorGUI._find_active_segment_indices(gui, 4200, segments)
+        self.assertEqual(res_gap, [])
+        self.assertEqual(VideoTranslatorGUI._find_active_segment_index(gui, 4200, segments), -1)
+
+        # 5. Exactly at boundary 4.5s: segment 2 is active
+        res_2 = VideoTranslatorGUI._find_active_segment_indices(gui, 4500, segments)
+        self.assertEqual(res_2, [2])
+        self.assertEqual(VideoTranslatorGUI._find_active_segment_index(gui, 4500, segments), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

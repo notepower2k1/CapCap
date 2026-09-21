@@ -192,6 +192,9 @@ class WindowsMediaOcrEngine:
 
     def _resolve_language_tag(self, lang: str) -> str:
         if not lang or lang.lower() == "auto":
+            for tag in self._available_langs:
+                if tag.lower().startswith("zh"):
+                    return tag
             return self._available_langs[0] if self._available_langs else "en-US"
 
         target = lang.strip().lower()

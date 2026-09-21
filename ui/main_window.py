@@ -13858,12 +13858,11 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _find_active_segment_index(self, position_ms: int, segments):
         active = self._find_active_segment_indices(position_ms, segments)
-        return active[0] if active else -1
+        return active[-1] if active else -1
 
     def _find_active_segment_indices(self, position_ms: int, segments) -> list[int]:
-        """Return the indices of every segment whose [start, end] contains
-        position_ms. Multiple entries are returned when segments overlap in
-        time, so the live overlay can stack them on separate lines.
+        """Return the indices of every segment whose [start, end) contains
+        position_ms.
         """
         position_seconds = max(0.0, float(position_ms) / 1000.0)
         # ``segments`` is already the editor's indexed list. Avoid copying a
@@ -13897,7 +13896,7 @@ class VideoTranslatorGUI(QMainWindow):
                     previous_boundary = max(previous_boundary, boundary)
                 else:
                     next_boundary = boundary if next_boundary is None else min(next_boundary, boundary)
-            if start_s <= position_seconds <= end_s:
+            if (start_s <= position_seconds < end_s) or (idx == len(source) - 1 and start_s <= position_seconds <= end_s):
                 result.append(idx)
         stable_start = previous_boundary
         stable_end = next_boundary if next_boundary is not None else float("inf")
@@ -14017,8 +14016,9 @@ class VideoTranslatorGUI(QMainWindow):
                             self.video_view.subtitle_item.set_text(active_lines[0])
                         else:
                             self.video_view.subtitle_item.set_lines(active_lines)
-                        self._apply_live_subtitle_segment_color(segments[active_indices[0]])
-                        self._set_live_subtitle_effects(segments[active_indices[0]], position_ms)
+                        current_seg = segments[active_indices[-1]]
+                        self._apply_live_subtitle_segment_color(current_seg)
+                        self._set_live_subtitle_effects(current_seg, position_ms)
                         if not self.video_view.subtitle_item.isVisible():
                             self.video_view.subtitle_item.show()
                     else:
@@ -16861,94 +16861,73 @@ class VideoTranslatorGUI(QMainWindow):
 def _relaunch_launcher():
     from views.launcher import show_launcher, LauncherWindow, _get_video_duration
 
-    reloaded_window = [None]
-
-    def _loader(vpath, on_progress=None):
-        LauncherWindow.add_recent(None, vpath)
-        if callable(on_progress):
-            on_progress(t("Building interface components..."), 80)
-        new_window = VideoTranslatorGUI()
-        new_window._current_video_path = os.path.abspath(vpath)
-        new_window.video_path_edit.setText(vpath)
-
-        if callable(on_progress):
-            on_progress(t("Loading project data..."), 90)
-
-        # 1. Resolve video dimensions before show so the canvas matches exact video aspect ratio
-        if hasattr(new_window, "refresh_video_dimensions"):
-            new_window.refresh_video_dimensions(vpath)
-
-        # 2. Load project state and timeline metadata
-        new_window.current_project_state = new_window.ensure_current_project()
-        new_window.load_project_context(new_window.current_project_state)
-
-        if hasattr(new_window, "timeline") and hasattr(new_window.timeline, "set_video_source"):
-            dur = 0.0
-            try:
-                dur = float(_get_video_duration(new_window._current_video_path) or 0.0)
-            except Exception:
-                pass
-            if dur <= 0.0:
-                dur = 60.0
-            new_window.timeline.set_video_source(new_window._current_video_path, dur)
-            ensure_tracks = getattr(new_window.timeline, "_ensure_tracks_populated", None)
-            if callable(ensure_tracks):
-                ensure_tracks()
-            redraw = getattr(new_window.timeline, "_redraw", None)
-            if callable(redraw):
-                redraw()
-        new_window.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
-
-        # 3. Resolve initial layout geometry while hidden so first paint is already settled
-        new_window.prepare_initial_editor_layout()
-
-        if callable(on_progress):
-            on_progress(t("Displaying editor..."), 98)
-
-        # 4. Show the complete editor UI cohesively as one window and paint immediately
-        new_window.show()
-        new_window.raise_()
-        new_window.activateWindow()
-        new_window.setFocus()
-        try:
-            new_window.repaint()
-        except Exception:
-            pass
-
-        # 5. Defer media backend loading slightly so the entire UI paints first on screen
-        # before MPV initializes and renders into the settled video canvas
-        def _deferred_load_media():
-            try:
-                if not new_window.isVisible():
-                    return
-                new_window.ensure_media_backend_ready()
-                new_window.media_player.setSource(QUrl.fromLocalFile(vpath))
-                if hasattr(new_window, "refresh_video_dimensions"):
-                    new_window.refresh_video_dimensions(vpath)
-                if hasattr(new_window, "sync_preview_audio_track_to_output"):
-                    new_window.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
-                if hasattr(new_window, "_sync_preview_framing_to_player"):
-                    new_window._sync_preview_framing_to_player()
-            except Exception as exc:
-                print(f"[Preview] Deferred media load error: {exc}")
-
-        QTimer.singleShot(50, _deferred_load_media)
-        reloaded_window[0] = new_window
-        return new_window
-
-    video_path = show_launcher(None, project_loader=_loader)
+    video_path = show_launcher(None)
     QApplication.setQuitOnLastWindowClosed(True)
     if not video_path:
-        if reloaded_window[0] is None:
-            QApplication.quit()
+        QApplication.quit()
         return
+    LauncherWindow.add_recent(None, video_path)
 
-    if reloaded_window[0] is not None:
-        reloaded_window[0].raise_()
-        reloaded_window[0].activateWindow()
-        return
+    new_window = VideoTranslatorGUI()
+    new_window._current_video_path = os.path.abspath(video_path)
+    new_window.video_path_edit.setText(video_path)
 
-    _loader(video_path)
+    # 1. Resolve video dimensions before show so the canvas matches exact video aspect ratio
+    if hasattr(new_window, "refresh_video_dimensions"):
+        new_window.refresh_video_dimensions(video_path)
+
+    # 2. Load project state and timeline metadata
+    new_window.current_project_state = new_window.ensure_current_project()
+    new_window.load_project_context(new_window.current_project_state)
+
+    if hasattr(new_window, "timeline") and hasattr(new_window.timeline, "set_video_source"):
+        dur = 0.0
+        try:
+            dur = float(_get_video_duration(new_window._current_video_path) or 0.0)
+        except Exception:
+            pass
+        if dur <= 0.0:
+            dur = 60.0
+        new_window.timeline.set_video_source(new_window._current_video_path, dur)
+        ensure_tracks = getattr(new_window.timeline, "_ensure_tracks_populated", None)
+        if callable(ensure_tracks):
+            ensure_tracks()
+        redraw = getattr(new_window.timeline, "_redraw", None)
+        if callable(redraw):
+            redraw()
+    new_window.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
+
+    # 3. Resolve initial layout geometry while hidden so first paint is already settled
+    new_window.prepare_initial_editor_layout()
+
+    # 4. Show the complete editor UI cohesively as one window and paint immediately
+    new_window.show()
+    new_window.raise_()
+    new_window.activateWindow()
+    new_window.setFocus()
+    try:
+        new_window.repaint()
+    except Exception:
+        pass
+
+    # 5. Defer media backend loading slightly so the entire UI paints first on screen
+    # before MPV initializes and renders into the settled video canvas
+    def _deferred_load_media():
+        try:
+            if not new_window.isVisible():
+                return
+            new_window.ensure_media_backend_ready()
+            new_window.media_player.setSource(QUrl.fromLocalFile(video_path))
+            if hasattr(new_window, "refresh_video_dimensions"):
+                new_window.refresh_video_dimensions(video_path)
+            if hasattr(new_window, "sync_preview_audio_track_to_output"):
+                new_window.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
+            if hasattr(new_window, "_sync_preview_framing_to_player"):
+                new_window._sync_preview_framing_to_player()
+        except Exception as exc:
+            print(f"[Preview] Deferred media load error: {exc}")
+
+    QTimer.singleShot(50, _deferred_load_media)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

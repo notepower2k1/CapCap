@@ -76,7 +76,7 @@ def load_user_settings(gui):
     filter_modified = {}
     if hasattr(gui, "set_video_filter_state"):
         gui.set_video_filter_state(filter_preset, filter_intensity, filter_overrides, filter_modified)
-    source_lang = s.value("source_lang", current_source_text(gui.lang_whisper_combo))
+    source_lang = s.value("source_lang", "zh")
     gui.selected_whisper_model_name = str(
         s.value("whisper_model_name", getattr(gui, "selected_whisper_model_name", "auto")) or "auto"
     ).strip().lower()

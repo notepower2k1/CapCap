@@ -467,6 +467,9 @@ def build_start_group(gui, left_layout):
     gui.lang_whisper_combo.addItem("Japanese", "ja")
     gui.lang_whisper_combo.addItem("Korean", "ko")
     gui.lang_whisper_combo.addItem("English", "en")
+    idx_zh = gui.lang_whisper_combo.findData("zh")
+    if idx_zh >= 0:
+        gui.lang_whisper_combo.setCurrentIndex(idx_zh)
     gui.lang_target_combo = QComboBox()
     gui.lang_target_combo.addItem("Vietnamese", "vi")
     gui.lang_target_combo.addItem("English", "en")

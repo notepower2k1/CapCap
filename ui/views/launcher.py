@@ -441,7 +441,7 @@ class VisualCacheWorker(QThread):
             _prepare_timeline_visual_cache(self.target_video, self.temp_root, progress_cb=_on_progress)
         except Exception as exc:
             print(f"[Launcher] Visual cache preparation error: {exc}")
-        self.progress.emit(t("Opening main interface..."), 75)
+        self.progress.emit(t("Ready to open project!"), 100)
         self.finished_prep.emit()
 
 
@@ -935,25 +935,6 @@ class LauncherWindow(QDialog):
         self._finish_accept()
 
     def _finish_accept(self):
-        loader = getattr(self, "_project_loader", None)
-        if callable(loader):
-            def _progress_bridge(msg: str, val: int):
-                self.update_loading_progress(msg, val)
-                from PySide6.QtWidgets import QApplication
-                QApplication.processEvents()
-
-            self.update_loading_progress(t("Opening main interface..."), 75)
-            from PySide6.QtWidgets import QApplication
-            QApplication.processEvents()
-            try:
-                loader(self.selected_video, on_progress=_progress_bridge)
-            except TypeError:
-                try:
-                    loader(self.selected_video)
-                except Exception as exc:
-                    print(f"[Launcher] Project loader error: {exc}")
-            except Exception as exc:
-                print(f"[Launcher] Project loader error: {exc}")
         super().accept()
 
     def closeEvent(self, event):
@@ -1500,8 +1481,6 @@ def _thumbnail_name(video_path: str) -> str:
 def show_launcher(settings_or_none, project_loader=None):
     """Show launcher, return selected video path or empty string."""
     w = LauncherWindow()
-    if project_loader:
-        w.set_project_loader(project_loader)
     result = w.exec()
     selected_video = str(getattr(w, "selected_video", "") or "")
     worker = getattr(w, "_cache_worker", None)
