@@ -222,67 +222,7 @@ def launch_editor_for_video(target_video: str, runtime_logs=None) -> VideoTransl
     win = VideoTranslatorGUI()
     if runtime_logs is not None:
         runtime_logs.attach(win)
-    win._current_video_path = os.path.abspath(target_video)
-    win.video_path_edit.setText(target_video)
-
-    # 1. Resolve video dimensions before show so the canvas matches exact video aspect ratio
-    if hasattr(win, "refresh_video_dimensions"):
-        win.refresh_video_dimensions(target_video)
-
-    # 2. Load project state and timeline metadata
-    win.current_project_state = win.ensure_current_project()
-    win.load_project_context(win.current_project_state)
-
-    if hasattr(win, "timeline") and hasattr(win.timeline, "set_video_source"):
-        dur = 0.0
-        try:
-            from views.launcher import _get_video_duration
-            dur = float(_get_video_duration(win._current_video_path) or 0.0)
-        except Exception:
-            pass
-        if dur <= 0.0:
-            dur = 60.0
-        win.timeline.set_video_source(win._current_video_path, dur)
-        ensure_tracks = getattr(win.timeline, "_ensure_tracks_populated", None)
-        if callable(ensure_tracks):
-            ensure_tracks()
-        redraw = getattr(win.timeline, "_redraw", None)
-        if callable(redraw):
-            redraw()
-    win.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
-
-    # 3. Resolve initial layout geometry while hidden so first paint is already settled
-    win.prepare_initial_editor_layout()
-
-    # 4. Show the complete editor UI cohesively as one window and paint immediately
-    win.show()
-    win.raise_()
-    win.activateWindow()
-    win.setFocus()
-    try:
-        win.repaint()
-    except Exception:
-        pass
-
-    # 5. Defer media backend loading slightly so the entire UI paints first on screen
-    # before MPV initializes and renders into the settled video canvas
-    def _deferred_load_media():
-        try:
-            if not win.isVisible():
-                return
-            win.ensure_media_backend_ready()
-            win.media_player.setSource(QUrl.fromLocalFile(target_video))
-            if hasattr(win, "refresh_video_dimensions"):
-                win.refresh_video_dimensions(target_video)
-            if hasattr(win, "sync_preview_audio_track_to_output"):
-                win.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
-            if hasattr(win, "_sync_preview_framing_to_player"):
-                win._sync_preview_framing_to_player()
-        except Exception as exc:
-            print(f"[Preview] Deferred media load error: {exc}")
-
-    QTimer.singleShot(50, _deferred_load_media)
-
+    win.load_video_project(target_video)
     return win
 
 

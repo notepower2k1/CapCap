@@ -783,6 +783,10 @@ class TimelineThumbnailWorker(QThread):
 
             thumbnails = []
             for idx, timestamp_s in enumerate(timestamps):
+                if self.isInterruptionRequested():
+                    self.completed.emit(self.request_signature, [], "interrupted")
+                    emitted = True
+                    return
                 output_path = os.path.join(self.thumb_dir, f"{digest}_{idx:02d}.jpg")
                 if not os.path.exists(output_path):
                     cmd = [

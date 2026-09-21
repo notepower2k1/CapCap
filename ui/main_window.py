@@ -671,6 +671,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._timeline_video_thumbnails = []
         self._timeline_thumbnail_worker = None
         self._desired_timeline_thumbnail_request = None
+        self._retiring_workers = []
         self._pending_timeline_waveform_refresh = False
         self._pending_timeline_thumbnail_refresh = False
         self._allow_post_pipeline_preview_assets = False
@@ -878,6 +879,23 @@ class VideoTranslatorGUI(QMainWindow):
 
     def setup_ui(self):
         build_main_window_ui(self)
+        try:
+            from widgets.loading_overlay import MainWindowLoadingOverlay
+        except ImportError:
+            from ui.widgets.loading_overlay import MainWindowLoadingOverlay
+        self._loading_overlay = MainWindowLoadingOverlay(self)
+        self._loading_overlay.hide()
+
+    def show_loading_overlay(self, video_path: str = "", timeout_ms: int = 4000):
+        overlay = getattr(self, "_loading_overlay", None)
+        if overlay is not None:
+            target = video_path or getattr(self, "_current_video_path", "")
+            overlay.show_for_video(target, timeout_ms)
+
+    def hide_loading_overlay(self, fade: bool = True):
+        overlay = getattr(self, "_loading_overlay", None)
+        if overlay is not None:
+            overlay.dismiss(fade=fade)
 
     def prepare_responsive_layout(self):
         """Apply only the target-screen responsive profile while hidden."""
@@ -942,6 +960,9 @@ class VideoTranslatorGUI(QMainWindow):
     def resizeEvent(self, event):
         """Apply responsive layout changes after Qt settles a resize/DPI move."""
         super().resizeEvent(event)
+        overlay = getattr(self, "_loading_overlay", None)
+        if overlay is not None and overlay.isVisible():
+            overlay.setGeometry(self.rect())
         if not getattr(self, "_initial_layout_finalized", False):
             return
         if not getattr(self, "_responsive_layout_pending", False):
@@ -3701,15 +3722,25 @@ class VideoTranslatorGUI(QMainWindow):
         )
         worker.setParent(self)
         worker.completed.connect(self._on_timeline_waveform_ready)
-        worker.finished.connect(self._on_timeline_waveform_worker_finished)
+        worker.finished.connect(lambda w=worker: self._on_timeline_waveform_worker_finished(w))
         self._timeline_waveform_worker = worker
         worker.start()
 
-    def _on_timeline_waveform_worker_finished(self):
-        worker = getattr(self, "_timeline_waveform_worker", None)
-        self._timeline_waveform_worker = None
+    def _on_timeline_waveform_worker_finished(self, worker=None):
+        if worker is None:
+            worker = getattr(self, "_timeline_waveform_worker", None)
+        if getattr(self, "_timeline_waveform_worker", None) is worker:
+            self._timeline_waveform_worker = None
+        if hasattr(self, "_retiring_workers") and worker in self._retiring_workers:
+            try:
+                self._retiring_workers.remove(worker)
+            except ValueError:
+                pass
         if worker is not None:
-            worker.deleteLater()
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
 
     def _on_timeline_waveform_ready(self, request_signature, waveform, duration_s, error):
         if request_signature != self._desired_timeline_waveform_request:
@@ -3821,15 +3852,25 @@ class VideoTranslatorGUI(QMainWindow):
         worker = TimelineThumbnailWorker(request_signature, video_path, duration_s, thumb_dir)
         worker.setParent(self)
         worker.completed.connect(self._on_timeline_video_thumbnails_ready)
-        worker.finished.connect(self._on_timeline_thumbnail_worker_finished)
+        worker.finished.connect(lambda w=worker: self._on_timeline_thumbnail_worker_finished(w))
         self._timeline_thumbnail_worker = worker
         worker.start()
 
-    def _on_timeline_thumbnail_worker_finished(self):
-        worker = getattr(self, "_timeline_thumbnail_worker", None)
-        self._timeline_thumbnail_worker = None
+    def _on_timeline_thumbnail_worker_finished(self, worker=None):
+        if worker is None:
+            worker = getattr(self, "_timeline_thumbnail_worker", None)
+        if getattr(self, "_timeline_thumbnail_worker", None) is worker:
+            self._timeline_thumbnail_worker = None
+        if hasattr(self, "_retiring_workers") and worker in self._retiring_workers:
+            try:
+                self._retiring_workers.remove(worker)
+            except ValueError:
+                pass
         if worker is not None:
-            worker.deleteLater()
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
         if (
             self._desired_timeline_thumbnail_request
             and self._desired_timeline_thumbnail_request != self._timeline_video_thumb_cache_key
@@ -16660,12 +16701,35 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception as e:
                 self.log(f"[Clean] Failed: {e}")
         self._current_video_path = ""
-        self._terminate_workers()
+        # Pause playback and unload source without destroying the MPV backend
+        if hasattr(self, "media_player") and self.media_player is not None:
+            try:
+                self.media_player.pause()
+                self.media_player.setSource("")
+            except Exception:
+                pass
+        self._terminate_workers(close_media=False)
         self.hide()
         QApplication.setQuitOnLastWindowClosed(False)
-        QTimer.singleShot(100, _relaunch_launcher)
+        QTimer.singleShot(50, lambda: _relaunch_launcher(existing_window=self))
 
-    def _terminate_workers(self):
+    def _terminate_workers(self, close_media: bool = True):
+        if hasattr(self, "_timeline_visual_refresh_timer"):
+            self._timeline_visual_refresh_timer.stop()
+        self._pending_timeline_waveform_refresh = False
+        self._pending_timeline_thumbnail_refresh = False
+        if hasattr(self, "auto_frame_preview_timer"):
+            self.auto_frame_preview_timer.stop()
+        if hasattr(self, "seek_frame_preview_timer"):
+            self.seek_frame_preview_timer.stop()
+        if hasattr(self, "live_subtitle_preview_timer"):
+            self.live_subtitle_preview_timer.stop()
+        if hasattr(self, "subtitle_ass_debounce_timer"):
+            self.subtitle_ass_debounce_timer.stop()
+
+        if not hasattr(self, "_retiring_workers"):
+            self._retiring_workers = []
+
         attrs = [
             "extraction_thread",
             "vocal_thread",
@@ -16686,38 +16750,56 @@ class VideoTranslatorGUI(QMainWindow):
         for name in attrs:
             worker = getattr(self, name, None)
             if worker is not None and getattr(worker, "isRunning", lambda: False)():
-                print(f"[Cleanup] Terminating worker: {name}")
+                print(f"[Cleanup] Stopping worker: {name}")
                 try:
+                    if hasattr(worker, "completed"):
+                        try:
+                            worker.completed.disconnect()
+                        except Exception:
+                            pass
+                    if hasattr(worker, "finished"):
+                        try:
+                            worker.finished.disconnect()
+                        except Exception:
+                            pass
+                    if hasattr(worker, "requestInterruption"):
+                        worker.requestInterruption()
                     worker.quit()
-                    worker.wait(3000)
+                    worker.wait(1000)
                     if worker.isRunning():
-                        worker.terminate()
-                        worker.wait(2000)
-                        print(f"[Cleanup] Force-terminated {name}")
+                        print(f"[Cleanup] Worker {name} still finishing, keeping safe reference...")
+                        self._retiring_workers.append(worker)
+                        worker.finished.connect(
+                            lambda w=worker: self._retiring_workers.remove(w) if w in self._retiring_workers else None
+                        )
                     else:
                         print(f"[Cleanup] Graceful quit {name}")
                 except Exception as e:
-                    print(f"[Cleanup] Failed to terminate {name}: {e}")
+                    print(f"[Cleanup] Failed to stop {name}: {e}")
+            setattr(self, name, None)
         threads_dict = getattr(self, "_segment_preview_threads", None)
         if threads_dict:
             for idx, worker in list(threads_dict.items()):
                 try:
                     if getattr(worker, "isRunning", lambda: False)():
-                        print(f"[Cleanup] Terminating segment preview thread idx={idx}")
+                        if hasattr(worker, "requestInterruption"):
+                            worker.requestInterruption()
                         worker.quit()
-                        worker.wait(3000)
+                        worker.wait(500)
                         if worker.isRunning():
-                            worker.terminate()
-                            worker.wait(2000)
+                            self._retiring_workers.append(worker)
+                            worker.finished.connect(
+                                lambda w=worker: self._retiring_workers.remove(w) if w in self._retiring_workers else None
+                            )
                 except Exception as e:
-                    print(f"[Cleanup] Failed to terminate segment thread {idx}: {e}")
+                    print(f"[Cleanup] Failed to stop segment thread {idx}: {e}")
             threads_dict.clear()
         try:
             from vieneu_tts import unload_vieneu_model
             unload_vieneu_model()
         except Exception:
             pass
-        if hasattr(self, "media_player") and self.media_player is not None:
+        if close_media and hasattr(self, "media_player") and self.media_player is not None:
             if hasattr(self.media_player, "close"):
                 try:
                     self.media_player.close()
@@ -16767,7 +16849,7 @@ class VideoTranslatorGUI(QMainWindow):
                     pass
             self.save_user_settings()
             self.cleanup_temp_preview_files()
-            self._terminate_workers()
+            self._terminate_workers(close_media=True)
         finally:
             super().closeEvent(event)
 
@@ -16857,77 +16939,129 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception:
                 pass
 
+    def load_video_project(self, video_path: str):
+        """Load or switch to a video project on this window without recreating windows or backend."""
+        from views.launcher import LauncherWindow, _get_video_duration
 
-def _relaunch_launcher():
-    from views.launcher import show_launcher, LauncherWindow, _get_video_duration
+        if not video_path:
+            return
+
+        LauncherWindow.add_recent(getattr(self, "settings", None), video_path)
+        self.show_loading_overlay(video_path)
+
+        self._current_video_path = os.path.abspath(video_path)
+        self.video_path_edit.setText(video_path)
+        self.update_project_header()
+
+        # 1. Reset state, editor texts, caches, and timeline state
+        self.transcript_text.clear()
+        self.translated_text.clear()
+        self.current_segments = []
+        self.current_translated_segments = []
+        self.current_segment_models = []
+        self.current_translated_segment_models = []
+        self.live_preview_segments = []
+        self.live_preview_subtitle_path = ""
+        self.live_preview_ass_path = ""
+        self._playback_subtitle_activity_cache = {}
+        self._selected_segment_index = -1
+        self._editor_highlight_state = {}
+        self._editor_highlight_chunks = {}
+        if hasattr(self, "auto_frame_preview_timer"):
+            self.auto_frame_preview_timer.stop()
+        if hasattr(self, "seek_frame_preview_timer"):
+            self.seek_frame_preview_timer.stop()
+        if hasattr(self, "video_view"):
+            self.video_view.clear_blur_region()
+        if hasattr(self, "media_player") and hasattr(self.media_player, "clear_mask_region"):
+            try:
+                self.media_player.clear_mask_region()
+            except Exception:
+                pass
+
+        # 2. Resolve video dimensions before show so the canvas matches exact video aspect ratio
+        if hasattr(self, "refresh_video_dimensions"):
+            self.refresh_video_dimensions(video_path)
+
+        # 3. Load project state and timeline metadata
+        self.current_project_state = self.ensure_current_project()
+        self.load_project_context(self.current_project_state)
+
+        if hasattr(self, "timeline") and hasattr(self.timeline, "set_video_source"):
+            dur = 0.0
+            try:
+                dur = float(_get_video_duration(self._current_video_path) or 0.0)
+            except Exception:
+                pass
+            if dur <= 0.0:
+                dur = 60.0
+            self.timeline.set_video_source(self._current_video_path, dur)
+            ensure_tracks = getattr(self.timeline, "_ensure_tracks_populated", None)
+            if callable(ensure_tracks):
+                ensure_tracks()
+            redraw = getattr(self.timeline, "_redraw", None)
+            if callable(redraw):
+                redraw()
+        self.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
+
+        # 4. Resolve initial layout geometry while hidden so first paint is already settled
+        self.prepare_initial_editor_layout()
+
+        # 5. Show the complete editor UI cohesively as one window and paint immediately
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+        try:
+            self.repaint()
+        except Exception:
+            pass
+
+        # 6. Defer media backend loading slightly so the entire UI paints first on screen
+        # before MPV initializes and renders into the settled video canvas
+        def _deferred_load_media():
+            try:
+                if not self.isVisible():
+                    return
+                self.ensure_media_backend_ready()
+                self.media_player.setSource(QUrl.fromLocalFile(video_path))
+                if hasattr(self, "refresh_video_dimensions"):
+                    self.refresh_video_dimensions(video_path)
+                if hasattr(self, "sync_preview_audio_track_to_output"):
+                    self.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
+                if hasattr(self, "_sync_preview_framing_to_player"):
+                    self._sync_preview_framing_to_player()
+            except Exception as exc:
+                print(f"[Preview] Deferred media load error: {exc}")
+            finally:
+                QTimer.singleShot(150, lambda: self.hide_loading_overlay())
+
+        QTimer.singleShot(50, _deferred_load_media)
+
+
+def _relaunch_launcher(existing_window=None):
+    from views.launcher import show_launcher, LauncherWindow
 
     video_path = show_launcher(None)
     QApplication.setQuitOnLastWindowClosed(True)
     if not video_path:
+        if existing_window is not None:
+            try:
+                existing_window.close()
+            except Exception:
+                pass
         QApplication.quit()
         return
+
     LauncherWindow.add_recent(None, video_path)
 
+    if existing_window is not None:
+        existing_window.load_video_project(video_path)
+        return existing_window
+
     new_window = VideoTranslatorGUI()
-    new_window._current_video_path = os.path.abspath(video_path)
-    new_window.video_path_edit.setText(video_path)
-
-    # 1. Resolve video dimensions before show so the canvas matches exact video aspect ratio
-    if hasattr(new_window, "refresh_video_dimensions"):
-        new_window.refresh_video_dimensions(video_path)
-
-    # 2. Load project state and timeline metadata
-    new_window.current_project_state = new_window.ensure_current_project()
-    new_window.load_project_context(new_window.current_project_state)
-
-    if hasattr(new_window, "timeline") and hasattr(new_window.timeline, "set_video_source"):
-        dur = 0.0
-        try:
-            dur = float(_get_video_duration(new_window._current_video_path) or 0.0)
-        except Exception:
-            pass
-        if dur <= 0.0:
-            dur = 60.0
-        new_window.timeline.set_video_source(new_window._current_video_path, dur)
-        ensure_tracks = getattr(new_window.timeline, "_ensure_tracks_populated", None)
-        if callable(ensure_tracks):
-            ensure_tracks()
-        redraw = getattr(new_window.timeline, "_redraw", None)
-        if callable(redraw):
-            redraw()
-    new_window.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
-
-    # 3. Resolve initial layout geometry while hidden so first paint is already settled
-    new_window.prepare_initial_editor_layout()
-
-    # 4. Show the complete editor UI cohesively as one window and paint immediately
-    new_window.show()
-    new_window.raise_()
-    new_window.activateWindow()
-    new_window.setFocus()
-    try:
-        new_window.repaint()
-    except Exception:
-        pass
-
-    # 5. Defer media backend loading slightly so the entire UI paints first on screen
-    # before MPV initializes and renders into the settled video canvas
-    def _deferred_load_media():
-        try:
-            if not new_window.isVisible():
-                return
-            new_window.ensure_media_backend_ready()
-            new_window.media_player.setSource(QUrl.fromLocalFile(video_path))
-            if hasattr(new_window, "refresh_video_dimensions"):
-                new_window.refresh_video_dimensions(video_path)
-            if hasattr(new_window, "sync_preview_audio_track_to_output"):
-                new_window.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
-            if hasattr(new_window, "_sync_preview_framing_to_player"):
-                new_window._sync_preview_framing_to_player()
-        except Exception as exc:
-            print(f"[Preview] Deferred media load error: {exc}")
-
-    QTimer.singleShot(50, _deferred_load_media)
+    new_window.load_video_project(video_path)
+    return new_window
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

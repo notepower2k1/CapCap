@@ -204,14 +204,20 @@ class ProjectCard(QFrame):
                     h, w, _ = rgb.shape
                     rgb_contig = np.ascontiguousarray(rgb)
                     qimg = QImage(rgb_contig.data, w, h, w * 3, QImage.Format_RGB888).copy()
-                    self.thumb_ready.emit(qimg)
+                    try:
+                        self.thumb_ready.emit(qimg)
+                    except (RuntimeError, AttributeError):
+                        pass
                     return
             except Exception:
                 pass
             try:
                 res = _extract_thumbnail(video_path, thumb_path)
                 if res and os.path.exists(res):
-                    self.thumb_ready.emit(res)
+                    try:
+                        self.thumb_ready.emit(res)
+                    except (RuntimeError, AttributeError):
+                        pass
             except Exception:
                 pass
 
@@ -904,7 +910,7 @@ class LauncherWindow(QDialog):
         from runtime_paths import workspace_root
         temp_root = os.path.join(workspace_root(), "temp")
 
-        self._cache_worker = VisualCacheWorker(self.selected_video, temp_root, self)
+        self._cache_worker = VisualCacheWorker(self.selected_video, temp_root, None)
         self._cache_worker.progress.connect(self.update_loading_progress)
 
         self._prep_timeout_timer = QTimer(self)
@@ -1478,6 +1484,9 @@ def _thumbnail_name(video_path: str) -> str:
     return f"{h}.jpg"
 
 
+_stale_launcher_workers = []
+
+
 def show_launcher(settings_or_none, project_loader=None):
     """Show launcher, return selected video path or empty string."""
     w = LauncherWindow()
@@ -1487,9 +1496,14 @@ def show_launcher(settings_or_none, project_loader=None):
     if worker is not None and worker.isRunning():
         try:
             worker.requestInterruption()
-            worker.wait(2000)
+            worker.wait(1000)
         except Exception:
             pass
+        if worker.isRunning():
+            _stale_launcher_workers.append(worker)
+            worker.finished.connect(
+                lambda w=worker: _stale_launcher_workers.remove(w) if w in _stale_launcher_workers else None
+            )
     try:
         w.close()
         w.deleteLater()
