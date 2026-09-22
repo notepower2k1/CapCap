@@ -219,7 +219,37 @@ class TestProjectSwitch(unittest.TestCase):
         gui.refresh_ui_state.assert_called_once()
 
 
+    def test_return_to_launcher_removes_from_recent(self):
+        """Verify _return_to_launcher removes target_video_path from recent_projects even if fields were cleared."""
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui._current_video_path = ""
+        gui.video_path_edit = MagicMock()
+        gui.video_path_edit.text.return_value = ""
+        gui.media_player = None
+
+        mock_projects = [
+            {"video_path": "D:/CodingTime/media/video1.mp4", "opened_at": 100},
+            {"video_path": "D:/CodingTime/media/video2.mp4", "opened_at": 200},
+        ]
+
+        saved_projects = []
+        with patch("views.launcher._load_recent_projects", return_value=mock_projects), \
+             patch("views.launcher._save_recent_projects", side_effect=lambda s, p: saved_projects.extend(p)), \
+             patch("PySide6.QtCore.QTimer.singleShot"):
+
+            VideoTranslatorGUI._return_to_launcher(
+                gui,
+                project_removed_from_recent=True,
+                persist_project_data=False,
+                target_video_path="D:\\CodingTime\\media\\video1.mp4",
+            )
+
+        self.assertEqual(len(saved_projects), 1)
+        self.assertEqual(saved_projects[0]["video_path"], "D:/CodingTime/media/video2.mp4")
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

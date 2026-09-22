@@ -16623,7 +16623,10 @@ class VideoTranslatorGUI(QMainWindow):
         return False
 
     def exit_to_launcher(self):
-        self._return_to_launcher(project_removed_from_recent=False)
+        video_path = getattr(self, "_current_video_path", "") or (
+            self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
+        )
+        self._return_to_launcher(project_removed_from_recent=False, target_video_path=video_path)
 
     def clean_current_project(self):
         project_state = getattr(self, "current_project_state", None)
@@ -16645,6 +16648,9 @@ class VideoTranslatorGUI(QMainWindow):
         if confirmation != QMessageBox.Yes:
             return
 
+        cleaning_video_path = getattr(self, "_current_video_path", "") or (
+            self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
+        )
         self._is_cleaning_or_resetting = True
 
         removed_paths = []
@@ -16829,9 +16835,10 @@ class VideoTranslatorGUI(QMainWindow):
         self._return_to_launcher(
             project_removed_from_recent=True,
             persist_project_data=False,
+            target_video_path=cleaning_video_path,
         )
 
-    def _return_to_launcher(self, project_removed_from_recent=True, *, persist_project_data=True):
+    def _return_to_launcher(self, project_removed_from_recent=True, *, persist_project_data=True, target_video_path=""):
         # Keep the complete saved timeline when returning to the launcher.
         # Optional tracks (Text, Logo, Blur, Mask) are part of the project
         # state and must be available when that project is reopened.
@@ -16840,15 +16847,26 @@ class VideoTranslatorGUI(QMainWindow):
                 self.persist_current_timeline_project_data()
             except Exception:
                 pass
-        video_path = getattr(self, "_current_video_path", "")
-        if not video_path:
-            video_path = os.path.normpath(self.video_path_edit.text().strip())
+        video_path = target_video_path or getattr(self, "_current_video_path", "")
+        if not video_path and hasattr(self, "video_path_edit"):
+            video_path = self.video_path_edit.text().strip()
+        if video_path:
+            video_path = os.path.normpath(video_path)
         self.log(f"[Clean] _return_to_launcher: video_path={video_path}")
-        if video_path and project_removed_from_recent:
+        if video_path and video_path != "." and project_removed_from_recent:
             try:
                 from views.launcher import _load_recent_projects, _save_recent_projects
                 projects = _load_recent_projects()
-                projects = [p for p in projects if os.path.normpath(p.get("video_path", "")) != os.path.normpath(video_path)]
+                norm_target = os.path.normcase(os.path.abspath(video_path))
+                def _same_video(p):
+                    v = p.get("video_path", "")
+                    if not v:
+                        return False
+                    try:
+                        return os.path.normcase(os.path.abspath(v)) == norm_target
+                    except Exception:
+                        return os.path.normpath(v) == os.path.normpath(video_path)
+                projects = [p for p in projects if not _same_video(p)]
                 _save_recent_projects(None, projects)
                 self.log(f"[Clean] Removed from recent: {video_path} -> {len(projects)} remaining")
             except Exception as e:
