@@ -10233,13 +10233,16 @@ class VideoTranslatorGUI(QMainWindow):
         def update_engine_options():
             eng = str(engine_combo.currentData() or "whisper")
             whisper_box.setVisible(eng == "whisper")
-            audio_language_box.setVisible(eng in ("whisper", "sensevoice", "capcut"))
+            audio_language_box.setVisible(True)
             ocr_box.setVisible(eng == "ocr")
             if eng == "sensevoice":
                 audio_hint.setText(t("SenseVoice provides ultra-fast multilingual speech recognition (zh, en, ja, ko, yue)."))
                 audio_hint.setVisible(True)
             elif eng == "capcut":
                 audio_hint.setText(t("CapCut API extracts subtitles via cloud speech recognition."))
+                audio_hint.setVisible(True)
+            elif eng == "ocr":
+                audio_hint.setText(t("Language used for OCR recognition (Windows Media OCR requires matching language pack)."))
                 audio_hint.setVisible(True)
             else:
                 audio_hint.setText("")

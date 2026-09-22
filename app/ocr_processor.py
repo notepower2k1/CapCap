@@ -434,7 +434,9 @@ def ocr_frame(engine, image, profiling=None):
         profiling["crop_preprocess"] += time.perf_counter() - preprocess_started
 
     inference_started = time.perf_counter()
-    result = engine(image, use_cls=False, text_score=0.6, box_thresh=0.5)
+    box_thresh = float(os.getenv("OCR_BOX_THRESH", "0.3"))
+    text_score = float(os.getenv("OCR_TEXT_SCORE", "0.5"))
+    result = engine(image, use_cls=False, text_score=text_score, box_thresh=box_thresh)
     inference_elapsed = time.perf_counter() - inference_started
     if profiling is not None:
         profiling["ocr_inference"] += inference_elapsed
