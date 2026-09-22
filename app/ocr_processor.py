@@ -580,7 +580,8 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
     try:
         if ocr_engine is None:
             engine_started = time.perf_counter()
-            ocr_engine = _load_ocr_engine(lang=language)
+            backend = str(kwargs.get("ocr_backend") or kwargs.get("backend") or "").strip().lower()
+            ocr_engine = _load_ocr_engine(backend=backend, lang=language)
             profiling["engine_init"] = time.perf_counter() - engine_started
 
         segments = []

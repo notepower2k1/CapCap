@@ -9973,8 +9973,35 @@ class VideoTranslatorGUI(QMainWindow):
         mode = str(config["mode"])
         if engine_name == "whisper" and not self.ensure_required_resources(t("Range Transcription"), include_whisper=True):
             return
-        if engine_name == "ocr" and not self.ensure_required_resources(t("Range Transcription"), include_ocr=True):
-            return
+        if engine_name == "sensevoice":
+            service = self._resource_service()
+            missing = service.validate_sensevoice_runtime()
+            if missing:
+                missing_lines = "\n".join(f"- {t(label)}" for _resource_id, label in missing)
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Warning)
+                box.setWindowTitle(t("CapCap Cannot Start This Step"))
+                box.setText(t("SenseVoice cannot start because a required local component is unavailable."))
+                box.setInformativeText(missing_lines)
+                open_btn = box.addButton(t("Manage Resources"), QMessageBox.AcceptRole)
+                box.addButton(t("Close"), QMessageBox.RejectRole)
+                box.exec()
+                if box.clickedButton() is open_btn:
+                    self.open_resource_manager_dialog()
+                return
+        if engine_name == "ocr":
+            ocr_backend = str(config.get("ocr_backend", "rapidocr")).strip().lower()
+            if ocr_backend in ("winocr", "windows", "windows_ocr"):
+                try:
+                    import winocr
+                except ImportError:
+                    QMessageBox.warning(
+                        self, t("Range OCR"),
+                        t("Windows OCR library 'winocr' is not installed. Please install it with: pip install winocr")
+                    )
+                    return
+            elif not self.ensure_required_resources(t("Range Transcription"), include_ocr=True):
+                return
         if engine_name == "ocr" and not pending:
             overlay = getattr(self, "ocr_region_overlay", None)
             if overlay is None:
@@ -9998,7 +10025,7 @@ class VideoTranslatorGUI(QMainWindow):
             self._update_alt_transcribe_button_label()
             self.log(
                 f"[Range OCR] Region editor opened for {start:.3f}s–{end:.3f}s; "
-                f"fps={config['ocr_fps'] or 'Settings default'}. Adjust it, then click Run OCR."
+                f"backend={config.get('ocr_backend', 'rapidocr')}, fps={config['ocr_fps'] or 'Settings default'}. Adjust it, then click Run OCR."
             )
             return
 
@@ -10006,9 +10033,11 @@ class VideoTranslatorGUI(QMainWindow):
         language = str(config.get("language", "auto"))
         ocr_fps = config.get("ocr_fps") if engine_name == "ocr" else None
         ocr_region = str(config.get("ocr_region", "bottom"))
+        ocr_backend = str(config.get("ocr_backend", "rapidocr")) if engine_name == "ocr" else "rapidocr"
         settings_summary = (
             f"model={model}, language={language}" if engine_name == "whisper"
-            else f"region={ocr_region}, fps={ocr_fps or 'Settings default'}"
+            else f"language={language}" if engine_name in ("sensevoice", "capcut")
+            else f"backend={ocr_backend}, region={ocr_region}, fps={ocr_fps or 'Settings default'}"
         )
         self.log(
             f"[Range Transcription] Running {engine_name} for {start:.3f}s–{end:.3f}s "
@@ -10016,7 +10045,7 @@ class VideoTranslatorGUI(QMainWindow):
         )
         worker = AlternateRangeTranscriptionWorker(
             video_path, start, end, engine_name, model, language,
-            ocr_region=ocr_region, ocr_fps=ocr_fps,
+            ocr_region=ocr_region, ocr_fps=ocr_fps, ocr_backend=ocr_backend,
         )
         # Keep the QThread parented and referenced until its native finished
         # signal fires.  Clearing the only reference from the worker's custom
@@ -10077,10 +10106,12 @@ class VideoTranslatorGUI(QMainWindow):
 
         engine_label = QLabel(t("Engine"), dialog)
         engine_combo = QComboBox(dialog)
-        engine_combo.addItem("Whisper", "whisper")
-        engine_combo.addItem("OCR", "ocr")
-        default_engine = self._alternate_transcription_engine()
-        engine_index = engine_combo.findData(default_engine)
+        engine_combo.addItem("Audio (SenseVoice) - Speed", "sensevoice")
+        engine_combo.addItem("Audio (Whisper) - Quality", "whisper")
+        engine_combo.addItem("CapCut API (Beta)", "capcut")
+        engine_combo.addItem("Video (OCR)", "ocr")
+        current_engine = self.get_transcription_engine()
+        engine_index = engine_combo.findData(current_engine)
         engine_combo.setCurrentIndex(engine_index if engine_index >= 0 else 0)
         layout.addWidget(engine_label)
         layout.addWidget(engine_combo)
@@ -10107,8 +10138,14 @@ class VideoTranslatorGUI(QMainWindow):
         model_index = whisper_model_combo.findData(current_model)
         whisper_model_combo.setCurrentIndex(model_index if model_index >= 0 else 0)
         whisper_layout.addWidget(whisper_model_combo)
-        whisper_layout.addWidget(QLabel(t("Language"), whisper_box))
-        language_combo = QComboBox(whisper_box)
+        layout.addWidget(whisper_box)
+
+        audio_language_box = QWidget(dialog)
+        audio_language_layout = QVBoxLayout(audio_language_box)
+        audio_language_layout.setContentsMargins(0, 0, 0, 0)
+        audio_language_layout.setSpacing(6)
+        audio_language_layout.addWidget(QLabel(t("Language"), audio_language_box))
+        language_combo = QComboBox(audio_language_box)
         source_language = str(self.get_source_language_code() or "auto")
         language_combo.addItem(f"Project language ({source_language})", source_language)
         if source_language != "auto":
@@ -10116,13 +10153,55 @@ class VideoTranslatorGUI(QMainWindow):
         for label, code in (("Chinese", "zh"), ("English", "en"), ("Vietnamese", "vi"), ("Japanese", "ja"), ("Korean", "ko")):
             if code != source_language:
                 language_combo.addItem(label, code)
-        whisper_layout.addWidget(language_combo)
-        layout.addWidget(whisper_box)
+        audio_language_layout.addWidget(language_combo)
+
+        audio_hint = QLabel(audio_language_box)
+        audio_hint.setWordWrap(True)
+        audio_hint.setStyleSheet("color: #888888; font-size: 11px; margin-top: 2px;")
+        audio_language_layout.addWidget(audio_hint)
+        layout.addWidget(audio_language_box)
 
         ocr_box = QWidget(dialog)
         ocr_layout = QVBoxLayout(ocr_box)
         ocr_layout.setContentsMargins(0, 0, 0, 0)
         ocr_layout.setSpacing(6)
+
+        ocr_backend_label = QLabel(t("OCR Engine:"), ocr_box)
+        ocr_backend_combo = QComboBox(ocr_box)
+        ocr_backend_combo.addItem("RapidOCR (Default)", "rapidocr")
+        ocr_backend_combo.addItem("Windows Media OCR (Native)", "winocr")
+        current_ocr_backend = str(os.getenv("OCR_BACKEND", self.settings.value("ocr_backend", "rapidocr")) or "rapidocr").strip().lower()
+        idx = ocr_backend_combo.findData(current_ocr_backend)
+        ocr_backend_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        ocr_layout.addWidget(ocr_backend_label)
+        ocr_layout.addWidget(ocr_backend_combo)
+
+        ocr_backend_note = QLabel(ocr_box)
+        ocr_backend_note.setWordWrap(True)
+        ocr_backend_note.setStyleSheet("color: #888888; font-size: 11px; margin-top: 2px; margin-bottom: 4px;")
+        ocr_layout.addWidget(ocr_backend_note)
+
+        def update_ocr_backend_note():
+            backend = str(ocr_backend_combo.currentData() or "rapidocr").strip().lower()
+            is_winocr = backend in ("winocr", "windows", "windows_ocr")
+            if is_winocr:
+                try:
+                    from app.ocr_processor import get_windows_ocr_languages
+                    langs = get_windows_ocr_languages()
+                except Exception:
+                    langs = []
+                langs_str = ", ".join(langs) if langs else t("None detected")
+                ocr_backend_note.setText(
+                    t("Note: Windows Media OCR requires language packs installed in Windows Settings.\nCurrently installed: {langs}", langs=langs_str)
+                )
+                ocr_backend_note.setVisible(True)
+            else:
+                ocr_backend_note.setText("")
+                ocr_backend_note.setVisible(False)
+
+        ocr_backend_combo.currentIndexChanged.connect(update_ocr_backend_note)
+        update_ocr_backend_note()
+
         ocr_layout.addWidget(QLabel(t("OCR sampling rate"), ocr_box))
         ocr_fps_combo = QComboBox(ocr_box)
         ocr_fps_combo.addItem("Use Settings default", "settings")
@@ -10142,9 +10221,19 @@ class VideoTranslatorGUI(QMainWindow):
         layout.addWidget(ocr_box)
 
         def update_engine_options():
-            is_whisper = engine_combo.currentData() == "whisper"
-            whisper_box.setVisible(is_whisper)
-            ocr_box.setVisible(not is_whisper)
+            eng = str(engine_combo.currentData() or "whisper")
+            whisper_box.setVisible(eng == "whisper")
+            audio_language_box.setVisible(eng in ("whisper", "sensevoice", "capcut"))
+            ocr_box.setVisible(eng == "ocr")
+            if eng == "sensevoice":
+                audio_hint.setText(t("SenseVoice provides ultra-fast multilingual speech recognition (zh, en, ja, ko, yue)."))
+                audio_hint.setVisible(True)
+            elif eng == "capcut":
+                audio_hint.setText(t("CapCut API extracts subtitles via cloud speech recognition."))
+                audio_hint.setVisible(True)
+            else:
+                audio_hint.setText("")
+                audio_hint.setVisible(False)
             dialog.adjustSize()
 
         engine_combo.currentIndexChanged.connect(update_engine_options)
@@ -10171,6 +10260,7 @@ class VideoTranslatorGUI(QMainWindow):
             "mode": str(mode_combo.currentData() or "replace"),
             "whisper_model": str(whisper_model_combo.currentData() or "small"),
             "language": str(language_combo.currentData() or "auto"),
+            "ocr_backend": str(ocr_backend_combo.currentData() or "rapidocr"),
             "ocr_region": str(os.getenv("OCR_SUBTITLE_REGION") or "bottom").strip().lower(),
             "ocr_fps": None if fps_value == "settings" else float(fps_value),
         }

@@ -126,12 +126,15 @@ class AlternateRangeTranscriptionWorker(QThread):
         *,
         ocr_region="bottom",
         ocr_fps=None,
+        ocr_backend="rapidocr",
     ):
         super().__init__()
         self.video_path, self.start_time, self.end_time = video_path, float(start), float(end)
-        self.engine_name, self.model_path, self.language = engine_name, model_path, language
+        self.engine_name = str(engine_name or "whisper").strip().lower()
+        self.model_path, self.language = model_path, language
         self.ocr_region = str(ocr_region or "bottom")
         self.ocr_fps = float(ocr_fps) if ocr_fps is not None else None
+        self.ocr_backend = str(ocr_backend or "rapidocr").strip().lower()
 
     def run(self):
         temp_audio = ""
@@ -144,7 +147,24 @@ class AlternateRangeTranscriptionWorker(QThread):
                     fps=self.ocr_fps,
                     start_seconds=self.start_time,
                     end_seconds=self.end_time,
+                    language=self.language,
+                    ocr_backend=self.ocr_backend,
                 )
+            elif self.engine_name == "sensevoice":
+                import tempfile
+                temp_audio = os.path.join(tempfile.gettempdir(), f"capcap_range_{int(self.start_time * 1000)}_{int(self.end_time * 1000)}.wav")
+                ffmpeg = bin_path("ffmpeg", "ffmpeg.exe")
+                subprocess.run([
+                    ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", str(self.start_time),
+                    "-t", str(max(0.1, self.end_time - self.start_time)), "-i", self.video_path,
+                    "-vn", "-ac", "1", "-ar", "16000", temp_audio,
+                ], check=True, **subprocess_hidden_kwargs())
+                from runtime_paths import models_path
+                sensevoice_model_dir = models_path("sensevoice")
+                segments = engine.transcribe_audio_sensevoice(temp_audio, sensevoice_model_dir, language=self.language)
+                for segment in segments or []:
+                    segment["start"] = float(segment.get("start", 0.0)) + self.start_time
+                    segment["end"] = float(segment.get("end", 0.0)) + self.start_time
             elif self.engine_name == "capcut":
                 import tempfile
                 temp_audio = os.path.join(tempfile.gettempdir(), f"capcap_range_{int(self.start_time * 1000)}_{int(self.end_time * 1000)}.wav")
