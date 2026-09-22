@@ -4646,6 +4646,8 @@ class VideoTranslatorGUI(QMainWindow):
         )
 
     def persist_current_timeline_project_data(self):
+        if getattr(self, "_is_cleaning_or_resetting", False):
+            return
         state = self.ensure_current_project()
         if not state:
             return
@@ -4709,6 +4711,8 @@ class VideoTranslatorGUI(QMainWindow):
         disk-backed project/timeline write is delayed, which prevents drag
         operations and text typing from blocking the Qt event loop.
         """
+        if getattr(self, "_is_cleaning_or_resetting", False):
+            return
         self._pending_timeline_persist = True
         self._pending_mask_state_persist = self._pending_mask_state_persist or bool(mask_state)
         self._pending_blur_state_persist = self._pending_blur_state_persist or bool(blur_state)
@@ -4720,6 +4724,11 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _flush_pending_timeline_persist(self):
         """Write coalesced editor changes once after an edit burst ends."""
+        if getattr(self, "_is_cleaning_or_resetting", False):
+            self._pending_timeline_persist = False
+            self._pending_mask_state_persist = False
+            self._pending_blur_state_persist = False
+            return
         if not getattr(self, "_pending_timeline_persist", False):
             return
         save_mask = self._pending_mask_state_persist
@@ -4928,12 +4937,13 @@ class VideoTranslatorGUI(QMainWindow):
         self.refresh_detected_speakers_section()
         if self.current_translated_segments:
             self.refresh_auto_keyword_highlights(force=True)
-        if self.get_audio_handling_mode() == "clean" and self.last_vocals_path and os.path.exists(self.last_vocals_path):
-            self.audio_source_edit.setText(self.last_vocals_path)
-        elif self.last_extracted_audio and os.path.exists(self.last_extracted_audio):
-            self.audio_source_edit.setText(self.last_extracted_audio)
-        elif self.last_vocals_path and os.path.exists(self.last_vocals_path):
-            self.audio_source_edit.setText(self.last_vocals_path)
+        if hasattr(self, "audio_source_edit"):
+            if self.get_audio_handling_mode() == "clean" and self.last_vocals_path and os.path.exists(self.last_vocals_path):
+                self.audio_source_edit.setText(self.last_vocals_path)
+            elif self.last_extracted_audio and os.path.exists(self.last_extracted_audio):
+                self.audio_source_edit.setText(self.last_extracted_audio)
+            elif self.last_vocals_path and os.path.exists(self.last_vocals_path):
+                self.audio_source_edit.setText(self.last_vocals_path)
         if self.current_segments:
             self.transcript_text.setText(self.format_to_srt(self.current_segments))
         if self.current_translated_segments:
@@ -4944,6 +4954,16 @@ class VideoTranslatorGUI(QMainWindow):
             self.set_selected_segment_index(0, sync_ui=True)
             if self.isVisible():
                 QApplication.processEvents()
+        else:
+            if hasattr(self, "timeline"):
+                self.timeline.set_segments([])
+            if hasattr(self, "_clear_segment_editor_rows"):
+                self._clear_segment_editor_rows()
+            self._segment_editor_rows = []
+            self._selected_segment_index = -1
+            if hasattr(self, "sync_segment_editor_rows"):
+                self.sync_segment_editor_rows()
+
         # Restore A2 Dub track if TTS was generated
         voice_path = context.get("artifacts", {}).get("voice_vi", "")
         if voice_path and os.path.exists(voice_path) and hasattr(self, "timeline"):
@@ -5040,6 +5060,8 @@ class VideoTranslatorGUI(QMainWindow):
                 self.media_player.pause()
         except Exception:
             pass
+        self.update_progress_checklist()
+        self.refresh_ui_state()
 
     def _enable_post_pipeline_preview_assets(self, *, refresh: bool = True):
         self._allow_post_pipeline_preview_assets = True
@@ -12412,6 +12434,8 @@ class VideoTranslatorGUI(QMainWindow):
         return regions
 
     def persist_project_blur_state(self, *, regions=None, enabled=None):
+        if getattr(self, "_is_cleaning_or_resetting", False):
+            return
         state = getattr(self, "current_project_state", None)
         if not state:
             return
@@ -12697,6 +12721,8 @@ class VideoTranslatorGUI(QMainWindow):
         QTimer.singleShot(0, self.refresh_ui_state)
 
     def persist_project_mask_state(self, *, regions=None):
+        if getattr(self, "_is_cleaning_or_resetting", False):
+            return
         state = getattr(self, "current_project_state", None)
         if not state:
             return
@@ -16366,11 +16392,19 @@ class VideoTranslatorGUI(QMainWindow):
             removed.append(normalized)
 
     def _reset_project_runtime_state(self) -> None:
+        self._is_cleaning_or_resetting = True
+        persist_timer = getattr(self, "_timeline_persist_timer", None)
+        if persist_timer is not None:
+            persist_timer.stop()
+        self._pending_timeline_persist = False
+        self._pending_mask_state_persist = False
+        self._pending_blur_state_persist = False
         self.current_project_state = None
         self.current_segment_models = []
         self.current_translated_segment_models = []
         self.current_segments = []
         self.current_translated_segments = []
+        self._current_video_path = ""
         self.video_time_warps = []
         self._preview_has_warps = False
         self._active_freeze_warp = None
@@ -16419,11 +16453,14 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "video_path_edit"):
             self.video_path_edit.clear()
         if hasattr(self, "timeline"):
-            self.timeline.set_segments([])
-            self.timeline.set_duration(0)
-            self.timeline.set_waveform_data([], 0.0)
-            self.timeline.set_video_thumbnails([])
-            self.timeline.set_playing(False)
+            if hasattr(self.timeline, "reset_timeline"):
+                self.timeline.reset_timeline()
+            else:
+                self.timeline.set_segments([])
+                self.timeline.set_duration(0)
+                self.timeline.set_waveform_data([], 0.0)
+                self.timeline.set_video_thumbnails([])
+                self.timeline.set_playing(False)
         if hasattr(self, "media_player"):
             try:
                 self.media_player.clear_subtitle()
@@ -16434,7 +16471,14 @@ class VideoTranslatorGUI(QMainWindow):
                 pass
         if hasattr(self, "video_view"):
             try:
+                blocked = self.video_view.blockSignals(True)
                 self.video_view.clear_blur_region()
+                self.video_view.blockSignals(blocked)
+            except Exception:
+                pass
+        if hasattr(self, "media_player") and hasattr(self.media_player, "clear_mask_region"):
+            try:
+                self.media_player.clear_mask_region()
             except Exception:
                 pass
         if hasattr(self, "progress_bar"):
@@ -16446,6 +16490,12 @@ class VideoTranslatorGUI(QMainWindow):
         self.sync_segment_editor_rows()
         self.update_progress_checklist()
         self.refresh_ui_state()
+        persist_timer = getattr(self, "_timeline_persist_timer", None)
+        if persist_timer is not None:
+            persist_timer.stop()
+        self._pending_timeline_persist = False
+        self._pending_mask_state_persist = False
+        self._pending_blur_state_persist = False
         from PySide6.QtWidgets import QApplication
         QApplication.processEvents()
 
@@ -16499,6 +16549,8 @@ class VideoTranslatorGUI(QMainWindow):
         )
         if confirmation != QMessageBox.Yes:
             return
+
+        self._is_cleaning_or_resetting = True
 
         removed_paths = []
         removed_groups = {
@@ -16961,6 +17013,14 @@ class VideoTranslatorGUI(QMainWindow):
         self.update_project_header()
 
         # 1. Reset state, editor texts, caches, and timeline state
+        self._is_cleaning_or_resetting = True
+        persist_timer = getattr(self, "_timeline_persist_timer", None)
+        if persist_timer is not None:
+            persist_timer.stop()
+        self._pending_timeline_persist = False
+        self._pending_mask_state_persist = False
+        self._pending_blur_state_persist = False
+
         self.transcript_text.clear()
         self.translated_text.clear()
         self.current_segments = []
@@ -16974,12 +17034,31 @@ class VideoTranslatorGUI(QMainWindow):
         self._selected_segment_index = -1
         self._editor_highlight_state = {}
         self._editor_highlight_chunks = {}
+        if hasattr(self, "_clear_segment_editor_rows"):
+            self._clear_segment_editor_rows()
+        self._segment_editor_rows = []
+        if hasattr(self, "sync_segment_editor_rows"):
+            self.sync_segment_editor_rows()
+        if hasattr(self, "timeline"):
+            if hasattr(self.timeline, "reset_timeline"):
+                self.timeline.reset_timeline()
+            else:
+                self.timeline.set_segments([])
+                self.timeline.set_duration(0)
+                self.timeline.set_waveform_data([], 0.0)
+                self.timeline.set_video_thumbnails([])
+                self.timeline.set_playing(False)
         if hasattr(self, "auto_frame_preview_timer"):
             self.auto_frame_preview_timer.stop()
         if hasattr(self, "seek_frame_preview_timer"):
             self.seek_frame_preview_timer.stop()
         if hasattr(self, "video_view"):
-            self.video_view.clear_blur_region()
+            try:
+                blocked = self.video_view.blockSignals(True)
+                self.video_view.clear_blur_region()
+                self.video_view.blockSignals(blocked)
+            except Exception:
+                pass
         if hasattr(self, "media_player") and hasattr(self.media_player, "clear_mask_region"):
             try:
                 self.media_player.clear_mask_region()
@@ -16991,6 +17070,7 @@ class VideoTranslatorGUI(QMainWindow):
             self.refresh_video_dimensions(video_path)
 
         # 3. Load project state and timeline metadata
+        self._is_cleaning_or_resetting = False
         self.current_project_state = self.ensure_current_project()
         self.load_project_context(self.current_project_state)
 

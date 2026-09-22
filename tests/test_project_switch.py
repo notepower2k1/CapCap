@@ -115,6 +115,111 @@ class TestProjectSwitch(unittest.TestCase):
         backend = QtMediaPlayerBackend(mock_view)
         self.assertFalse(backend.is_closed())
 
+    def test_sync_segments_empty_clears_subtitle_layers(self):
+        """Verify sync_segments_to_dub_subtitle_layers clears TS1 layers when segments list is empty."""
+        from app.layers.timeline import Timeline, Track
+        from app.layers.base import LayerType
+        from app.layers.dub_subtitle import DubSubtitleLayer
+        from app.layers.sync_bridge import sync_segments_to_dub_subtitle_layers
+
+        tl = Timeline(duration=10.0)
+        track = Track(name="TS1", type=LayerType.DUB_SUBTITLE, height=80)
+        layer = DubSubtitleLayer(id="sub-1", start=1.0, end=3.0, text="Hello")
+        track.layers.append(layer)
+        tl.tracks.append(track)
+
+        self.assertEqual(len(track.layers), 1)
+
+        result = sync_segments_to_dub_subtitle_layers(tl, [])
+        self.assertEqual(result, [])
+        self.assertEqual(len(track.layers), 0)
+
+    def test_timeline_reset_timeline_clears_all_tracks_to_defaults(self):
+        """Verify EditorTimeline.reset_timeline restores only default V1 and A1 tracks with no subtitle layers."""
+        from ui.views.editor.timeline import EditorTimeline
+        from app.layers.timeline import Track
+        from app.layers.base import LayerType
+        from app.layers.dub_subtitle import DubSubtitleLayer
+
+        widget = EditorTimeline()
+        # Add TS1 track with layers
+        ts_track = Track(name="TS1", type=LayerType.DUB_SUBTITLE, height=80)
+        ts_track.layers.append(DubSubtitleLayer(id="s1", start=0.0, end=2.0, text="Test"))
+        widget._timeline.tracks.append(ts_track)
+        widget._segment_indices["s1"] = 0
+        widget._duration = 100.0
+
+        widget.reset_timeline()
+
+        self.assertEqual(widget._duration, 0.0)
+        self.assertEqual(len(widget._segment_indices), 0)
+        track_names = [t.name for t in widget._timeline.tracks]
+        self.assertEqual(track_names, ["V1 Video", "A1 Audio"])
+        for t in widget._timeline.tracks:
+            self.assertEqual(len(t.layers), 0)
+
+    def test_persistence_suppressed_when_cleaning_or_resetting(self):
+        """Verify persistence methods return immediately when _is_cleaning_or_resetting is True."""
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui._is_cleaning_or_resetting = True
+        gui._pending_timeline_persist = False
+
+        VideoTranslatorGUI.schedule_timeline_project_persist(gui)
+        self.assertFalse(gui._pending_timeline_persist)
+
+        gui._pending_timeline_persist = True
+        gui._pending_mask_state_persist = True
+        gui._pending_blur_state_persist = True
+        VideoTranslatorGUI._flush_pending_timeline_persist(gui)
+        self.assertFalse(gui._pending_timeline_persist)
+        self.assertFalse(gui._pending_mask_state_persist)
+        self.assertFalse(gui._pending_blur_state_persist)
+        gui.persist_current_timeline_project_data.assert_not_called()
+
+        gui.ensure_current_project = MagicMock()
+        VideoTranslatorGUI.persist_current_timeline_project_data(gui)
+        gui.ensure_current_project.assert_not_called()
+
+    def test_load_project_context_clears_timeline_when_no_segments(self):
+        """Verify load_project_context calls timeline.set_segments([]) and clears rows when project has no segments."""
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui.project_bridge = MagicMock()
+        gui.project_bridge.load_context.return_value = {
+            "artifacts": {},
+            "last_original_srt_path": "",
+            "last_translated_srt_path": "",
+            "last_extracted_audio": "",
+            "last_vocals_path": "",
+            "last_music_path": "",
+            "last_voice_vi_path": "",
+            "last_mixed_vi_path": "",
+            "current_segments": [],
+            "current_translated_segments": [],
+            "current_segment_models": [],
+            "current_translated_segment_models": [],
+        }
+        gui._restore_saved_timeline_model.return_value = False
+        gui.timeline = MagicMock()
+        gui._segment_editor_rows = ["row1", "row2"]
+        gui._selected_segment_index = 0
+        gui.isVisible.return_value = False
+
+        mock_state = MagicMock()
+        mock_state.settings = {}
+        mock_state.artifacts = {}
+
+        VideoTranslatorGUI.load_project_context(gui, mock_state)
+
+        gui.timeline.set_segments.assert_called_with([])
+        gui._clear_segment_editor_rows.assert_called_once()
+        self.assertEqual(gui._segment_editor_rows, [])
+        self.assertEqual(gui._selected_segment_index, -1)
+        gui.sync_segment_editor_rows.assert_called_once()
+        gui.update_progress_checklist.assert_called_once()
+        gui.refresh_ui_state.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

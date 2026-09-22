@@ -54,7 +54,17 @@ def sync_segments_to_dub_subtitle_layers(
     re-syncing the timeline doesn't clobber voice data.
     """
     if not segments:
+        for t in list(timeline.tracks):
+            t_type = getattr(t, "type", None)
+            name = str(getattr(t, "name", "") or "").strip().upper()
+            if (
+                t_type in (LayerType.DUB_SUBTITLE, LayerType.SUBTITLE)
+                or name.startswith("TS")
+                or name == "SUBTITLE"
+            ):
+                t.layers = []
         return []
+
 
     indexed = list(enumerate(segments))
     indexed.sort(key=lambda kv: float(kv[1].get("start", 0)))

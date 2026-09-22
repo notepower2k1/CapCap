@@ -153,6 +153,36 @@ class EditorTimeline(QGraphicsView):
             self._track_heights[t.id] = t.height
         self._redraw()
 
+    def reset_timeline(self) -> None:
+        """Completely reset the timeline widget to fresh initial default tracks."""
+        self._selected_layer_id = ""
+        self._manual_subtitle_selection = False
+        self._hover_layer_id = ""
+        self._highlighted_speaker = ""
+        self._drag_state = None
+        self._timeline_hidden_track_ids.clear()
+        self._segment_indices.clear()
+        self._overlap_layout_cache.clear()
+        self._overlap_row_assignments.clear()
+        self._waveform_samples = []
+        self._waveform_duration_s = 0.0
+        self._video_thumbnails = []
+        self._video_time_warps = []
+        self._duration = 0.0
+        self._duration_explicit = False
+        self._base_video_duration = 0.0
+        self._playhead = 0.0
+        self._playing = False
+        self._selection_range = None
+        self._selection_mode = False
+        self._track_heights.clear()
+        if hasattr(self, "_return_to_playhead_button"):
+            self._return_to_playhead_button.hide()
+        if hasattr(self, "horizontalScrollBar"):
+            self.horizontalScrollBar().setValue(0)
+        self._init_default_tracks()
+
+
     def is_track_shown_on_timeline(self, track) -> bool:
         return bool(getattr(track, "visible", True) and track.id not in self._timeline_hidden_track_ids)
 
