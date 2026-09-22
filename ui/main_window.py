@@ -10220,6 +10220,16 @@ class VideoTranslatorGUI(QMainWindow):
         ocr_layout.addWidget(ocr_hint)
         layout.addWidget(ocr_box)
 
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        cancel_button = QPushButton(t("Cancel"), dialog)
+        run_button = QPushButton(t("Continue"), dialog)
+        buttons.addWidget(cancel_button)
+        buttons.addWidget(run_button)
+        layout.addLayout(buttons)
+        cancel_button.clicked.connect(dialog.reject)
+        run_button.clicked.connect(dialog.accept)
+
         def update_engine_options():
             eng = str(engine_combo.currentData() or "whisper")
             whisper_box.setVisible(eng == "whisper")
@@ -10234,20 +10244,12 @@ class VideoTranslatorGUI(QMainWindow):
             else:
                 audio_hint.setText("")
                 audio_hint.setVisible(False)
-            dialog.adjustSize()
+            if dialog.isVisible():
+                dialog.adjustSize()
 
         engine_combo.currentIndexChanged.connect(update_engine_options)
         update_engine_options()
 
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-        cancel_button = QPushButton(t("Cancel"), dialog)
-        run_button = QPushButton(t("Continue"), dialog)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(run_button)
-        layout.addLayout(buttons)
-        cancel_button.clicked.connect(dialog.reject)
-        run_button.clicked.connect(dialog.accept)
         if dialog.exec() != QDialog.Accepted:
             return None
 
