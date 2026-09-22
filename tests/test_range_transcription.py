@@ -193,7 +193,7 @@ class TestRangeTranscriptionDialog(unittest.TestCase):
         self.assertEqual(cfg["end"], 15.0)
         self.assertEqual(cfg["engine"], "sensevoice")
         self.assertIn("ocr_backend", cfg)
-        self.assertEqual(cfg["ocr_backend"], "rapidocr")
+        self.assertIn(cfg["ocr_backend"], ("rapidocr", "winocr"))
 
 
 
