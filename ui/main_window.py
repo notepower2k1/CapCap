@@ -1092,8 +1092,11 @@ class VideoTranslatorGUI(QMainWindow):
         self.load_voice_preview_catalog()
 
     def ensure_media_backend_ready(self):
-        if getattr(self, "_media_backend_ready", False):
-            return
+        player = getattr(self, "media_player", None)
+        if player is not None and not getattr(player, "is_closed", lambda: False)():
+            if getattr(self, "_media_backend_ready", False):
+                return
+        self._media_backend_ready = False
         self.setup_media_player()
         if hasattr(self, "video_view") and hasattr(self.video_view, "blurRegionChanged"):
             if getattr(self, "_blur_region_signal_bound", False):
@@ -15701,8 +15704,11 @@ class VideoTranslatorGUI(QMainWindow):
 
 
     def setup_media_player(self):
-        if getattr(self, "_media_backend_ready", False):
-            return
+        player = getattr(self, "media_player", None)
+        if player is not None and not getattr(player, "is_closed", lambda: False)():
+            if getattr(self, "_media_backend_ready", False):
+                return
+        self._media_backend_ready = False
         previous_speed = getattr(self, "_preview_speed", 1.0)
         setup_media_player_impl(self)
         self._preview_speed = previous_speed
@@ -16517,7 +16523,7 @@ class VideoTranslatorGUI(QMainWindow):
         # Stop active workers and pending persistence before deleting files.
         # Otherwise a late worker/timer can recreate the selected project's
         # cache or timeline after it has just been removed.
-        self._terminate_workers()
+        self._terminate_workers(close_media=False)
         # Release MPV/QMediaPlayer handles before deleting extracted audio or
         # project files. Windows keeps a stopped sidecar source locked until
         # it is explicitly unloaded, which previously made the first cleanup
@@ -16810,6 +16816,7 @@ class VideoTranslatorGUI(QMainWindow):
                     self.media_player.close_native_audio()
                 except Exception:
                     pass
+            self._media_backend_ready = False
         print("[Cleanup] Worker termination complete.")
 
     def closeEvent(self, event):
@@ -17021,8 +17028,6 @@ class VideoTranslatorGUI(QMainWindow):
         # before MPV initializes and renders into the settled video canvas
         def _deferred_load_media():
             try:
-                if not self.isVisible():
-                    return
                 self.ensure_media_backend_ready()
                 self.media_player.setSource(QUrl.fromLocalFile(video_path))
                 if hasattr(self, "refresh_video_dimensions"):

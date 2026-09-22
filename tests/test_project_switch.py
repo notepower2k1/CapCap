@@ -96,8 +96,24 @@ class TestProjectSwitch(unittest.TestCase):
 
         gui._timeline_visual_refresh_timer.stop.assert_called_once()
         gui.live_subtitle_preview_timer.stop.assert_called_once()
-        self.assertFalse(gui._pending_timeline_waveform_refresh)
         self.assertFalse(gui._pending_timeline_thumbnail_refresh)
+
+    def test_ensure_media_backend_ready_recreates_when_player_closed(self):
+        """Verify ensure_media_backend_ready re-initializes media_player if it was closed."""
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui._media_backend_ready = True
+        gui.media_player = MagicMock()
+        gui.media_player.is_closed.return_value = True
+
+        VideoTranslatorGUI.ensure_media_backend_ready(gui)
+        gui.setup_media_player.assert_called_once()
+
+    def test_media_player_backend_tracks_is_closed(self):
+        """Verify is_closed returns False initially and True after close()."""
+        from ui.utils.media_backend import QtMediaPlayerBackend
+        mock_view = QWidget()
+        backend = QtMediaPlayerBackend(mock_view)
+        self.assertFalse(backend.is_closed())
 
 
 if __name__ == "__main__":

@@ -12,6 +12,27 @@ except ImportError:
 
 
 def setup_media_player(gui):
+    old_player = getattr(gui, "media_player", None)
+    if old_player is not None:
+        try:
+            old_player.positionChanged.disconnect(gui.position_changed)
+        except Exception:
+            pass
+        try:
+            old_player.durationChanged.disconnect(gui.duration_changed)
+        except Exception:
+            pass
+        try:
+            if hasattr(old_player, "stateChanged"):
+                old_player.stateChanged.disconnect(gui._on_preview_state_changed)
+        except Exception:
+            pass
+        try:
+            if hasattr(old_player, "close") and not getattr(old_player, "is_closed", lambda: False)():
+                old_player.close()
+        except Exception:
+            pass
+
     gui.media_player = create_media_backend(gui.video_view)
     gui.media_player.gui = gui
     if hasattr(gui, "log"):
@@ -39,8 +60,10 @@ def setup_media_player(gui):
 
             QTimer.singleShot(0, _show_preview_warning)
 
-    gui.play_btn.clicked.connect(gui.toggle_play)
-    gui.stop_btn.clicked.connect(gui.stop_video)
+    if not getattr(gui, "_media_player_controls_connected", False):
+        gui.play_btn.clicked.connect(gui.toggle_play)
+        gui.stop_btn.clicked.connect(gui.stop_video)
+        gui._media_player_controls_connected = True
 
     gui.media_player.positionChanged.connect(gui.position_changed)
     gui.media_player.durationChanged.connect(gui.duration_changed)

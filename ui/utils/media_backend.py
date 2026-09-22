@@ -468,6 +468,9 @@ class QtMediaPlayerBackend(QObject):
     def close(self):
         pass
 
+    def is_closed(self) -> bool:
+        return False
+
 
 class MpvMediaPlayerBackend(QObject):
     """Three-track design with truly independent mute:
@@ -516,6 +519,7 @@ class MpvMediaPlayerBackend(QObject):
         self._video_time_warps = []
         self._base_playback_rate = 1.0
         self._current_applied_speed = 1.0
+        self._is_closed = False
 
         prepare_mpv_bundle()
         try:
@@ -1168,6 +1172,7 @@ class MpvMediaPlayerBackend(QObject):
 
     def close(self):
         """Release backend resources cleanly."""
+        self._is_closed = True
         if hasattr(self, "_poll_timer") and self._poll_timer.isActive():
             self._poll_timer.stop()
         if hasattr(self, "_sync_timer") and self._sync_timer.isActive():
@@ -1182,6 +1187,9 @@ class MpvMediaPlayerBackend(QObject):
             self._player.terminate()
         except Exception:
             pass
+
+    def is_closed(self) -> bool:
+        return getattr(self, "_is_closed", False)
 
     def position(self):
         return self._position_ms
