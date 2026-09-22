@@ -235,6 +235,8 @@ a = Analysis(
         "vieneu_tts",
         "app.vieneu_tts",
         "ui.widgets.voice_clone_dialog",
+        "ui.widgets.loading_overlay",
+        "widgets.loading_overlay",
         "tokenizers",
         "kaldi_native_fbank",
         "soxr",
