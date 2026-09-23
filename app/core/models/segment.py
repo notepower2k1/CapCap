@@ -42,6 +42,10 @@ class Segment:
         for key in ("tts_group_id", "tts_group_start", "tts_group_end"):
             if key in data and key not in metadata:
                 metadata[key] = data.get(key)
+        if "translation_provider" in data and "translation_provider" not in metadata:
+            metadata["translation_provider"] = str(data.get("translation_provider") or "")
+        if "provider" in data and "translation_provider" not in metadata:
+            metadata["translation_provider"] = str(data.get("provider") or "")
         raw_ae = data.get("_audio_end")
         if raw_ae is not None and "_audio_end" not in metadata:
             try:
@@ -168,6 +172,10 @@ class Segment:
             payload["time_warp_id"] = str(self.metadata.get("time_warp_id"))
         if self.metadata.get("_wav_path"):
             payload["_wav_path"] = str(self.metadata.get("_wav_path"))
+        if self.metadata.get("translation_provider"):
+            payload["translation_provider"] = str(self.metadata.get("translation_provider"))
+        if self.metadata.get("provider"):
+            payload["provider"] = str(self.metadata.get("provider"))
         return payload
 
     def to_original_subtitle_dict(self) -> dict[str, Any]:

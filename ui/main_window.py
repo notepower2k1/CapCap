@@ -4603,6 +4603,9 @@ class VideoTranslatorGUI(QMainWindow):
         signature = self.build_current_translation_signature()
         if signature:
             state.set_setting("translation_signature", signature)
+            provider = getattr(self, "_last_translation_provider", "") or self._completed_translation_provider_label()
+            if provider:
+                state.set_setting("translation_provider", provider)
             self.project_service.save_project(state)
 
     def build_current_translation_signature(self, source_segments=None):
@@ -5980,11 +5983,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.update_workflow_stage_badges()
 
     def _completed_translation_provider_label(self) -> str:
-        """Return the provider recorded in completed translation segments.
-
-        This intentionally reads the result metadata rather than Settings:
-        an unavailable AI provider can finish a run through Google Translate.
-        """
+        """Return the provider recorded in completed translation segments or settings."""
         models = list(getattr(self, "current_translated_segment_models", []) or [])
         provider_counts = {}
         for model in models:
@@ -5992,19 +5991,81 @@ class VideoTranslatorGUI(QMainWindow):
             if provider:
                 provider_counts[provider] = provider_counts.get(provider, 0) + 1
         if not provider_counts:
-            return ""
-        provider = max(provider_counts, key=provider_counts.get)
+            for seg in list(getattr(self, "current_translated_segments", []) or []):
+                p = str(seg.get("provider") or seg.get("translation_provider") or "").strip().lower()
+                if p:
+                    provider_counts[p] = provider_counts.get(p, 0) + 1
+
+        provider = ""
+        if provider_counts:
+            provider = max(provider_counts, key=provider_counts.get)
+        if not provider:
+            provider = str(getattr(self, "_last_translation_provider", "") or "").strip().lower()
+        if not provider:
+            state = getattr(self, "current_project_state", None)
+            settings = getattr(state, "settings", {}) if state else {}
+            provider = str(settings.get("translation_provider", "") or "").strip().lower()
+        if not provider:
+            provider = str(
+                os.getenv("OPENAI_PROVIDER")
+                or os.getenv("AI_POLISHER_PROVIDER")
+                or (self.settings.value("translation_provider", "") if hasattr(self, "settings") else "")
+                or "google"
+            ).strip().lower()
+
         names = {
             "google-web": "Google Translate",
             "google": "Google Translate",
+            "google_web": "Google Translate",
             "bing-web": "Bing Translator",
             "bing": "Bing Translator",
+            "bing_web": "Bing Translator",
             "gemini": "Google AI Studio",
             "google_ai_studio": "Google AI Studio",
             "openai": "OpenAI",
             "ollama": "Ollama",
         }
-        return names.get(provider, provider.replace("-", " ").title())
+        return names.get(provider, provider.replace("-", " ").replace("_", " ").title() if provider else "Google Translate")
+
+    def _completed_transcript_engine_label(self) -> str:
+        state = getattr(self, "current_project_state", None)
+        settings = getattr(state, "settings", {}) if state else {}
+        engine = str(settings.get("transcription_engine", "") or "").strip().lower()
+        if not engine and hasattr(self, "get_transcription_engine"):
+            engine = self.get_transcription_engine()
+        if engine == "ocr":
+            ocr_backend = str(settings.get("ocr_backend", "") or "").strip().lower()
+            if not ocr_backend:
+                ocr_backend = str(os.getenv("OCR_BACKEND", self.settings.value("ocr_backend", "rapidocr")) or "rapidocr").strip().lower()
+            if ocr_backend in ("winocr", "windows", "windows_ocr"):
+                return "Windows OCR"
+            return "Rapid OCR"
+        elif engine == "sensevoice":
+            return "SenseVoice"
+        elif engine == "whisper":
+            return "Whisper"
+        elif engine == "capcut":
+            return "CapCut"
+        artifacts = getattr(state, "artifacts", {}) if state else {}
+        if artifacts.get("transcript_segments") and not settings.get("transcription_signature") and not settings.get("ocr_transcription_signature"):
+            return "Imported SRT"
+        return "Rapid OCR" if engine == "ocr" else (engine.title() if engine else "Transcript")
+
+    def _completed_voice_engine_label(self) -> str:
+        state = getattr(self, "current_project_state", None)
+        settings = getattr(state, "settings", {}) if state else {}
+        engine = str(settings.get("voice_engine", "") or "").strip().lower()
+        if not engine and hasattr(self, "_current_voice_engine_key"):
+            engine = self._current_voice_engine_key()
+        names = {
+            "piper": "Piper",
+            "vieneu": "VieNeu",
+            "capcut": "CapCut",
+            "kokoro": "Kokoro",
+            "edgetts": "Edge TTS",
+            "fptai": "FptAI",
+        }
+        return names.get(engine, engine.title() if engine else "Piper")
 
     def update_workflow_stage_badges(self):
         """Reflect persisted workflow artifacts in the left-side milestones."""
@@ -6030,7 +6091,9 @@ class VideoTranslatorGUI(QMainWindow):
             else translation_status == "done" or bool(artifacts.get("translation_final"))
         )
         tts_skipped = bool(state and state.settings.get("tts_skipped", False))
-        voice = not tts_skipped and bool(
+        is_subtitles_only = hasattr(self, "get_output_mode_key") and self.get_output_mode_key() == "subtitle"
+        is_tts_skip = tts_skipped or is_subtitles_only
+        voice = not is_tts_skip and bool(
             artifacts.get("voice_vi") or artifacts.get("mixed_vi") or self.last_voice_vi_path or self.last_mixed_vi_path
         )
         exported = bool(artifacts.get("final_video"))
@@ -6042,11 +6105,17 @@ class VideoTranslatorGUI(QMainWindow):
             "tts": (voice, "voiceover"),
             "export": (exported, "export"),
         }
+        stage_names = {
+            "prepare": t("Prepare"),
+            "transcript": t("Transcript"),
+            "translate": t("Translate"),
+            "tts": t("Generate Voice"),
+            "export": t("Export"),
+        }
         for key, (complete, running_step) in values.items():
             label = labels.get(key)
-            if label is not None and key == "translate":
-                provider = self._completed_translation_provider_label() if complete else ""
-                label.setText(t("Translate — {provider}", provider=provider) if provider else t("Translate"))
+            if label is not None:
+                label.setText(stage_names.get(key, label.text()))
             badge = badges.get(key)
             if badge is None:
                 continue
@@ -6054,15 +6123,29 @@ class VideoTranslatorGUI(QMainWindow):
             if is_running:
                 text, color = t("Processing…"), "#f6c453"
             elif complete:
-                text, color = t("✓ Completed"), "#6ee7d6"
-            elif key == "tts" and translated:
-                # A translated subtitle track is exportable without a dub.
-                # Keep TTS available for later regeneration, but make its
-                # optional nature obvious in the workflow sidebar.
-                text, color = t("Optional"), "#8394aa"
+                color = "#6ee7d6"
+                if key == "transcript":
+                    engine_name = self._completed_transcript_engine_label()
+                    text = t("{engine} Completed", engine=engine_name)
+                elif key == "translate":
+                    provider_name = self._completed_translation_provider_label() or "Google Translate"
+                    text = t("{provider} Completed", provider=provider_name)
+                elif key == "tts":
+                    voice_engine = self._completed_voice_engine_label()
+                    text = t("{engine} Completed", engine=voice_engine)
+                else:
+                    text = t("✓ Completed")
+            elif key == "tts":
+                if is_tts_skip:
+                    text, color = "", "#8394aa"
+                elif translated:
+                    text, color = t("Optional"), "#8394aa"
+                else:
+                    text, color = t("Not started"), "#8394aa"
             else:
                 text, color = t("Not started"), "#8394aa"
             badge.setText(text)
+            badge.setToolTip(text)
             badge.setStyleSheet(f"color: {color}; font-weight: 700;")
 
         # Step-by-Step is deliberately linear until translation is complete.
@@ -14868,12 +14951,13 @@ class VideoTranslatorGUI(QMainWindow):
         dialog = QDialog(self)
         if hasattr(self, "light_window_icon") and self.light_window_icon and not self.light_window_icon.isNull():
             dialog.setWindowIcon(self.light_window_icon)
-        dialog.setWindowTitle("Settings")
+        dialog.setWindowTitle(t("Settings"))
         dialog.setModal(True)
-        dialog.setMinimumWidth(580)
+        dialog.setMinimumWidth(560)
         parent_height = self.height() if (hasattr(self, "height") and self.height() > 200) else 850
-        dialog.setMinimumHeight(int(parent_height * 0.80))
-        dialog.resize(600, int(parent_height * 0.85))
+        max_dialog_height = max(420, int(parent_height * 0.85))
+        dialog.setMaximumHeight(max_dialog_height)
+        dialog.setMinimumHeight(220)
         dialog.setStyleSheet(
             """
             QDialog {
@@ -14952,6 +15036,16 @@ class VideoTranslatorGUI(QMainWindow):
         scroll_area.setWidget(content_widget)
         main_dialog_layout.addWidget(scroll_area, 1)
 
+        def adjust_dialog_size():
+            content_widget.layout().invalidate()
+            content_widget.adjustSize()
+            content_h = content_widget.sizeHint().height()
+            margins = main_dialog_layout.contentsMargins()
+            btn_h = button_row.sizeHint().height() if 'button_row' in locals() else 45
+            extra_h = margins.top() + margins.bottom() + main_dialog_layout.spacing() + btn_h + 20
+            target_h = max(240, min(content_h + extra_h, max_dialog_height))
+            dialog.resize(dialog.width(), target_h)
+
         remote_mode = is_remote_profile()
         # Transcription Engine Section
         engine_title = QLabel("Audio source")
@@ -15008,6 +15102,7 @@ class VideoTranslatorGUI(QMainWindow):
                 ocr_backend_note.setVisible(False)
 
         ocr_backend_combo.currentIndexChanged.connect(update_ocr_backend_note)
+        ocr_backend_combo.currentIndexChanged.connect(adjust_dialog_size)
         update_ocr_backend_note()
         layout.addWidget(ocr_backend_note)
 
@@ -15382,8 +15477,7 @@ class VideoTranslatorGUI(QMainWindow):
                 model_edit.setText("gemma4:31b-cloud")
                 provider_hint.setText(t("Requires a running Ollama server. Default model: gemma4:31b-cloud"))
             model_edit.setReadOnly(False)
-            dialog.layout().invalidate()
-            dialog.adjustSize()
+            adjust_dialog_size()
 
         test_btn = QPushButton(t("Test Connection"), dialog)
         test_btn.setVisible(not remote_mode)
@@ -15450,7 +15544,7 @@ class VideoTranslatorGUI(QMainWindow):
             _toggle_visible(sampling_label, is_ocr)
             _toggle_visible(sampling_combo, is_ocr)
             _toggle_visible(capcut_settings_widget, is_capcut_engine or is_capcut_voice)
-            content_widget.layout().invalidate()
+            adjust_dialog_size()
 
         engine_combo.currentIndexChanged.connect(update_engine_fields)
         update_engine_fields()
@@ -15508,6 +15602,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         cancel_btn.clicked.connect(dialog.reject)
         save_btn.clicked.connect(dialog.accept)
+        adjust_dialog_size()
 
         # The subtitle is a top-level overlay above MPV's native surface.
         # Hide it for this modal dialog so it cannot paint over Settings.
@@ -15747,7 +15842,7 @@ class VideoTranslatorGUI(QMainWindow):
         layout.setSpacing(14)
 
         # Header title
-        title_label = QLabel(t("💬 Phản hồi & Báo lỗi (Feedback & Support)"), dialog)
+        title_label = QLabel(t("💬 Feedback & Support"), dialog)
         title_label.setObjectName("statusHeadline")
         layout.addWidget(title_label)
 
@@ -15758,7 +15853,7 @@ class VideoTranslatorGUI(QMainWindow):
         bug_card_layout.setContentsMargins(14, 14, 14, 14)
         bug_card_layout.setSpacing(10)
 
-        bug_title = QLabel(t("🐛 Báo lỗi (Bug Report)"), bug_card)
+        bug_title = QLabel(t("🐛 Bug Report"), bug_card)
         bug_title.setObjectName("sectionTitle")
         bug_card_layout.addWidget(bug_title)
 
@@ -15766,11 +15861,11 @@ class VideoTranslatorGUI(QMainWindow):
 
         bug_text = QLabel(
             t(
-                "Khi gặp lỗi (bug), bạn vui lòng:<br>"
-                "• Lấy file log tại đường dẫn cài đặt: <b style='color: #f8fbff;'>CapCap\\temp\\capcap_runtime.log</b><br>"
-                "&nbsp;&nbsp;&nbsp;<i>(hoặc nhấn nút <b style='color: #f8fbff;'>Xuất log</b> ở tab <b style='color: #f8fbff;'>Nâng cao</b>)</i><br>"
-                "• Chụp ảnh màn hình lỗi<br>"
-                "• Đăng bài mô tả kèm ảnh và log lên GitHub Discussions:"
+                "When encountering an issue, please:<br>"
+                "• Get the log file at: <b style='color: #f8fbff;'>CapCap\\temp\\capcap_runtime.log</b><br>"
+                "&nbsp;&nbsp;&nbsp;<i>(or click <b style='color: #f8fbff;'>Export Log</b> in the <b style='color: #f8fbff;'>Advanced</b> tab)</i><br>"
+                "• Take a screenshot of the error<br>"
+                "• Post a description along with the screenshot and log to GitHub Discussions:"
             ),
             bug_card,
         )
@@ -15788,8 +15883,8 @@ class VideoTranslatorGUI(QMainWindow):
 
         bug_btn_row = QHBoxLayout()
         bug_btn_row.setSpacing(10)
-        open_log_btn = QPushButton(t("📂 Mở thư mục Log (temp)"), bug_card)
-        open_disc_btn = QPushButton(t("🌐 Mở GitHub Discussions"), bug_card)
+        open_log_btn = QPushButton(t("📂 Open Log Folder (temp)"), bug_card)
+        open_disc_btn = QPushButton(t("🌐 Open GitHub Discussions"), bug_card)
         open_disc_btn.setObjectName("primaryActionBtn")
 
         def _open_log_folder():
@@ -15815,12 +15910,12 @@ class VideoTranslatorGUI(QMainWindow):
         feat_card_layout.setContentsMargins(14, 14, 14, 14)
         feat_card_layout.setSpacing(10)
 
-        feat_title = QLabel(t("💡 Đề xuất chức năng mới (Feature Request)"), feat_card)
+        feat_title = QLabel(t("💡 Feature Request"), feat_card)
         feat_title.setObjectName("sectionTitle")
         feat_card_layout.addWidget(feat_title)
 
         feat_text = QLabel(
-            t("Bạn có ý tưởng hay hoặc muốn đề xuất chức năng mới cho CapCap? Hãy tạo issue đóng góp cho dự án tại:"),
+            t("Have an idea or want to request a new feature for CapCap? Create an issue on GitHub:"),
             feat_card,
         )
         feat_text.setTextFormat(Qt.RichText)
@@ -15836,7 +15931,7 @@ class VideoTranslatorGUI(QMainWindow):
         feat_card_layout.addWidget(link_issues)
 
         feat_btn_row = QHBoxLayout()
-        open_issues_btn = QPushButton(t("🚀 Mở GitHub Issues"), feat_card)
+        open_issues_btn = QPushButton(t("🚀 Open GitHub Issues"), feat_card)
 
         def _open_issues():
             QDesktopServices.openUrl(QUrl("https://github.com/notepower2k1/CapCap/issues"))

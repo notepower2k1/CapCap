@@ -247,11 +247,11 @@ def build_start_group(gui, left_layout):
     stage_layout.setContentsMargins(10, 8, 10, 8)
     stage_layout.setSpacing(4)
     for key, title in (("prepare", "Prepare"), ("transcript", "Transcript"),
-                       ("translate", "Translate"), ("tts", "Generate Voice / TTS (Optional)"),
+                       ("translate", "Translate"), ("tts", "Generate Voice"),
                        ("export", "Export")):
         row = QHBoxLayout()
-        label = QLabel(title)
-        status = QLabel("Not started")
+        label = QLabel(t(title))
+        status = QLabel(t("Not started"))
         status.setObjectName("helperLabel")
         row.addWidget(label)
         row.addStretch(1)

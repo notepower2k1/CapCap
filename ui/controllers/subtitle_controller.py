@@ -43,7 +43,7 @@ class TranslationPromptDialog(QDialog):
         self.settings = getattr(parent, "settings", None) or QSettings("CapCap", "VideoTranslatorGUI")
         self.setWindowTitle(t("Translation Settings & Prompt Review"))
         self.setMinimumWidth(680)
-        self.setMinimumHeight(600)
+        self.setMinimumHeight(240)
         self.src_lang = str(src_lang or "zh").strip().lower()
         self.target_lang = str(target_lang or "vi").strip().lower()
 
@@ -110,9 +110,9 @@ class TranslationPromptDialog(QDialog):
         layout.addWidget(self.provider_hint)
 
         # Preset Selector
-        preset_label = QLabel("Content / Prompt Preset:")
-        preset_label.setObjectName("fieldLabel")
-        layout.addWidget(preset_label)
+        self.preset_label = QLabel(t("Content / Prompt Preset:"))
+        self.preset_label.setObjectName("fieldLabel")
+        layout.addWidget(self.preset_label)
 
         self.preset_combo = QComboBox()
         presets = load_translation_presets()
@@ -167,9 +167,9 @@ class TranslationPromptDialog(QDialog):
         layout.addWidget(self.review_context_cb)
 
         # Prompt editor
-        prompt_box_label = QLabel(t("System Prompt (Editable):"))
-        prompt_box_label.setObjectName("fieldLabel")
-        layout.addWidget(prompt_box_label)
+        self.prompt_box_label = QLabel(t("System Prompt (Editable):"))
+        self.prompt_box_label.setObjectName("fieldLabel")
+        layout.addWidget(self.prompt_box_label)
 
         self.prompt_edit = QPlainTextEdit()
         layout.addWidget(self.prompt_edit, stretch=1)
@@ -199,24 +199,33 @@ class TranslationPromptDialog(QDialog):
 
     def _on_provider_changed(self):
         provider = self.provider_combo.currentData() or "google_ai_studio"
+        is_free_provider = provider in ("google", "bing")
+        if hasattr(self, "preset_label"):
+            self.preset_label.setVisible(not is_free_provider)
+        if hasattr(self, "preset_combo"):
+            self.preset_combo.setVisible(not is_free_provider)
+        if hasattr(self, "auto_context_cb"):
+            self.auto_context_cb.setVisible(not is_free_provider)
+        if hasattr(self, "review_context_cb"):
+            self.review_context_cb.setVisible(not is_free_provider)
+        if hasattr(self, "prompt_box_label"):
+            self.prompt_box_label.setVisible(not is_free_provider)
+        if hasattr(self, "prompt_edit"):
+            self.prompt_edit.setVisible(not is_free_provider)
+
         if provider == "google":
             self.provider_hint.setText(t("💡 Google Translate translates directly via web API (free, no key). It does not use LLM system prompts."))
-            self.prompt_edit.setEnabled(False)
-            self.preset_combo.setEnabled(False)
-            self.auto_context_cb.setEnabled(False)
-            self.review_context_cb.setEnabled(False)
+            self.resize(self.width(), 240)
         elif provider == "bing":
             self.provider_hint.setText(t("💡 Bing Translator translates directly via web API (free, no key). It does not use LLM system prompts."))
-            self.prompt_edit.setEnabled(False)
-            self.preset_combo.setEnabled(False)
-            self.auto_context_cb.setEnabled(False)
-            self.review_context_cb.setEnabled(False)
+            self.resize(self.width(), 240)
         else:
             self.provider_hint.setText("")
             self.prompt_edit.setEnabled(True)
             self.preset_combo.setEnabled(True)
             self.auto_context_cb.setEnabled(True)
             self.review_context_cb.setEnabled(self.auto_context_cb.isChecked())
+            self.resize(self.width(), 600)
 
     def _on_preset_changed(self):
         preset_id = self.preset_combo.currentData() or "general_default"
@@ -946,7 +955,13 @@ class SubtitleController:
             chosen_auto_context = str(saved_auto).strip().lower() not in ("0", "false", "no")
             saved_review = settings.value("review_translation_context", os.getenv("CAPCAP_REVIEW_TRANSLATION_CONTEXT", "1"))
             chosen_review_context = chosen_auto_context and (str(saved_review).strip().lower() not in ("0", "false", "no"))
+            chosen_provider = (
+                os.getenv("OPENAI_PROVIDER")
+                or os.getenv("AI_POLISHER_PROVIDER")
+                or str(settings.value("translation_provider", "google")).strip().lower()
+            )
 
+        self.gui._last_translation_provider = chosen_provider
         if chosen_provider == "google":
             chosen_auto_context = False
             chosen_review_context = False
@@ -1209,8 +1224,10 @@ class SubtitleController:
         fallback_text = ""
         if fallback_notice:
             if "BING_FALLBACK" in fallback_notice:
+                self.gui._last_translation_provider = "bing"
                 fallback_text = t("Translation completed using Bing Translator (AI Provider unavailable).")
             else:
+                self.gui._last_translation_provider = "google"
                 fallback_text = t("Translation completed using Google Translate (AI Provider unavailable).")
 
         video_path = self.gui.video_path_edit.text()
@@ -1962,7 +1979,11 @@ class SubtitleController:
                         "manual_highlights": list(base.get("manual_highlights", [])),
                         "speaker": str(base.get("speaker", "") or ""),
                     }
-                    for fld in ("tts_text", "tts_group_id", "tts_group_start", "tts_group_end", "extended_duration", "time_warp_id", "_audio_end", "_wav_path"):
+                    for fld in (
+                        "tts_text", "tts_group_id", "tts_group_start", "tts_group_end",
+                        "extended_duration", "time_warp_id", "_audio_end", "_wav_path",
+                        "provider", "translation_provider",
+                    ):
                         if fld in base:
                             d[fld] = base[fld]
                     segments.append(d)
@@ -1979,7 +2000,11 @@ class SubtitleController:
                     speaker = str(metadata_base[idx].get("speaker", "") or "").strip()
                     if speaker:
                         segment["speaker"] = speaker
-                    for fld in ("tts_text", "tts_group_id", "tts_group_start", "tts_group_end", "extended_duration", "time_warp_id", "_audio_end", "_wav_path"):
+                    for fld in (
+                        "tts_text", "tts_group_id", "tts_group_start", "tts_group_end",
+                        "extended_duration", "time_warp_id", "_audio_end", "_wav_path",
+                        "provider", "translation_provider",
+                    ):
                         if fld in metadata_base[idx] and fld not in segment:
                             segment[fld] = metadata_base[idx][fld]
         if not segments:
@@ -1990,6 +2015,11 @@ class SubtitleController:
                     t("Could not parse edited translated SRT.\n\nTip: Keep standard SRT format:\n1\\n00:00:01,000 --> 00:00:02,000\\ntext"),
                 )
             return False
+
+        default_provider = getattr(self.gui, "_last_translation_provider", "") or self.gui._completed_translation_provider_label() or "google"
+        for segment in segments:
+            if not segment.get("provider") and not segment.get("translation_provider"):
+                segment["provider"] = default_provider
 
         self.gui.current_translated_segments = segments
         self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(segments, translated=True)

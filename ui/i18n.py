@@ -1269,12 +1269,17 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Re-analyzing dialogue context with user guidance...": "Đang phân tích lại theo góp ý của bạn...",
     "Feedback": "Phản hồi / Báo lỗi",
     "Feedback & Bug Report": "Phản hồi & Báo lỗi",
-    "💬 Phản hồi & Báo lỗi (Feedback & Support)": "💬 Phản hồi & Báo lỗi (Feedback & Support)",
-    "🐛 Báo lỗi (Bug Report)": "🐛 Báo lỗi (Bug Report)",
-    "💡 Đề xuất chức năng mới (Feature Request)": "💡 Đề xuất chức năng mới (Feature Request)",
-    "📂 Mở thư mục Log (temp)": "📂 Mở thư mục Log (temp)",
-    "🌐 Mở GitHub Discussions": "🌐 Mở GitHub Discussions",
-    "🚀 Mở GitHub Issues": "🚀 Mở GitHub Issues",
+    "💬 Feedback & Support": "💬 Phản hồi & Hỗ trợ",
+    "🐛 Bug Report": "🐛 Báo lỗi",
+    "When encountering an issue, please:<br>• Get the log file at: <b style='color: #f8fbff;'>CapCap\\temp\\capcap_runtime.log</b><br>&nbsp;&nbsp;&nbsp;<i>(or click <b style='color: #f8fbff;'>Export Log</b> in the <b style='color: #f8fbff;'>Advanced</b> tab)</i><br>• Take a screenshot of the error<br>• Post a description along with the screenshot and log to GitHub Discussions:": "Khi gặp lỗi (bug), bạn vui lòng:<br>• Lấy file log tại đường dẫn cài đặt: <b style='color: #f8fbff;'>CapCap\\temp\\capcap_runtime.log</b><br>&nbsp;&nbsp;&nbsp;<i>(hoặc nhấn nút <b style='color: #f8fbff;'>Xuất log</b> ở tab <b style='color: #f8fbff;'>Nâng cao</b>)</i><br>• Chụp ảnh màn hình lỗi<br>• Đăng bài mô tả kèm ảnh và log lên GitHub Discussions:",
+    "📂 Open Log Folder (temp)": "📂 Mở thư mục Log (temp)",
+    "🌐 Open GitHub Discussions": "🌐 Mở GitHub Discussions",
+    "💡 Feature Request": "💡 Đề xuất tính năng mới",
+    "Have an idea or want to request a new feature for CapCap? Create an issue on GitHub:": "Bạn có ý tưởng hay hoặc muốn đề xuất tính năng mới cho CapCap? Hãy tạo issue đóng góp cho dự án tại:",
+    "🚀 Open GitHub Issues": "🚀 Mở GitHub Issues",
+    "Generate Voice": "Tạo giọng đọc",
+    "{engine} Completed": "{engine} đã hoàn tất",
+    "{provider} Completed": "{provider} đã hoàn tất",
 }
 
 
