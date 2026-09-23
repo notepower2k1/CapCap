@@ -1107,6 +1107,14 @@ class PrepareWorkflow:
                         segment_models,
                     )
                 project_state.set_setting("translation_signature", translation_signature)
+                provider_counts = {}
+                for sm in segment_models:
+                    p = str(sm.metadata.get("translation_provider", "") or "").strip().lower()
+                    if p:
+                        provider_counts[p] = provider_counts.get(p, 0) + 1
+                if provider_counts:
+                    dominant_provider = max(provider_counts, key=provider_counts.get)
+                    project_state.set_setting("translation_provider", dominant_provider)
                 project_state.set_step_status("translate_raw", "done")
                 project_state.set_step_status("refine_translation", "done" if optimize_subtitles else "skipped")
                 self.project_service.save_project(project_state)

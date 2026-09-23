@@ -338,5 +338,45 @@ class TestRuntimeBugfixes(unittest.TestCase):
             self.assertTrue("CapCap" in ws)
 
 
+    def test_export_runtime_logs(self):
+        from unittest.mock import MagicMock, patch
+        from main_window import VideoTranslatorGUI
+
+        with tempfile.TemporaryDirectory() as td:
+            target_file = os.path.join(td, "exported_logs.txt")
+            mock_gui = MagicMock()
+            mock_gui.workspace_root = td
+            mock_gui._runtime_logs = ["[12:00:00] Sample log entry 1", "[12:00:01] Sample log entry 2"]
+            mock_gui._flush_runtime_log_entries = MagicMock()
+            mock_gui.log = MagicMock()
+
+            with patch("PySide6.QtWidgets.QFileDialog.getSaveFileName", return_value=(target_file, "text")), \
+                 patch("PySide6.QtWidgets.QMessageBox.information") as mock_info:
+                VideoTranslatorGUI.export_runtime_logs(mock_gui)
+
+                self.assertTrue(os.path.exists(target_file))
+                with open(target_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                self.assertIn("Sample log entry 1", content)
+                self.assertIn("Sample log entry 2", content)
+                mock_info.assert_called_once()
+
+    def test_completed_translation_provider_label_fallback(self):
+        from unittest.mock import MagicMock
+        from main_window import VideoTranslatorGUI
+
+        mock_gui = MagicMock()
+        mock_gui._last_translation_provider = "google"
+        mock_gui.current_translated_segment_models = []
+        mock_gui.current_translated_segments = []
+
+        label = VideoTranslatorGUI._completed_translation_provider_label(mock_gui)
+        self.assertEqual(label, "Google Translate")
+
+        mock_gui._last_translation_provider = "bing"
+        label = VideoTranslatorGUI._completed_translation_provider_label(mock_gui)
+        self.assertEqual(label, "Bing Translator")
+
+
 if __name__ == "__main__":
     unittest.main()

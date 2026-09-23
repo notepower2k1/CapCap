@@ -1219,16 +1219,20 @@ class SubtitleController:
 
         self.gui.progress_bar.setValue(100)
         self.gui.translated_text.setText(translated_srt)
-        self.gui.apply_edited_translation(show_message=False, force_apply=True)
 
         fallback_text = ""
+        actual_provider = getattr(self.gui, "_last_translation_provider", "")
         if fallback_notice:
             if "BING_FALLBACK" in fallback_notice:
+                actual_provider = "bing"
                 self.gui._last_translation_provider = "bing"
                 fallback_text = t("Translation completed using Bing Translator (AI Provider unavailable).")
             else:
+                actual_provider = "google"
                 self.gui._last_translation_provider = "google"
                 fallback_text = t("Translation completed using Google Translate (AI Provider unavailable).")
+
+        self.gui.apply_edited_translation(show_message=False, force_apply=True, provider=actual_provider)
 
         video_path = self.gui.video_path_edit.text()
         if video_path:
@@ -1962,7 +1966,7 @@ class SubtitleController:
         _update_preview_validity()
         dialog.exec()
 
-    def apply_edited_translation(self, show_message=True, force_apply=True):
+    def apply_edited_translation(self, show_message=True, force_apply=True, provider=None):
         srt_text = self.gui.translated_text.toPlainText()
         segments = []
         if self.gui.keep_timeline_cb.isChecked():
@@ -1982,10 +1986,13 @@ class SubtitleController:
                     for fld in (
                         "tts_text", "tts_group_id", "tts_group_start", "tts_group_end",
                         "extended_duration", "time_warp_id", "_audio_end", "_wav_path",
-                        "provider", "translation_provider",
                     ):
                         if fld in base:
                             d[fld] = base[fld]
+                    if not provider:
+                        for fld in ("provider", "translation_provider"):
+                            if fld in base:
+                                d[fld] = base[fld]
                     segments.append(d)
         if not segments:
             segments = self.gui.parse_srt_to_segments(srt_text)
@@ -2003,10 +2010,13 @@ class SubtitleController:
                     for fld in (
                         "tts_text", "tts_group_id", "tts_group_start", "tts_group_end",
                         "extended_duration", "time_warp_id", "_audio_end", "_wav_path",
-                        "provider", "translation_provider",
                     ):
                         if fld in metadata_base[idx] and fld not in segment:
                             segment[fld] = metadata_base[idx][fld]
+                    if not provider:
+                        for fld in ("provider", "translation_provider"):
+                            if fld in metadata_base[idx] and fld not in segment:
+                                segment[fld] = metadata_base[idx][fld]
         if not segments:
             if show_message:
                 QMessageBox.warning(
@@ -2016,13 +2026,26 @@ class SubtitleController:
                 )
             return False
 
-        default_provider = getattr(self.gui, "_last_translation_provider", "") or self.gui._completed_translation_provider_label() or "google"
-        for segment in segments:
-            if not segment.get("provider") and not segment.get("translation_provider"):
+        default_provider = str(
+            provider
+            or getattr(self.gui, "_last_translation_provider", "")
+            or self.gui._completed_translation_provider_label()
+            or "google"
+        ).strip().lower()
+        if provider:
+            for segment in segments:
                 segment["provider"] = default_provider
+                segment.pop("translation_provider", None)
+        else:
+            for segment in segments:
+                if not segment.get("provider") and not segment.get("translation_provider"):
+                    segment["provider"] = default_provider
 
         self.gui.current_translated_segments = segments
         self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(segments, translated=True)
+        if provider:
+            for model in self.gui.current_translated_segment_models:
+                model.metadata["translation_provider"] = default_provider
         if force_apply:
             self.gui.apply_segments_to_timeline()
 

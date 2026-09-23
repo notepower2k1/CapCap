@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import json
+import time
 import copy
 import glob
 import hashlib
@@ -2413,8 +2414,13 @@ class VideoTranslatorGUI(QMainWindow):
         clear_log_impl(self)
 
     def export_runtime_logs(self):
+        import time
+        from PySide6.QtCore import QStandardPaths
+
         default_name = f"capcap_logs_{time.strftime('%Y%m%d_%H%M%S')}.txt"
-        default_path = os.path.join(self.workspace_root, default_name)
+        desktop_dir = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
+        default_dir = desktop_dir if desktop_dir and os.path.isdir(desktop_dir) else getattr(self, "workspace_root", "")
+        default_path = os.path.join(default_dir, default_name) if default_dir else default_name
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             t("Export Runtime Logs"),
@@ -2425,12 +2431,37 @@ class VideoTranslatorGUI(QMainWindow):
             return
         try:
             self._flush_runtime_log_entries()
+            entries = list(getattr(self, "_runtime_logs", []) or [])
+
+            # Check if persistent capcap_runtime.log has the complete process trace
+            disk_content = ""
+            for candidate in (
+                os.path.join(getattr(self, "workspace_root", ""), "temp", "capcap_runtime.log"),
+                os.path.join(workspace_root(), "temp", "capcap_runtime.log"),
+            ):
+                if candidate and os.path.exists(candidate):
+                    try:
+                        with open(candidate, "r", encoding="utf-8", errors="replace") as f:
+                            disk_content = f.read()
+                        if disk_content.strip():
+                            break
+                    except Exception:
+                        pass
+
+            log_parts = []
+            if disk_content.strip():
+                log_parts.append(disk_content.strip())
+            if entries:
+                new_entries = [e for e in entries if e not in disk_content]
+                if new_entries:
+                    log_parts.append("\n".join(new_entries))
+            content = ("\n\n".join(log_parts) + "\n") if log_parts else ("\n".join(entries) + "\n")
+
             with open(file_path, "w", encoding="utf-8") as handle:
-                entries = getattr(self, "_runtime_logs", [])
-                handle.write("\n".join(entries))
-                handle.write("\n" if entries else "")
+                handle.write(content)
             self.log(f"[Logs] Exported runtime logs to {file_path}")
-        except OSError as exc:
+            QMessageBox.information(self, t("Export Logs"), f"{t('Exported runtime logs to')}\n{file_path}")
+        except Exception as exc:
             QMessageBox.warning(self, t("Export Logs"), f"{t('Could not export logs:')}\n{exc}")
 
     def _register_progress_dialog(self, dialog):
@@ -5997,10 +6028,13 @@ class VideoTranslatorGUI(QMainWindow):
                     provider_counts[p] = provider_counts.get(p, 0) + 1
 
         provider = ""
-        if provider_counts:
+        last_provider = str(getattr(self, "_last_translation_provider", "") or "").strip().lower()
+        if last_provider in ("google", "google-web", "google_web", "bing", "bing-web", "bing_web"):
+            provider = last_provider
+        elif provider_counts:
             provider = max(provider_counts, key=provider_counts.get)
         if not provider:
-            provider = str(getattr(self, "_last_translation_provider", "") or "").strip().lower()
+            provider = last_provider
         if not provider:
             state = getattr(self, "current_project_state", None)
             settings = getattr(state, "settings", {}) if state else {}
@@ -15762,8 +15796,8 @@ class VideoTranslatorGUI(QMainWindow):
         if subtitle_was_visible and not getattr(self, "_preview_video_has_burned_subtitles", False):
             QTimer.singleShot(0, self.sync_live_subtitle_preview)
 
-    def apply_edited_translation(self, show_message=True, force_apply=True):
-        result = self.subtitle_controller.apply_edited_translation(show_message=show_message, force_apply=force_apply)
+    def apply_edited_translation(self, show_message=True, force_apply=True, provider=None):
+        result = self.subtitle_controller.apply_edited_translation(show_message=show_message, force_apply=force_apply, provider=provider)
         if result:
             self.refresh_auto_keyword_highlights()
             self.sync_segment_editor_rows()
@@ -15883,19 +15917,25 @@ class VideoTranslatorGUI(QMainWindow):
 
         bug_btn_row = QHBoxLayout()
         bug_btn_row.setSpacing(10)
+        export_log_btn = QPushButton(t("💾 Export Log File"), bug_card)
         open_log_btn = QPushButton(t("📂 Open Log Folder (temp)"), bug_card)
         open_disc_btn = QPushButton(t("🌐 Open GitHub Discussions"), bug_card)
         open_disc_btn.setObjectName("primaryActionBtn")
 
         def _open_log_folder():
-            os.makedirs(log_dir, exist_ok=True)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(log_dir))
+            target_dir = log_dir
+            if hasattr(self, "workspace_root") and os.path.exists(os.path.join(self.workspace_root, "temp", "capcap_runtime.log")):
+                target_dir = os.path.join(self.workspace_root, "temp")
+            os.makedirs(target_dir, exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(target_dir))
 
         def _open_discussions():
             QDesktopServices.openUrl(QUrl("https://github.com/notepower2k1/CapCap/discussions"))
 
+        export_log_btn.clicked.connect(self.export_runtime_logs)
         open_log_btn.clicked.connect(_open_log_folder)
         open_disc_btn.clicked.connect(_open_discussions)
+        bug_btn_row.addWidget(export_log_btn)
         bug_btn_row.addWidget(open_log_btn)
         bug_btn_row.addWidget(open_disc_btn)
         bug_btn_row.addStretch()

@@ -636,13 +636,18 @@ class PipelineController:
             str(getattr(model, "metadata", {}).get("translation_provider", "") or "").strip().lower()
             for model in models
         }
-        if "google-web" not in providers:
+        if "google-web" not in providers and "google" not in providers and "bing-web" not in providers and "bing" not in providers:
             return
+        if "google-web" in providers or "google" in providers:
+            self.gui._last_translation_provider = "google"
+            notice = t("AI Provider is unavailable. Translation completed using Google Translate instead.")
+        else:
+            self.gui._last_translation_provider = "bing"
+            notice = t("AI Provider is unavailable. Translation completed using Bing Translator instead.")
         signature = f"{getattr(self, 'prepare_run_id', 0)}:{selected_provider}"
         if getattr(self, "_fallback_notification_signature", "") == signature:
             return
         self._fallback_notification_signature = signature
-        notice = t("AI Provider is unavailable. Translation completed using Google Translate instead.")
         self.gui.log(f"[Translation] {notice}")
         QMessageBox.information(self.gui, t("Translation Fallback"), notice)
 

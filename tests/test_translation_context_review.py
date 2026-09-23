@@ -279,6 +279,18 @@ class TestSubtitleControllerIntegration(unittest.TestCase):
             mock_info.assert_called_once()
             _, args, _ = mock_info.mock_calls[0]
             self.assertIn("Bing Translator", args[2])
+            self.assertEqual(self.gui._last_translation_provider, "bing")
+
+    def test_on_translation_finished_reports_google_fallback(self):
+        self.gui.video_path_edit.text.return_value = ""
+        self.gui._last_translation_provider = "google_ai_studio"
+        with patch("ui.controllers.subtitle_controller.QMessageBox.information") as mock_info:
+            self.controller.on_translation_finished("1\n00:00:00,000 --> 00:00:01,000\nXin chào\n", "", "AI Provider is unavailable. Falling back to Google Translate...")
+            mock_info.assert_called_once()
+            _, args, _ = mock_info.mock_calls[0]
+            self.assertIn("Google Translate", args[2])
+            self.assertEqual(self.gui._last_translation_provider, "google")
+            self.gui.apply_edited_translation.assert_called_with(show_message=False, force_apply=True, provider="google")
 
 
 

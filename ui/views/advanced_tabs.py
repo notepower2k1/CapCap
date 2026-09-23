@@ -1,4 +1,5 @@
 import os
+from i18n import t
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -78,7 +79,7 @@ def build_advanced_group(gui, left_layout):
     gui.runtime_log_view.setReadOnly(True)
     gui.runtime_log_view.setMaximumBlockCount(10000)
     gui.runtime_log_view.setMinimumHeight(160)
-    gui.runtime_log_view.setPlaceholderText("Runtime logs will appear here.")
+    gui.runtime_log_view.setPlaceholderText(t("Runtime logs will appear here."))
     gui.runtime_log_view.setStyleSheet(
         "QPlainTextEdit#runtimeLogView { background: #0b1220; color: #c9d8e8; "
         "border: 1px solid #30425b; border-radius: 6px; padding: 6px; font-family: Consolas, monospace; }"
@@ -89,9 +90,9 @@ def build_advanced_group(gui, left_layout):
         gui._runtime_log_view_entry_count = len(existing_logs)
     logs_layout.addWidget(gui.runtime_log_view)
     logs_actions = QHBoxLayout()
-    gui.export_logs_btn = QPushButton("Export Logs")
+    gui.export_logs_btn = QPushButton(t("Export Logs"))
     gui.export_logs_btn.clicked.connect(gui.export_runtime_logs)
-    gui.clear_logs_btn = QPushButton("Clear Logs")
+    gui.clear_logs_btn = QPushButton(t("Clear Logs"))
     gui.clear_logs_btn.clicked.connect(gui.clear_log)
     logs_actions.addWidget(gui.export_logs_btn)
     logs_actions.addWidget(gui.clear_logs_btn)
