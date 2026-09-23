@@ -15751,14 +15751,15 @@ class VideoTranslatorGUI(QMainWindow):
 
         bug_text = QLabel(
             t(
-                "Khi gặp lỗi (bug), bạn vui lòng:\n"
-                "• Lấy file log tại đường dẫn cài đặt: <b>CapCap\\temp\\capcap_runtime.log</b>\n"
-                "   <i>(hoặc nhấn nút <b>Xuất log</b> ở tab <b>Nâng cao</b>)</i>\n"
-                "• Chụp ảnh màn hình lỗi\n"
+                "Khi gặp lỗi (bug), bạn vui lòng:<br>"
+                "• Lấy file log tại đường dẫn cài đặt: <b style='color: #f8fbff;'>CapCap\\temp\\capcap_runtime.log</b><br>"
+                "&nbsp;&nbsp;&nbsp;<i>(hoặc nhấn nút <b style='color: #f8fbff;'>Xuất log</b> ở tab <b style='color: #f8fbff;'>Nâng cao</b>)</i><br>"
+                "• Chụp ảnh màn hình lỗi<br>"
                 "• Đăng bài mô tả kèm ảnh và log lên GitHub Discussions:"
             ),
             bug_card,
         )
+        bug_text.setTextFormat(Qt.RichText)
         bug_text.setObjectName("helperLabel")
         bug_text.setWordWrap(True)
         bug_card_layout.addWidget(bug_text)
@@ -15807,6 +15808,7 @@ class VideoTranslatorGUI(QMainWindow):
             t("Bạn có ý tưởng hay hoặc muốn đề xuất chức năng mới cho CapCap? Hãy tạo issue đóng góp cho dự án tại:"),
             feat_card,
         )
+        feat_text.setTextFormat(Qt.RichText)
         feat_text.setObjectName("helperLabel")
         feat_text.setWordWrap(True)
         feat_card_layout.addWidget(feat_text)
