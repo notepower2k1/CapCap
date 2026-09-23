@@ -322,5 +322,35 @@ class TestLearnDialogueContextWithUserGuidance(unittest.TestCase):
         self.assertIn("SWAP their roles, genders, and addressing rules", system_msg)
 
 
+class TestRollingBatchesMultiBatch(unittest.TestCase):
+    @patch("app.translation.orchestrator.time.sleep")
+    def test_multi_batch_calls_sleep_without_name_error(self, mock_sleep):
+        orchestrator = TranslationOrchestrator()
+        mock_polisher = MagicMock()
+        mock_polisher.polish_batch.side_effect = [
+            (["Dòng 1"], [], "gemini-3.5-flash"),
+            (["Dòng 2"], [], "gemini-3.5-flash"),
+        ]
+
+        batches = [
+            (["Line 1"], None, 100, None),
+            (["Line 2"], None, 100, None),
+        ]
+        texts, providers, warnings = orchestrator._run_ai_batches_sequential(
+            polisher=mock_polisher,
+            batches=batches,
+            src_lang="zh-Hans",
+            target_lang="vi",
+            style_instruction="",
+            custom_system_prompt="",
+            context_guidance="",
+        )
+
+        self.assertEqual(texts, ["Dòng 1", "Dòng 2"])
+        mock_sleep.assert_called_once_with(0.25)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
