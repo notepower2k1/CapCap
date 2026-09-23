@@ -683,14 +683,19 @@ class SubtitleController:
         dialog._started_at = started
         dialog._action = action
         dialog._provider = provider
+        dialog._fallback_msg = ""
         dialog._progress_str = ""
         timer = QTimer(dialog)
 
         def update_elapsed():
             elapsed = int(time.monotonic() - started)
+            curr_action = getattr(dialog, "_action", action)
+            curr_provider = getattr(dialog, "_provider", provider)
+            fallback_msg = getattr(dialog, "_fallback_msg", "")
+            msg_line = f"\n{t(fallback_msg)}" if fallback_msg else ""
             prog_line = f"{t('Progress')}: {t(dialog._progress_str)}\n" if getattr(dialog, "_progress_str", "") else ""
             dialog.setLabelText(
-                f"{action_text} {t('subtitles with')} {provider}...\n"
+                f"{t(curr_action)} {t('subtitles with')} {curr_provider}...{msg_line}\n"
                 f"{prog_line}"
                 f"{t('Elapsed')}: {elapsed // 60:02d}:{elapsed % 60:02d}\n"
                 f"{t('Large subtitle projects can take a few minutes.')}"
@@ -1012,6 +1017,7 @@ class SubtitleController:
         self.gui.translation_thread.finished.connect(self.gui.on_translation_finished)
         self.gui.translation_thread.progress.connect(self.on_translation_progress)
         self.gui.translation_thread.batch_ready.connect(self.on_translation_batch_ready)
+        self.gui.translation_thread.status_changed.connect(self.on_translation_status_changed)
         self.gui.translation_thread.start()
 
     def _extract_and_review_context(
@@ -1121,6 +1127,36 @@ class SubtitleController:
         self.gui.log(f"[Translation] Confirmed pronoun rules ({len(result.splitlines())} lines).")
         return result
 
+    def on_translation_status_changed(self, provider: str, message: str = ""):
+        provider_map = {
+            "google_ai_studio": "Google AI Studio",
+            "openai": "OpenAI",
+            "ollama": "Ollama",
+            "google": "Google Translate",
+            "google-web": "Google Translate",
+            "bing": "Bing Translator",
+            "bing-web": "Bing Translator",
+        }
+        display_provider = provider_map.get(provider, provider)
+        dialog = getattr(self.gui, "_translation_progress_dialog", None)
+        if dialog is not None:
+            dialog._provider = display_provider
+            if message:
+                dialog._fallback_msg = message
+            action = getattr(dialog, "_action", "Translating")
+            action_text = t(action)
+            dialog.setWindowTitle(f"{action_text} {t('Subtitles')} ({display_provider})")
+            elapsed = int(time.monotonic() - getattr(dialog, "_started_at", time.monotonic()))
+            fallback_msg = getattr(dialog, "_fallback_msg", "")
+            msg_line = f"\n{t(fallback_msg)}" if fallback_msg else ""
+            prog_line = f"{t('Progress')}: {t(dialog._progress_str)}\n" if getattr(dialog, "_progress_str", "") else ""
+            dialog.setLabelText(
+                f"{action_text} {t('subtitles with')} {display_provider}...{msg_line}\n"
+                f"{prog_line}"
+                f"{t('Elapsed')}: {elapsed // 60:02d}:{elapsed % 60:02d}\n"
+                f"{t('Large subtitle projects can take a few minutes.')}"
+            )
+
     def on_translation_progress(self, completed: int, total: int):
         if total <= 0:
             return
@@ -1132,8 +1168,10 @@ class SubtitleController:
             elapsed = int(time.monotonic() - getattr(dialog, "_started_at", time.monotonic()))
             action = getattr(dialog, "_action", "Translating")
             provider = getattr(dialog, "_provider", "AI")
+            fallback_msg = getattr(dialog, "_fallback_msg", "")
+            msg_line = f"\n{t(fallback_msg)}" if fallback_msg else ""
             dialog.setLabelText(
-                f"{t(action)} {t('subtitles with')} {provider}...\n"
+                f"{t(action)} {t('subtitles with')} {provider}...{msg_line}\n"
                 f"{t('Progress')}: {t(dialog._progress_str)}\n"
                 f"{t('Elapsed')}: {elapsed // 60:02d}:{elapsed % 60:02d}\n"
                 f"{t('Large subtitle projects can take a few minutes.')}"
@@ -1168,6 +1206,13 @@ class SubtitleController:
         self.gui.translated_text.setText(translated_srt)
         self.gui.apply_edited_translation(show_message=False, force_apply=True)
 
+        fallback_text = ""
+        if fallback_notice:
+            if "BING_FALLBACK" in fallback_notice:
+                fallback_text = t("Translation completed using Bing Translator (AI Provider unavailable).")
+            else:
+                fallback_text = t("Translation completed using Google Translate (AI Provider unavailable).")
+
         video_path = self.gui.video_path_edit.text()
         if video_path:
             file_basename = os.path.splitext(os.path.basename(video_path))[0]
@@ -1180,12 +1225,12 @@ class SubtitleController:
             self.gui.processed_artifacts["srt_translated"] = out_path
             self.gui.persist_translation_project_data(self.gui.current_translated_segments, out_path)
             message = f"{t('Process complete! Subtitle saved and loaded for preview:')}\n{out_path}"
-            if fallback_notice:
-                message = f"{t('Translation completed using Google Translate (AI Provider unavailable).')}\n\n{message}"
+            if fallback_text:
+                message = f"{fallback_text}\n\n{message}"
             QMessageBox.information(self.gui, t("Finished"), message)
         else:
             self.gui.persist_translation_project_data(self.gui.current_translated_segments)
-            message = t("Translation completed using Google Translate (AI Provider unavailable).") if fallback_notice else t("Translation complete!")
+            message = fallback_text if fallback_text else t("Translation complete!")
             QMessageBox.information(self.gui, t("Finished"), message)
 
         if fallback_notice:

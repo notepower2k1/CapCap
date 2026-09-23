@@ -204,6 +204,7 @@ class TranslationWorker(QThread):
     finished = Signal(str, str, str)
     batch_ready = Signal(int, list)
     progress = Signal(int, int)
+    status_changed = Signal(str, str)
 
     def __init__(
         self,
@@ -263,6 +264,7 @@ class TranslationWorker(QThread):
                         self.progress.emit(completed, total_cues)
 
                 translate_kwargs["batch_callback"] = on_batch
+                translate_kwargs["status_callback"] = lambda prov, msg: self.status_changed.emit(str(prov or ""), str(msg or ""))
 
                 if self.segments:
                     result = orch.translate_segments(
@@ -277,7 +279,14 @@ class TranslationWorker(QThread):
                 if not result.success:
                     raise RuntimeError("; ".join(result.errors) or "Translation failed.")
                 translated_srt = orch.result_to_srt(result)
-                fallback_notice = "\n".join(result.warnings or []) if result.used_fallback else ""
+                if result.used_fallback:
+                    prov_str = str(result.primary_provider or "").lower()
+                    if "bing" in prov_str:
+                        fallback_notice = "BING_FALLBACK\n" + "\n".join(result.warnings or [])
+                    else:
+                        fallback_notice = "\n".join(result.warnings or [])
+                else:
+                    fallback_notice = ""
             except Exception:
                 raise
             self.finished.emit(translated_srt, "", fallback_notice)

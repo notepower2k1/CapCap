@@ -44,9 +44,11 @@ class GoogleWebTranslatorProvider:
     DELIMITER = "\n===@@@===\n"
     CHUNK_MAX_CUES = 15
     CHUNK_MAX_CHARS = 1800
+    CLIENT_CANDIDATES = ("dict-chrome-ex", "at", "it", "gtx")
 
     def __init__(self):
         self.session = requests.Session()
+        self.current_client_idx = 0
         self.headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -127,8 +129,12 @@ class GoogleWebTranslatorProvider:
                 if len(parts) == len(chunk):
                     results.extend(parts)
                     batch_success = True
-            except Exception:
+            except Exception as batch_exc:
                 batch_success = False
+                err_str = str(batch_exc).lower()
+                if "429" in err_str or "403" in err_str or "sorry" in err_str or "unusual traffic" in err_str:
+                    # Google IP blocked / rate-limited. Fail fast to allow Bing fallback.
+                    raise
 
             if not batch_success:
                 # Fallback to translating individual cues for this chunk
@@ -156,77 +162,55 @@ class GoogleWebTranslatorProvider:
     ) -> str:
         last_error = ""
         query = quote(text or "", safe="")
-        url = (
-            f"{self.BASE_URL}?client=gtx&sl={src_lang}&tl={target_lang}"
-            f"&dt=t&q={query}"
-        )
         headers = self.headers
 
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = self.session.get(url, headers=headers, timeout=timeout)
-                if response.status_code != 200:
+        num_clients = len(self.CLIENT_CANDIDATES)
+        for offset in range(num_clients):
+            cand_idx = (self.current_client_idx + offset) % num_clients
+            client = self.CLIENT_CANDIDATES[cand_idx]
+            url = (
+                f"{self.BASE_URL}?client={client}&sl={src_lang}&tl={target_lang}"
+                f"&dt=t&q={query}"
+            )
+
+            for attempt in range(1, max_retries + 1):
+                try:
+                    response = self.session.get(url, headers=headers, timeout=timeout)
+                    if response.status_code == 200:
+                        try:
+                            payload = response.json()
+                            translated = self._extract_text(payload)
+                            if translated:
+                                self.current_client_idx = cand_idx
+                                return translated
+                        except (ValueError, json.JSONDecodeError):
+                            pass
+
                     last_error = f"Google web translate error ({response.status_code}): {response.text}"
-                    # The free JSON endpoint is undocumented and can be
-                    # blocked per IP.  Try the public mobile Translate page
-                    # before retrying the same blocked endpoint.
                     if response.status_code in {403, 429}:
-                        try:
-                            mobile_text = self._translate_mobile(
-                                text=text,
-                                src_lang=src_lang,
-                                target_lang=target_lang,
-                                timeout=timeout,
-                                headers=headers,
-                            )
-                            if mobile_text:
-                                return mobile_text
-                        except Exception as mobile_exc:
-                            last_error = f"{last_error}; mobile fallback failed: {mobile_exc}"
+                        # Client blocked/rate-limited. Try next candidate.
+                        break
+
                     if attempt < max_retries:
-                        retry_after = response.headers.get("Retry-After", "")
-                        try:
-                            delay = max(1.0, min(float(retry_after), 10.0))
-                        except (TypeError, ValueError):
-                            delay = min(float(attempt), 5.0)
-                        time.sleep(delay)
-                        continue
-                    raise TranslationProviderError(last_error)
+                        time.sleep(min(float(attempt), 2.0))
+                except (requests.RequestException, json.JSONDecodeError, TranslationProviderError) as exc:
+                    last_error = str(exc)
+                    if attempt < max_retries:
+                        time.sleep(1.0)
 
-                try:
-                    payload = response.json()
-                    translated = self._extract_text(payload)
-                except ValueError as exc:
-                    translated = ""
-                    last_error = f"Google web translate returned invalid JSON: {exc}"
-                if translated:
-                    return translated
-
-                # A future endpoint change may return HTTP 200 with a
-                # different payload shape.  Treat that the same as a blocked
-                # endpoint and try the mobile response before retrying.
-                try:
-                    mobile_text = self._translate_mobile(
-                        text=text,
-                        src_lang=src_lang,
-                        target_lang=target_lang,
-                        timeout=timeout,
-                        headers=headers,
-                    )
-                    if mobile_text:
-                        return mobile_text
-                except Exception as mobile_exc:
-                    last_error = (
-                        last_error or "Google web translate returned empty text."
-                    ) + f"; mobile fallback failed: {mobile_exc}"
-                raise TranslationProviderError(
-                    last_error or "Google web translate returned empty text."
-                )
-            except (requests.RequestException, json.JSONDecodeError, TranslationProviderError) as exc:
-                last_error = str(exc)
-                if attempt < max_retries:
-                    time.sleep(attempt)
-                    continue
+        # Fallback to mobile page if JSON clients are exhausted
+        try:
+            mobile_text = self._translate_mobile(
+                text=text,
+                src_lang=src_lang,
+                target_lang=target_lang,
+                timeout=timeout,
+                headers=headers,
+            )
+            if mobile_text:
+                return mobile_text
+        except Exception as mobile_exc:
+            last_error = f"{last_error}; mobile fallback failed: {mobile_exc}"
 
         raise TranslationProviderError(last_error or "Google web translate failed.")
 

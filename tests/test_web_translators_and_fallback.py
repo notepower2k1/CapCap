@@ -118,6 +118,42 @@ class TestOrchestratorWebFallback(unittest.TestCase):
         self.assertEqual(result.segments[0]["text"], "Bing 1")
         self.assertEqual(result.segments[1]["text"], "Bing 2")
 
+    @patch.dict("os.environ", {"OPENAI_PROVIDER": "google"})
+    def test_status_callback_on_google_to_bing_fallback(self):
+        self.orchestrator.google_web.translate_batch = MagicMock(side_effect=Exception("HTTP 429 Too Many Requests"))
+        self.orchestrator.bing_web.translate_batch = MagicMock(return_value=["Xin chào Bing", "Tạm biệt Bing"])
+
+        status_updates = []
+        def status_cb(provider, msg):
+            status_updates.append((provider, msg))
+
+        result = self.orchestrator.translate_segments(
+            segments=self.segments,
+            src_lang="en",
+            target_lang="vi",
+            enable_polish=False,
+            status_callback=status_cb,
+        )
+        self.assertTrue(result.success)
+        self.assertTrue(any(p == "Bing Translator" for p, _ in status_updates))
+
+    def test_google_client_rotation_on_429(self):
+        provider = GoogleWebTranslatorProvider()
+        # Mock session.get to return 429 on first candidate, 200 on second
+        mock_resp_429 = MagicMock()
+        mock_resp_429.status_code = 429
+        mock_resp_429.text = "Sorry 429"
+
+        mock_resp_200 = MagicMock()
+        mock_resp_200.status_code = 200
+        mock_resp_200.json.return_value = [[["Xin chào", "Hello", None, None]]]
+
+        with patch.object(provider.session, "get", side_effect=[mock_resp_429, mock_resp_200]):
+            res = provider._translate_text(text="Hello", src_lang="en", target_lang="vi", timeout=5, max_retries=1)
+            self.assertEqual(res, "Xin chào")
+            # Should have rotated index
+            self.assertNotEqual(provider.current_client_idx, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

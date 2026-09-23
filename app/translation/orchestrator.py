@@ -51,6 +51,7 @@ class TranslationOrchestrator:
         context_guidance: str = "",
         override_provider: str = "",
         batch_callback=None,
+        status_callback=None,
     ) -> TranslationResult:
         if not segments:
             return TranslationResult(success=False, errors=["No segments to translate."], stage="input")
@@ -81,6 +82,11 @@ class TranslationOrchestrator:
         if enable_polish:
             provider_type, polisher = self._resolve_ai_provider(override_provider=override_provider)
             if polisher.is_configured():
+                if status_callback:
+                    try:
+                        status_callback(self._describe_ai_provider(provider_type), "")
+                    except Exception:
+                        pass
                 try:
                     mode_label = self._describe_ai_provider(provider_type)
                     merged_style = str(style_instruction or "")
@@ -178,16 +184,36 @@ class TranslationOrchestrator:
                         msg = "AI Provider is unavailable. Falling back to Google Translate..."
                     print(f"[AI Translation] WARNING: {msg} ({exc})")
                     warnings.append(msg)
+                    if status_callback:
+                        try:
+                            status_callback("Google Translate", msg)
+                        except Exception:
+                            pass
             else:
                 selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
                 if selected_provider not in ("google", "bing"):
                     msg = "AI Provider is unavailable. Falling back to Google Translate..."
                     print(f"[AI Translation] WARNING: {msg}")
                     warnings.append(msg)
+                    if status_callback:
+                        try:
+                            status_callback("Google Translate", msg)
+                        except Exception:
+                            pass
                 elif selected_provider == "bing":
                     print("[AI Translation] Bing Translator selected.")
+                    if status_callback:
+                        try:
+                            status_callback("Bing Translator", "")
+                        except Exception:
+                            pass
                 else:
                     print("[AI Translation] Google Translate selected.")
+                    if status_callback:
+                        try:
+                            status_callback("Google Translate", "")
+                        except Exception:
+                            pass
 
         selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
 
@@ -201,13 +227,42 @@ class TranslationOrchestrator:
                 ms_batch_size=ms_batch_size,
                 batch_callback=batch_callback,
                 warnings=warnings,
+                status_callback=status_callback,
             )
 
+        return self._run_google_translate(
+            segments=segments,
+            source_texts=source_texts,
+            normalized_src=normalized_src,
+            target_lang=target_lang,
+            ms_batch_size=ms_batch_size,
+            batch_callback=batch_callback,
+            warnings=warnings,
+            status_callback=status_callback,
+        )
+
+    def _run_google_translate(
+        self,
+        *,
+        segments: list[dict],
+        source_texts: list[str],
+        normalized_src: str,
+        target_lang: str,
+        ms_batch_size: int,
+        batch_callback,
+        warnings: list[str],
+        status_callback=None,
+    ) -> TranslationResult:
         print("=" * 60)
         print(f"[Translation] Starting Google web translate (batch_size={ms_batch_size})...")
         print("[Translation] Prompt: Google Web API (No custom prompt / No LLM)")
         print("[Translation] Speaker Diarization: DISABLED (Not supported by Google Translate)")
         print("=" * 60)
+        if status_callback:
+            try:
+                status_callback("Google Translate", "")
+            except Exception:
+                pass
         google_failed = False
         try:
             translated_texts = []
@@ -249,6 +304,11 @@ class TranslationOrchestrator:
             warnings.append(msg)
 
         if google_failed:
+            if status_callback:
+                try:
+                    status_callback("Bing Translator", "Google web translate error. Auto-falling back to Bing Translator...")
+                except Exception:
+                    pass
             return self._run_bing_translate(
                 segments=segments,
                 source_texts=source_texts,
@@ -258,6 +318,7 @@ class TranslationOrchestrator:
                 batch_callback=batch_callback,
                 warnings=warnings,
                 is_fallback=True,
+                status_callback=status_callback,
             )
 
     def _run_bing_translate(
@@ -271,6 +332,7 @@ class TranslationOrchestrator:
         batch_callback,
         warnings: list[str],
         is_fallback: bool = False,
+        status_callback=None,
     ) -> TranslationResult:
         print("=" * 60)
         action = "Auto-fallback to Bing web translate" if is_fallback else "Starting Bing web translate"
@@ -278,6 +340,11 @@ class TranslationOrchestrator:
         print("[Translation] Prompt: Bing Web API (No custom prompt / No LLM)")
         print("[Translation] Speaker Diarization: DISABLED (Not supported by Bing Translator)")
         print("=" * 60)
+        if status_callback:
+            try:
+                status_callback("Bing Translator", "Auto-falling back to Bing Translator..." if is_fallback else "")
+            except Exception:
+                pass
         try:
             translated_texts = []
             offset = 0

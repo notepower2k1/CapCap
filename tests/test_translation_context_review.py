@@ -257,6 +257,30 @@ class TestSubtitleControllerIntegration(unittest.TestCase):
             mock_review.assert_called_once()
             mock_worker_cls.assert_not_called()
 
+    def test_on_translation_status_changed_updates_dialog(self):
+        mock_dialog = MagicMock()
+        mock_dialog._progress_str = "10/100 cues (10%)"
+        mock_dialog._started_at = 100.0
+        mock_dialog._action = "Translating"
+        mock_dialog._provider = "Google AI Studio"
+        self.gui._translation_progress_dialog = mock_dialog
+
+        self.controller.on_translation_status_changed("bing", "Falling back to Bing...")
+        self.assertEqual(mock_dialog._provider, "Bing Translator")
+        actual_title = mock_dialog.setWindowTitle.call_args[0][0]
+        self.assertIn("Bing Translator", actual_title)
+        self.assertTrue("Subtitles" in actual_title or "Phụ đề" in actual_title)
+        mock_dialog.setLabelText.assert_called()
+
+    def test_on_translation_finished_reports_bing_fallback(self):
+        self.gui.video_path_edit.text.return_value = ""
+        with patch("ui.controllers.subtitle_controller.QMessageBox.information") as mock_info:
+            self.controller.on_translation_finished("1\n00:00:00,000 --> 00:00:01,000\nXin chào\n", "", "BING_FALLBACK\nwarning")
+            mock_info.assert_called_once()
+            _, args, _ = mock_info.mock_calls[0]
+            self.assertIn("Bing Translator", args[2])
+
+
 
 class TestCleanDialogueContext(unittest.TestCase):
     def test_replaces_latex_arrows(self):
