@@ -77,7 +77,7 @@ def _enable_reusable_detector_preprocess(engine):
 
 MAX_CROP_WIDTH = 960
 EMPTY_TOLERANCE = 2
-EXACT_HASH_THRESHOLD = 5.0
+EXACT_HASH_THRESHOLD = float(os.getenv("OCR_HASH_THRESHOLD", "0.10"))
 _OCR_MODEL_SETS = (
     (
         "PP-OCRv4",
@@ -396,12 +396,41 @@ def preprocess_for_ocr(image):
 
 
 def _crop_hash(image):
-    small = cv2.resize(image, (64, 64), interpolation=cv2.INTER_NEAREST)
-    return small.astype(np.float32).mean(axis=(0, 1))
+    """Generate a binary subtitle text mask (Text Mask Fingerprint).
+
+    Extracts high-contrast subtitle pixels (white or yellow) as a boolean mask.
+    This is invariant to background video scenery motion, but changes sharply
+    (typically 20%-70% difference) whenever a new subtitle line appears.
+    """
+    if image is None or image.size == 0:
+        return np.zeros((1, 1), dtype=bool)
+    try:
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        white_mask = (v > 160) & (s < 60)
+        yellow_mask = (h >= 15) & (h <= 40) & (s > 40) & (v > 130)
+        return (white_mask | yellow_mask)
+    except Exception:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+        return (gray > 160)
 
 
 def _hamming_distance(h1, h2):
-    return float(np.sum(np.abs(h1.astype(np.float32) - h2.astype(np.float32))))
+    """Compute the normalized shape difference between two text fingerprints.
+
+    Returns a float in [0.0, 1.0], representing the percentage of differing active pixels.
+    If both fingerprints have zero text, returns 0.0 (identical blank).
+    If one is blank and the other has text, returns 1.0 (completely changed).
+    """
+    if h1 is None or h2 is None:
+        return 1.0
+    if getattr(h1, "shape", None) != getattr(h2, "shape", None):
+        return 1.0
+    total = np.count_nonzero(h1 | h2)
+    if total == 0:
+        return 0.0
+    diff = np.count_nonzero(h1 != h2)
+    return float(diff) / float(total)
 
 
 def _sanitize_ocr_line(text: str) -> str:
@@ -688,6 +717,7 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
                     skip_count += 1
                     blank_skip_count += 1
                     texts = []
+                    prev_hash = cur_hash
                 else:
                     texts = ocr_frame(ocr_engine, cropped, profiling=profiling)
                     ocr_count += 1

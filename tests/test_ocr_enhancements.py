@@ -82,6 +82,36 @@ class TestOcrEnhancements(unittest.TestCase):
         self.assertAlmostEqual(merged[0]["start"], 10.0)
         self.assertAlmostEqual(merged[0]["end"], 11.5)
 
+    def test_crop_hash_and_hamming_distance(self):
+        # Frame A: black background with white text block at x=50..100
+        img_a = np.zeros((100, 400, 3), dtype=np.uint8)
+        img_a[40:60, 50:150] = (255, 255, 255)
+        h_a = ocr_processor._crop_hash(img_a)
+
+        # Frame A_identical: same text, but background has subtle noise
+        img_a_noisy = img_a.copy()
+        img_a_noisy[0:20, 0:20] = (20, 30, 25)  # background noise
+        h_a_noisy = ocr_processor._crop_hash(img_a_noisy)
+
+        # Distance should be 0.0 or negligible (< threshold)
+        dist_same = ocr_processor._hamming_distance(h_a, h_a_noisy)
+        self.assertLess(dist_same, ocr_processor.EXACT_HASH_THRESHOLD)
+
+        # Frame B: completely different text position / shape at x=200..350
+        img_b = np.zeros((100, 400, 3), dtype=np.uint8)
+        img_b[40:60, 200:350] = (255, 255, 255)
+        h_b = ocr_processor._crop_hash(img_b)
+
+        # Distance between different text shapes must exceed threshold
+        dist_diff = ocr_processor._hamming_distance(h_a, h_b)
+        self.assertGreater(dist_diff, ocr_processor.EXACT_HASH_THRESHOLD)
+
+    def test_crop_hash_edge_cases(self):
+        self.assertEqual(ocr_processor._hamming_distance(None, None), 1.0)
+        blank_a = np.zeros((10, 10), dtype=bool)
+        blank_b = np.zeros((10, 10), dtype=bool)
+        self.assertEqual(ocr_processor._hamming_distance(blank_a, blank_b), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
