@@ -113,5 +113,39 @@ class TestOcrEnhancements(unittest.TestCase):
         self.assertEqual(ocr_processor._hamming_distance(blank_a, blank_b), 0.0)
 
 
+    def test_merge_adjacent_preserves_character_names_and_single_chars(self):
+        # Character name at 37s must not be swallowed by next sentence at 41s or within max_gap
+        segments = [
+            {"start": 37.12, "end": 37.62, "text": "由嘉郁"},
+            {"start": 37.80, "end": 39.50, "text": "由嘉郁你真行啊"},
+        ]
+        merged = ocr_processor._merge_adjacent(segments, max_gap=0.5)
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0]["text"], "由嘉郁")
+        self.assertEqual(merged[1]["text"], "由嘉郁你真行啊")
+
+        # 1-character utterance must not be swallowed
+        segments_single = [
+            {"start": 35.12, "end": 35.62, "text": "嗯"},
+            {"start": 35.80, "end": 36.50, "text": "嗯好的"},
+        ]
+        merged_single = ocr_processor._merge_adjacent(segments_single, max_gap=0.5)
+        self.assertEqual(len(merged_single), 2)
+        self.assertEqual(merged_single[0]["text"], "嗯")
+        self.assertEqual(merged_single[1]["text"], "嗯好的")
+
+    def test_is_blank_region_preserves_single_character_strokes(self):
+        # 1080p crop with 1 small single character (e.g. 35 bright pixels)
+        h, w = 150, 800
+        img = np.zeros((h, w, 3), dtype=np.uint8)
+        # Put 35 bright pixels resembling a small character stroke
+        img[70:75, 400:407] = (220, 220, 220)
+        self.assertFalse(ocr_processor._is_blank_region(img))
+
+        # Truly blank frame
+        blank = np.zeros((h, w, 3), dtype=np.uint8)
+        self.assertTrue(ocr_processor._is_blank_region(blank))
+
+
 if __name__ == "__main__":
     unittest.main()

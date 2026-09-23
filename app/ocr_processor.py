@@ -235,6 +235,14 @@ class WindowsMediaOcrEngine:
         if image is None or image.size == 0:
             return WindowsMediaOcrResult([])
         try:
+            h, w = image.shape[:2]
+            # WinRT OCR requires glyphs to have a minimum height (~30px) to be detected.
+            # On video subtitle crops where height is often 80-140px, scaling up to
+            # at least 220px height ensures small single-character subtitles (e.g. '嗯', '你')
+            # are reliably detected instead of being dropped as noise.
+            if h < 220:
+                scale = 220.0 / float(h)
+                image = cv2.resize(image, (int(w * scale), 220), interpolation=cv2.INTER_CUBIC)
             res = self._winocr.recognize_cv2_sync(image, lang=self._target_lang)
             raw_lines = [str(line.get("text", "")).strip() for line in res.get("lines", []) if str(line.get("text", "")).strip()]
             # Normalize whitespace between CJK characters (WinRT OCR inserts spaces between individual Chinese/Japanese characters)
@@ -478,8 +486,9 @@ def _dim_background_for_ocr(image):
         yellow_mask = (h >= 15) & (h <= 40) & (s > 40) & (v > 130)
         text_mask = white_mask | yellow_mask
 
-        ratio = float(np.count_nonzero(text_mask)) / float(text_mask.size)
-        if ratio < 0.0005 or ratio > 0.50:
+        active_count = np.count_nonzero(text_mask)
+        ratio = float(active_count) / float(text_mask.size)
+        if (ratio < 0.00005 and active_count < 20) or ratio > 0.50:
             return image
 
         dimmed = image.copy()
@@ -494,16 +503,21 @@ def _dim_background_for_ocr(image):
 
 def _is_blank_region(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    bright_pixels = int(np.sum(gray > 170))
+    bright_ratio = float(bright_pixels) / gray.size
+
+    # Flat, untextured backgrounds (e.g. pitch black frames or flat overexposed sky)
     lap = cv2.Laplacian(gray, cv2.CV_64F)
-    if float(lap.var()) < 30.0:
+    lap_var = float(lap.var())
+    if lap_var < 10.0 and (bright_pixels == 0 or bright_ratio > 0.40):
         return True
-    bright_ratio = float(np.sum(gray > 180)) / gray.size
-    # Small, single-character white subtitles can occupy only about 0.1% of a
-    # bottom crop.  The previous 0.2% cutoff labelled those valid subtitle
-    # frames as blank before RapidOCR was allowed to inspect them.
-    if bright_ratio > 0.0005:
+
+    # Single-character subtitles (e.g. '一', '人', '嗯') on high-res crops can have
+    # as few as 20-50 bright pixels. Never drop frames that contain identifiable
+    # glyph strokes.
+    if bright_ratio > 0.0001 or bright_pixels >= 20:
         return False
-    return True
+    return lap_var < 25.0
 
 
 def ocr_frame(engine, image, profiling=None):
@@ -656,14 +670,12 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
     frame_interval = 1.0 / fps
     cap = _open_video(video_path)
     video_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    frame_step = max(1, round(video_fps / fps))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-    # Include the initial frame at 0 and the final partial sampling interval.
-    total_steps = (total_frames + frame_step - 1) // frame_step if total_frames else 0
-    if end_seconds is not None:
-        total_steps = max(1, int(max(0.0, end_seconds - start_seconds) * fps) + 1)
-    if total_steps <= 0:
-        total_steps = int(duration * fps) if duration > 0 else 300
+    effective_end = float(end_seconds) if end_seconds is not None else (duration if duration > 0 else (total_frames / video_fps if total_frames and video_fps else 0.0))
+    if effective_end > start_seconds:
+        total_steps = max(1, int(round((effective_end - start_seconds) * fps)) + 1)
+    else:
+        total_steps = max(1, int(round(duration * fps))) if duration > 0 else 300
     print(f"[OCR] Seeking {total_steps} frames at {fps} fps from video directly...")
     try:
         if ocr_engine is None:
@@ -673,28 +685,32 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
             profiling["engine_init"] = time.perf_counter() - engine_started
 
         segments = []
-        prev_texts = None
+        last_frame_texts = []
         prev_hash = None
         seg_start = None
         seg_text_lines = []
+        last_text_ts = None
         empty_streak = 0
         ocr_count = 0
         skip_count = 0
         unchanged_skip_count = 0
         blank_skip_count = 0
-        step = max(0, int(start_seconds * fps))
         sampled_count = 0
 
         while True:
-            frame_idx = step * frame_step
+            timestamp = start_seconds + sampled_count * frame_interval
+            if end_seconds is not None and timestamp > float(end_seconds):
+                break
+            if duration > 0 and timestamp > float(duration):
+                break
+            frame_idx = int(round(timestamp * video_fps))
+            if total_frames and frame_idx >= total_frames:
+                break
             decode_started = time.perf_counter()
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, img = cap.read()
             profiling["seek_decode"] += time.perf_counter() - decode_started
             if not ret or img is None:
-                break
-            timestamp = frame_idx / video_fps
-            if end_seconds is not None and timestamp > float(end_seconds):
                 break
             sampled_count += 1
             crop_started = time.perf_counter()
@@ -702,13 +718,19 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
             profiling["crop_preprocess"] += time.perf_counter() - crop_started
             change_started = time.perf_counter()
             cur_hash = _crop_hash(cropped)
+            cur_active = int(np.count_nonzero(cur_hash)) if cur_hash is not None else 0
             unchanged = prev_hash is not None and _hamming_distance(cur_hash, prev_hash) < EXACT_HASH_THRESHOLD
             profiling["change_detection"] += time.perf_counter() - change_started
 
             if unchanged:
                 skip_count += 1
                 unchanged_skip_count += 1
-                texts = list(prev_texts) if prev_texts else []
+                # If current frame has zero text pixels, it is completely blank.
+                # Never copy non-empty text across blank frames.
+                if cur_active == 0:
+                    texts = []
+                else:
+                    texts = list(last_frame_texts) if last_frame_texts else []
             else:
                 blank_started = time.perf_counter()
                 is_blank = _is_blank_region(cropped)
@@ -723,7 +745,7 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
                     ocr_count += 1
                     prev_hash = cur_hash
 
-            step += 1
+            last_frame_texts = texts
 
             if sampled_count % 15 == 0 or sampled_count == total_steps:
                 pct = min(99, max(1, int(sampled_count * 100 / total_steps))) if total_steps > 0 else 0
@@ -739,18 +761,21 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
             if not texts:
                 empty_streak += 1
                 if empty_streak >= EMPTY_TOLERANCE and seg_start is not None:
-                    end_ts = max(seg_start + frame_interval, timestamp - frame_interval * 0.5)
+                    # Subtitle segment ended. Close promptly at the time text was last seen
+                    # + half frame interval, avoiding subtitle lingering across blank frames.
+                    end_ts = max(seg_start + frame_interval, (last_text_ts or timestamp) + frame_interval * 0.5)
                     combined = " ".join(seg_text_lines).strip()
                     if combined:
                         segments.append({"start": seg_start, "end": end_ts, "text": combined, "words": []})
                     seg_start = None
                     seg_text_lines = []
-                    prev_texts = None
+                    last_text_ts = None
                 profiling["temporal"] += time.perf_counter() - temporal_started
                 continue
 
             empty_streak = 0
-            if prev_texts is not None and _texts_equal(texts, prev_texts):
+            if seg_text_lines and _texts_equal(texts, seg_text_lines):
+                last_text_ts = timestamp
                 profiling["temporal"] += time.perf_counter() - temporal_started
                 continue
             if seg_start is not None and seg_text_lines:
@@ -758,9 +783,9 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
                 combined = " ".join(seg_text_lines).strip()
                 if combined:
                     segments.append({"start": seg_start, "end": end_ts, "text": combined, "words": []})
-            seg_start = 0.0 if step == 1 else timestamp - frame_interval * 0.5
+            seg_start = 0.0 if (sampled_count == 1 and start_seconds == 0.0) else max(0.0, timestamp - frame_interval * 0.5)
             seg_text_lines = texts
-            prev_texts = texts
+            last_text_ts = timestamp
             profiling["temporal"] += time.perf_counter() - temporal_started
     finally:
         cap.release()
@@ -772,9 +797,8 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
             video_duration = total_frames / video_fps if total_frames and video_fps else (total_steps * frame_interval)
             if end_seconds is not None:
                 video_duration = min(video_duration, float(end_seconds))
-            end_ts = max(seg_start + frame_interval, video_duration)
-            # A range transcription must never extend its final cue beyond
-            # the range merely to satisfy the normal minimum-duration rule.
+            end_ts = max(seg_start + frame_interval, (last_text_ts or timestamp) + frame_interval * 0.5)
+            end_ts = min(end_ts, video_duration)
             if end_seconds is not None:
                 end_ts = min(end_ts, float(end_seconds))
             segments.append({
@@ -845,9 +869,7 @@ def _merge_adjacent(segments, max_gap=0.5):
                 sim = difflib.SequenceMatcher(None, current["text"], seg["text"]).ratio()
                 if sim >= 0.85:
                     is_match = True
-            elif (len(seg["text"]) <= 3 or len(current["text"]) <= 3) and (
-                seg["text"] in current["text"] or current["text"] in seg["text"]
-            ):
+            elif len(current["text"]) > 3 and len(seg["text"]) <= len(current["text"]) and seg["text"] in current["text"]:
                 is_match = True
 
         if is_match:
