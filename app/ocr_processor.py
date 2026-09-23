@@ -1,3 +1,4 @@
+import difflib
 import os
 import re
 import subprocess
@@ -101,6 +102,20 @@ _OCR_WATERMARK_PATTERNS = [
     re.compile(r"[\u3400-\u9fff]{1,6}漫(?:剧|居|刷)"),
     re.compile(r"专店"),
 ]
+_OCR_STRIP_PUNCTUATION = " -_.,;:!?|/\\[]{}()<>'\"`~，。！？；：、“”‘’（）【】《》…—·．、"
+_OCR_RADICAL_REPLACEMENTS = (
+    ("亻尔", "你"),
+    ("亻故", "做"),
+    ("亻门", "们"),
+    ("亻旦", "但"),
+    ("亻也", "他"),
+    ("亻义", "仪"),
+    ("亻青", "倩"),
+    ("彳亍", "行"),
+    ("讠兑", "说"),
+    ("讠青", "请"),
+    ("讠讠", "计"),
+)
 
 
 def _onnx_cuda_provider_ready() -> tuple[bool, str]:
@@ -396,7 +411,9 @@ def _sanitize_ocr_line(text: str) -> str:
     cleaned = _OCR_HANDLE_RE.sub(" ", cleaned)
     for pattern in _OCR_WATERMARK_PATTERNS:
         cleaned = pattern.sub(" ", cleaned)
-    cleaned = " ".join(cleaned.split()).strip(" -_.,;:!?|/\\[]{}()<>'\"`~")
+    for r_from, r_to in _OCR_RADICAL_REPLACEMENTS:
+        cleaned = cleaned.replace(r_from, r_to)
+    cleaned = " ".join(cleaned.split()).strip(_OCR_STRIP_PUNCTUATION)
     if not cleaned:
         return ""
 
@@ -405,6 +422,45 @@ def _sanitize_ocr_line(text: str) -> str:
     # subtitles. Watermark/handle patterns above remain the only explicit
     # OCR text suppression.
     return cleaned
+
+
+def _dim_background_for_ocr(image):
+    """Dim non-subtitle background pixels to make subtitles stand out against video scenery.
+
+    Subtitles in videos are almost universally high-contrast:
+    - White text (high value, low saturation)
+    - Yellow/amber text (hue in [15, 40], high value, medium/high saturation)
+    Dimming pixels outside these text ranges dramatically reduces background noise
+    from moving scenery, actor clothing, and compression artifacts, preventing
+    glyph split errors (such as '你' becoming '亻尔') and hallucinated noise characters.
+    """
+    if image is None or image.size == 0:
+        return image
+    if os.getenv("OCR_DIM_BACKGROUND", "1").strip().lower() in ("0", "false", "no", "off"):
+        return image
+
+    try:
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+
+        # White subtitle mask: high brightness, low saturation
+        white_mask = (v > 160) & (s < 60)
+        # Yellow/amber subtitle mask: warm hue, high brightness, medium/high saturation
+        yellow_mask = (h >= 15) & (h <= 40) & (s > 40) & (v > 130)
+        text_mask = white_mask | yellow_mask
+
+        ratio = float(np.count_nonzero(text_mask)) / float(text_mask.size)
+        if ratio < 0.0005 or ratio > 0.50:
+            return image
+
+        dimmed = image.copy()
+        dim_factor = float(os.getenv("OCR_BG_DIM_FACTOR", "0.20"))
+        dim_factor = max(0.05, min(0.9, dim_factor))
+        bg_mask = ~text_mask
+        dimmed[bg_mask] = (dimmed[bg_mask] * dim_factor).astype(np.uint8)
+        return dimmed
+    except Exception:
+        return image
 
 
 def _is_blank_region(image):
@@ -430,6 +486,7 @@ def ocr_frame(engine, image, profiling=None):
         new_w = MAX_CROP_WIDTH
         new_h = int(h * scale)
         image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    image = _dim_background_for_ocr(image)
     if profiling is not None:
         profiling["crop_preprocess"] += time.perf_counter() - preprocess_started
 
@@ -748,10 +805,25 @@ def _merge_adjacent(segments, max_gap=0.5):
         if not seg["text"]:
             continue
         gap = seg["start"] - current["end"]
-        # A fuzzy OCR match may represent a genuinely new subtitle line.
-        # Extend only the exact same text displayed on successive frames.
-        if gap <= max_gap and seg["text"] == current["text"]:
-            current["end"] = seg["end"]
+        # Extend identical or high-similarity subtitle frames within max_gap.
+        # This handles minor OCR flickering / single-character differences between successive frames.
+        is_match = False
+        if gap <= max_gap:
+            if seg["text"] == current["text"]:
+                is_match = True
+            elif len(seg["text"]) > 3 and len(current["text"]) > 3:
+                sim = difflib.SequenceMatcher(None, current["text"], seg["text"]).ratio()
+                if sim >= 0.85:
+                    is_match = True
+            elif (len(seg["text"]) <= 3 or len(current["text"]) <= 3) and (
+                seg["text"] in current["text"] or current["text"] in seg["text"]
+            ):
+                is_match = True
+
+        if is_match:
+            current["end"] = max(current["end"], seg["end"])
+            if len(seg["text"]) > len(current["text"]):
+                current["text"] = seg["text"]
         else:
             if current.get("text"):
                 merged.append(current)
