@@ -1263,6 +1263,14 @@ VI_TRANSLATIONS: dict[str, str] = {
     "🔄 Re-analyze with Feedback": "🔄 Phân tích lại theo góp ý",
     "Re-run AI dialogue analysis incorporating your custom feedback or guidance.": "Chạy lại phân tích AI kết hợp với hướng dẫn/góp ý của bạn.",
     "Re-analyzing dialogue context with user guidance...": "Đang phân tích lại theo góp ý của bạn...",
+    "Feedback": "Phản hồi / Báo lỗi",
+    "Feedback & Bug Report": "Phản hồi & Báo lỗi",
+    "💬 Phản hồi & Báo lỗi (Feedback & Support)": "💬 Phản hồi & Báo lỗi (Feedback & Support)",
+    "🐛 Báo lỗi (Bug Report)": "🐛 Báo lỗi (Bug Report)",
+    "💡 Đề xuất chức năng mới (Feature Request)": "💡 Đề xuất chức năng mới (Feature Request)",
+    "📂 Mở thư mục Log (temp)": "📂 Mở thư mục Log (temp)",
+    "🌐 Mở GitHub Discussions": "🌐 Mở GitHub Discussions",
+    "🚀 Mở GitHub Issues": "🚀 Mở GitHub Issues",
 }
 
 

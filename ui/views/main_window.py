@@ -133,6 +133,8 @@ def _build_header_bar(gui):
     gui.exit_project_action.triggered.connect(gui.exit_to_launcher)
     gui.settings_action = more_menu.addAction("Settings")
     gui.settings_action.triggered.connect(gui.open_model_settings_dialog)
+    gui.feedback_action = more_menu.addAction("Feedback")
+    gui.feedback_action.triggered.connect(gui.open_feedback_dialog)
     gui.more_actions_btn.setMenu(more_menu)
     layout.addWidget(gui.more_actions_btn)
     gui.titlebar_min_btn = None

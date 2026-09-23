@@ -15576,10 +15576,10 @@ class VideoTranslatorGUI(QMainWindow):
             self.settings.setValue("translation_preset_id", new_preset)
             os.environ["OPENAI_PROVIDER"] = new_provider
             os.environ["AI_POLISHER_PROVIDER"] = new_provider
-            if new_provider == "google":
+            if new_provider in ("google", "bing"):
                 updates = {
-                    "AI_POLISHER_PROVIDER": "google",
-                    "OPENAI_PROVIDER": "google",
+                    "AI_POLISHER_PROVIDER": new_provider,
+                    "OPENAI_PROVIDER": new_provider,
                     "CAPCAP_TRANSLATION_PRESET_ID": new_preset,
                 }
             elif new_provider == "google_ai_studio":
@@ -15660,6 +15660,186 @@ class VideoTranslatorGUI(QMainWindow):
             self.refresh_auto_keyword_highlights()
             self.sync_segment_editor_rows()
             return result
+
+    def open_feedback_dialog(self):
+        """Open the Feedback & Bug Report dialog."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from runtime_paths import workspace_root
+
+        try:
+            dialog = QDialog(self)
+        except (RuntimeError, TypeError):
+            dialog = QDialog()
+        dialog.setWindowTitle(t("Feedback & Bug Report"))
+        dialog.setModal(True)
+        dialog.setMinimumWidth(580)
+        dialog.setStyleSheet(
+            """
+            QDialog {
+                background-color: #0f1724;
+            }
+            QLabel {
+                color: #d7e3f4;
+                background: transparent;
+            }
+            QLabel#statusHeadline {
+                color: #f8fbff;
+                font-size: 16px;
+                font-weight: 700;
+            }
+            QLabel#sectionTitle {
+                color: #60a5fa;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QLabel#helperLabel {
+                color: #9fb3ca;
+                font-size: 12px;
+                line-height: 1.5;
+            }
+            QFrame[frameClass="feedbackCard"] {
+                background-color: #132033;
+                border: 1px solid #243b55;
+                border-radius: 10px;
+            }
+            QPushButton {
+                background-color: #22344d;
+                color: #f8fbff;
+                border: 1px solid #34506f;
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2a4160;
+                border-color: #4a729e;
+            }
+            QPushButton:pressed {
+                background-color: #1b2a3d;
+            }
+            QPushButton#primaryActionBtn {
+                background-color: #2563eb;
+                border-color: #3b82f6;
+            }
+            QPushButton#primaryActionBtn:hover {
+                background-color: #1d4ed8;
+            }
+            """
+        )
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        # Header title
+        title_label = QLabel(t("💬 Phản hồi & Báo lỗi (Feedback & Support)"), dialog)
+        title_label.setObjectName("statusHeadline")
+        layout.addWidget(title_label)
+
+        # Card 1: Báo lỗi & Gửi log (Bug Report)
+        bug_card = QFrame(dialog)
+        bug_card.setProperty("frameClass", "feedbackCard")
+        bug_card_layout = QVBoxLayout(bug_card)
+        bug_card_layout.setContentsMargins(14, 14, 14, 14)
+        bug_card_layout.setSpacing(10)
+
+        bug_title = QLabel(t("🐛 Báo lỗi (Bug Report)"), bug_card)
+        bug_title.setObjectName("sectionTitle")
+        bug_card_layout.addWidget(bug_title)
+
+        log_dir = os.path.join(workspace_root(), "temp")
+
+        bug_text = QLabel(
+            t(
+                "Khi gặp lỗi (bug), bạn vui lòng:\n"
+                "• Lấy file log tại đường dẫn cài đặt: <b>CapCap\\temp\\capcap_runtime.log</b>\n"
+                "   <i>(hoặc nhấn nút <b>Xuất log</b> ở tab <b>Nâng cao</b>)</i>\n"
+                "• Chụp ảnh màn hình lỗi\n"
+                "• Đăng bài mô tả kèm ảnh và log lên GitHub Discussions:"
+            ),
+            bug_card,
+        )
+        bug_text.setObjectName("helperLabel")
+        bug_text.setWordWrap(True)
+        bug_card_layout.addWidget(bug_text)
+
+        link_disc = QLabel(
+            '<a style="color: #60a5fa; text-decoration: underline;" href="https://github.com/notepower2k1/CapCap/discussions">https://github.com/notepower2k1/CapCap/discussions</a>',
+            bug_card,
+        )
+        link_disc.setOpenExternalLinks(True)
+        bug_card_layout.addWidget(link_disc)
+
+        bug_btn_row = QHBoxLayout()
+        bug_btn_row.setSpacing(10)
+        open_log_btn = QPushButton(t("📂 Mở thư mục Log (temp)"), bug_card)
+        open_disc_btn = QPushButton(t("🌐 Mở GitHub Discussions"), bug_card)
+        open_disc_btn.setObjectName("primaryActionBtn")
+
+        def _open_log_folder():
+            os.makedirs(log_dir, exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(log_dir))
+
+        def _open_discussions():
+            QDesktopServices.openUrl(QUrl("https://github.com/notepower2k1/CapCap/discussions"))
+
+        open_log_btn.clicked.connect(_open_log_folder)
+        open_disc_btn.clicked.connect(_open_discussions)
+        bug_btn_row.addWidget(open_log_btn)
+        bug_btn_row.addWidget(open_disc_btn)
+        bug_btn_row.addStretch()
+        bug_card_layout.addLayout(bug_btn_row)
+
+        layout.addWidget(bug_card)
+
+        # Card 2: Đề xuất chức năng mới (Feature Request)
+        feat_card = QFrame(dialog)
+        feat_card.setProperty("frameClass", "feedbackCard")
+        feat_card_layout = QVBoxLayout(feat_card)
+        feat_card_layout.setContentsMargins(14, 14, 14, 14)
+        feat_card_layout.setSpacing(10)
+
+        feat_title = QLabel(t("💡 Đề xuất chức năng mới (Feature Request)"), feat_card)
+        feat_title.setObjectName("sectionTitle")
+        feat_card_layout.addWidget(feat_title)
+
+        feat_text = QLabel(
+            t("Bạn có ý tưởng hay hoặc muốn đề xuất chức năng mới cho CapCap? Hãy tạo issue đóng góp cho dự án tại:"),
+            feat_card,
+        )
+        feat_text.setObjectName("helperLabel")
+        feat_text.setWordWrap(True)
+        feat_card_layout.addWidget(feat_text)
+
+        link_issues = QLabel(
+            '<a style="color: #60a5fa; text-decoration: underline;" href="https://github.com/notepower2k1/CapCap/issues">https://github.com/notepower2k1/CapCap/issues</a>',
+            feat_card,
+        )
+        link_issues.setOpenExternalLinks(True)
+        feat_card_layout.addWidget(link_issues)
+
+        feat_btn_row = QHBoxLayout()
+        open_issues_btn = QPushButton(t("🚀 Mở GitHub Issues"), feat_card)
+
+        def _open_issues():
+            QDesktopServices.openUrl(QUrl("https://github.com/notepower2k1/CapCap/issues"))
+
+        open_issues_btn.clicked.connect(_open_issues)
+        feat_btn_row.addWidget(open_issues_btn)
+        feat_btn_row.addStretch()
+        feat_card_layout.addLayout(feat_btn_row)
+
+        layout.addWidget(feat_card)
+
+        # Bottom close button
+        bottom_row = QHBoxLayout()
+        bottom_row.addStretch()
+        close_btn = QPushButton(t("Close"), dialog)
+        close_btn.clicked.connect(dialog.accept)
+        bottom_row.addWidget(close_btn)
+        layout.addLayout(bottom_row)
+
+        dialog.exec()
 
     def open_subtitle_editor(self):
         """Open the staged, bulk translated-subtitle editor.
