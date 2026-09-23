@@ -80,16 +80,17 @@ class TranslationPromptDialog(QDialog):
         self.provider_combo.addItem("OpenAI", "openai")
         self.provider_combo.addItem("Ollama (Local)", "ollama")
         self.provider_combo.addItem("Google Translate (free, no key)", "google")
+        self.provider_combo.addItem("Bing Translator (free, no key)", "bing")
 
         # Resolve active provider from Settings:
         current_env = (os.getenv("OPENAI_PROVIDER") or os.getenv("AI_POLISHER_PROVIDER") or "").strip().lower()
         if current_env == "gemini":
             current_env = "google_ai_studio"
-        if current_env not in ("google_ai_studio", "openai", "ollama", "google"):
+        if current_env not in ("google_ai_studio", "openai", "ollama", "google", "bing"):
             current_env = str(self.settings.value("translation_provider", "")).strip().lower()
             if current_env == "gemini":
                 current_env = "google_ai_studio"
-        if current_env not in ("google_ai_studio", "openai", "ollama", "google"):
+        if current_env not in ("google_ai_studio", "openai", "ollama", "google", "bing"):
             current_env = "google_ai_studio"
 
         self.selected_provider = current_env
@@ -200,6 +201,12 @@ class TranslationPromptDialog(QDialog):
         provider = self.provider_combo.currentData() or "google_ai_studio"
         if provider == "google":
             self.provider_hint.setText(t("💡 Google Translate translates directly via web API (free, no key). It does not use LLM system prompts."))
+            self.prompt_edit.setEnabled(False)
+            self.preset_combo.setEnabled(False)
+            self.auto_context_cb.setEnabled(False)
+            self.review_context_cb.setEnabled(False)
+        elif provider == "bing":
+            self.provider_hint.setText(t("💡 Bing Translator translates directly via web API (free, no key). It does not use LLM system prompts."))
             self.prompt_edit.setEnabled(False)
             self.preset_combo.setEnabled(False)
             self.auto_context_cb.setEnabled(False)
@@ -639,6 +646,9 @@ class SubtitleController:
                 "openai": "OpenAI",
                 "ollama": "Ollama",
                 "google": "Google Translate",
+                "google-web": "Google Translate",
+                "bing": "Bing Translator",
+                "bing-web": "Bing Translator",
             }
             provider = provider_map.get(provider_name, provider_name)
         else:

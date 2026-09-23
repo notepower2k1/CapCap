@@ -5990,6 +5990,8 @@ class VideoTranslatorGUI(QMainWindow):
         names = {
             "google-web": "Google Translate",
             "google": "Google Translate",
+            "bing-web": "Bing Translator",
+            "bing": "Bing Translator",
             "gemini": "Google AI Studio",
             "google_ai_studio": "Google AI Studio",
             "openai": "OpenAI",
@@ -15183,13 +15185,14 @@ class VideoTranslatorGUI(QMainWindow):
         provider_layout.addWidget(provider_label)
         provider_combo = QComboBox(dialog)
         provider_combo.addItem("Google Translate (free, no key)", "google")
+        provider_combo.addItem("Bing Translator (free, no key)", "bing")
         provider_combo.addItem("Google AI Studio", "google_ai_studio")
         provider_combo.addItem("OpenAI", "openai")
         provider_combo.addItem("Ollama (Local)", "ollama")
         current_provider = (os.getenv("OPENAI_PROVIDER") or os.getenv("AI_POLISHER_PROVIDER") or self.settings.value("translation_provider", "google")).strip().lower()
         if current_provider == "gemini":
             current_provider = "google_ai_studio"
-        if current_provider not in {"google", "google_ai_studio", "openai", "ollama"}:
+        if current_provider not in {"google", "bing", "google_ai_studio", "openai", "ollama"}:
             current_provider = "google"
         idx = provider_combo.findData(current_provider)
         if idx >= 0:
@@ -15314,11 +15317,12 @@ class VideoTranslatorGUI(QMainWindow):
         def update_provider_fields():
             p = provider_combo.currentData()
             model_edit.setPlaceholderText("")
-            is_ai = p != "google"
+            is_ai = p not in ("google", "bing")
             is_google_ai_studio = p == "google_ai_studio"
             is_openai = p == "openai"
             is_ollama = p == "ollama"
             is_google = p == "google"
+            is_bing = p == "bing"
             _toggle_visible(key_section_widget, is_google_ai_studio or is_openai)
             _toggle_visible(base_url_label, not remote_mode and is_ai)
             _toggle_visible(base_url_edit, not remote_mode and is_ai)
@@ -15332,6 +15336,11 @@ class VideoTranslatorGUI(QMainWindow):
             _toggle_visible(model_edit, not remote_mode and is_ai)
             if is_google:
                 provider_hint.setText(t("Free Google web translate, no API key needed. Lower quality than AI translation."))
+                key_edit.clear()
+                model_edit.clear()
+                base_url_edit.clear()
+            elif is_bing:
+                provider_hint.setText(t("Free Bing web translate, no API key needed. Lower quality than AI translation."))
                 key_edit.clear()
                 model_edit.clear()
                 base_url_edit.clear()

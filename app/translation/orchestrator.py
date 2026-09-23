@@ -20,6 +20,7 @@ from .errors import TranslationConfigError, TranslationValidationError
 from .models import TranslationResult
 from .prompt_loader import render_prompt
 from .providers import (
+    BingWebTranslatorProvider,
     GoogleWebTranslatorProvider,
     OpenAICompatiblePolisherProvider,
 )
@@ -33,6 +34,7 @@ class AIBatchTranslationError(Exception):
 class TranslationOrchestrator:
     def __init__(self):
         self.google_web = GoogleWebTranslatorProvider()
+        self.bing_web = BingWebTranslatorProvider()
 
     def translate_segments(
         self,
@@ -178,18 +180,35 @@ class TranslationOrchestrator:
                     warnings.append(msg)
             else:
                 selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
-                if selected_provider != "google":
+                if selected_provider not in ("google", "bing"):
                     msg = "AI Provider is unavailable. Falling back to Google Translate..."
                     print(f"[AI Translation] WARNING: {msg}")
                     warnings.append(msg)
+                elif selected_provider == "bing":
+                    print("[AI Translation] Bing Translator selected.")
                 else:
                     print("[AI Translation] Google Translate selected.")
+
+        selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
+
+        # If Bing Translator is explicitly chosen
+        if selected_provider == "bing":
+            return self._run_bing_translate(
+                segments=segments,
+                source_texts=source_texts,
+                normalized_src=normalized_src,
+                target_lang=target_lang,
+                ms_batch_size=ms_batch_size,
+                batch_callback=batch_callback,
+                warnings=warnings,
+            )
 
         print("=" * 60)
         print(f"[Translation] Starting Google web translate (batch_size={ms_batch_size})...")
         print("[Translation] Prompt: Google Web API (No custom prompt / No LLM)")
         print("[Translation] Speaker Diarization: DISABLED (Not supported by Google Translate)")
         print("=" * 60)
+        google_failed = False
         try:
             translated_texts = []
             offset = 0
@@ -224,7 +243,81 @@ class TranslationOrchestrator:
                 used_fallback=bool(warnings),
             )
         except Exception as exc:
-            return TranslationResult(success=False, errors=[str(exc)], warnings=warnings, stage="translation")
+            google_failed = True
+            msg = f"Google web translate failed. Auto-falling back to Bing Translator... ({exc})"
+            print(f"[Translation] WARNING: {msg}")
+            warnings.append(msg)
+
+        if google_failed:
+            return self._run_bing_translate(
+                segments=segments,
+                source_texts=source_texts,
+                normalized_src=normalized_src,
+                target_lang=target_lang,
+                ms_batch_size=ms_batch_size,
+                batch_callback=batch_callback,
+                warnings=warnings,
+                is_fallback=True,
+            )
+
+    def _run_bing_translate(
+        self,
+        *,
+        segments: list[dict],
+        source_texts: list[str],
+        normalized_src: str,
+        target_lang: str,
+        ms_batch_size: int,
+        batch_callback,
+        warnings: list[str],
+        is_fallback: bool = False,
+    ) -> TranslationResult:
+        print("=" * 60)
+        action = "Auto-fallback to Bing web translate" if is_fallback else "Starting Bing web translate"
+        print(f"[Translation] {action} (batch_size={ms_batch_size})...")
+        print("[Translation] Prompt: Bing Web API (No custom prompt / No LLM)")
+        print("[Translation] Speaker Diarization: DISABLED (Not supported by Bing Translator)")
+        print("=" * 60)
+        try:
+            translated_texts = []
+            offset = 0
+            for batch in split_text_batches(source_texts, ms_batch_size):
+                translated_batch = self.bing_web.translate_batch(
+                    batch,
+                    src_lang=normalized_src,
+                    target_lang=target_lang,
+                )
+                translated_texts.extend(translated_batch)
+                self._emit_batch_callback(
+                    batch_callback=batch_callback,
+                    base_segments=segments,
+                    start_idx=offset,
+                    translated_texts=translated_batch,
+                    provider="bing-web",
+                    polished=False,
+                )
+                offset += len(batch)
+
+            if not validate_texts(translated_texts, len(segments)):
+                raise TranslationValidationError("Bing web translate returned an invalid number of segments.")
+
+            print("[Translation] Success: Bing web translate completed.")
+            final_segments = clone_with_texts(segments, translated_texts, provider="bing-web", polished=False)
+            return TranslationResult(
+                success=True,
+                segments=final_segments,
+                warnings=warnings,
+                stage="translation",
+                primary_provider="bing-web",
+                used_fallback=bool(warnings) or is_fallback,
+            )
+        except Exception as exc:
+            return TranslationResult(
+                success=False,
+                errors=[f"Bing web translate failed: {exc}"],
+                warnings=warnings,
+                stage="translation",
+            )
 
     def rewrite_segments(
         self,

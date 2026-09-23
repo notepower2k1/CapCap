@@ -41,10 +41,46 @@ class GoogleWebTranslatorProvider:
     # still exposes the same free translation through this mobile page.
     MOBILE_URL = "https://translate.google.com/m"
     MOBILE_MAX_CHARS = 2048
-    MAX_WORKERS = 6
+    DELIMITER = "\n===@@@===\n"
+    CHUNK_MAX_CUES = 15
+    CHUNK_MAX_CHARS = 1800
+
+    def __init__(self):
+        self.session = requests.Session()
+        self.headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0 Safari/537.36"
+            ),
+            "Accept": "application/json,text/plain,*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
 
     def is_configured(self) -> bool:
         return True
+
+    def _chunk_texts(self, texts: list[str]) -> list[list[str]]:
+        chunks: list[list[str]] = []
+        current: list[str] = []
+        current_len = 0
+
+        for text in texts:
+            text_len = len(text or "")
+            if current and (
+                len(current) >= self.CHUNK_MAX_CUES
+                or (current_len + text_len) > self.CHUNK_MAX_CHARS
+            ):
+                chunks.append(current)
+                current = []
+                current_len = 0
+            current.append(text)
+            current_len += text_len
+
+        if current:
+            chunks.append(current)
+
+        return chunks
 
     def translate_batch(
         self,
@@ -55,33 +91,58 @@ class GoogleWebTranslatorProvider:
         timeout: int = 20,
         max_retries: int = 2,
     ) -> list[str]:
-        if len(texts) <= 3:
-            return [
-                self._translate_text(
-                    text=text,
+        if not texts:
+            return []
+
+        results: list[str] = []
+        chunks = self._chunk_texts(texts)
+
+        for chunk_idx, chunk in enumerate(chunks):
+            if chunk_idx > 0:
+                time.sleep(0.25)
+
+            if len(chunk) == 1:
+                translated = self._translate_text(
+                    text=chunk[0],
                     src_lang=src_lang,
                     target_lang=target_lang,
                     timeout=timeout,
                     max_retries=max_retries,
                 )
-                for text in texts
-            ]
-        results = [None] * len(texts)
-        with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
-            future_to_idx = {}
-            for idx, text in enumerate(texts):
-                future = executor.submit(
-                    self._translate_text,
-                    text=text,
+                results.append(translated)
+                continue
+
+            # Batch translation using delimiter
+            joined = self.DELIMITER.join(chunk)
+            batch_success = False
+            try:
+                translated_joined = self._translate_text(
+                    text=joined,
                     src_lang=src_lang,
                     target_lang=target_lang,
                     timeout=timeout,
                     max_retries=max_retries,
                 )
-                future_to_idx[future] = idx
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                results[idx] = future.result()
+                parts = [p.strip() for p in translated_joined.split(self.DELIMITER.strip())]
+                if len(parts) == len(chunk):
+                    results.extend(parts)
+                    batch_success = True
+            except Exception:
+                batch_success = False
+
+            if not batch_success:
+                # Fallback to translating individual cues for this chunk
+                for item in chunk:
+                    time.sleep(0.1)
+                    res = self._translate_text(
+                        text=item,
+                        src_lang=src_lang,
+                        target_lang=target_lang,
+                        timeout=timeout,
+                        max_retries=max_retries,
+                    )
+                    results.append(res)
+
         return results
 
     def _translate_text(
@@ -99,19 +160,11 @@ class GoogleWebTranslatorProvider:
             f"{self.BASE_URL}?client=gtx&sl={src_lang}&tl={target_lang}"
             f"&dt=t&q={query}"
         )
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/131.0 Safari/537.36"
-            ),
-            "Accept": "application/json,text/plain,*/*",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
+        headers = self.headers
 
         for attempt in range(1, max_retries + 1):
             try:
-                response = requests.get(url, headers=headers, timeout=timeout)
+                response = self.session.get(url, headers=headers, timeout=timeout)
                 if response.status_code != 200:
                     last_error = f"Google web translate error ({response.status_code}): {response.text}"
                     # The free JSON endpoint is undocumented and can be
@@ -193,7 +246,7 @@ class GoogleWebTranslatorProvider:
             )
         mobile_headers = dict(headers or {})
         mobile_headers["Accept"] = "text/html,application/xhtml+xml"
-        response = requests.get(
+        response = self.session.get(
             self.MOBILE_URL,
             params={"sl": src_lang, "tl": target_lang, "q": text or ""},
             headers=mobile_headers,
