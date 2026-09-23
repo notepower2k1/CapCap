@@ -33,6 +33,8 @@ class CreateVoiceCloneDialog(QDialog):
         super().__init__(parent)
         self.created_voice_entry: dict | None = None
 
+        if hasattr(parent, "light_window_icon") and parent.light_window_icon and not parent.light_window_icon.isNull():
+            self.setWindowIcon(parent.light_window_icon)
         self.setWindowTitle("Create Voice Clone (VieNeu-TTS)")
         self.setModal(True)
         self.resize(580, 560)

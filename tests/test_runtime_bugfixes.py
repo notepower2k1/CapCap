@@ -125,7 +125,7 @@ class TestRuntimeBugfixes(unittest.TestCase):
             "Dark background icon should be tinted white for high contrast",
         )
 
-        # Check light bg (original dark silhouette)
+        # Check light bg (solid black silhouette for light/white headers)
         icon_light_bg = build_contrasting_window_icon(ico_path, is_dark_bg=False)
         p32_dark = icon_light_bg.pixmap(32, 32).toImage()
         dark_pixels = [
@@ -136,13 +136,38 @@ class TestRuntimeBugfixes(unittest.TestCase):
         ]
         self.assertTrue(len(dark_pixels) > 0)
         self.assertTrue(
-            any(r < 100 and g < 100 and b < 100 for r, g, b, a in dark_pixels),
-            "Light background icon should remain dark silhouette",
+            all(r == 0 and g == 0 and b == 0 for r, g, b, a in dark_pixels),
+            "Light background icon should be tinted solid black (#000000) for popup headers",
         )
 
         # Check default auto-detection
         icon_auto = build_contrasting_window_icon(ico_path)
         self.assertGreaterEqual(len(icon_auto.availableSizes()), 4)
+
+    def test_dialog_icon_filter_and_light_icon(self):
+        from PySide6.QtWidgets import QDialog
+        from utils.display_utils import install_dialog_icon_filter
+        ico_path = asset_path("capcap.ico")
+
+        # Install filter
+        filter_obj = install_dialog_icon_filter(app, ico_path)
+        self.assertIsNotNone(filter_obj)
+
+        # Dialog should automatically receive the black icon
+        dlg = QDialog()
+        dlg.show()
+        dlg_pix = dlg.windowIcon().pixmap(32, 32).toImage()
+        dark_pixels = [
+            dlg_pix.pixelColor(x, y).getRgb()
+            for y in range(32)
+            for x in range(32)
+            if dlg_pix.pixelColor(x, y).alpha() > 200
+        ]
+        self.assertTrue(len(dark_pixels) > 0)
+        self.assertTrue(
+            all(r == 0 and g == 0 and b == 0 for r, g, b, a in dark_pixels),
+            "QDialog should automatically have solid black icon on show",
+        )
 
     def test_sea_g2p_db_path_patch_and_resolution(self):
         from vieneu_tts import _patch_sea_g2p_db_path

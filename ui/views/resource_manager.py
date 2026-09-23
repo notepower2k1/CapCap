@@ -77,6 +77,8 @@ def open_resource_manager(workspace_root: str = None, parent=None,
     service = ResourceDownloadService(workspace_root)
 
     dialog = QDialog(parent)
+    if hasattr(parent, "light_window_icon") and parent.light_window_icon and not parent.light_window_icon.isNull():
+        dialog.setWindowIcon(parent.light_window_icon)
     dialog.setWindowTitle(t("Manage Resources"))
     dialog.setModal(True)
     dialog.resize(820, 580)

@@ -64,6 +64,8 @@ def show_error(gui, title: str, short_msg: str, details: str = ""):
 
 def show_frame_preview_dialog(gui, image_path: str, qpixmap_cls, qt):
     dialog = QDialog(gui)
+    if hasattr(gui, "light_window_icon") and gui.light_window_icon and not gui.light_window_icon.isNull():
+        dialog.setWindowIcon(gui.light_window_icon)
     dialog.setWindowTitle(t("Large Frame Preview"))
     dialog.resize(720, 820)
 
@@ -157,6 +159,11 @@ def cleanup_temp_preview_files(gui):
 
 def apply_windows_dark_title_bar(widget) -> bool:
     """Enable immersive dark title bar on Windows 10/11 using DWM API."""
+    if widget is not None:
+        try:
+            widget._has_dark_title_bar = True
+        except Exception:
+            pass
     if sys.platform != "win32":
         return False
     try:
@@ -197,6 +204,10 @@ def build_contrasting_window_icon(image_path: str, is_dark_bg: bool = None):
     When the background is dark (default on Windows dark mode / dark title bar),
     tints the dark silhouette logo to crisp white (#FFFFFF) so it stands out clearly
     on the window title bar, Windows taskbar, and Alt-Tab switcher.
+
+    When the background is light (standard Windows dialog / popup title bars),
+    tints the silhouette logo to solid black (#000000) so it stands out clearly
+    on the light/white window header without blending into the background.
     """
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
@@ -219,17 +230,15 @@ def build_contrasting_window_icon(image_path: str, is_dark_bg: bool = None):
     if master_pixmap.isNull():
         return QIcon(image_path)
 
-    if is_dark_bg:
-        tinted = QPixmap(master_pixmap.size())
-        tinted.fill(Qt.transparent)
-        painter = QPainter(tinted)
-        painter.drawPixmap(0, 0, master_pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        painter.fillRect(tinted.rect(), QColor(255, 255, 255))
-        painter.end()
-        base_pixmap = tinted
-    else:
-        base_pixmap = master_pixmap
+    tint_color = QColor(255, 255, 255) if is_dark_bg else QColor(0, 0, 0)
+    tinted = QPixmap(master_pixmap.size())
+    tinted.fill(Qt.transparent)
+    painter = QPainter(tinted)
+    painter.drawPixmap(0, 0, master_pixmap)
+    painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+    painter.fillRect(tinted.rect(), tint_color)
+    painter.end()
+    base_pixmap = tinted
 
     icon = QIcon()
     for size in (16, 20, 24, 32, 48, 64, 128, 256):
@@ -243,6 +252,59 @@ def build_contrasting_window_icon(image_path: str, is_dark_bg: bool = None):
         painter.end()
         icon.addPixmap(canvas)
     return icon
+
+
+class DialogContrastingIconFilter:
+    """Event filter that ensures popup windows and dialogs display a black contrasting icon."""
+
+    def __init__(self, black_icon, parent=None):
+        from PySide6.QtCore import QObject
+        self._qobject = QObject(parent)
+        self.black_icon = black_icon
+
+    def eventFilter(self, watched, event):
+        try:
+            from PySide6.QtCore import QEvent
+            from PySide6.QtWidgets import QDialog
+            if event.type() in (QEvent.Show, QEvent.Polish):
+                if isinstance(watched, QDialog):
+                    if not getattr(watched, "_has_dark_title_bar", False) and type(watched).__name__ != "LauncherWindow":
+                        if not getattr(watched, "_has_contrasting_popup_icon", False):
+                            watched.setWindowIcon(self.black_icon)
+                            watched._has_contrasting_popup_icon = True
+        except Exception:
+            pass
+        return False
+
+
+def install_dialog_icon_filter(app, icon_path: str = None):
+    """Install an application-wide event filter that applies a black icon to popups and dialogs."""
+    from PySide6.QtCore import QObject, QEvent
+    from PySide6.QtWidgets import QDialog
+
+    if app is None or not icon_path or not os.path.exists(icon_path):
+        return None
+    black_icon = build_contrasting_window_icon(icon_path, is_dark_bg=False)
+    if black_icon.isNull():
+        return None
+
+    class _Filter(QObject):
+        def eventFilter(self, watched, event):
+            try:
+                if event.type() in (QEvent.Show, QEvent.Polish):
+                    if isinstance(watched, QDialog):
+                        if not getattr(watched, "_has_dark_title_bar", False) and type(watched).__name__ != "LauncherWindow":
+                            if not getattr(watched, "_has_contrasting_popup_icon", False):
+                                watched.setWindowIcon(black_icon)
+                                watched._has_contrasting_popup_icon = True
+            except Exception:
+                pass
+            return super().eventFilter(watched, event)
+
+    filter_obj = _Filter(parent=app)
+    app.installEventFilter(filter_obj)
+    app._dialog_contrasting_icon_filter = filter_obj
+    return filter_obj
 
 
 def set_windows_normal_geometry(widget, x: int, y: int, width: int, height: int) -> bool:

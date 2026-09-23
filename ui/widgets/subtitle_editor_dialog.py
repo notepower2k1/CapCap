@@ -48,6 +48,8 @@ class SubtitleEditorDialog(QDialog):
         self._matches: list[tuple[int, int, int]] = []
         self._match_index = -1
 
+        if hasattr(parent, "light_window_icon") and parent.light_window_icon and not parent.light_window_icon.isNull():
+            self.setWindowIcon(parent.light_window_icon)
         self.setWindowTitle("Subtitle Editor")
         self.setModal(True)
         self.resize(1120, 700)

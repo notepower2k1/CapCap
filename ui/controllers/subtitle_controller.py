@@ -662,6 +662,11 @@ class SubtitleController:
             100,
             self.gui,
         )
+        if hasattr(self.gui, "light_window_icon") and self.gui.light_window_icon and not self.gui.light_window_icon.isNull():
+            dialog.setWindowIcon(self.gui.light_window_icon)
+            dialog._has_contrasting_popup_icon = True
+        if hasattr(self.gui, "_register_progress_dialog"):
+            self.gui._register_progress_dialog(dialog)
         dialog.setWindowTitle(f"{action_text} {t('Subtitles')}")
         dialog.setWindowModality(Qt.NonModal)
         dialog.setAutoClose(False)
@@ -725,6 +730,11 @@ class SubtitleController:
             100,
             self.gui,
         )
+        if hasattr(self.gui, "light_window_icon") and self.gui.light_window_icon and not self.gui.light_window_icon.isNull():
+            dialog.setWindowIcon(self.gui.light_window_icon)
+            dialog._has_contrasting_popup_icon = True
+        if hasattr(self.gui, "_register_progress_dialog"):
+            self.gui._register_progress_dialog(dialog)
         dialog.setWindowTitle(t("Transcribing Audio"))
         dialog.setWindowModality(Qt.NonModal)
         dialog.setAutoClose(False)
@@ -1027,6 +1037,11 @@ class SubtitleController:
             0,
             self.gui,
         )
+        if hasattr(self.gui, "light_window_icon") and self.gui.light_window_icon and not self.gui.light_window_icon.isNull():
+            progress.setWindowIcon(self.gui.light_window_icon)
+            progress._has_contrasting_popup_icon = True
+        if hasattr(self.gui, "_register_progress_dialog"):
+            self.gui._register_progress_dialog(progress)
         progress.setWindowTitle(t("Dialogue Analysis"))
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)

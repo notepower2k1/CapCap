@@ -40,6 +40,8 @@ class ExportSummaryDialog(QDialog):
 
     def __init__(self, parent, summary_text: str):
         super().__init__(parent)
+        if hasattr(parent, "light_window_icon") and parent.light_window_icon and not parent.light_window_icon.isNull():
+            self.setWindowIcon(parent.light_window_icon)
         self.setWindowTitle("Export Summary")
         self.setMinimumWidth(500)
         self.setMinimumHeight(540)

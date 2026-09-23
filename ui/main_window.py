@@ -228,7 +228,9 @@ class VideoTranslatorGUI(QMainWindow):
         ico_candidate = asset_path("capcap.ico")
         self.logo_path = ico_candidate if os.path.exists(ico_candidate) else asset_path("capcap.png")
         if os.path.exists(self.logo_path):
-            self.setWindowIcon(build_contrasting_window_icon(self.logo_path, is_dark_bg=True))
+            self.dark_window_icon = build_contrasting_window_icon(self.logo_path, is_dark_bg=True)
+            self.light_window_icon = build_contrasting_window_icon(self.logo_path, is_dark_bg=False)
+            self.setWindowIcon(self.dark_window_icon)
         
         # Start maximized, but keep the window genuinely resizable.
         self.setWindowState(Qt.WindowMaximized)
@@ -2434,6 +2436,9 @@ class VideoTranslatorGUI(QMainWindow):
     def _register_progress_dialog(self, dialog):
         if dialog is None:
             return
+        if hasattr(self, "light_window_icon") and self.light_window_icon and not self.light_window_icon.isNull():
+            dialog.setWindowIcon(self.light_window_icon)
+            dialog._has_contrasting_popup_icon = True
         self._tracked_progress_dialogs = [d for d in self._tracked_progress_dialogs if d is not None]
         if dialog not in self._tracked_progress_dialogs:
             self._tracked_progress_dialogs.append(dialog)
@@ -2556,6 +2561,8 @@ class VideoTranslatorGUI(QMainWindow):
         ]
 
         dialog = QDialog(self)
+        if hasattr(self, "light_window_icon") and self.light_window_icon and not self.light_window_icon.isNull():
+            dialog.setWindowIcon(self.light_window_icon)
         dialog.setWindowTitle(t("Normalizer Dictionary"))
         dialog.setModal(True)
         dialog.resize(700, 520)
@@ -10095,6 +10102,8 @@ class VideoTranslatorGUI(QMainWindow):
             for seg in list(self.current_segments or [])
         )
         dialog = QDialog(self)
+        if hasattr(self, "light_window_icon") and self.light_window_icon and not self.light_window_icon.isNull():
+            dialog.setWindowIcon(self.light_window_icon)
         dialog.setWindowTitle(t("Transcribe Selected Range"))
         dialog.setMinimumWidth(420)
         dialog.setStyleSheet(
@@ -14775,6 +14784,8 @@ class VideoTranslatorGUI(QMainWindow):
         if dlg is not None:
             return dlg
         dlg = BackgroundableProgressDialog(t("Preparing final export..."), t("Hide"), 0, 100, self)
+        if hasattr(self, "light_window_icon") and self.light_window_icon and not self.light_window_icon.isNull():
+            dlg.setWindowIcon(self.light_window_icon)
         dlg.setWindowTitle(t("Exporting Video"))
         dlg.setWindowModality(Qt.WindowModal)
         dlg.setMinimumDuration(0)
@@ -14855,6 +14866,8 @@ class VideoTranslatorGUI(QMainWindow):
 
     def open_model_settings_dialog(self):
         dialog = QDialog(self)
+        if hasattr(self, "light_window_icon") and self.light_window_icon and not self.light_window_icon.isNull():
+            dialog.setWindowIcon(self.light_window_icon)
         dialog.setWindowTitle("Settings")
         dialog.setModal(True)
         dialog.setMinimumWidth(580)
@@ -15671,6 +15684,8 @@ class VideoTranslatorGUI(QMainWindow):
             dialog = QDialog(self)
         except (RuntimeError, TypeError):
             dialog = QDialog()
+        if hasattr(self, "light_window_icon") and self.light_window_icon and not self.light_window_icon.isNull():
+            dialog.setWindowIcon(self.light_window_icon)
         dialog.setWindowTitle(t("Feedback & Bug Report"))
         dialog.setModal(True)
         dialog.setMinimumWidth(580)

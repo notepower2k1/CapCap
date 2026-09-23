@@ -236,13 +236,16 @@ if __name__ == "__main__":
 
     from PySide6.QtGui import QIcon
     from runtime_paths import asset_path
-    from utils.display_utils import build_contrasting_window_icon
+    from utils.display_utils import build_contrasting_window_icon, install_dialog_icon_filter
 
     app_icon_path = asset_path("capcap.ico")
     if not os.path.exists(app_icon_path):
         app_icon_path = asset_path("capcap.png")
     if os.path.exists(app_icon_path):
-        app.setWindowIcon(build_contrasting_window_icon(app_icon_path))
+        # Set default app window icon to contrasting black for standard light title bar dialogs/windows
+        app.setWindowIcon(build_contrasting_window_icon(app_icon_path, is_dark_bg=False))
+        # Install global filter ensuring all popups and dialogs automatically display the black icon
+        install_dialog_icon_filter(app, app_icon_path)
 
     from views.launcher import show_launcher, LauncherWindow
 
