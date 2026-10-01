@@ -91,6 +91,19 @@ def validate_texts(texts: list[str], expected_len: int) -> bool:
     return all(isinstance(text, str) and text.strip() for text in texts)
 
 
+def _deduplicate_numbered_items(items: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Deduplicate numbered line items by ID keeping the last occurrence."""
+    if not items:
+        return items
+    deduped = {}
+    for number, text in items:
+        deduped[number] = text
+    n = len(items) - len(deduped)
+    if n > 0:
+        print(f"[Parser] Deduplicated {n} duplicate IDs in AI response")
+    return sorted(deduped.items(), key=lambda x: x[0])
+
+
 def parse_numbered_line_items(raw: str) -> list[tuple[int, str]]:
     """Parse numbered model output while retaining the original cue IDs."""
     # Strip Gemma chain-of-thought tags
@@ -128,6 +141,7 @@ def parse_numbered_line_items(raw: str) -> list[tuple[int, str]]:
         if normalized:
             items.append((int(match.group(1)), normalized))
 
+    items = _deduplicate_numbered_items(items)
     if items:
         return items
 
@@ -150,7 +164,7 @@ def parse_numbered_line_items(raw: str) -> list[tuple[int, str]]:
                     break
                 candidate = inner
             fallback_items.append((int(match.group(1)), candidate))
-    return fallback_items
+    return _deduplicate_numbered_items(fallback_items)
 
 
 def parse_numbered_lines(raw: str) -> list[str]:

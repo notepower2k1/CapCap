@@ -25,6 +25,7 @@ class OpenAICompatiblePolisherProvider:
         self.model_name = os.getenv(f"{env_prefix}_MODEL", default_model).strip()
         self.base_url = os.getenv(f"{env_prefix}_BASE_URL", default_base_url).strip()
         self._client = None
+        self._logged_reasoning_effort = False
 
     def is_configured(self) -> bool:
         return bool(self.api_key and self.model_name and self.base_url)
@@ -55,8 +56,14 @@ class OpenAICompatiblePolisherProvider:
         if is_gemini:
             # Gemini 2.5/3.x models:
             # 1. Custom temperature (< 1.0) is not supported for reasoning models and returns 400.
-            # 2. Set reasoning_effort to "low" to prevent reasoning tokens from causing timeouts on subtitle translation.
-            kwargs["reasoning_effort"] = "low"
+            # 2. Configurable reasoning_effort via CAPCAP_GEMINI_REASONING_EFFORT ("low", "medium", "high"), defaulting to "medium".
+            reasoning_effort = os.getenv("CAPCAP_GEMINI_REASONING_EFFORT", "medium").strip().lower()
+            if reasoning_effort not in ("low", "medium", "high"):
+                reasoning_effort = "medium"
+            if reasoning_effort != "medium" and not getattr(self, "_logged_reasoning_effort", False):
+                print(f"[{self.display_name}] Effective reasoning_effort: {reasoning_effort}")
+                self._logged_reasoning_effort = True
+            kwargs["reasoning_effort"] = reasoning_effort
         elif is_reasoning_model:
             kwargs["reasoning_effort"] = "low"
         else:

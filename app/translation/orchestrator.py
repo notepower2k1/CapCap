@@ -529,7 +529,7 @@ class TranslationOrchestrator:
         if provider_type == "gemini":  # backward compatibility for saved settings
             provider_type = "google_ai_studio"
         definitions = {
-            "google_ai_studio": ("Google AI Studio", "GOOGLE_AI_STUDIO", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-3.7-flash"),
+            "google_ai_studio": ("Google AI Studio", "GOOGLE_AI_STUDIO", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-3.8-flash"),
             "openai": ("OpenAI", "OPENAI", "https://api.openai.com/v1/", "gpt-4o-mini"),
             "ollama": ("Ollama", "OPENAI", "http://localhost:11434/v1", "gemma4:31b-cloud"),
         }
@@ -856,20 +856,26 @@ class TranslationOrchestrator:
         response_tokens = max(512, math.ceil(max(source_token_estimate, draft_token_estimate) * 1.5) + (3 * len(source_texts)) + 64)
 
         is_ollama = (provider_type or "").strip().lower() == "ollama"
+        is_gemini = (provider_type or "").strip().lower() in ("google_ai_studio", "gemini")
         default_context_limit = 32000 if is_ollama else 64000
-        default_output_limit = 4096 if is_ollama else 8192
+        if is_gemini:
+            default_output_limit = 65536
+        elif is_ollama:
+            default_output_limit = 4096
+        else:
+            default_output_limit = 8192
         context_limit = max(4096, _env_int("CAPCAP_AI_TRANSLATION_CONTEXT_TOKENS", default_context_limit))
         output_limit = max(2048, _env_int("CAPCAP_AI_TRANSLATION_MAX_OUTPUT_TOKENS", default_output_limit))
 
         # Smart full-context heuristic (for any language):
-        # If estimated response fits safely in single request (<= 3800 tokens and <= 250 cues)
-        # AND input tokens fit within context window (<= 24000 tokens),
+        # If estimated response fits safely in single request (<= 6000 tokens and <= 400 cues)
+        # AND input tokens fit within context window (<= 48000 tokens),
         # ALWAYS prefer full-context single request for 100% narrative and pronoun consistency!
         safe_single_pass = (
             not force_ordered
-            and input_tokens <= min(context_limit, 24000)
-            and response_tokens <= min(output_limit, 3800)
-            and len(source_texts) <= 250
+            and input_tokens <= min(context_limit, 48000)
+            and response_tokens <= min(output_limit, 6000)
+            and len(source_texts) <= 400
         )
 
         if safe_single_pass:

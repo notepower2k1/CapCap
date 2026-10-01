@@ -12,10 +12,13 @@ import zipfile
 import tarfile
 from pathlib import Path
 
+import requests
+
 from runtime_paths import app_path, bin_path, bundle_root, join_root, models_path, subprocess_hidden_kwargs, subprocess_text_kwargs
 
 
 class ResourceDownloadService:
+    HF_MIRROR_ENDPOINT = "https://hf-mirror.com"
     WHISPER_ZIP_FILES = {
         "base": "models--Systran--faster-whisper-base.zip",
         "small": "models--Systran--faster-whisper-small.zip",
@@ -61,6 +64,8 @@ class ResourceDownloadService:
         "whisper:base",
         "whisper:small",
         "whisper:medium",
+        "whisper:turbo",
+        "whisper:large-v3",
         "sensevoice:model",
         "ocr:engine",
         "cuda:whisper",
@@ -75,6 +80,7 @@ class ResourceDownloadService:
         self.workspace_root = workspace_root
         self.repo_id = self.HF_RESOURCE_REPO
         self.revision = self.HF_RESOURCE_REVISION
+        os.environ.setdefault("HF_ENDPOINT", os.getenv("CAPCAP_HF_ENDPOINT", self.HF_MIRROR_ENDPOINT))
 
     def _catalog_path(self) -> str:
         download_catalog = app_path("voice_download_catalog.json")
@@ -700,9 +706,14 @@ class ResourceDownloadService:
                 missing.append((rid, label))
         return (len(missing) == 0, missing)
 
+    def _hf_endpoint(self) -> str:
+        endpoint = os.getenv("HF_ENDPOINT", self.HF_MIRROR_ENDPOINT).strip().rstrip("/")
+        return endpoint or self.HF_MIRROR_ENDPOINT
+
     def _hf_blob_url(self, filename: str) -> str:
+        endpoint = self._hf_endpoint()
         return (
-            f"https://huggingface.co/{self.HF_RESOURCE_REPO}/"
+            f"{endpoint}/{self.HF_RESOURCE_REPO}/"
             f"resolve/{self.HF_RESOURCE_REVISION}/{filename.lstrip('/')}"
         )
 
@@ -740,6 +751,30 @@ class ResourceDownloadService:
                 "expected_filename": "models--Systran--faster-whisper-medium.zip",
                 "auto_download_supported": True,
                 "description": "Speech-recognition model used to create the original transcript.",
+            },
+            {
+                "id": "whisper:turbo",
+                "name": "Whisper Turbo (~6GB VRAM)",
+                "kind": "whisper",
+                "status": "installed" if self.is_resource_installed("whisper:turbo") else "missing",
+                "target_dir": join_root("models", "faster_whisper"),
+                "download_url": "https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+                "open_url": "https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+                "expected_filename": "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo",
+                "auto_download_supported": True,
+                "description": "Fast and high-accuracy model (distilled Large-v3). Requires ~6GB GPU VRAM.",
+            },
+            {
+                "id": "whisper:large-v3",
+                "name": "Whisper Large-v3 (~10GB VRAM)",
+                "kind": "whisper",
+                "status": "installed" if self.is_resource_installed("whisper:large-v3") else "missing",
+                "target_dir": join_root("models", "faster_whisper"),
+                "download_url": "https://huggingface.co/Systran/faster-whisper-large-v3",
+                "open_url": "https://huggingface.co/Systran/faster-whisper-large-v3",
+                "expected_filename": "models--Systran--faster-whisper-large-v3",
+                "auto_download_supported": True,
+                "description": "Best accuracy model for complex/quiet dialogue. Requires ~10GB GPU VRAM.",
             },
             {
                 "id": "cuda:whisper",
@@ -932,6 +967,15 @@ class ResourceDownloadService:
                 return voice
         return None
 
+    @staticmethod
+    def _candidate_download_urls(primary_url: str) -> list[str]:
+        urls = [primary_url]
+        if "hf-mirror.com" in primary_url:
+            fallback = primary_url.replace("hf-mirror.com", "huggingface.co")
+            if fallback not in urls:
+                urls.append(fallback)
+        return urls
+
     def _download_and_extract_zip(self, zip_url: str, extract_to: str, progress_cb=None) -> None:
         import tempfile
 
@@ -943,20 +987,50 @@ class ResourceDownloadService:
             tmp_path = tmp_file.name
 
         try:
-            if progress_cb:
-                progress_cb(-1, "Downloading zip file...")
+            urls = self._candidate_download_urls(zip_url)
+            download_succeeded = False
+            last_err = None
 
-            def _report_progress(block_num, block_size, total_size):
-                if progress_cb and total_size > 0:
-                    downloaded = block_num * block_size
-                    percent = min(99, int((downloaded / total_size) * 100))
-                    progress_cb(percent, f"Downloading... ({percent}%)")
-                if block_num % 10 == 0:  # Log every 10 blocks
-                    print(f"[Download] Progress: block {block_num}, size {block_size}, total {total_size}")
+            for current_url in urls:
+                try:
+                    print(f"[Download] Streaming from: {current_url}")
+                    if progress_cb:
+                        progress_cb(-1, "Downloading zip file...")
 
-            print(f"[Download] Calling urlretrieve...")
-            urllib.request.urlretrieve(zip_url, tmp_path, reporthook=_report_progress)
-            print(f"[Download] Download complete. File size: {os.path.getsize(tmp_path)} bytes")
+                    with requests.get(
+                        current_url,
+                        stream=True,
+                        timeout=(10, 60),
+                        headers={"User-Agent": "CapCap/1.0"},
+                    ) as resp:
+                        resp.raise_for_status()
+                        total_size = int(resp.headers.get("content-length", 0))
+                        downloaded = 0
+                        with open(tmp_path, "wb") as f:
+                            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    if progress_cb and total_size > 0:
+                                        percent = min(99, int((downloaded / total_size) * 100))
+                                        progress_cb(percent, f"Downloading... ({percent}%)")
+
+                    print(f"[Download] Download complete. File size: {os.path.getsize(tmp_path)} bytes")
+                    download_succeeded = True
+                    break
+                except Exception as exc:
+                    last_err = exc
+                    print(f"[Download] Warning: download failed from {current_url}: {exc}")
+                    if os.path.exists(tmp_path):
+                        try:
+                            os.truncate(tmp_path, 0)
+                        except Exception:
+                            pass
+                    continue
+
+            if not download_succeeded:
+                print(f"[Download] ERROR: All download attempts failed. Last error: {last_err}")
+                raise last_err or RuntimeError(f"Failed to download from {zip_url}")
 
             if progress_cb:
                 progress_cb(90, "Extracting zip file...")
@@ -973,7 +1047,10 @@ class ResourceDownloadService:
             raise
         finally:
             if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
     def _download_and_extract_tar(self, archive_url: str, extract_to: str, progress_cb=None) -> None:
         """Download and safely extract a tar/tar.bz2 resource archive."""
@@ -1030,23 +1107,58 @@ class ResourceDownloadService:
         """Download one resource atomically so interrupted files are ignored."""
         os.makedirs(os.path.dirname(destination), exist_ok=True)
         temporary = f"{destination}.part"
+
+        urls = self._candidate_download_urls(file_url)
+        download_succeeded = False
+        last_err = None
+
         try:
-            if progress_cb:
-                progress_cb(-1, label)
+            for current_url in urls:
+                try:
+                    if progress_cb:
+                        progress_cb(-1, label)
 
-            def _report_progress(block_num, block_size, total_size):
-                if progress_cb and total_size and total_size > 0:
-                    downloaded = block_num * block_size
-                    percent = min(99, int((downloaded / total_size) * 100))
-                    progress_cb(percent, f"{label} ({percent}%)")
+                    with requests.get(
+                        current_url,
+                        stream=True,
+                        timeout=(10, 60),
+                        headers={"User-Agent": "CapCap/1.0"},
+                    ) as resp:
+                        resp.raise_for_status()
+                        total_size = int(resp.headers.get("content-length", 0))
+                        downloaded = 0
+                        with open(temporary, "wb") as f:
+                            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    if progress_cb and total_size > 0:
+                                        percent = min(99, int((downloaded / total_size) * 100))
+                                        progress_cb(percent, f"{label} ({percent}%)")
 
-            urllib.request.urlretrieve(file_url, temporary, reporthook=_report_progress)
+                    download_succeeded = True
+                    break
+                except Exception as exc:
+                    last_err = exc
+                    if os.path.exists(temporary):
+                        try:
+                            os.remove(temporary)
+                        except OSError:
+                            pass
+                    continue
+
+            if not download_succeeded:
+                raise last_err or RuntimeError(f"Failed to download from {file_url}")
+
             os.replace(temporary, destination)
             if progress_cb:
                 progress_cb(100, f"{label} (100%)")
         finally:
             if os.path.exists(temporary):
-                os.remove(temporary)
+                try:
+                    os.remove(temporary)
+                except OSError:
+                    pass
         return destination
 
     def _download_piper_new_pack(self, progress_cb=None) -> None:
@@ -1206,11 +1318,17 @@ class ResourceDownloadService:
         if resource_id.startswith("whisper:"):
             model_name = resource_id.split(":", 1)[1].strip().lower()
             zip_name = self.WHISPER_ZIP_FILES.get(model_name)
-            if not zip_name:
-                raise ValueError(f"Unsupported Whisper model: {model_name}")
-            zip_url = self._hf_blob_url(f"zipResource/{zip_name}")
             target_dir = join_root("models", "faster_whisper")
-            self._download_and_extract_zip(zip_url, target_dir, progress_cb)
+            if zip_name:
+                zip_url = self._hf_blob_url(f"zipResource/{zip_name}")
+                self._download_and_extract_zip(zip_url, target_dir, progress_cb)
+            elif model_name in ("large-v3", "turbo", "distil-large-v3"):
+                if progress_cb:
+                    progress_cb(10, f"Downloading Whisper {model_name} from Hugging Face...")
+                from faster_whisper import download_model
+                download_model(model_name, cache_dir=self._whisper_cache_root())
+            else:
+                raise ValueError(f"Unsupported Whisper model: {model_name}")
             if not self.is_resource_installed(resource_id):
                 raise RuntimeError(
                     f"Whisper {model_name} download completed, but no model files were found in {target_dir}."
@@ -1251,15 +1369,9 @@ class ResourceDownloadService:
             for index, filename in enumerate(self._OCR_REQUIRED_MODELS):
                 url = self._hf_blob_url(f"rapidocr/models/{filename}")
                 destination = os.path.join(target_dir, filename)
-                temporary = f"{destination}.part"
                 if progress_cb:
                     progress_cb(int(index * 100 / total), f"Downloading RapidOCR model: {filename}")
-                try:
-                    urllib.request.urlretrieve(url, temporary)
-                    os.replace(temporary, destination)
-                finally:
-                    if os.path.exists(temporary):
-                        os.remove(temporary)
+                self._download_file(url, destination)
             if not self.is_resource_installed("ocr:engine"):
                 raise RuntimeError("RapidOCR download completed but one or more model files are missing.")
             if progress_cb:

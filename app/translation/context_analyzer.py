@@ -6,6 +6,7 @@ cues across sequential batches when translating long videos that exceed a single
 
 from __future__ import annotations
 
+from collections import Counter
 import re
 
 
@@ -99,6 +100,19 @@ def update_ledger_from_batch(
         ledger.add_confirmed_rule(
             "师傅 / 师父 -> Xưng hô bắt buộc: 'sư phụ' / 'thầy' / 'bác tài'"
         )
+
+    # Generic pronoun pattern extraction from translated output.
+    # Catches pronoun choices the AI established that are not covered by the hardcoded keyword list above.
+    _DISTINCTIVE_FIRST_PERSON = ("em", "tao", "mày", "con", "cháu")
+    trn_words = trn_lower.split()
+    first_person_counts = Counter(w for w in trn_words if w in _DISTINCTIVE_FIRST_PERSON)
+    dominant = first_person_counts.most_common(1)
+    if dominant:
+        pronoun, count = dominant[0]
+        if count >= 3:
+            ledger.add_confirmed_rule(
+                f"Batch pronoun pattern: nhân vật xưng '{pronoun}' (xuất hiện {count} lần trong batch này) — duy trì ở các batch tiếp theo."
+            )
 
 
 def build_rolling_context_guidance(

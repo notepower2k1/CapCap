@@ -53,19 +53,27 @@ KNOWN_FASTER_WHISPER_MODELS = {
 
 def _cached_model_snapshot(model_name: str) -> str | None:
     """Return the newest complete Hugging Face cache snapshot for a model."""
-    snapshots_dir = Path(models_path(
-        "faster_whisper",
-        f"models--Systran--faster-whisper-{model_name}",
-        "snapshots",
-    ))
-    if not snapshots_dir.is_dir():
+    fw_dir = Path(models_path("faster_whisper"))
+    if not fw_dir.is_dir():
         return None
-    snapshots = sorted(
-        (path for path in snapshots_dir.iterdir() if path.is_dir() and (path / "model.bin").is_file()),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    return str(snapshots[0]) if snapshots else None
+    normalized = model_name.strip().lower()
+    for child in fw_dir.iterdir():
+        if not child.is_dir():
+            continue
+        cname = child.name.lower()
+        if (cname.startswith("models--") and normalized in cname) or cname == normalized:
+            snapshots_dir = child / "snapshots"
+            if snapshots_dir.is_dir():
+                snapshots = sorted(
+                    (p for p in snapshots_dir.iterdir() if p.is_dir() and (p / "model.bin").is_file()),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if snapshots:
+                    return str(snapshots[0])
+            if (child / "model.bin").is_file():
+                return str(child)
+    return None
 
 
 def _resolve_model_name(model_path):
@@ -470,6 +478,7 @@ def transcribe_audio_with_model(
     language="auto",
     task="transcribe",
     use_batched: bool = True,
+    vad_filter: bool = True,
     on_progress=None,
 ):
     if not os.path.exists(audio_path):
@@ -479,7 +488,10 @@ def transcribe_audio_with_model(
     transcribe_kwargs = {
         "language": normalized_language,
         "task": task,
-        "vad_filter": True,
+        "vad_filter": vad_filter,
+        # Lower VAD threshold (default=0.5) to catch quiet/whispered dialogue.
+        # Must NOT disable vad_filter entirely — that breaks sentence segmentation.
+        "vad_parameters": {"threshold": 0.3, "min_speech_duration_ms": 100},
         "beam_size": 5,
         "word_timestamps": True,
     }

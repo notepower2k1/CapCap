@@ -10,8 +10,8 @@ class WhisperAdapter:
     def load_model(self, model_path: str):
         return load_whisper_model(model_path)
 
-    def transcribe_with_model(self, model, audio_path: str, *, language: str = "auto", task: str = "transcribe", use_batched: bool = True, on_progress=None):
+    def transcribe_with_model(self, model, audio_path: str, *, language: str = "auto", task: str = "transcribe", use_batched: bool = True, vad_filter: bool = True, on_progress=None):
         with GPUStageScheduler.stage("whisper"):
             return transcribe_audio_with_model(
-                model, audio_path, language=language, task=task, use_batched=use_batched, on_progress=on_progress
+                model, audio_path, language=language, task=task, use_batched=use_batched, vad_filter=vad_filter, on_progress=on_progress
             )

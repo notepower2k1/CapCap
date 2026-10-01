@@ -166,6 +166,9 @@ class AsrMergeService:
                     chunk.audio_path,
                     language=language,
                     use_batched=False,
+                    # vad_filter=True is required for within-chunk sentence segmentation.
+                    # Disabling it causes Whisper to merge all speech into one long segment.
+                    vad_filter=True,
                 )
             else:
                 segments = whisper_adapter.transcribe(
@@ -231,7 +234,7 @@ class AsrMergeService:
                 chunk = gpu_item["chunk"]
                 if reusable_model is not None and hasattr(whisper_adapter, "transcribe_with_model"):
                     gpu_segments = whisper_adapter.transcribe_with_model(
-                        reusable_model, chunk.audio_path, language=language, use_batched=False
+                        reusable_model, chunk.audio_path, language=language, use_batched=False, vad_filter=True
                     )
                 else:
                     gpu_segments = whisper_adapter.transcribe(chunk.audio_path, model_path, language=language)
@@ -462,10 +465,12 @@ class AsrMergeService:
         # identical after normalization.
         shorter_duration = min(previous_duration, candidate_duration)
         substantial_overlap = overlap >= max(0.10, shorter_duration * 0.60)
-        is_boundary_duplicate = substantial_overlap and similarity >= 0.92
+        is_boundary_duplicate = substantial_overlap and similarity >= 0.82
         if not is_boundary_duplicate:
             merged_entries.append(candidate)
             return
+
+        print(f"[ASR] Dedup boundary: '{previous_segment.get('text','')[:30]}' ~ '{candidate_segment.get('text','')[:30]}' (sim={similarity:.2f}, overlap={overlap:.2f}s)")
 
         if previous_in_core != candidate_in_core:
             if candidate_in_core:

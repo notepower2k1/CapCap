@@ -1420,12 +1420,20 @@ class LauncherWindow(QDialog):
         try:
             import subprocess
             result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=10,
                 **subprocess_hidden_kwargs(),
             )
             if result.returncode == 0 and result.stdout.strip():
-                gpu_name = result.stdout.strip().split("\n")[0].strip()
+                parts = result.stdout.strip().split("\n")[0].strip().split(",")
+                gpu_name = parts[0].strip()
+                if len(parts) >= 2:
+                    try:
+                        vram_mb = int(parts[1].strip())
+                        vram_gb = round(vram_mb / 1024)
+                        gpu_name = f"{gpu_name} ({vram_gb}GB)"
+                    except ValueError:
+                        pass
                 has_gpu = True
         except Exception:
             pass

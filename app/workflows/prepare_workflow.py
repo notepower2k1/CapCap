@@ -18,10 +18,10 @@ class PrepareWorkflow:
     CHUNK_OVERLAP_SECONDS = 0.5
     CHUNK_SILENCE_NOISE = "-35dB"
     CHUNK_SILENCE_DURATION_SECONDS = 0.35
-    # ASR-only gain control: quiet speech is easy for VAD to misclassify as
-    # silence.  Keep this deliberately conservative so normal recordings are
-    # untouched and background noise is not amplified excessively.
-    ASR_NORMALIZE_TRIGGER_DB = -35.0
+    # ASR-only gain control: normalize audio when mean level is below -20dB so that
+    # quiet/whispered dialogue is boosted before VAD and model inference.
+    # Peak limiter (ASR_NORMALIZE_PEAK_DB) prevents clipping on loud peaks.
+    ASR_NORMALIZE_TRIGGER_DB = -20.0
     ASR_NORMALIZE_TARGET_DB = -25.0
     ASR_NORMALIZE_MAX_GAIN_DB = 12.0
     ASR_NORMALIZE_PEAK_DB = -2.0

@@ -4,11 +4,12 @@ import numpy as np
 from runtime_paths import bin_path
 
 _VAD = None
+_VAD_CONFIG = None
 _WINDOW_SIZE = 0
 
 
 def _ensure_vad():
-    global _VAD, _WINDOW_SIZE
+    global _VAD, _VAD_CONFIG, _WINDOW_SIZE
     if _VAD is not None:
         return
 
@@ -34,6 +35,7 @@ def _ensure_vad():
         _WINDOW_SIZE = config.silero_vad.window_size
 
         _VAD = sherpa_onnx.VoiceActivityDetector(config, buffer_size_in_seconds=30)
+        _VAD_CONFIG = config
         print(f"[VAD] initialized OK, window_size={_WINDOW_SIZE}")
 
     except Exception:
@@ -42,7 +44,7 @@ def _ensure_vad():
 
 
 def get_speech_segments(audio: np.ndarray, sr: int = 16000) -> list[dict]:
-    global _VAD, _WINDOW_SIZE
+    global _VAD, _VAD_CONFIG, _WINDOW_SIZE
 
     _ensure_vad()
 
@@ -62,7 +64,10 @@ def get_speech_segments(audio: np.ndarray, sr: int = 16000) -> list[dict]:
     print(f"[VAD] audio stats: min={audio.min():.4f} max={audio.max():.4f} mean_abs={np.abs(audio).mean():.6f}")
 
     try:
-        if hasattr(_VAD, "reset"):
+        if _VAD_CONFIG is not None:
+            import sherpa_onnx as _sherpa
+            _VAD = _sherpa.VoiceActivityDetector(_VAD_CONFIG, buffer_size_in_seconds=30)
+        elif hasattr(_VAD, "reset"):
             _VAD.reset()
 
         segments = []

@@ -10258,10 +10258,12 @@ class VideoTranslatorGUI(QMainWindow):
         whisper_layout.setSpacing(6)
         whisper_layout.addWidget(QLabel(t("Whisper model"), whisper_box))
         whisper_model_combo = QComboBox(whisper_box)
-        whisper_model_combo.addItem("Base", "base")
-        whisper_model_combo.addItem("Small (Fast)", "small")
+        whisper_model_combo.addItem("Base (~1GB VRAM)", "base")
+        whisper_model_combo.addItem("Small - Nhanh (~2GB VRAM)", "small")
         if os.environ.get("CAPCAP_DEVICE", "cuda").strip().lower() == "cuda":
-            whisper_model_combo.addItem("Medium (Quality)", "medium")
+            whisper_model_combo.addItem("Medium - Cân bằng (~5GB VRAM)", "medium")
+            whisper_model_combo.addItem("Turbo - Tốt + Nhanh (~6GB VRAM)", "turbo")
+            whisper_model_combo.addItem("Large-v3 - Tốt nhất (~10GB VRAM)", "large-v3")
         current_model = str(self.get_whisper_model_name() or "small").strip().lower()
         model_index = whisper_model_combo.findData(current_model)
         whisper_model_combo.setCurrentIndex(model_index if model_index >= 0 else 0)
@@ -15180,10 +15182,12 @@ class VideoTranslatorGUI(QMainWindow):
         layout.addWidget(whisper_title)
         
         whisper_combo = QComboBox(dialog)
-        whisper_combo.addItem("Base", "base")
-        whisper_combo.addItem("Small (Fast)", "small")
+        whisper_combo.addItem("Base (~1GB VRAM)", "base")
+        whisper_combo.addItem("Small - Nhanh (~2GB VRAM)", "small")
         if os.environ.get("CAPCAP_DEVICE", "cuda").strip().lower() == "cuda":
-            whisper_combo.addItem("Medium (Auto)", "medium")
+            whisper_combo.addItem("Medium - Cân bằng (~5GB VRAM)", "medium")
+            whisper_combo.addItem("Turbo - Tốt + Nhanh (~6GB VRAM)", "turbo")
+            whisper_combo.addItem("Large-v3 - Tốt nhất (~10GB VRAM)", "large-v3")
         current_whisper = str(getattr(self, "selected_whisper_model_name", "auto") or "auto").strip().lower()
         if current_whisper == "auto":
             current_whisper = self.get_whisper_model_name()
