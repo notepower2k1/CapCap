@@ -742,13 +742,15 @@ class SubtitleController:
             # Keep safe reference in retiring workers until thread terminates, preventing GC crash
             retiring = getattr(self.gui, "_retiring_workers", None)
             if retiring is not None:
-                retiring.append(worker)
-                try:
-                    worker.finished.connect(
-                        lambda w=worker: retiring.remove(w) if w in retiring else None
-                    )
-                except Exception:
-                    pass
+                if not worker.isFinished():
+                    retiring.append(worker)
+                    try:
+                        worker.finished.connect(
+                            lambda w=worker: retiring.remove(w) if w in retiring else None
+                        )
+                    except Exception:
+                        pass
+                # else: thread already finished, GC will handle it
             # Immediately clear translation_thread so user can re-translate without blocking
             self.gui.translation_thread = None
 

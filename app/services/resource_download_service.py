@@ -15,36 +15,7 @@ from pathlib import Path
 import requests
 
 from runtime_paths import app_path, bin_path, bundle_root, join_root, models_path, subprocess_hidden_kwargs, subprocess_text_kwargs
-
-
-def _matches_whisper_model_dir(dir_name: str, model_name: str) -> bool:
-    """Return True if dir_name accurately corresponds to model_name, avoiding substring collisions."""
-    dname = dir_name.lower().strip()
-    target = model_name.lower().strip()
-
-    if dname == target:
-        return True
-
-    if dname.startswith("models--"):
-        parts = dname.split("--")
-        repo = parts[-1] if len(parts) >= 3 else dname[len("models--"):]
-    else:
-        repo = dname
-
-    if target in ("turbo", "large-v3-turbo"):
-        return "turbo" in repo
-
-    if "turbo" in repo:
-        return False
-
-    if "distil" in target:
-        base = target.replace("distil-", "")
-        return "distil" in repo and (repo.endswith(f"-{target}") or base in repo)
-
-    if "distil" in repo:
-        return False
-
-    return repo == target or repo.endswith(f"-{target}")
+from app.services.model_utils import matches_whisper_model_dir
 
 
 class ResourceDownloadService:
@@ -477,7 +448,7 @@ class ResourceDownloadService:
         for child in root.iterdir():
             if not child.is_dir():
                 continue
-            if _matches_whisper_model_dir(child.name, normalized):
+            if matches_whisper_model_dir(child.name, normalized):
                 matches.append(str(child))
         return matches
 

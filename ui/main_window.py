@@ -17312,7 +17312,7 @@ class VideoTranslatorGUI(QMainWindow):
             overlay.show_completion(
                 title="✅ " + t("Clean Project Completed"),
                 status=summary_text,
-                button_text=t("Quay về Launcher"),
+                button_text=t("Back to Launcher"),
                 on_action=_do_return,
             )
         else:
@@ -17601,148 +17601,152 @@ class VideoTranslatorGUI(QMainWindow):
         LauncherWindow.add_recent(getattr(self, "settings", None), video_path)
         self.show_loading_overlay(video_path)
 
-        self._current_video_path = os.path.abspath(video_path)
-        self.video_path_edit.setText(video_path)
-        self.update_project_header()
-
-        # 1. Reset state, editor texts, caches, and timeline state
-        self._is_cleaning_or_resetting = True
-        persist_timer = getattr(self, "_timeline_persist_timer", None)
-        if persist_timer is not None:
-            persist_timer.stop()
-        self._pending_timeline_persist = False
-        self._pending_mask_state_persist = False
-        self._pending_blur_state_persist = False
-
-        self.transcript_text.clear()
-        self.translated_text.clear()
-        self.current_segments = []
-        self.current_translated_segments = []
-        self.current_segment_models = []
-        self.current_translated_segment_models = []
-        self.live_preview_segments = []
-        self.live_preview_subtitle_path = ""
-        self.live_preview_ass_path = ""
-        self._playback_subtitle_activity_cache = {}
-        self._selected_segment_index = -1
-        self._editor_highlight_state = {}
-        self._editor_highlight_chunks = {}
-        if hasattr(self, "_clear_segment_editor_rows"):
-            self._clear_segment_editor_rows()
-        self._segment_editor_rows = []
-        if hasattr(self, "sync_segment_editor_rows"):
-            self.sync_segment_editor_rows()
-        if hasattr(self, "timeline"):
-            if hasattr(self.timeline, "reset_timeline"):
-                self.timeline.reset_timeline()
-            else:
-                self.timeline.set_segments([])
-                self.timeline.set_duration(0)
-                self.timeline.set_waveform_data([], 0.0)
-                self.timeline.set_video_thumbnails([])
-                self.timeline.set_playing(False)
-        if hasattr(self, "auto_frame_preview_timer"):
-            self.auto_frame_preview_timer.stop()
-        if hasattr(self, "seek_frame_preview_timer"):
-            self.seek_frame_preview_timer.stop()
-        if hasattr(self, "video_view"):
-            try:
-                blocked = self.video_view.blockSignals(True)
-                self.video_view.clear_blur_region()
-                if hasattr(self.video_view, "clear_logo"):
-                    self.video_view.clear_logo()
-                if hasattr(self.video_view, "clear_text"):
-                    self.video_view.clear_text()
-                self.video_view.blockSignals(blocked)
-            except Exception:
-                pass
-        self._logo_overlay_track = None
-        self._logo_overlay_layer = None
-        self._text_overlay_track = None
-        self._text_overlay_layer = None
-        if hasattr(self, "media_player") and hasattr(self.media_player, "clear_mask_region"):
-            try:
-                self.media_player.clear_mask_region()
-            except Exception:
-                pass
-
-        # 2. Resolve video dimensions before show so the canvas matches exact video aspect ratio
-        if hasattr(self, "refresh_video_dimensions"):
-            self.refresh_video_dimensions(video_path)
-
-        # 3. Load project state and timeline metadata
-        self._is_cleaning_or_resetting = False
-        self.current_project_state = self.ensure_current_project()
-        self.load_project_context(self.current_project_state)
-
-        if hasattr(self, "timeline") and hasattr(self.timeline, "set_video_source"):
-            dur = 0.0
-            try:
-                dur = float(_get_video_duration(self._current_video_path) or 0.0)
-            except Exception:
-                pass
-            if dur <= 0.0:
-                dur = 60.0
-            self.timeline.set_video_source(self._current_video_path, dur)
-            ensure_tracks = getattr(self.timeline, "_ensure_tracks_populated", None)
-            if callable(ensure_tracks):
-                ensure_tracks()
-            redraw = getattr(self.timeline, "_redraw", None)
-            if callable(redraw):
-                redraw()
-        self.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
-
-        # 4. Resolve initial layout geometry while hidden so first paint is already settled
-        self.prepare_initial_editor_layout()
-
-        # 5. Show the complete editor UI cohesively as one window and paint immediately
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        self.setFocus()
-        overlay = getattr(self, "_loading_overlay", None)
-        if overlay is not None and overlay.isVisible():
-            parent_rect = overlay.parent().rect() if overlay.parent() is not None else self.rect()
-            overlay.setGeometry(parent_rect)
-            overlay.raise_()
         try:
-            self.repaint()
-        except Exception:
-            pass
+            self._current_video_path = os.path.abspath(video_path)
+            self.video_path_edit.setText(video_path)
+            self.update_project_header()
 
-        # 6. Defer media backend loading slightly so the entire UI paints first on screen
-        # before MPV initializes and renders into the settled video canvas
-        def _deferred_load_media():
+            # 1. Reset state, editor texts, caches, and timeline state
+            self._is_cleaning_or_resetting = True
+            persist_timer = getattr(self, "_timeline_persist_timer", None)
+            if persist_timer is not None:
+                persist_timer.stop()
+            self._pending_timeline_persist = False
+            self._pending_mask_state_persist = False
+            self._pending_blur_state_persist = False
+
+            self.transcript_text.clear()
+            self.translated_text.clear()
+            self.current_segments = []
+            self.current_translated_segments = []
+            self.current_segment_models = []
+            self.current_translated_segment_models = []
+            self.live_preview_segments = []
+            self.live_preview_subtitle_path = ""
+            self.live_preview_ass_path = ""
+            self._playback_subtitle_activity_cache = {}
+            self._selected_segment_index = -1
+            self._editor_highlight_state = {}
+            self._editor_highlight_chunks = {}
+            if hasattr(self, "_clear_segment_editor_rows"):
+                self._clear_segment_editor_rows()
+            self._segment_editor_rows = []
+            if hasattr(self, "sync_segment_editor_rows"):
+                self.sync_segment_editor_rows()
+            if hasattr(self, "timeline"):
+                if hasattr(self.timeline, "reset_timeline"):
+                    self.timeline.reset_timeline()
+                else:
+                    self.timeline.set_segments([])
+                    self.timeline.set_duration(0)
+                    self.timeline.set_waveform_data([], 0.0)
+                    self.timeline.set_video_thumbnails([])
+                    self.timeline.set_playing(False)
+            if hasattr(self, "auto_frame_preview_timer"):
+                self.auto_frame_preview_timer.stop()
+            if hasattr(self, "seek_frame_preview_timer"):
+                self.seek_frame_preview_timer.stop()
+            if hasattr(self, "video_view"):
+                try:
+                    blocked = self.video_view.blockSignals(True)
+                    self.video_view.clear_blur_region()
+                    if hasattr(self.video_view, "clear_logo"):
+                        self.video_view.clear_logo()
+                    if hasattr(self.video_view, "clear_text"):
+                        self.video_view.clear_text()
+                    self.video_view.blockSignals(blocked)
+                except Exception:
+                    pass
+            self._logo_overlay_track = None
+            self._logo_overlay_layer = None
+            self._text_overlay_track = None
+            self._text_overlay_layer = None
+            if hasattr(self, "media_player") and hasattr(self.media_player, "clear_mask_region"):
+                try:
+                    self.media_player.clear_mask_region()
+                except Exception:
+                    pass
+
+            # 2. Resolve video dimensions before show so the canvas matches exact video aspect ratio
+            if hasattr(self, "refresh_video_dimensions"):
+                self.refresh_video_dimensions(video_path)
+
+            # 3. Load project state and timeline metadata
+            self._is_cleaning_or_resetting = False
+            self.current_project_state = self.ensure_current_project()
+            self.load_project_context(self.current_project_state)
+
+            if hasattr(self, "timeline") and hasattr(self.timeline, "set_video_source"):
+                dur = 0.0
+                try:
+                    dur = float(_get_video_duration(self._current_video_path) or 0.0)
+                except Exception:
+                    pass
+                if dur <= 0.0:
+                    dur = 60.0
+                self.timeline.set_video_source(self._current_video_path, dur)
+                ensure_tracks = getattr(self.timeline, "_ensure_tracks_populated", None)
+                if callable(ensure_tracks):
+                    ensure_tracks()
+                redraw = getattr(self.timeline, "_redraw", None)
+                if callable(redraw):
+                    redraw()
+            self.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
+
+            # 4. Resolve initial layout geometry while hidden so first paint is already settled
+            self.prepare_initial_editor_layout()
+
+            # 5. Show the complete editor UI cohesively as one window and paint immediately
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            self.setFocus()
+            overlay = getattr(self, "_loading_overlay", None)
+            if overlay is not None and overlay.isVisible():
+                parent_rect = overlay.parent().rect() if overlay.parent() is not None else self.rect()
+                overlay.setGeometry(parent_rect)
+                overlay.raise_()
             try:
-                self.ensure_media_backend_ready()
-                self.media_player.setSource(QUrl.fromLocalFile(video_path))
-                if hasattr(self, "refresh_video_dimensions"):
-                    self.refresh_video_dimensions(video_path)
-                if hasattr(self, "sync_preview_audio_track_to_output"):
-                    self.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
-                if hasattr(self, "_sync_preview_framing_to_player"):
-                    self._sync_preview_framing_to_player()
-            except Exception as exc:
-                print(f"[Preview] Deferred media load error: {exc}")
-            finally:
-                def _on_overlay_dismissed():
-                    if hasattr(self, "video_view") and hasattr(self.video_view, "video_surface") and self.video_view.video_surface is not None:
-                        try:
-                            self.video_view.video_surface.show()
-                        except Exception:
-                            pass
-                    self.hide_loading_overlay(fade=False)
-                    if hasattr(self, "sync_live_subtitle_preview"):
-                        self.sync_live_subtitle_preview()
-                    if hasattr(self, "media_player") and not self.media_player.is_playing():
-                        self._show_subtitle_drag_layer()
-                    if hasattr(self, "video_view"):
-                        overlay = getattr(self.video_view, "logo_overlay", None)
-                        if overlay is not None and getattr(overlay, "_regions", None) and getattr(self.video_view, "_logo_track_visible", True):
-                            overlay.sync_to_view()
-                QTimer.singleShot(150, _on_overlay_dismissed)
+                self.repaint()
+            except Exception:
+                pass
 
-        QTimer.singleShot(50, _deferred_load_media)
+            # 6. Defer media backend loading slightly so the entire UI paints first on screen
+            # before MPV initializes and renders into the settled video canvas
+            def _deferred_load_media():
+                try:
+                    self.ensure_media_backend_ready()
+                    self.media_player.setSource(QUrl.fromLocalFile(video_path))
+                    if hasattr(self, "refresh_video_dimensions"):
+                        self.refresh_video_dimensions(video_path)
+                    if hasattr(self, "sync_preview_audio_track_to_output"):
+                        self.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
+                    if hasattr(self, "_sync_preview_framing_to_player"):
+                        self._sync_preview_framing_to_player()
+                except Exception as exc:
+                    print(f"[Preview] Deferred media load error: {exc}")
+                finally:
+                    def _on_overlay_dismissed():
+                        if hasattr(self, "video_view") and hasattr(self.video_view, "video_surface") and self.video_view.video_surface is not None:
+                            try:
+                                self.video_view.video_surface.show()
+                            except Exception:
+                                pass
+                        self.hide_loading_overlay(fade=False)
+                        if hasattr(self, "sync_live_subtitle_preview"):
+                            self.sync_live_subtitle_preview()
+                        if hasattr(self, "media_player") and not self.media_player.is_playing():
+                            self._show_subtitle_drag_layer()
+                        if hasattr(self, "video_view"):
+                            overlay = getattr(self.video_view, "logo_overlay", None)
+                            if overlay is not None and getattr(overlay, "_regions", None) and getattr(self.video_view, "_logo_track_visible", True):
+                                overlay.sync_to_view()
+                    QTimer.singleShot(150, _on_overlay_dismissed)
+
+            QTimer.singleShot(50, _deferred_load_media)
+        except Exception as _load_err:
+            self.hide_loading_overlay(fade=False)
+            raise
 
 
 def _relaunch_launcher(existing_window=None):

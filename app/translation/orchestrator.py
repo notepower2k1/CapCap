@@ -822,7 +822,8 @@ class TranslationOrchestrator:
             batch_timeout = int(os.getenv("CAPCAP_OLLAMA_TIMEOUT") or "3600") if is_ollama else int(os.getenv("CAPCAP_AI_TIMEOUT") or "300")
         except (ValueError, TypeError):
             batch_timeout = 3600 if is_ollama else 300
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_workers))
+        try:
             future_to_idx = {}
             for idx, batch_item in enumerate(batches):
                 source_batch = batch_item[0]
@@ -881,6 +882,8 @@ class TranslationOrchestrator:
                             raise
                         warnings.append(f"Batch {idx + 1} AI polishing failed ({exc}); kept draft.")
                         translated_texts_map[idx] = batches[idx][1]
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         merged = []
         for idx in range(len(batches)):

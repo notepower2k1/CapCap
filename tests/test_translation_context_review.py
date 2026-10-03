@@ -447,6 +447,7 @@ class TestTranslationCancellation(unittest.TestCase):
         mock_gui = MagicMock()
         mock_gui._retiring_workers = []
         mock_worker = MagicMock()
+        mock_worker.isFinished.return_value = False
         mock_gui.translation_thread = mock_worker
         controller = SubtitleController(mock_gui)
 
@@ -456,6 +457,19 @@ class TestTranslationCancellation(unittest.TestCase):
         self.assertIn(mock_worker, mock_gui._retiring_workers)
         mock_gui.log.assert_any_call("[Translation] Canceling translation request...")
         mock_gui.log.assert_any_call("[Translation] Translation canceled by user.")
+
+    def test_subtitle_controller_on_translation_canceled_already_finished(self):
+        mock_gui = MagicMock()
+        mock_gui._retiring_workers = []
+        mock_worker = MagicMock()
+        mock_worker.isFinished.return_value = True
+        mock_gui.translation_thread = mock_worker
+        controller = SubtitleController(mock_gui)
+
+        controller._on_translation_canceled()
+        mock_worker.cancel.assert_called_once()
+        self.assertIsNone(mock_gui.translation_thread)
+        self.assertNotIn(mock_worker, mock_gui._retiring_workers)
 
     def test_polisher_sliced_sleep_cancels_promptly(self):
         import threading

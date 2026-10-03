@@ -5,6 +5,7 @@ creating a separate top-level OS window/HWND, thus avoiding D3D11 swapchain
 conflicts with MPV.
 """
 import os
+import warnings
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QProgressBar, QFrame, QGraphicsOpacityEffect,
     QPushButton
@@ -164,7 +165,6 @@ class MainWindowLoadingOverlay(QWidget):
         if button_text and on_action:
             self.action_btn.setText(button_text)
             try:
-                import warnings
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", category=RuntimeWarning)
                     self.action_btn.clicked.disconnect()

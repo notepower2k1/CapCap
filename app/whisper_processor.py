@@ -7,6 +7,7 @@ import traceback
 from pathlib import Path
 
 from runtime_paths import bin_path, models_path, workspace_root, subprocess_hidden_kwargs, subprocess_text_kwargs
+from app.services.model_utils import matches_whisper_model_dir
 from services.resource_download_service import ResourceDownloadService
 
 
@@ -51,36 +52,6 @@ KNOWN_FASTER_WHISPER_MODELS = {
 }
 
 
-def _matches_whisper_model_dir(dir_name: str, model_name: str) -> bool:
-    """Return True if dir_name accurately corresponds to model_name, avoiding substring collisions."""
-    dname = dir_name.lower().strip()
-    target = model_name.lower().strip()
-
-    if dname == target:
-        return True
-
-    if dname.startswith("models--"):
-        parts = dname.split("--")
-        repo = parts[-1] if len(parts) >= 3 else dname[len("models--"):]
-    else:
-        repo = dname
-
-    if target in ("turbo", "large-v3-turbo"):
-        return "turbo" in repo
-
-    if "turbo" in repo:
-        return False
-
-    if "distil" in target:
-        base = target.replace("distil-", "")
-        return "distil" in repo and (repo.endswith(f"-{target}") or base in repo)
-
-    if "distil" in repo:
-        return False
-
-    return repo == target or repo.endswith(f"-{target}")
-
-
 def _cached_model_snapshot(model_name: str) -> str | None:
     """Return the newest complete Hugging Face cache snapshot for a model."""
     fw_dir = Path(models_path("faster_whisper"))
@@ -90,7 +61,7 @@ def _cached_model_snapshot(model_name: str) -> str | None:
     for child in fw_dir.iterdir():
         if not child.is_dir():
             continue
-        if _matches_whisper_model_dir(child.name, normalized):
+        if matches_whisper_model_dir(child.name, normalized):
             snapshots_dir = child / "snapshots"
             if snapshots_dir.is_dir():
                 snapshots = sorted(

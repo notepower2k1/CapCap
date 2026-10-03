@@ -118,6 +118,19 @@ class TestMainWindowLoadingOverlay(unittest.TestCase):
         self.assertEqual(self.overlay.subtitle_label.text(), "sample.mp4")
         self.assertTrue(self.overlay.subtitle_label.isVisible())
 
+    def test_load_video_project_exception_dismisses_overlay(self):
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui.video_path_edit = MagicMock()
+        gui.update_project_header = MagicMock(side_effect=RuntimeError("Simulated header crash"))
+        gui.show_loading_overlay = MagicMock()
+        gui.hide_loading_overlay = MagicMock()
+
+        with self.assertRaises(RuntimeError):
+            VideoTranslatorGUI.load_video_project(gui, "test.mp4")
+
+        gui.show_loading_overlay.assert_called_once_with("test.mp4")
+        gui.hide_loading_overlay.assert_called_once_with(fade=False)
+
 
 if __name__ == "__main__":
     unittest.main()
