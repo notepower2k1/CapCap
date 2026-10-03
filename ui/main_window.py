@@ -886,7 +886,8 @@ class VideoTranslatorGUI(QMainWindow):
             from widgets.loading_overlay import MainWindowLoadingOverlay
         except ImportError:
             from ui.widgets.loading_overlay import MainWindowLoadingOverlay
-        self._loading_overlay = MainWindowLoadingOverlay(self)
+        parent_widget = self.centralWidget() if self.centralWidget() is not None else self
+        self._loading_overlay = MainWindowLoadingOverlay(parent_widget)
         self._loading_overlay.hide()
         self._project_loading_in_progress = False
 
@@ -913,7 +914,8 @@ class VideoTranslatorGUI(QMainWindow):
         if overlay is not None:
             target = video_path or getattr(self, "_current_video_path", "")
             overlay.show_for_video(target, timeout_ms)
-            overlay.setGeometry(self.rect())
+            parent_rect = overlay.parent().rect() if overlay.parent() is not None else self.rect()
+            overlay.setGeometry(parent_rect)
             overlay.raise_()
 
     def hide_loading_overlay(self, fade: bool = True):
@@ -978,7 +980,8 @@ class VideoTranslatorGUI(QMainWindow):
         apply_windows_dark_title_bar_impl(self)
         overlay = getattr(self, "_loading_overlay", None)
         if overlay is not None and overlay.isVisible():
-            overlay.setGeometry(self.rect())
+            parent_rect = overlay.parent().rect() if overlay.parent() is not None else self.rect()
+            overlay.setGeometry(parent_rect)
             overlay.raise_()
         if getattr(self, "_initial_layout_finalized", False):
             return
@@ -991,7 +994,8 @@ class VideoTranslatorGUI(QMainWindow):
         super().resizeEvent(event)
         overlay = getattr(self, "_loading_overlay", None)
         if overlay is not None and overlay.isVisible():
-            overlay.setGeometry(self.rect())
+            parent_rect = overlay.parent().rect() if overlay.parent() is not None else self.rect()
+            overlay.setGeometry(parent_rect)
             overlay.raise_()
         if not getattr(self, "_initial_layout_finalized", False):
             return
@@ -17685,7 +17689,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.setFocus()
         overlay = getattr(self, "_loading_overlay", None)
         if overlay is not None and overlay.isVisible():
-            overlay.setGeometry(self.rect())
+            parent_rect = overlay.parent().rect() if overlay.parent() is not None else self.rect()
+            overlay.setGeometry(parent_rect)
             overlay.raise_()
         try:
             self.repaint()

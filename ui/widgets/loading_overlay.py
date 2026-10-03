@@ -94,9 +94,13 @@ class MainWindowLoadingOverlay(QWidget):
 
         if parent is not None:
             parent.installEventFilter(self)
+            top = parent.window()
+            if top is not None and top is not parent:
+                top.installEventFilter(self)
 
     def eventFilter(self, watched, event):
-        if watched == self.parent() and event.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest):
+        watched_targets = (self.parent(), self.window()) if self.parent() else (self.window(),)
+        if watched in watched_targets and event.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest):
             if self.parent() and self.isVisible():
                 self.setGeometry(self.parent().rect())
                 self.raise_()

@@ -61,6 +61,19 @@ class TestMainWindowLoadingOverlay(unittest.TestCase):
         handled = self.overlay.eventFilter(self.parent, ev)
         self.assertEqual(self.overlay.geometry(), self.parent.rect())
 
+    def test_event_filter_window_event(self):
+        win = QWidget()
+        win.resize(1000, 700)
+        central = QWidget(win)
+        central.resize(1000, 700)
+        overlay = MainWindowLoadingOverlay(central)
+        overlay.show_for_video("test.mp4")
+        ev = QEvent(QEvent.Type.Resize)
+        overlay.eventFilter(win, ev)
+        self.assertEqual(overlay.geometry(), central.rect())
+        overlay.dismiss()
+        win.deleteLater()
+
     def test_main_window_integration_methods(self):
         gui = MagicMock(spec=VideoTranslatorGUI)
         gui._loading_overlay = MagicMock(spec=MainWindowLoadingOverlay)
