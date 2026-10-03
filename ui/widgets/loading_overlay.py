@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QProgressBar, QFrame, QGraphicsOpacityEffect
 )
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QEvent
+from PySide6.QtGui import QPainter, QColor
 
 try:
     from i18n import t
@@ -24,6 +25,7 @@ class MainWindowLoadingOverlay(QWidget):
         self.setObjectName("mainWindowLoadingOverlay")
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
         self.setStyleSheet("""
             #mainWindowLoadingOverlay {
                 background-color: #0c1017;
@@ -97,6 +99,12 @@ class MainWindowLoadingOverlay(QWidget):
             top = parent.window()
             if top is not None and top is not parent:
                 top.installEventFilter(self)
+
+    def paintEvent(self, event):
+        """Paint solid opaque dark backdrop to completely cover all underlying items."""
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#0c1017"))
+        super().paintEvent(event)
 
     def eventFilter(self, watched, event):
         watched_targets = (self.parent(), self.window()) if self.parent() else (self.window(),)

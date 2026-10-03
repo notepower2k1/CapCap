@@ -910,6 +910,11 @@ class VideoTranslatorGUI(QMainWindow):
                     self.video_view.text_overlay.hide()
                 except Exception:
                     pass
+            if hasattr(self.video_view, "video_surface") and self.video_view.video_surface is not None:
+                try:
+                    self.video_view.video_surface.hide()
+                except Exception:
+                    pass
         overlay = getattr(self, "_loading_overlay", None)
         if overlay is not None:
             target = video_path or getattr(self, "_current_video_path", "")
@@ -17118,6 +17123,13 @@ class VideoTranslatorGUI(QMainWindow):
         cleaning_video_path = getattr(self, "_current_video_path", "") or (
             self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
         )
+        self.show_loading_overlay("", timeout_ms=8000)
+        overlay = getattr(self, "_loading_overlay", None)
+        if overlay is not None:
+            overlay.set_status(t("Cleaning project data and caches..."))
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+
         self._is_cleaning_or_resetting = True
 
         removed_paths = []
@@ -17296,6 +17308,7 @@ class VideoTranslatorGUI(QMainWindow):
                 t("Clean Project"),
                 t("No removable intermediate files were found for the current project."),
             )
+        self.hide_loading_overlay(fade=False)
         # The project directory above has intentionally been deleted. Do not
         # persist the in-memory timeline while returning to the launcher,
         # because that would recreate projects/<project_id>/timeline.json.
@@ -17713,6 +17726,11 @@ class VideoTranslatorGUI(QMainWindow):
                 print(f"[Preview] Deferred media load error: {exc}")
             finally:
                 def _on_overlay_dismissed():
+                    if hasattr(self, "video_view") and hasattr(self.video_view, "video_surface") and self.video_view.video_surface is not None:
+                        try:
+                            self.video_view.video_surface.show()
+                        except Exception:
+                            pass
                     self.hide_loading_overlay(fade=False)
                     if hasattr(self, "sync_live_subtitle_preview"):
                         self.sync_live_subtitle_preview()
