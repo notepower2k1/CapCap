@@ -1192,7 +1192,7 @@ class PreviewController:
         fill_focus_x, fill_focus_y = self.gui.get_output_fill_focus()
         
         # Check if an export is already running
-        if hasattr(self.gui, 'export_thread') and self.gui.export_thread.isRunning():
+        if getattr(self.gui, 'export_thread', None) is not None and self.gui.export_thread.isRunning():
             self.gui.log("[Export] Export already running, ignoring request")
             return
         
@@ -1494,6 +1494,7 @@ class PreviewController:
         self.gui.progress_bar.setValue(100)
 
         if error:
+            self.gui.export_thread = None
             self.gui.update_project_step("export", "failed")
             self.gui.show_error(t("Error"), t("Final export failed."), error)
             return
@@ -1508,6 +1509,8 @@ class PreviewController:
             self.gui.log(f"[Export] Final video exported successfully: {output_path}")
             self.gui.log("[Export] Kept current preview/subtitle state so you can continue editing after export.")
 
+        self.gui.export_thread = None
+
     def on_quick_preview_ready(self, output_path, error):
         if hasattr(self.gui, "ensure_media_backend_ready"):
             self.gui.ensure_media_backend_ready()
@@ -1517,6 +1520,7 @@ class PreviewController:
         self.gui.progress_bar.setValue(100)
 
         if error:
+            self.gui.preview_thread = None
             self.gui.show_error(t("Error"), t("5-second preview failed."), error)
             return
 
@@ -1530,6 +1534,8 @@ class PreviewController:
                 self.gui.open_folder(os.path.dirname(output_path))
             self.gui.refresh_ui_state()
 
+        self.gui.preview_thread = None
+
     def preview_video(self):
         self._start_video_preview()
 
@@ -1537,7 +1543,7 @@ class PreviewController:
         self.gui.log("[Preview] _start_video_preview called")
         
         # Check if a preview is already running
-        if hasattr(self.gui, 'preview_thread') and self.gui.preview_thread.isRunning():
+        if getattr(self.gui, 'preview_thread', None) is not None and self.gui.preview_thread.isRunning():
             self.gui.log("[Preview] Preview already running, ignoring request")
             return
         
