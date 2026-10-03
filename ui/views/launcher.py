@@ -495,16 +495,26 @@ class LauncherWindow(QDialog):
         root.setSpacing(16)
 
         header = QHBoxLayout()
+        title_box = QHBoxLayout()
+        title_box.setSpacing(8)
         self._title_label = QLabel("CapCap V8")
         title = self._title_label
         title.setStyleSheet("font-size: 26px; font-weight: 800; color: #ffffff;")
+        title_box.addWidget(title)
+        self._version_badge = QLabel("v8.0.3")
+        self._version_badge.setStyleSheet(
+            "color: #4ecdc4; font-size: 11px; font-weight: 700; "
+            "background-color: #12283a; border: 1px solid #1e455f; "
+            "border-radius: 4px; padding: 2px 6px;"
+        )
+        title_box.addWidget(self._version_badge)
+        title_box.addStretch()
         self._subtitle_label = QLabel("Video Translation & Voiceover Studio")
         subtitle = self._subtitle_label
         subtitle.setStyleSheet("font-size: 12px; color: #6ee7d6;")
 
-
         header_text = QVBoxLayout()
-        header_text.addWidget(title)
+        header_text.addLayout(title_box)
         header_text.addWidget(subtitle)
 
         has_gpu, gpu_name, cuda_ready = self._detect_gpu_with_cuda()
@@ -740,6 +750,14 @@ class LauncherWindow(QDialog):
         self.empty_label.setStyleSheet("color: #556677; font-size: 13px;")
         self.empty_label.hide()
         root.addWidget(self.empty_label)
+
+        footer_row = QHBoxLayout()
+        footer_row.setContentsMargins(0, 0, 0, 0)
+        footer_row.addStretch()
+        self._footer_version_label = QLabel("Version 8.0.3")
+        self._footer_version_label.setStyleSheet("color: #4a6382; font-size: 11px; font-weight: 600;")
+        footer_row.addWidget(self._footer_version_label)
+        root.addLayout(footer_row)
 
         # Smooth Loading Overlay Panel
         self.loading_panel = QFrame(self)

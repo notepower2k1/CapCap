@@ -2,7 +2,7 @@
 ; Ho tro: Chon thu muc cai dat, tao Desktop icon, tu dong cai Microsoft Visual C++ Redistributable x64 (kiem tra phien ban >= 14.20)
 
 #define MyAppName "CapCap"
-#define MyAppVersion "8.3"
+#define MyAppVersion "8.0.3"
 #define MyAppPublisher "CapCap"
 #define MyAppURL "https://github.com/notepower2k1/CapCap"
 #define MyAppExeName "CapCap.exe"
