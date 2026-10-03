@@ -937,6 +937,23 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
             self.hide()
         self.update()
 
+    def clear_region(self):
+        if hasattr(self, "_sync_timer") and self._sync_timer is not None:
+            try:
+                self._sync_timer.stop()
+            except Exception:
+                pass
+        if self._target_view is not None:
+            try:
+                self._target_view.removeEventFilter(self)
+            except Exception:
+                pass
+        self._pixmap = None
+        self._logo_items = []
+        self._opacity = 1.0
+        self._rotation = 0.0
+        super().clear_region()
+
     def sync_to_view(self):
         """Keep the logo image positioned even when edit handles are hidden."""
         win = self._target_view.window() if self._target_view else None

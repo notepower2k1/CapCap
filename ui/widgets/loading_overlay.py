@@ -96,9 +96,10 @@ class MainWindowLoadingOverlay(QWidget):
             parent.installEventFilter(self)
 
     def eventFilter(self, watched, event):
-        if watched == self.parent() and event.type() in (QEvent.Resize, QEvent.Show):
-            if self.parent():
+        if watched == self.parent() and event.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest):
+            if self.parent() and self.isVisible():
                 self.setGeometry(self.parent().rect())
+                self.raise_()
         return super().eventFilter(watched, event)
 
     def show_for_video(self, video_path: str = "", max_timeout_ms: int = 4000):
@@ -108,8 +109,8 @@ class MainWindowLoadingOverlay(QWidget):
         self.subtitle_label.setVisible(bool(name))
         if self.parent():
             self.setGeometry(self.parent().rect())
-        self.raise_()
         self.show()
+        self.raise_()
         if max_timeout_ms > 0:
             self._safety_timer.start(max_timeout_ms)
 

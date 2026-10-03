@@ -913,6 +913,8 @@ class VideoTranslatorGUI(QMainWindow):
         if overlay is not None:
             target = video_path or getattr(self, "_current_video_path", "")
             overlay.show_for_video(target, timeout_ms)
+            overlay.setGeometry(self.rect())
+            overlay.raise_()
 
     def hide_loading_overlay(self, fade: bool = True):
         self._project_loading_in_progress = False
@@ -974,6 +976,10 @@ class VideoTranslatorGUI(QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         apply_windows_dark_title_bar_impl(self)
+        overlay = getattr(self, "_loading_overlay", None)
+        if overlay is not None and overlay.isVisible():
+            overlay.setGeometry(self.rect())
+            overlay.raise_()
         if getattr(self, "_initial_layout_finalized", False):
             return
         # Fallback for non-launcher entry points. The normal Launcher flow
@@ -986,6 +992,7 @@ class VideoTranslatorGUI(QMainWindow):
         overlay = getattr(self, "_loading_overlay", None)
         if overlay is not None and overlay.isVisible():
             overlay.setGeometry(self.rect())
+            overlay.raise_()
         if not getattr(self, "_initial_layout_finalized", False):
             return
         if not getattr(self, "_responsive_layout_pending", False):
@@ -5162,6 +5169,11 @@ class VideoTranslatorGUI(QMainWindow):
                     logo_track.layers[0],
                 )
                 self._show_logo_overlay(logo_track, logo_layer)
+            else:
+                if hasattr(self, "video_view") and hasattr(self.video_view, "clear_logo"):
+                    self.video_view.clear_logo()
+                self._logo_overlay_track = None
+                self._logo_overlay_layer = None
         except Exception:
             pass
         # Force the dual-track sidecar player to re-initialize for this
@@ -17011,9 +17023,17 @@ class VideoTranslatorGUI(QMainWindow):
             try:
                 blocked = self.video_view.blockSignals(True)
                 self.video_view.clear_blur_region()
+                if hasattr(self.video_view, "clear_logo"):
+                    self.video_view.clear_logo()
+                if hasattr(self.video_view, "clear_text"):
+                    self.video_view.clear_text()
                 self.video_view.blockSignals(blocked)
             except Exception:
                 pass
+        self._logo_overlay_track = None
+        self._logo_overlay_layer = None
+        self._text_overlay_track = None
+        self._text_overlay_layer = None
         if hasattr(self, "media_player") and hasattr(self.media_player, "clear_mask_region"):
             try:
                 self.media_player.clear_mask_region()
@@ -17612,9 +17632,17 @@ class VideoTranslatorGUI(QMainWindow):
             try:
                 blocked = self.video_view.blockSignals(True)
                 self.video_view.clear_blur_region()
+                if hasattr(self.video_view, "clear_logo"):
+                    self.video_view.clear_logo()
+                if hasattr(self.video_view, "clear_text"):
+                    self.video_view.clear_text()
                 self.video_view.blockSignals(blocked)
             except Exception:
                 pass
+        self._logo_overlay_track = None
+        self._logo_overlay_layer = None
+        self._text_overlay_track = None
+        self._text_overlay_layer = None
         if hasattr(self, "media_player") and hasattr(self.media_player, "clear_mask_region"):
             try:
                 self.media_player.clear_mask_region()
@@ -17655,6 +17683,10 @@ class VideoTranslatorGUI(QMainWindow):
         self.raise_()
         self.activateWindow()
         self.setFocus()
+        overlay = getattr(self, "_loading_overlay", None)
+        if overlay is not None and overlay.isVisible():
+            overlay.setGeometry(self.rect())
+            overlay.raise_()
         try:
             self.repaint()
         except Exception:

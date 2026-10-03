@@ -10,6 +10,7 @@ for p in (PROJECT_ROOT, APP_DIR, UI_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication, QWidget
 from widgets.loading_overlay import MainWindowLoadingOverlay
 from main_window import VideoTranslatorGUI
@@ -53,6 +54,13 @@ class TestMainWindowLoadingOverlay(unittest.TestCase):
         self.overlay.dismiss(fade=False)
         self.assertFalse(self.overlay.isVisible())
 
+    def test_event_filter_layout_request(self):
+        self.overlay.show_for_video("test.mp4")
+        self.parent.resize(800, 600)
+        ev = QEvent(QEvent.Type.LayoutRequest)
+        handled = self.overlay.eventFilter(self.parent, ev)
+        self.assertEqual(self.overlay.geometry(), self.parent.rect())
+
     def test_main_window_integration_methods(self):
         gui = MagicMock(spec=VideoTranslatorGUI)
         gui._loading_overlay = MagicMock(spec=MainWindowLoadingOverlay)
@@ -60,6 +68,8 @@ class TestMainWindowLoadingOverlay(unittest.TestCase):
 
         VideoTranslatorGUI.show_loading_overlay(gui, "test.mp4", 2000)
         gui._loading_overlay.show_for_video.assert_called_once_with("test.mp4", 2000)
+        gui._loading_overlay.setGeometry.assert_called_once()
+        gui._loading_overlay.raise_.assert_called_once()
 
         VideoTranslatorGUI.hide_loading_overlay(gui, fade=True)
         gui._loading_overlay.dismiss.assert_called_once_with(fade=True)
