@@ -4542,7 +4542,7 @@ class VideoTranslatorGUI(QMainWindow):
         saved = self._read_saved_subtitle_style_presets()
         self.saved_subtitle_style_combo.blockSignals(True)
         self.saved_subtitle_style_combo.clear()
-        self.saved_subtitle_style_combo.addItem("My Presets", "")
+        self.saved_subtitle_style_combo.addItem(t("My Presets"), "")
         for name in sorted(saved.keys(), key=str.lower):
             self.saved_subtitle_style_combo.addItem(name, name)
         self.saved_subtitle_style_combo.setCurrentIndex(0)
@@ -4576,7 +4576,7 @@ class VideoTranslatorGUI(QMainWindow):
         if not old_name:
             return
         new_name, ok = QInputDialog.getText(
-            self, "Đổi tên preset", "Tên mới:", text=old_name
+            self, t("Rename Preset"), t("New name:"), text=old_name
         )
         if not ok or not (new_name or "").strip():
             return
@@ -4585,7 +4585,7 @@ class VideoTranslatorGUI(QMainWindow):
             return
         saved = self._read_saved_subtitle_style_presets()
         if new_name in saved:
-            QMessageBox.warning(self, "Đổi tên preset", f"Đã tồn tại preset tên '{new_name}'.")
+            QMessageBox.warning(self, t("Rename Preset"), t("A preset named '{name}' already exists.", name=new_name))
             return
         if old_name in saved:
             saved[new_name] = saved.pop(old_name)
@@ -4606,8 +4606,8 @@ class VideoTranslatorGUI(QMainWindow):
             return
         reply = QMessageBox.question(
             self,
-            "Xóa preset",
-            f"Bạn có chắc muốn xóa preset '{preset_name}' không?",
+            t("Delete Preset"),
+            t("Are you sure you want to delete preset '{name}'?", name=preset_name),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
