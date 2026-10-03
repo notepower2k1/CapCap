@@ -604,6 +604,7 @@ class TestRuntimeBugfixes(unittest.TestCase):
         from PySide6.QtWidgets import QDialog
         from ui.views.resource_manager import open_resource_manager
         from services.resource_download_service import ResourceDownloadService
+        from ui.i18n import t
 
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = ResourceDownloadService(tmpdir)
@@ -647,12 +648,12 @@ class TestRuntimeBugfixes(unittest.TestCase):
             # Missing resource button has primaryBtn styling
             missing_btn = rows["whisper:turbo"]["download_btn"]
             self.assertEqual(missing_btn.objectName(), "primaryBtn")
-            self.assertEqual(missing_btn.text(), "Download Whisper")
+            self.assertIn(missing_btn.text(), ("Download Whisper", "Tải Whisper", t("Download Whisper")))
 
             # Installed resource button has Re-download text and no primaryBtn
             installed_btn = rows["voice:pack"]["download_btn"]
             self.assertEqual(installed_btn.objectName(), "")
-            self.assertEqual(installed_btn.text(), "Re-download")
+            self.assertIn(installed_btn.text(), ("Re-download", "Tải lại", t("Re-download")))
 
     def test_resource_download_service_progress_reporting_formats(self):
         from unittest.mock import patch, MagicMock

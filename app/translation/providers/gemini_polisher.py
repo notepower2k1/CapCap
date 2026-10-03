@@ -39,6 +39,7 @@ class OpenAICompatiblePolisherProvider:
         self, system_msg: str, user_msg: str, max_tokens: int, timeout: int
     ) -> dict:
         is_gemini = "generativelanguage.googleapis.com" in self.base_url or "gemini" in self.model_name.lower()
+        is_ollama = "localhost:11434" in self.base_url or "ollama" in self.provider_id.lower() or "ollama" in self.base_url.lower()
         is_reasoning_model = is_gemini or any(
             self.model_name.lower().startswith(p) for p in ("o1", "o3", "deepseek-r1")
         )
@@ -52,6 +53,17 @@ class OpenAICompatiblePolisherProvider:
             "max_tokens": max(2048 if is_gemini else 1024, int(max_tokens or 4096)),
             "timeout": timeout,
         }
+
+        if is_ollama:
+            try:
+                num_ctx = int(os.getenv("CAPCAP_OLLAMA_NUM_CTX") or "16384")
+            except (ValueError, TypeError):
+                num_ctx = 16384
+            kwargs["extra_body"] = {
+                "options": {
+                    "num_ctx": num_ctx,
+                }
+            }
 
         if is_gemini:
             # Gemini 2.5/3.x models:
@@ -108,6 +120,9 @@ class OpenAICompatiblePolisherProvider:
                 except Exception as api_err:
                     if "reasoning_effort" in kwargs and "reasoning_effort" in str(api_err):
                         kwargs.pop("reasoning_effort", None)
+                        response = client.chat.completions.create(**kwargs)
+                    elif "extra_body" in kwargs and any(term in str(api_err).lower() for term in ("extra_body", "options", "unexpected")):
+                        kwargs.pop("extra_body", None)
                         response = client.chat.completions.create(**kwargs)
                     else:
                         raise
@@ -179,6 +194,9 @@ class OpenAICompatiblePolisherProvider:
                 except Exception as api_err:
                     if "reasoning_effort" in kwargs and "reasoning_effort" in str(api_err):
                         kwargs.pop("reasoning_effort", None)
+                        response = client.chat.completions.create(**kwargs)
+                    elif "extra_body" in kwargs and any(term in str(api_err).lower() for term in ("extra_body", "options", "unexpected")):
+                        kwargs.pop("extra_body", None)
                         response = client.chat.completions.create(**kwargs)
                     else:
                         raise

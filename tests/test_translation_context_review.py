@@ -535,6 +535,120 @@ class TestTranslationCancellation(unittest.TestCase):
         mock_gui.show_error.assert_not_called()
 
 
+class TestOllamaBatchingAndContext(unittest.TestCase):
+    def test_ollama_completion_kwargs_includes_num_ctx(self):
+        from app.translation.providers.gemini_polisher import OpenAICompatiblePolisherProvider
+
+        polisher = OpenAICompatiblePolisherProvider(
+            provider_id="ollama",
+            display_name="Ollama",
+            env_prefix="OPENAI",
+            default_base_url="http://localhost:11434/v1",
+            default_model="gemma4:31b-cloud",
+        )
+        kwargs = polisher._build_completion_kwargs(
+            system_msg="system message",
+            user_msg="user message",
+            max_tokens=4096,
+            timeout=60,
+        )
+        self.assertIn("extra_body", kwargs)
+        self.assertEqual(kwargs["extra_body"], {"options": {"num_ctx": 16384}})
+
+    def test_ollama_completion_kwargs_custom_num_ctx(self):
+        from app.translation.providers.gemini_polisher import OpenAICompatiblePolisherProvider
+
+        polisher = OpenAICompatiblePolisherProvider(
+            provider_id="custom",
+            display_name="Custom Ollama",
+            env_prefix="OPENAI",
+            default_base_url="http://localhost:11434/v1",
+            default_model="custom-model",
+        )
+        with patch.dict(os.environ, {"CAPCAP_OLLAMA_NUM_CTX": "8192"}):
+            kwargs = polisher._build_completion_kwargs(
+                system_msg="sys",
+                user_msg="usr",
+                max_tokens=4096,
+                timeout=60,
+            )
+            self.assertIn("extra_body", kwargs)
+            self.assertEqual(kwargs["extra_body"], {"options": {"num_ctx": 8192}})
+
+    def test_ollama_extra_body_fallback_on_unsupported_endpoint(self):
+        from app.translation.providers.gemini_polisher import OpenAICompatiblePolisherProvider
+
+        polisher = OpenAICompatiblePolisherProvider(
+            provider_id="ollama",
+            display_name="Ollama",
+            env_prefix="OPENAI",
+            default_base_url="http://localhost:11434/v1",
+            default_model="gemma4:31b-cloud",
+        )
+        polisher.api_key = "test"
+        mock_client = MagicMock()
+        first_call = True
+
+        def fake_create(**kwargs):
+            nonlocal first_call
+            if first_call and "extra_body" in kwargs:
+                first_call = False
+                raise Exception("unexpected keyword extra_body or options")
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock(message=MagicMock(content="1. Line 1"))]
+            return mock_resp
+
+        mock_client.chat.completions.create.side_effect = fake_create
+        polisher._client = mock_client
+
+        lines, _, _ = polisher.polish_batch(
+            source_texts=["Line 1"],
+            src_lang="zh",
+            target_lang="vi",
+        )
+        self.assertEqual(lines, ["Line 1"])
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+
+    def test_ollama_build_ai_batches_caps_at_25_segments(self):
+        source_texts = [f"Segment {i}" for i in range(1, 61)]
+        batches, is_single_pass = TranslationOrchestrator._build_ai_batches(
+            source_texts=source_texts,
+            translated_texts=None,
+            source_speakers=None,
+            requested_max_segments=60,
+            provider_type="ollama",
+        )
+        self.assertFalse(is_single_pass)
+        self.assertGreater(len(batches), 1)
+        total_segments = 0
+        for current_source, _, _, _ in batches:
+            self.assertLessEqual(len(current_source), 25)
+            total_segments += len(current_source)
+        self.assertEqual(total_segments, 60)
+
+    def test_ollama_single_pass_threshold(self):
+        source_texts_30 = [f"Segment {i}" for i in range(1, 31)]
+        batches_30, is_single_pass_30 = TranslationOrchestrator._build_ai_batches(
+            source_texts=source_texts_30,
+            translated_texts=None,
+            source_speakers=None,
+            requested_max_segments=50,
+            provider_type="ollama",
+        )
+        self.assertTrue(is_single_pass_30)
+        self.assertEqual(len(batches_30), 1)
+
+        source_texts_31 = [f"Segment {i}" for i in range(1, 32)]
+        batches_31, is_single_pass_31 = TranslationOrchestrator._build_ai_batches(
+            source_texts=source_texts_31,
+            translated_texts=None,
+            source_speakers=None,
+            requested_max_segments=50,
+            provider_type="ollama",
+        )
+        self.assertFalse(is_single_pass_31)
+
+
 if __name__ == "__main__":
     unittest.main()
 

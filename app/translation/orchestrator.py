@@ -958,7 +958,7 @@ class TranslationOrchestrator:
             not force_ordered
             and input_tokens <= min(context_limit, 48000)
             and response_tokens <= min(output_limit, 6000)
-            and len(source_texts) <= 400
+            and len(source_texts) <= (30 if is_ollama else 400)
         )
 
         if safe_single_pass:
@@ -976,9 +976,16 @@ class TranslationOrchestrator:
         # For long videos exceeding single-pass limits (> 3600 response tokens or > 280 cues):
         # Chunk dynamically by character and token budget (~1800 response tokens per batch,
         # which translates to roughly 80-120 lines depending on language/character density).
-        max_batch_tokens = _env_int("CAPCAP_AI_TRANSLATION_BATCH_TOKENS", 1800)
-        max_chars = _env_int("CAPCAP_AI_TRANSLATION_MAX_CHARS", 12000)
-        max_chars = max(2000, max_chars // (2 if translated_texts is not None else 1))
+        default_batch_tokens = 700 if is_ollama else 1800
+        default_max_chars = 4000 if is_ollama else 12000
+        default_max_segments = 25 if is_ollama else (requested_max_segments or 0)
+
+        max_batch_tokens = _env_int("CAPCAP_AI_TRANSLATION_BATCH_TOKENS", default_batch_tokens)
+        max_chars = _env_int("CAPCAP_AI_TRANSLATION_MAX_CHARS", default_max_chars)
+        max_chars = max(1500, max_chars // (2 if translated_texts is not None else 1))
+        max_segments = _env_int("CAPCAP_AI_TRANSLATION_MAX_SEGMENTS", default_max_segments)
+        if is_ollama:
+            max_segments = _env_int("CAPCAP_OLLAMA_MAX_SEGMENTS", min(25, max_segments) if max_segments > 0 else 25)
 
         batches: list[tuple[list[str], list[str] | None, int, list[str] | None]] = []
         current_source: list[str] = []
@@ -992,7 +999,8 @@ class TranslationOrchestrator:
             item_chars = len(source) + len(draft) + 16
             item_response_tokens = math.ceil(max(_estimate_tokens(source), _estimate_tokens(draft)) * 1.8) + 10
             if current_source and (
-                current_chars + item_chars > max_chars
+                (max_segments > 0 and len(current_source) >= max_segments)
+                or current_chars + item_chars > max_chars
                 or current_response_tokens + item_response_tokens > max_batch_tokens
             ):
                 batches.append((
