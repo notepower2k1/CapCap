@@ -20,18 +20,19 @@ CapCap/
 │   │   ├── orchestrator.py    # Pipeline orchestration, batching, provider routing
 │   │   ├── prompts.py         # Genre-specific translation presets
 │   │   ├── srt_utils.py       # SRT parsing, timing, and formatting utilities
-│   │   └── providers/         # Google AI Studio, OpenAI, Ollama, Google Translate
+│   │   └── providers/         # Google AI Studio, OpenAI, Ollama, Google Translate, Bing Web
 │   ├── engines/               # Whisper, OCR, TTS, FFmpeg adapters
-│   ├── services/              # Project, resource, ASR, diarization services
+│   ├── services/              # Project, resource, ASR, diarization services (model_utils.py)
 │   ├── layers/                # Timeline track and layer domain models
 │   ├── vieneu_tts.py          # VieNeu TTS and voice cloning integration
 │   ├── ocr_processor.py       # OCR subtitle extraction
 │   ├── whisper_processor.py   # Faster-Whisper integration
 │   └── sensevoice_processor.py
-├── tests/                     # Comprehensive automated test suite (160+ unit tests)
+├── tests/                     # Comprehensive automated test suite (250+ unit tests)
 │   ├── test_translation_context_review.py # Tests for pronoun review & feedback
 │   └── ...
 ├── bin/                       # FFmpeg, MPV, on-demand CUDA runtime
+├── installer/                 # Inno Setup script (CapCap_Setup.iss) and vc_redist.x64.exe
 ├── models/                    # Downloaded ASR, Piper, and diarization models
 ├── assets/                    # Icons, fonts, voice samples, and image assets
 │   ├── voices/                # Reference voice samples for cloning and preview

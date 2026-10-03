@@ -20,7 +20,7 @@ CapCap hỗ trợ tạo **phụ đề tiếng Việt và tiếng Anh**, dịch n
   * **Hộp thoại kiểm tra & can thiệp xưng hô:** Cho phép người dùng xem lại, sửa tay trực tiếp hoặc **nhập góp ý bằng lời** (ví dụ: *"Đảo lại vai 2 nhân vật A và B"*, *"Xưng mày - tao với kẻ xấu"*) để AI tự động phân tích lại theo chỉ dẫn.
   * **Sổ nhớ ngữ cảnh cuộn (Rolling Context Ledger):** Lưu vết các quy tắc xưng hô đã chốt và ngữ cảnh câu thoại liền trước, đảm bảo 100% nhất quán xuyên suốt các video dài nhiều tập.
   * **Preset dịch thuật theo thể loại:** Tích hợp sẵn prompt cho Phim ngắn/Douyin, Ngôn tình, Cổ trang/Võ hiệp/Tiên hiệp, Anime/Manga, K-Drama, Vlog/TikTok, Tài liệu...
-  * **Hỗ trợ đa dạng nhà cung cấp AI:** **Google AI Studio (Gemini 2.5/1.5)**, **OpenAI (GPT-4o)**, **DeepSeek**, **Ollama (chạy offline local)**, cùng **Google Translate** làm phương án dự phòng.
+  * **Hỗ trợ đa dạng nhà cung cấp AI & Dịch thuật web:** **Google AI Studio (Gemini 2.5/1.5)**, **OpenAI (GPT-4o)**, **DeepSeek**, **Ollama (chạy offline local)**, cùng **Google Translate** và **Bing Translate** (dịch web miễn phí không cần API key, tự động chuyển đổi dự phòng sang Bing khi Google Translate bị giới hạn lượt gọi / rate limit).
 * **Tạo giọng đọc (TTS) & Nhân bản giọng nói (Voice Cloning):**
   * Hỗ trợ **Piper TTS** (offline), **Edge TTS**, **CapCut TTS** và **VieNeu TTS** (hỗ trợ nhân bản giọng đọc tùy chọn).
   * Nhận diện người nói (**Speaker Diarization**) và gán giọng đọc riêng cho từng nhân vật.
@@ -35,6 +35,7 @@ CapCap hỗ trợ tạo **phụ đề tiếng Việt và tiếng Anh**, dịch n
 * **Xuất video thông minh & Tối ưu hóa GPU NVENC:**
   * Tùy chọn 4 profile chất lượng (**Low, Medium, High, Very High**), tự động tận dụng mã hóa phần cứng **NVIDIA NVENC** và tự động fallback sang CPU `libx264` khi không có card rời.
   * Xuất trực tiếp sang định dạng **CapCut Draft** để tiếp tục dựng phim chuyên sâu.
+* **Trình quản lý tài nguyên thông minh (Resource Manager):** Tải model và gói phụ trợ chỉ với 1 click (Whisper Turbo/Large-v3, SenseVoice, thư viện giọng đọc, gói CUDA tăng tốc) với thanh tiến độ % và dung lượng MB hiển thị trực quan theo thời gian thực.
 * **Tối ưu hóa nạp video & quản lý bộ đệm:** Nạp cache waveform và video thumbnails ở chế độ nền mượt mà với thẻ trạng thái trực quan, không làm đơ ứng dụng.
 
 ## 🚀 Tính năng sắp tới
@@ -66,6 +67,13 @@ python ui/gui.py
 Bạn chỉ cần sao chép `.env_example` thành `.env` nếu muốn cấu hình thủ công các dịch vụ dịch thuật hoặc máy chủ từ xa.
 
 Phần lớn thiết lập của CapCap có thể được cấu hình trực tiếp ngay trong ứng dụng.
+
+### 💡 Khắc phục sự cố trình phát xem trước video (MPV)
+
+CapCap mặc định sử dụng **libmpv** để xem trước video mượt mà và chuẩn xác từng khung hình:
+* **Yêu cầu Visual C++:** `libmpv-2.dll` yêu cầu **Microsoft Visual C++ 2015–2022 Redistributable (x64)** (phiên bản >= 14.20).
+* **Nếu MPV không khởi động được** (báo lỗi hoặc tự động chuyển về Qt player): Bạn chỉ cần chạy file cài đặt có sẵn tại `installer\vc_redist.x64.exe` (hoặc tải từ trang chủ Microsoft).
+* **Cập nhật / Sử dụng thư viện MPV ngoài:** Nếu muốn nâng cấp hoặc dùng thư viện MPV tùy chỉnh, hãy đặt file `libmpv-2.dll` (bản 64-bit) vào thư mục `bin/mpv/`.
 
 ## ❤️ Ủng hộ CapCap
 

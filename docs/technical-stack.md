@@ -9,7 +9,7 @@
 | OCR | RapidOCR PP-OCRv4 with OpenCV and ONNX Runtime |
 | Speaker diarization | Sherpa-ONNX |
 | VAD | Silero VAD via Sherpa-ONNX |
-| Translation | Google Translate, OpenAI, Google AI Studio, and Ollama |
+| Translation | Google Translate, Bing Translate, OpenAI, Google AI Studio, and Ollama |
 | TTS | Piper, Edge TTS, CapCut TTS, and VieNeu TTS (Voice Cloning) |
 | Video/audio processing | FFmpeg (NVENC GPU accelerated with CPU libx264 failover), pydub, NumPy, SciPy, librosa, soundfile |
 | External integrations | CapCut Draft project generator |
@@ -21,9 +21,9 @@
   - Employs a multi-pass pipeline: Pass 1 analyzes the dialogue cues to build a Character Profile and strict Two-Way Address Rules (`learn_dialogue_context`), supporting interactive user feedback and draft re-analysis.
   - Automatically cleans LaTeX mathematical notation (converting `$\leftrightarrow$`, `$\rightarrow$` to Unicode arrows `↔`, `→`).
   - Employs `RollingContextLedger` across sequential subtitle batches to ensure pronoun continuity and maintain preceding dialogue context without batch-boundary drift.
-  - Supports Google AI Studio (Gemini 2.5/1.5), OpenAI (GPT-4o), DeepSeek, Ollama (local offline models), and Google Translate fallback.
+  - Supports Google AI Studio (Gemini 2.5/1.5), OpenAI (GPT-4o), DeepSeek, Ollama (local offline models), and free web providers (Google Translate, Bing Translate). If Google Translate encounters an HTTP 429 rate limit, CapCap automatically falls back to Bing Translate.
 - **Media Preview Architecture**:
-  - Primary preview engine uses `libmpv` for high-framerate, hardware-accelerated playback and frame-accurate timeline seeking.
+  - Primary preview engine uses `libmpv` for high-framerate, hardware-accelerated playback and frame-accurate timeline seeking. Requires Microsoft Visual C++ Redistributable (x64) >= 14.20 for `libmpv-2.dll` (`installer\vc_redist.x64.exe`).
   - Seamless fallback to Qt Multimedia on systems lacking MPV libraries.
   - Fast Preview generates an on-the-fly 5-second multitrack composition (video, BGM, TTS audio, subtitles, blur regions, overlays).
 - **GPU Acceleration & CPU Fallback**:

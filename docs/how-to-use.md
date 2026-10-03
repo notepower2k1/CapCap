@@ -23,6 +23,7 @@ CapCap includes an advanced AI dialogue analysis and pronoun consistency framewo
      - *Korean → Vietnamese*: K-Drama / Modern / Romance, Hunter / Dungeon / Manhwa.
      - *English → Vietnamese*: Vlog / Social Media / TikTok, Movies / Casual Dialogue, Documentary / Tech / Business.
    - Choose your AI provider: **Google AI Studio (Gemini 2.5 Flash / Pro)**, **OpenAI (GPT-4o / GPT-4o-mini)**, **DeepSeek**, or local offline models via **Ollama**.
+   - **Fast Web Translation**: Use **Google Translate** or **Bing Translate** for quick, keyless translations. If Google Translate encounters rate limiting (HTTP 429), CapCap automatically falls back to Bing Translate to keep batch translation running smoothly.
 
 2. **Auto-Detect Dialogue Context & Pronouns**:
    - When enabled, CapCap performs an initial dialogue analysis pass over the transcript cues.
@@ -50,6 +51,7 @@ CapCap includes an advanced AI dialogue analysis and pronoun consistency framewo
 ## Media Preview (MPV Backend) & Frame Inspector
 
 - **Native MPV Playback**: Smooth, hardware-accelerated playback of video and audio powered by `libmpv` (with seamless Qt Multimedia fallback).
+  - *Troubleshooting*: If the MPV player fails to start (e.g. error 126 or missing DLLs), install Microsoft Visual C++ Redistributable x64 via `installer\vc_redist.x64.exe`.
 - **Timeline Synchronization**: Dragging or scrubbing the Timeline playhead seeks the MPV player instantly.
 - **Exact Frame Preview & Large Frame Preview**: Inspect the current frame with pixel precision to review visual overlays, hardcoded subtitle positions, and blur masks.
 - **Fast Preview**: Quickly render a 5-second sample of the current timeline section to check subtitle formatting, audio mix, and visual layers before performing a full export.
@@ -60,6 +62,12 @@ CapCap includes an advanced AI dialogue analysis and pronoun consistency framewo
 - Use **+ Layer → Subtitle Segment** to add a missing subtitle at the playhead.
 - Use the timeline **Selection Range** and **Alt: OCR/Whisper** to re-transcribe only a problematic section with the opposite recognition engine.
 - Alt Transcribe only changes transcription for the selected range; it does not run Translate, TTS, or Export.
+
+## Subtitle Styling and Presets
+
+- Configure subtitle font typography, size, primary/border/shadow styling, and positioning in the Subtitle Styling panel.
+- **My Presets**: Manage custom subtitle styles through the **My Presets** dropdown. Click **+ Save This Style** to save the current configuration, and use the **Rename** and **Delete** buttons to update or remove presets.
+- **Keyword Highlight**: Emphasize important keywords dynamically (Auto, Manual, or Auto + Manual) with configurable accent colors.
 
 ## Timeline editing
 

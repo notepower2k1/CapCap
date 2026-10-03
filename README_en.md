@@ -20,7 +20,7 @@ It supports creating **Vietnamese and English subtitles**, translating video con
   * **Interactive Character & Pronoun Review Dialog:** Allows reviewing and editing character rules before translating, or providing **natural-language feedback** (e.g. *"Swap character A and B roles"*, *"Use formal pronouns"*) for AI to re-analyze accurately.
   * **Rolling Context Ledger:** Maintains confirmed character address rules and preceding dialogue boundary cues across sequential batches for 100% address continuity in long videos.
   * **Genre-Specific Translation Presets:** Built-in optimized prompts for Short Dramas/Douyin, Romance, Wuxia/Xianxia, Anime/Manga, K-Drama, Vlogs/TikTok, Documentaries, etc.
-  * **Multi-Provider AI Support:** **Google AI Studio (Gemini 2.5/1.5)**, **OpenAI (GPT-4o)**, **DeepSeek**, **Ollama (local offline models)**, with **Google Translate** as a fallback.
+  * **Multi-Provider AI & Web Translation Support:** **Google AI Studio (Gemini 2.5/1.5)**, **OpenAI (GPT-4o)**, **DeepSeek**, **Ollama (local offline models)**, alongside **Google Translate** and **Bing Translate** (free web translation engines without API keys, with automatic fallback to Bing when Google Translate hits rate limits).
 * **Versatile TTS & Voice Cloning:**
   * Supports **Piper TTS** (offline), **Edge TTS**, **CapCut TTS**, and **VieNeu TTS** (voice cloning).
   * Optional **Speaker Diarization** to detect unique speakers and assign distinct voices per character.
@@ -35,6 +35,7 @@ It supports creating **Vietnamese and English subtitles**, translating video con
 * **Intelligent NVENC Hardware Encoding & Quality Profiles:**
   * 4 export profiles (**Low, Medium, High, Very High**) leveraging **NVIDIA NVENC** GPU acceleration with seamless automatic fallback to CPU `libx264`.
   * Direct export to **CapCut Draft** projects for advanced post-production.
+* **Smart Resource Manager:** Convenient 1-click downloads for models and dependencies (Whisper Turbo/Large-v3, SenseVoice, TTS voices, CUDA acceleration pack) with real-time download progress tracking in MB and percentage.
 * **Optimized Project Loading & Visual Caching:** Asynchronous timeline waveform and thumbnail extraction with interactive loading cards, ensuring a fast and freeze-free experience.
 
 ## 🚀 Upcoming Features
@@ -66,6 +67,13 @@ python ui/gui.py
 You only need to copy `.env_example` to `.env` if you want to manually configure translation providers or remote servers.
 
 Most CapCap settings can be configured directly from within the application.
+
+### 💡 MPV Video Preview Troubleshooting & Setup
+
+CapCap uses **libmpv** by default for smooth, frame-accurate video playback and preview:
+* **Visual C++ Requirement:** `libmpv-2.dll` requires **Microsoft Visual C++ 2015–2022 Redistributable (x64)** (version >= 14.20).
+* **If MPV fails to load** (shows an error or falls back to Qt player): Simply run the bundled installer at `installer\vc_redist.x64.exe` (or download it from Microsoft).
+* **Updating / Using External MPV Library:** If you need to update or provide a custom 64-bit MPV library, place `libmpv-2.dll` into the `bin/mpv/` directory.
 
 ## ❤️ Support CapCap
 
