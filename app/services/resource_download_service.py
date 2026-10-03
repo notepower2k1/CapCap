@@ -80,7 +80,11 @@ class ResourceDownloadService:
         self.workspace_root = workspace_root
         self.repo_id = self.HF_RESOURCE_REPO
         self.revision = self.HF_RESOURCE_REVISION
-        os.environ.setdefault("HF_ENDPOINT", os.getenv("CAPCAP_HF_ENDPOINT", self.HF_MIRROR_ENDPOINT))
+        # Only set HF_ENDPOINT if explicitly configured by the user/environment;
+        # do NOT default HF_ENDPOINT to hf-mirror.com because huggingface_hub
+        # snapshot_download requires X-Repo-Commit headers that hf-mirror strips.
+        if os.getenv("CAPCAP_HF_ENDPOINT"):
+            os.environ["HF_ENDPOINT"] = os.getenv("CAPCAP_HF_ENDPOINT")
 
     def _catalog_path(self) -> str:
         download_catalog = app_path("voice_download_catalog.json")
@@ -707,7 +711,9 @@ class ResourceDownloadService:
         return (len(missing) == 0, missing)
 
     def _hf_endpoint(self) -> str:
-        endpoint = os.getenv("HF_ENDPOINT", self.HF_MIRROR_ENDPOINT).strip().rstrip("/")
+        endpoint = os.getenv("CAPCAP_HF_ENDPOINT", "").strip().rstrip("/")
+        if not endpoint:
+            endpoint = os.getenv("HF_ENDPOINT", "").strip().rstrip("/")
         return endpoint or self.HF_MIRROR_ENDPOINT
 
     def _hf_blob_url(self, filename: str) -> str:
@@ -1326,7 +1332,19 @@ class ResourceDownloadService:
                 if progress_cb:
                     progress_cb(10, f"Downloading Whisper {model_name} from Hugging Face...")
                 from faster_whisper import download_model
-                download_model(model_name, cache_dir=self._whisper_cache_root())
+                os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+                old_endpoint = os.environ.pop("HF_ENDPOINT", None)
+                try:
+                    try:
+                        download_model(model_name, cache_dir=self._whisper_cache_root())
+                    except Exception as primary_err:
+                        if model_name == "turbo":
+                            download_model("mobiuslabsgmbh/faster-whisper-large-v3-turbo", cache_dir=self._whisper_cache_root())
+                        else:
+                            raise primary_err
+                finally:
+                    if old_endpoint is not None:
+                        os.environ["HF_ENDPOINT"] = old_endpoint
             else:
                 raise ValueError(f"Unsupported Whisper model: {model_name}")
             if not self.is_resource_installed(resource_id):

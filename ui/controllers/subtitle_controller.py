@@ -674,11 +674,12 @@ class SubtitleController:
         action_text = t(action)
         dialog = QProgressDialog(
             f"{action_text} {t('subtitles with')} {provider}...\n{t('Elapsed')}: 00:00",
-            None,
+            t("Cancel"),
             0,
             100,
             self.gui,
         )
+        dialog.canceled.connect(self._on_translation_canceled)
         if hasattr(self.gui, "light_window_icon") and self.gui.light_window_icon and not self.gui.light_window_icon.isNull():
             dialog.setWindowIcon(self.gui.light_window_icon)
             dialog._has_contrasting_popup_icon = True
@@ -724,6 +725,12 @@ class SubtitleController:
         self.gui._translation_progress_dialog = dialog
         self.gui._translation_progress_timer = timer
         dialog.show()
+
+    def _on_translation_canceled(self):
+        worker = getattr(self.gui, "translation_thread", None)
+        if worker is not None:
+            worker.cancel()
+            self.gui.log("[Translation] Canceling translation request...")
 
     def _close_translation_progress(self):
         timer = getattr(self.gui, "_translation_progress_timer", None)
@@ -1216,6 +1223,14 @@ class SubtitleController:
         self._close_translation_progress()
         self.gui.translate_btn.setEnabled(True)
         if error or not translated_srt:
+            if error == "canceled":
+                self.gui.log("[Translation] Translation canceled by user.")
+                self.gui.update_project_step("translate_raw", "pending")
+                placeholder = t("Translating with the selected provider... please wait.")
+                if self.gui.translated_text.toPlainText().strip() == placeholder:
+                    self.gui.translated_text.clear()
+                self.gui.refresh_ui_state()
+                return
             self.gui.update_project_step("translate_raw", "failed")
             self.gui.show_error(
                 t("Translation Failed"),

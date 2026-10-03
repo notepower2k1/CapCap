@@ -377,6 +377,92 @@ class TestRuntimeBugfixes(unittest.TestCase):
         label = VideoTranslatorGUI._completed_translation_provider_label(mock_gui)
         self.assertEqual(label, "Bing Translator")
 
+    def test_hf_endpoint_configuration_and_mirror_fallback(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Case 1: Neither CAPCAP_HF_ENDPOINT nor HF_ENDPOINT set
+            with patch.dict(os.environ, {}, clear=True):
+                svc = ResourceDownloadService(tmpdir)
+                self.assertNotIn("HF_ENDPOINT", os.environ)
+                self.assertEqual(svc._hf_endpoint(), svc.HF_MIRROR_ENDPOINT)
+
+            # Case 2: Only HF_ENDPOINT set
+            with patch.dict(os.environ, {"HF_ENDPOINT": "https://custom-hf.com"}, clear=True):
+                svc = ResourceDownloadService(tmpdir)
+                self.assertEqual(svc._hf_endpoint(), "https://custom-hf.com")
+
+            # Case 3: Only CAPCAP_HF_ENDPOINT set
+            with patch.dict(os.environ, {"CAPCAP_HF_ENDPOINT": "https://mirror.capcap.com"}, clear=True):
+                svc = ResourceDownloadService(tmpdir)
+                self.assertEqual(os.environ.get("HF_ENDPOINT"), "https://mirror.capcap.com")
+                self.assertEqual(svc._hf_endpoint(), "https://mirror.capcap.com")
+
+    def test_whisper_turbo_download_unsets_mirror_and_falls_back(self):
+        from unittest.mock import patch, MagicMock
+        with tempfile.TemporaryDirectory() as tmpdir:
+            svc = ResourceDownloadService(tmpdir)
+
+            called_models = []
+            seen_hf_endpoint = []
+
+            def fake_download_model(model_name, cache_dir=None):
+                called_models.append(model_name)
+                seen_hf_endpoint.append(os.environ.get("HF_ENDPOINT"))
+                if model_name == "turbo":
+                    raise RuntimeError("Failed to resolve turbo")
+                return cache_dir
+
+            with patch.dict(os.environ, {"HF_ENDPOINT": "https://hf-mirror.com"}):
+                with patch("faster_whisper.download_model", side_effect=fake_download_model), \
+                     patch.object(svc, "is_resource_installed", return_value=True):
+                    svc.download_resource("whisper:turbo")
+
+                # Verify HF_ENDPOINT was unset during download_model calls
+                self.assertEqual(seen_hf_endpoint, [None, None])
+                # Verify fallback to full mobiuslabsgmbh repo id
+                self.assertEqual(
+                    called_models,
+                    ["turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo"],
+                )
+                # Verify HF_ENDPOINT was restored afterwards
+                self.assertEqual(os.environ.get("HF_ENDPOINT"), "https://hf-mirror.com")
+                # Verify symlinks warning was suppressed
+                self.assertEqual(os.environ.get("HF_HUB_DISABLE_SYMLINKS_WARNING"), "1")
+
+    def test_loading_overlay_suppresses_logo_and_text_layers(self):
+        from unittest.mock import MagicMock
+        from main_window import VideoTranslatorGUI
+        from widgets.mpv_video_view import _LogoRegionOverlayWindow
+
+        # 1. Test _LogoRegionOverlayWindow.sync_to_view hiding when loading in progress
+        mock_win = MagicMock()
+        mock_win._project_loading_in_progress = True
+        mock_target = MagicMock()
+        mock_target.window.return_value = mock_win
+        overlay = _LogoRegionOverlayWindow.__new__(_LogoRegionOverlayWindow)
+        overlay._target_view = mock_target
+        overlay.hide = MagicMock()
+        overlay.sync_to_view()
+        overlay.hide.assert_called_once()
+
+        # 2. Test VideoTranslatorGUI.show_loading_overlay hides subtitle, logo, and text overlays
+        mock_gui = MagicMock()
+        mock_gui.video_view = MagicMock()
+        mock_gui._loading_overlay = MagicMock()
+        VideoTranslatorGUI.show_loading_overlay(mock_gui, video_path="test.mp4")
+        self.assertTrue(mock_gui._project_loading_in_progress)
+        mock_gui.video_view.subtitle_item.hide.assert_called_once()
+        mock_gui.video_view.logo_overlay.hide.assert_called_once()
+        mock_gui.video_view.text_overlay.hide.assert_called_once()
+
+        # 3. Test _show_logo_overlay returns early when loading in progress
+        mock_gui._project_loading_in_progress = True
+        mock_gui.video_view.clear_logo = MagicMock()
+        VideoTranslatorGUI._show_logo_overlay(mock_gui, track=MagicMock(), layer=MagicMock())
+        # Should not touch video_view or layer since it returned early
+        mock_gui.video_view.clear_logo.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
+

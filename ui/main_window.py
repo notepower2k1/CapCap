@@ -892,12 +892,23 @@ class VideoTranslatorGUI(QMainWindow):
 
     def show_loading_overlay(self, video_path: str = "", timeout_ms: int = 4000):
         self._project_loading_in_progress = True
-        if hasattr(self, "video_view") and hasattr(self.video_view, "subtitle_item"):
-            try:
-                self.video_view.subtitle_item.set_text("")
-                self.video_view.subtitle_item.hide()
-            except Exception:
-                pass
+        if hasattr(self, "video_view"):
+            if hasattr(self.video_view, "subtitle_item"):
+                try:
+                    self.video_view.subtitle_item.set_text("")
+                    self.video_view.subtitle_item.hide()
+                except Exception:
+                    pass
+            if hasattr(self.video_view, "logo_overlay") and self.video_view.logo_overlay is not None:
+                try:
+                    self.video_view.logo_overlay.hide()
+                except Exception:
+                    pass
+            if hasattr(self.video_view, "text_overlay") and self.video_view.text_overlay is not None:
+                try:
+                    self.video_view.text_overlay.hide()
+                except Exception:
+                    pass
         overlay = getattr(self, "_loading_overlay", None)
         if overlay is not None:
             target = video_path or getattr(self, "_current_video_path", "")
@@ -7560,6 +7571,8 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _show_logo_overlay(self, track, layer, *, editable=True):
         """Show the draggable logo overlay for the selected logo layer."""
+        if getattr(self, "_project_loading_in_progress", False):
+            return
         if not hasattr(self, "video_view"):
             return
         # This method is also called by selection/project-restoration paths,
@@ -17668,6 +17681,10 @@ class VideoTranslatorGUI(QMainWindow):
                         self.sync_live_subtitle_preview()
                     if hasattr(self, "media_player") and not self.media_player.is_playing():
                         self._show_subtitle_drag_layer()
+                    if hasattr(self, "video_view"):
+                        overlay = getattr(self.video_view, "logo_overlay", None)
+                        if overlay is not None and getattr(overlay, "_regions", None) and getattr(self.video_view, "_logo_track_visible", True):
+                            overlay.sync_to_view()
                 QTimer.singleShot(150, _on_overlay_dismissed)
 
         QTimer.singleShot(50, _deferred_load_media)

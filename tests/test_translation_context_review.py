@@ -386,7 +386,86 @@ class TestRollingBatchesMultiBatch(unittest.TestCase):
         mock_sleep.assert_called_once_with(0.25)
 
 
+class TestTranslationCancellation(unittest.TestCase):
+    def test_orchestrator_immediate_cancel(self):
+        orchestrator = TranslationOrchestrator()
+        result = orchestrator.translate_segments(
+            segments=[{"start": "00:00:01,000", "end": "00:00:02,000", "text": "你好"}],
+            is_canceled=lambda: True,
+        )
+        self.assertFalse(result.success)
+        self.assertEqual(result.errors, ["canceled"])
+
+    def test_orchestrator_cancel_during_sequential_batches(self):
+        orchestrator = TranslationOrchestrator()
+        mock_polisher = MagicMock()
+        batches = [(["Line 1"], None, 100, None), (["Line 2"], None, 100, None)]
+        with self.assertRaises(InterruptedError):
+            orchestrator._run_ai_batches_sequential(
+                polisher=mock_polisher,
+                batches=batches,
+                src_lang="zh-Hans",
+                target_lang="vi",
+                style_instruction="",
+                is_canceled=lambda: True,
+            )
+
+    def test_orchestrator_cancel_during_google_translate(self):
+        orchestrator = TranslationOrchestrator()
+        with self.assertRaises(InterruptedError):
+            orchestrator._run_google_translate(
+                segments=[{"start": 1, "end": 2, "text": "test"}],
+                source_texts=["test"],
+                normalized_src="zh-Hans",
+                target_lang="vi",
+                ms_batch_size=50,
+                batch_callback=None,
+                warnings=[],
+                is_canceled=lambda: True,
+            )
+
+    def test_translation_worker_cancel(self):
+        from ui.worker_adapters.processing_workers import TranslationWorker
+        worker = TranslationWorker(
+            srt_text="1\n00:00:01,000 --> 00:00:02,000\nHello\n",
+            model_path="",
+            src_lang="en",
+            target_lang="vi",
+            enable_polish=False,
+            provider="google",
+        )
+        worker.cancel()
+        self.assertTrue(worker._is_canceled)
+
+        finished_signal = []
+        worker.finished.connect(lambda srt, err, notice: finished_signal.append((srt, err, notice)))
+        worker.run()
+        self.assertEqual(len(finished_signal), 1)
+        self.assertEqual(finished_signal[0], ("", "canceled", ""))
+
+    def test_subtitle_controller_on_translation_canceled(self):
+        mock_gui = MagicMock()
+        mock_worker = MagicMock()
+        mock_gui.translation_thread = mock_worker
+        controller = SubtitleController(mock_gui)
+
+        controller._on_translation_canceled()
+        mock_worker.cancel.assert_called_once()
+        mock_gui.log.assert_called_with("[Translation] Canceling translation request...")
+
+    def test_subtitle_controller_on_finished_canceled(self):
+        mock_gui = MagicMock()
+        mock_gui.translated_text.toPlainText.return_value = "Translating with the selected provider... please wait."
+        controller = SubtitleController(mock_gui)
+
+        controller.on_translation_finished("", "canceled", "")
+        mock_gui.update_project_step.assert_called_with("translate_raw", "pending")
+        mock_gui.refresh_ui_state.assert_called_once()
+        mock_gui.show_error.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

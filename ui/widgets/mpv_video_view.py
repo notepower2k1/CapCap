@@ -939,6 +939,10 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
 
     def sync_to_view(self):
         """Keep the logo image positioned even when edit handles are hidden."""
+        win = self._target_view.window() if self._target_view else None
+        if getattr(win, "_project_loading_in_progress", False):
+            self.hide()
+            return
         if (not self._logical_visible or self._suspended or not self._target_view
                 or not self._target_view.isVisible() or not self._regions):
             self.hide()
@@ -1573,19 +1577,21 @@ class MpvVideoView(QWidget):
         # Optional overlays may be restored before the native video surface
         # receives its final geometry. Reconnect their visible content now;
         # selection continues to control only edit chrome.
-        if self.text_overlay is not None and self.text_overlay._items and not self.text_overlay._suppressed:
-            self.text_overlay.sync_to_view()
-            self.text_overlay.show()
-            self.text_overlay.raise_()
-        if (self._logo_track_visible
-                and getattr(self, "logo_overlay", None) is not None
-                and getattr(self.logo_overlay, "_regions", None)):
-            self.logo_overlay.sync_to_view()
-            self.logo_overlay.show()
-            self.logo_overlay.raise_()
         win = self.window()
-        if not getattr(win, "_project_loading_in_progress", False) and self._subtitle_track_visible and self.subtitle_item.current_text:
-            self.subtitle_item.show()
+        is_loading = getattr(win, "_project_loading_in_progress", False)
+        if not is_loading:
+            if self.text_overlay is not None and self.text_overlay._items and not self.text_overlay._suppressed:
+                self.text_overlay.sync_to_view()
+                self.text_overlay.show()
+                self.text_overlay.raise_()
+            if (self._logo_track_visible
+                    and getattr(self, "logo_overlay", None) is not None
+                    and getattr(self.logo_overlay, "_regions", None)):
+                self.logo_overlay.sync_to_view()
+                self.logo_overlay.show()
+                self.logo_overlay.raise_()
+            if self._subtitle_track_visible and self.subtitle_item.current_text:
+                self.subtitle_item.show()
         self.blur_overlay.sync_to_view()
         self.mask_overlay.sync_to_view()
 

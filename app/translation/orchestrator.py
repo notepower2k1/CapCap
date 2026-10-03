@@ -52,179 +52,204 @@ class TranslationOrchestrator:
         override_provider: str = "",
         batch_callback=None,
         status_callback=None,
+        is_canceled=None,
     ) -> TranslationResult:
         if not segments:
             return TranslationResult(success=False, errors=["No segments to translate."], stage="input")
 
-        source_texts = [str(s.get("text") or s.get("original_text") or "").strip() for s in segments]
-        source_speakers = [
-            str(s.get("metadata", {}).get("speaker") or s.get("speaker") or "").strip()
-            for s in segments
-        ]
-        # Inspect if lines start with [SPEAKER_XX]:
-        for idx, s in enumerate(segments):
-            if not source_speakers[idx]:
-                txt = str(s.get("text") or "")
-                m = re.match(r"^\[(SPEAKER_\w+|Speaker \w+)\]\s*:?\s*(.*)$", txt, re.IGNORECASE)
-                if m:
-                    source_speakers[idx] = m.group(1).strip()
-        has_speakers = any(bool(spk) for spk in source_speakers)
-        unique_speakers = sorted(set(spk for spk in source_speakers if spk))
-        labeled_count = sum(1 for spk in source_speakers if spk)
-        normalized_src = self._normalize_source_language(src_lang)
-        warnings = []
-        optimize_subtitles = False
+        if is_canceled and is_canceled():
+            return TranslationResult(success=False, errors=["canceled"], stage="translate")
 
-        if override_provider == "google":
-            enable_polish = False
-            ms_batch_size = polish_batch_size or ms_batch_size
+        try:
+            source_texts = [str(s.get("text") or s.get("original_text") or "").strip() for s in segments]
+            source_speakers = [
+                str(s.get("metadata", {}).get("speaker") or s.get("speaker") or "").strip()
+                for s in segments
+            ]
+            # Inspect if lines start with [SPEAKER_XX]:
+            for idx, s in enumerate(segments):
+                if not source_speakers[idx]:
+                    txt = str(s.get("text") or "")
+                    m = re.match(r"^\[(SPEAKER_\w+|Speaker \w+)\]\s*:?\s*(.*)$", txt, re.IGNORECASE)
+                    if m:
+                        source_speakers[idx] = m.group(1).strip()
+            has_speakers = any(bool(spk) for spk in source_speakers)
+            unique_speakers = sorted(set(spk for spk in source_speakers if spk))
+            labeled_count = sum(1 for spk in source_speakers if spk)
+            normalized_src = self._normalize_source_language(src_lang)
+            warnings = []
+            optimize_subtitles = False
 
-        if enable_polish:
-            provider_type, polisher = self._resolve_ai_provider(override_provider=override_provider)
-            if polisher.is_configured():
-                if status_callback:
+            if override_provider == "google":
+                enable_polish = False
+                ms_batch_size = polish_batch_size or ms_batch_size
+
+            if enable_polish:
+                provider_type, polisher = self._resolve_ai_provider(override_provider=override_provider)
+                if polisher.is_configured():
+                    if status_callback:
+                        try:
+                            status_callback(self._describe_ai_provider(provider_type), "")
+                        except Exception:
+                            pass
                     try:
-                        status_callback(self._describe_ai_provider(provider_type), "")
-                    except Exception:
-                        pass
-                try:
-                    mode_label = self._describe_ai_provider(provider_type)
-                    merged_style = str(style_instruction or "")
-                    active_preset = os.getenv("CAPCAP_TRANSLATION_PRESET_ID") or "general_default"
+                        mode_label = self._describe_ai_provider(provider_type)
+                        merged_style = str(style_instruction or "")
+                        active_preset = os.getenv("CAPCAP_TRANSLATION_PRESET_ID") or "general_default"
 
-                    preset_info = active_preset
-                    p_name = ""
-                    try:
-                        from .prompt_loader import load_translation_presets
-                        for p in load_translation_presets():
-                            if p.get("id") == active_preset:
-                                p_name = str(p.get("name", active_preset)).replace("→", "->")
-                                break
-                    except Exception:
-                        pass
+                        preset_info = active_preset
+                        p_name = ""
+                        try:
+                            from .prompt_loader import load_translation_presets
+                            for p in load_translation_presets():
+                                if p.get("id") == active_preset:
+                                    p_name = str(p.get("name", active_preset)).replace("→", "->")
+                                    break
+                        except Exception:
+                            pass
 
-                    if not custom_system_prompt:
-                        preset_info = f"'{active_preset}' ({p_name})" if p_name else f"'{active_preset}'"
-                    else:
-                        label = f" ({p_name})" if p_name else ""
-                        preset_info = f"'{active_preset}'{label} (Customized - {len(custom_system_prompt)} chars)"
+                        if not custom_system_prompt:
+                            preset_info = f"'{active_preset}' ({p_name})" if p_name else f"'{active_preset}'"
+                        else:
+                            label = f" ({p_name})" if p_name else ""
+                            preset_info = f"'{active_preset}'{label} (Customized - {len(custom_system_prompt)} chars)"
 
-                    auto_context_enabled = str(os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1")).strip().lower() not in ("0", "false", "no")
+                        auto_context_enabled = str(os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1")).strip().lower() not in ("0", "false", "no")
 
-                    print("=" * 60)
-                    print(f"[AI Translation] Starting translation...")
-                    print(f"[AI Translation] Provider: {mode_label}")
-                    print(f"[AI Translation] Prompt: {preset_info}")
-                    if has_speakers:
-                        print(
-                            f"[AI Translation] Speaker Diarization: ENABLED "
-                            f"({len(unique_speakers)} speakers: {', '.join(unique_speakers)} | {labeled_count}/{len(segments)} cues tagged)"
-                        )
-                    else:
-                        print("[AI Translation] Speaker Diarization: DISABLED (No speaker tags found in transcript cues)")
-                    print(f"[AI Translation] Auto Dialogue Context: {'ENABLED (Pass 1 active)' if auto_context_enabled else 'DISABLED'}")
-                    print("=" * 60)
-                    if (provider_type or "").strip().lower() == "ollama":
-                        print(
-                            "[AI Translation] ⚠️ LƯU Ý: Ollama chạy trực tiếp trên phần cứng máy tính (GPU/CPU/RAM). "
-                            "Tốc độ xử lý phụ thuộc vào cấu hình máy; nếu vượt quá thời gian chờ (timeout), hệ thống sẽ tự động thất bại và chuyển sang Google Translate."
-                        )
+                        print("=" * 60)
+                        print(f"[AI Translation] Starting translation...")
+                        print(f"[AI Translation] Provider: {mode_label}")
+                        print(f"[AI Translation] Prompt: {preset_info}")
+                        if has_speakers:
+                            print(
+                                f"[AI Translation] Speaker Diarization: ENABLED "
+                                f"({len(unique_speakers)} speakers: {', '.join(unique_speakers)} | {labeled_count}/{len(segments)} cues tagged)"
+                            )
+                        else:
+                            print("[AI Translation] Speaker Diarization: DISABLED (No speaker tags found in transcript cues)")
+                        print(f"[AI Translation] Auto Dialogue Context: {'ENABLED (Pass 1 active)' if auto_context_enabled else 'DISABLED'}")
+                        print("=" * 60)
+                        if (provider_type or "").strip().lower() == "ollama":
+                            print(
+                                "[AI Translation] ⚠️ LƯU Ý: Ollama chạy trực tiếp trên phần cứng máy tính (GPU/CPU/RAM). "
+                                "Tốc độ xử lý phụ thuộc vào cấu hình máy; nếu vượt quá thời gian chờ (timeout), hệ thống sẽ tự động thất bại và chuyển sang Google Translate."
+                            )
 
-                    if context_guidance == "__SKIP__":
-                        print("[AI Translation] Dialogue context & address rules explicitly skipped by user.")
-                        context_guidance = ""
-                    elif context_guidance and str(context_guidance).strip():
-                        print(f"[AI Translation] Using user-provided dialogue context & address rules ({len(context_guidance.splitlines())} lines).")
-                    elif auto_context_enabled:
-                        print("[AI Translation] Learning dialogue context & address rules from transcript...")
-                        context_guidance = learn_dialogue_context(
-                            source_segments=segments,
+                        if context_guidance == "__SKIP__":
+                            print("[AI Translation] Dialogue context & address rules explicitly skipped by user.")
+                            context_guidance = ""
+                        elif context_guidance and str(context_guidance).strip():
+                            print(f"[AI Translation] Using user-provided dialogue context & address rules ({len(context_guidance.splitlines())} lines).")
+                        elif auto_context_enabled:
+                            if is_canceled and is_canceled():
+                                raise InterruptedError("Translation canceled by user.")
+                            print("[AI Translation] Learning dialogue context & address rules from transcript...")
+                            context_guidance = learn_dialogue_context(
+                                source_segments=segments,
+                                polisher=polisher,
+                                src_lang=normalized_src,
+                                target_lang=target_lang,
+                                max_cues=300,
+                            )
+                            if context_guidance:
+                                print(f"[AI Translation] Learned dialogue context ({len(context_guidance.splitlines())} lines):")
+                                for line in context_guidance.splitlines():
+                                    if line.strip():
+                                        print(f"  | {line}")
+                        else:
+                            context_guidance = ""
+
+                        if is_canceled and is_canceled():
+                            raise InterruptedError("Translation canceled by user.")
+
+                        translated_texts, providers_used, batch_warnings = self._run_ai_batches(
                             polisher=polisher,
+                            provider_type=provider_type,
+                            source_texts=source_texts,
+                            translated_texts=None,
+                            source_speakers=source_speakers if has_speakers else None,
                             src_lang=normalized_src,
                             target_lang=target_lang,
-                            max_cues=300,
+                            style_instruction=merged_style,
+                            custom_system_prompt=custom_system_prompt,
+                            context_guidance=context_guidance,
+                            polish_batch_size=polish_batch_size or 0,
+                            batch_callback=batch_callback,
+                            base_segments=segments,
+                            is_canceled=is_canceled,
                         )
-                        if context_guidance:
-                            print(f"[AI Translation] Learned dialogue context ({len(context_guidance.splitlines())} lines):")
-                            for line in context_guidance.splitlines():
-                                if line.strip():
-                                    print(f"  | {line}")
-                    else:
-                        context_guidance = ""
+                        warnings.extend(batch_warnings)
 
-                    translated_texts, providers_used, batch_warnings = self._run_ai_batches(
-                        polisher=polisher,
-                        provider_type=provider_type,
-                        source_texts=source_texts,
-                        translated_texts=None,
-                        source_speakers=source_speakers if has_speakers else None,
-                        src_lang=normalized_src,
-                        target_lang=target_lang,
-                        style_instruction=merged_style,
-                        custom_system_prompt=custom_system_prompt,
-                        context_guidance=context_guidance,
-                        polish_batch_size=polish_batch_size or 0,
-                        batch_callback=batch_callback,
-                        base_segments=segments,
-                    )
-                    warnings.extend(batch_warnings)
+                        if not validate_texts(translated_texts, len(segments)):
+                            raise TranslationValidationError("AI translator returned an invalid number of segments.")
 
-                    if not validate_texts(translated_texts, len(segments)):
-                        raise TranslationValidationError("AI translator returned an invalid number of segments.")
-
-                    print(f"[AI Translation] Success: completed via {', '.join(providers_used) or 'AI'}")
-                    final_segments = clone_with_texts(segments, translated_texts, provider=provider_type, polished=True)
-                    return TranslationResult(
-                        success=True,
-                        segments=final_segments,
-                        warnings=warnings,
-                        stage="ai_direct",
-                        primary_provider=" -> ".join(providers_used) or provider_type,
-                        used_fallback=bool(warnings),
-                    )
-                except Exception as exc:
-                    if isinstance(exc, AIBatchTranslationError):
-                        msg = "AI batch translation failed. Falling back to Google Translate."
-                    else:
-                        msg = "AI Provider is unavailable. Falling back to Google Translate..."
-                    print(f"[AI Translation] WARNING: {msg} ({exc})")
-                    warnings.append(msg)
-                    if status_callback:
-                        try:
-                            status_callback("Google Translate", msg)
-                        except Exception:
-                            pass
-            else:
-                selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
-                if selected_provider not in ("google", "bing"):
-                    msg = "AI Provider is unavailable. Falling back to Google Translate..."
-                    print(f"[AI Translation] WARNING: {msg}")
-                    warnings.append(msg)
-                    if status_callback:
-                        try:
-                            status_callback("Google Translate", msg)
-                        except Exception:
-                            pass
-                elif selected_provider == "bing":
-                    print("[AI Translation] Bing Translator selected.")
-                    if status_callback:
-                        try:
-                            status_callback("Bing Translator", "")
-                        except Exception:
-                            pass
+                        print(f"[AI Translation] Success: completed via {', '.join(providers_used) or 'AI'}")
+                        final_segments = clone_with_texts(segments, translated_texts, provider=provider_type, polished=True)
+                        return TranslationResult(
+                            success=True,
+                            segments=final_segments,
+                            warnings=warnings,
+                            stage="ai_direct",
+                            primary_provider=" -> ".join(providers_used) or provider_type,
+                            used_fallback=bool(warnings),
+                        )
+                    except InterruptedError:
+                        raise
+                    except Exception as exc:
+                        if isinstance(exc, AIBatchTranslationError):
+                            msg = "AI batch translation failed. Falling back to Google Translate."
+                        else:
+                            msg = "AI Provider is unavailable. Falling back to Google Translate..."
+                        print(f"[AI Translation] WARNING: {msg} ({exc})")
+                        warnings.append(msg)
+                        if status_callback:
+                            try:
+                                status_callback("Google Translate", msg)
+                            except Exception:
+                                pass
                 else:
-                    print("[AI Translation] Google Translate selected.")
-                    if status_callback:
-                        try:
-                            status_callback("Google Translate", "")
-                        except Exception:
-                            pass
+                    selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
+                    if selected_provider not in ("google", "bing"):
+                        msg = "AI Provider is unavailable. Falling back to Google Translate..."
+                        print(f"[AI Translation] WARNING: {msg}")
+                        warnings.append(msg)
+                        if status_callback:
+                            try:
+                                status_callback("Google Translate", msg)
+                            except Exception:
+                                pass
+                    elif selected_provider == "bing":
+                        print("[AI Translation] Bing Translator selected.")
+                        if status_callback:
+                            try:
+                                status_callback("Bing Translator", "")
+                            except Exception:
+                                pass
+                    else:
+                        print("[AI Translation] Google Translate selected.")
+                        if status_callback:
+                            try:
+                                status_callback("Google Translate", "")
+                            except Exception:
+                                pass
 
-        selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
+            selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
 
-        # If Bing Translator is explicitly chosen
-        if selected_provider == "bing":
-            return self._run_bing_translate(
+            # If Bing Translator is explicitly chosen
+            if selected_provider == "bing":
+                return self._run_bing_translate(
+                    segments=segments,
+                    source_texts=source_texts,
+                    normalized_src=normalized_src,
+                    target_lang=target_lang,
+                    ms_batch_size=ms_batch_size,
+                    batch_callback=batch_callback,
+                    warnings=warnings,
+                    status_callback=status_callback,
+                    is_canceled=is_canceled,
+                )
+
+            return self._run_google_translate(
                 segments=segments,
                 source_texts=source_texts,
                 normalized_src=normalized_src,
@@ -233,18 +258,10 @@ class TranslationOrchestrator:
                 batch_callback=batch_callback,
                 warnings=warnings,
                 status_callback=status_callback,
+                is_canceled=is_canceled,
             )
-
-        return self._run_google_translate(
-            segments=segments,
-            source_texts=source_texts,
-            normalized_src=normalized_src,
-            target_lang=target_lang,
-            ms_batch_size=ms_batch_size,
-            batch_callback=batch_callback,
-            warnings=warnings,
-            status_callback=status_callback,
-        )
+        except InterruptedError:
+            return TranslationResult(success=False, errors=["canceled"], stage="translate")
 
     def _run_google_translate(
         self,
@@ -257,6 +274,7 @@ class TranslationOrchestrator:
         batch_callback,
         warnings: list[str],
         status_callback=None,
+        is_canceled=None,
     ) -> TranslationResult:
         print("=" * 60)
         print(f"[Translation] Starting Google web translate (batch_size={ms_batch_size})...")
@@ -273,6 +291,8 @@ class TranslationOrchestrator:
             translated_texts = []
             offset = 0
             for batch in split_text_batches(source_texts, ms_batch_size):
+                if is_canceled and is_canceled():
+                    raise InterruptedError("Translation canceled by user.")
                 translated_batch = self.google_web.translate_batch(
                     batch,
                     src_lang=normalized_src,
@@ -302,6 +322,8 @@ class TranslationOrchestrator:
                 primary_provider="google-web",
                 used_fallback=bool(warnings),
             )
+        except InterruptedError:
+            raise
         except Exception as exc:
             google_failed = True
             msg = f"Google web translate failed. Auto-falling back to Bing Translator... ({exc})"
@@ -324,6 +346,7 @@ class TranslationOrchestrator:
                 warnings=warnings,
                 is_fallback=True,
                 status_callback=status_callback,
+                is_canceled=is_canceled,
             )
 
     def _run_bing_translate(
@@ -338,6 +361,7 @@ class TranslationOrchestrator:
         warnings: list[str],
         is_fallback: bool = False,
         status_callback=None,
+        is_canceled=None,
     ) -> TranslationResult:
         print("=" * 60)
         action = "Auto-fallback to Bing web translate" if is_fallback else "Starting Bing web translate"
@@ -354,6 +378,8 @@ class TranslationOrchestrator:
             translated_texts = []
             offset = 0
             for batch in split_text_batches(source_texts, ms_batch_size):
+                if is_canceled and is_canceled():
+                    raise InterruptedError("Translation canceled by user.")
                 translated_batch = self.bing_web.translate_batch(
                     batch,
                     src_lang=normalized_src,
@@ -383,6 +409,8 @@ class TranslationOrchestrator:
                 primary_provider="bing-web",
                 used_fallback=bool(warnings) or is_fallback,
             )
+        except InterruptedError:
+            raise
         except Exception as exc:
             return TranslationResult(
                 success=False,
@@ -571,6 +599,7 @@ class TranslationOrchestrator:
         polish_batch_size: int,
         batch_callback=None,
         base_segments: list[dict] | None = None,
+        is_canceled=None,
     ) -> tuple[list[str], list[str], list[str]]:
         warnings = []
         providers_used = set()
@@ -609,6 +638,7 @@ class TranslationOrchestrator:
                     batch_callback=batch_callback,
                     base_segments=base_segments,
                     provider_type=provider_type,
+                    is_canceled=is_canceled,
                 )
             else:
                 return self._run_ai_batches_sequential(
@@ -622,7 +652,10 @@ class TranslationOrchestrator:
                     batch_callback=batch_callback,
                     base_segments=base_segments,
                     provider_type=provider_type,
+                    is_canceled=is_canceled,
                 )
+        except InterruptedError:
+            raise
         except TranslationValidationError as exc:
             if not full_context_request:
                 raise
@@ -654,6 +687,7 @@ class TranslationOrchestrator:
                         batch_callback=batch_callback,
                         base_segments=base_segments,
                         provider_type=provider_type,
+                        is_canceled=is_canceled,
                     )
                 else:
                     recovered = self._run_ai_batches_sequential(
@@ -667,9 +701,12 @@ class TranslationOrchestrator:
                         batch_callback=batch_callback,
                         base_segments=base_segments,
                         provider_type=provider_type,
+                        is_canceled=is_canceled,
                     )
                 print("[AI Translation] Batch translation completed successfully.")
                 return recovered
+            except InterruptedError:
+                raise
             except Exception as batch_exc:
                 print(f"[AI Translation] AI batch translation failed. Falling back to Google Translate. ({batch_exc})")
                 raise AIBatchTranslationError(str(batch_exc)) from exc
@@ -687,6 +724,7 @@ class TranslationOrchestrator:
         batch_callback=None,
         base_segments: list[dict] | None = None,
         provider_type: str = "",
+        is_canceled=None,
     ) -> tuple[list[str], list[str], list[str]]:
         """Execute batches sequentially, carrying forward confirmed pronouns and dialogue boundary cues."""
         warnings: list[str] = []
@@ -701,6 +739,10 @@ class TranslationOrchestrator:
         total_batches = len(batches)
         offset = 0
         for idx, batch_item in enumerate(batches):
+            if is_canceled and is_canceled():
+                print("[AI Translation] Translation canceled by user.")
+                raise InterruptedError("Translation canceled by user.")
+
             source_batch = batch_item[0]
             draft_batch = batch_item[1]
             max_tokens = batch_item[2]
@@ -745,6 +787,9 @@ class TranslationOrchestrator:
                 )
                 if idx + 1 < total_batches:
                     time.sleep(0.25)
+                    if is_canceled and is_canceled():
+                        print("[AI Translation] Translation canceled by user.")
+                        raise InterruptedError("Translation canceled by user.")
 
         return translated_texts, sorted(providers_used), warnings
 
@@ -762,6 +807,7 @@ class TranslationOrchestrator:
         batch_callback=None,
         base_segments: list[dict] | None = None,
         provider_type: str = "",
+        is_canceled=None,
     ):
         """Submit validated ordered batches and merge their results by index."""
         warnings = []
@@ -792,6 +838,10 @@ class TranslationOrchestrator:
                 future_to_idx[future] = idx
 
             for future in concurrent.futures.as_completed(future_to_idx):
+                if is_canceled and is_canceled():
+                    for f in future_to_idx:
+                        f.cancel()
+                    raise InterruptedError("Translation canceled by user.")
                 idx = future_to_idx[future]
                 try:
                     batch_result, batch_warnings, provider_name = future.result()
@@ -810,7 +860,7 @@ class TranslationOrchestrator:
                             polished=True,
                         )
                 except Exception as exc:
-                    if isinstance(exc, TranslationValidationError):
+                    if isinstance(exc, (TranslationValidationError, InterruptedError)):
                         raise
                     raise Exception(f"Batch {idx + 1} failed: {exc}") from exc
 

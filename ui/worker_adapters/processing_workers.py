@@ -230,6 +230,10 @@ class TranslationWorker(QThread):
         self.custom_prompt = str(custom_prompt or "").strip()
         self.segments = segments
         self.context_guidance = str(context_guidance or "").strip()
+        self._is_canceled = False
+
+    def cancel(self):
+        self._is_canceled = True
 
     def run(self):
         try:
@@ -242,6 +246,7 @@ class TranslationWorker(QThread):
                     "src_lang": self.src_lang,
                     "target_lang": self.target_lang,
                     "enable_polish": self.enable_polish,
+                    "is_canceled": lambda: self._is_canceled,
                 }
                 if self.provider:
                     translate_kwargs["override_provider"] = self.provider
@@ -258,6 +263,8 @@ class TranslationWorker(QThread):
                     total_cues = len(parse_srt(self.srt_text))
 
                 def on_batch(start_idx, batch_segments):
+                    if self._is_canceled:
+                        return
                     self.batch_ready.emit(int(start_idx), list(batch_segments or []))
                     if total_cues > 0:
                         completed = min(total_cues, int(start_idx) + len(batch_segments or []))
@@ -276,6 +283,9 @@ class TranslationWorker(QThread):
                         self.srt_text,
                         **translate_kwargs,
                     )
+                if self._is_canceled or (not result.success and result.errors == ["canceled"]):
+                    self.finished.emit("", "canceled", "")
+                    return
                 if not result.success:
                     raise RuntimeError("; ".join(result.errors) or "Translation failed.")
                 translated_srt = orch.result_to_srt(result)
@@ -291,6 +301,9 @@ class TranslationWorker(QThread):
                 raise
             self.finished.emit(translated_srt, "", fallback_notice)
         except Exception as exc:
+            if self._is_canceled or str(exc) == "canceled":
+                self.finished.emit("", "canceled", "")
+                return
             print(f"Translation Thread Error: {exc}")
             self.finished.emit("", str(exc), "")
 
