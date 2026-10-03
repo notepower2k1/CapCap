@@ -4,6 +4,17 @@ import sys
 import threading
 import traceback
 
+_UI_PATH = os.path.dirname(os.path.abspath(__file__))
+if _UI_PATH not in sys.path:
+    sys.path.append(_UI_PATH)
+_PROJECT_ROOT = os.path.abspath(os.path.join(_UI_PATH, ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.append(_PROJECT_ROOT)
+_APP_PATH = os.path.join(_PROJECT_ROOT, "app")
+if _APP_PATH not in sys.path:
+    sys.path.append(_APP_PATH)
+
+
 _SINGLE_INSTANCE_HANDLE = None
 
 

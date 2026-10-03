@@ -15,7 +15,10 @@ from pathlib import Path
 import requests
 
 from runtime_paths import app_path, bin_path, bundle_root, join_root, models_path, subprocess_hidden_kwargs, subprocess_text_kwargs
-from app.services.model_utils import matches_whisper_model_dir
+try:
+    from services.model_utils import matches_whisper_model_dir
+except ModuleNotFoundError:
+    from app.services.model_utils import matches_whisper_model_dir
 
 
 class ResourceDownloadService:

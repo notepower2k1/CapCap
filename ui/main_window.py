@@ -24,6 +24,9 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 APP_PATH = os.path.join(os.path.dirname(__file__), '..', 'app')
 if APP_PATH not in sys.path:
     sys.path.append(APP_PATH)
+ROOT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if ROOT_PATH not in sys.path:
+    sys.path.append(ROOT_PATH)
 
 from services import GUIProjectBridge, ProjectService, ResourceDownloadService, VoiceCatalogService
 from controllers import PipelineController, PreviewController, SubtitleController

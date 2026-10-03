@@ -7,7 +7,10 @@ import traceback
 from pathlib import Path
 
 from runtime_paths import bin_path, models_path, workspace_root, subprocess_hidden_kwargs, subprocess_text_kwargs
-from app.services.model_utils import matches_whisper_model_dir
+try:
+    from services.model_utils import matches_whisper_model_dir
+except ModuleNotFoundError:
+    from app.services.model_utils import matches_whisper_model_dir
 from services.resource_download_service import ResourceDownloadService
 
 
