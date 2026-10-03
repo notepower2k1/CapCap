@@ -12372,7 +12372,8 @@ class VideoTranslatorGUI(QMainWindow):
             and not is_playing
             and not bool(getattr(self, "_filter_thumbnail_visible", False))
         )
-        video_view.set_blur_edit_enabled(editing_allowed)
+        if hasattr(video_view, "set_blur_edit_enabled"):
+            video_view.set_blur_edit_enabled(editing_allowed)
         if blur_add_btn is not None:
             # The "+" button must be clickable even when the blur effect
             # toggle is OFF: pressing it should both enable the effect
