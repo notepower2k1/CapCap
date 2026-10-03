@@ -146,6 +146,7 @@ class OpenAICompatiblePolisherProvider:
         timeout: int = 120,
         max_retries: int = 4,
         max_tokens: int = 4096,
+        is_canceled=None,
     ) -> tuple[list[str], list[str], str]:
         if not self.is_configured():
             raise TranslationConfigError(f"{self.display_name} is not configured. Set its API key and model in Settings.")
@@ -164,6 +165,8 @@ class OpenAICompatiblePolisherProvider:
         client = self._get_client()
         last_error = ""
         for attempt in range(1, max_retries + 1):
+            if is_canceled and is_canceled():
+                raise InterruptedError("Translation canceled by user.")
             try:
                 kwargs = self._build_completion_kwargs(
                     system_msg=system_msg,
@@ -203,6 +206,8 @@ class OpenAICompatiblePolisherProvider:
                 # recover by switching immediately to ordered batches.
                 raise
             except Exception as e:
+                if is_canceled and is_canceled():
+                    raise InterruptedError("Translation canceled by user.")
                 last_error = str(e)
                 if attempt < max_retries:
                     if self._is_rate_limit_error(e):
@@ -217,7 +222,12 @@ class OpenAICompatiblePolisherProvider:
                             f"[{self.display_name}] Error on batch attempt {attempt}/{max_retries}: {e}. "
                             f"Retrying in {sleep_s:.1f}s..."
                         )
-                    time.sleep(sleep_s)
+                    # Sliced sleep to respond immediately (<0.2s) if user cancels
+                    end_time = time.monotonic() + sleep_s
+                    while time.monotonic() < end_time:
+                        if is_canceled and is_canceled():
+                            raise InterruptedError("Translation canceled by user.")
+                        time.sleep(min(0.2, max(0.0, end_time - time.monotonic())))
                     continue
 
         raise TranslationProviderError(f"{self.display_name} failed: {last_error}")

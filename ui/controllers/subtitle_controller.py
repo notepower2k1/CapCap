@@ -732,6 +732,36 @@ class SubtitleController:
         if worker is not None:
             worker.cancel()
             self.gui.log("[Translation] Canceling translation request...")
+            # Disconnect all signals so any late callbacks/results are discarded
+            for sig in ("finished", "batch_ready", "progress", "status_changed"):
+                try:
+                    getattr(worker, sig).disconnect()
+                except Exception:
+                    pass
+
+            # Keep safe reference in retiring workers until thread terminates, preventing GC crash
+            retiring = getattr(self.gui, "_retiring_workers", None)
+            if retiring is not None:
+                retiring.append(worker)
+                try:
+                    worker.finished.connect(
+                        lambda w=worker: retiring.remove(w) if w in retiring else None
+                    )
+                except Exception:
+                    pass
+            # Immediately clear translation_thread so user can re-translate without blocking
+            self.gui.translation_thread = None
+
+        self._close_translation_progress()
+        if hasattr(self.gui, "hide_loading_overlay"):
+            self.gui.hide_loading_overlay(fade=False)
+        self.gui.log("[Translation] Translation canceled by user.")
+        self.gui.update_project_step("translate_raw", "pending")
+        stored = getattr(self, "_translation_placeholder", None)
+        current = self.gui.translated_text.toPlainText().strip()
+        if stored and current == stored.strip():
+            self.gui.translated_text.clear()
+        self.gui.refresh_ui_state()
 
     def _close_translation_progress(self):
         timer = getattr(self.gui, "_translation_progress_timer", None)
@@ -1225,6 +1255,8 @@ class SubtitleController:
     def on_translation_finished(self, translated_srt, error, fallback_notice=""):
         self._close_translation_progress()
         self.gui.translate_btn.setEnabled(True)
+        if getattr(self.gui, "translation_thread", None) is not None:
+            self.gui.translation_thread = None
         if error or not translated_srt:
             if error == "canceled":
                 self.gui.log("[Translation] Translation canceled by user.")

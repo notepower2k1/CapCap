@@ -445,13 +445,70 @@ class TestTranslationCancellation(unittest.TestCase):
 
     def test_subtitle_controller_on_translation_canceled(self):
         mock_gui = MagicMock()
+        mock_gui._retiring_workers = []
         mock_worker = MagicMock()
         mock_gui.translation_thread = mock_worker
         controller = SubtitleController(mock_gui)
 
         controller._on_translation_canceled()
         mock_worker.cancel.assert_called_once()
-        mock_gui.log.assert_called_with("[Translation] Canceling translation request...")
+        self.assertIsNone(mock_gui.translation_thread)
+        self.assertIn(mock_worker, mock_gui._retiring_workers)
+        mock_gui.log.assert_any_call("[Translation] Canceling translation request...")
+        mock_gui.log.assert_any_call("[Translation] Translation canceled by user.")
+
+    def test_polisher_sliced_sleep_cancels_promptly(self):
+        import threading
+        import time
+        from app.translation.providers.gemini_polisher import OpenAICompatiblePolisherProvider
+
+        polisher = OpenAICompatiblePolisherProvider(
+            provider_id="test",
+            display_name="Test Polisher",
+            env_prefix="TEST",
+            default_base_url="http://localhost",
+            default_model="test-model",
+        )
+        polisher.api_key = "test_key"
+        polisher.model_name = "test_model"
+
+        # 1. Immediate cancel
+        with self.assertRaises(InterruptedError):
+            polisher.polish_batch(
+                source_texts=["Hello"],
+                src_lang="en",
+                target_lang="vi",
+                is_canceled=lambda: True,
+            )
+
+        # 2. Cancel during retry backoff sleep cancels promptly (<1.0s vs 2.0s normal sleep)
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception("503 Service Unavailable")
+        polisher._client = mock_client
+
+        canceled = False
+        def cancel_check():
+            return canceled
+
+        def trigger_cancel_later():
+            time.sleep(0.05)
+            nonlocal canceled
+            canceled = True
+
+        t = threading.Thread(target=trigger_cancel_later)
+        t.start()
+
+        start_time = time.monotonic()
+        with self.assertRaises(InterruptedError):
+            polisher.polish_batch(
+                source_texts=["Hello"],
+                src_lang="en",
+                target_lang="vi",
+                is_canceled=cancel_check,
+            )
+        elapsed = time.monotonic() - start_time
+        t.join()
+        self.assertLess(elapsed, 1.0)
 
     def test_subtitle_controller_on_finished_canceled(self):
         mock_gui = MagicMock()

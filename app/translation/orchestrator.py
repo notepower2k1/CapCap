@@ -764,6 +764,7 @@ class TranslationOrchestrator:
                 context_guidance=current_guidance,
                 max_tokens=max_tokens,
                 timeout=batch_timeout,
+                is_canceled=is_canceled,
             )
             translated_texts.extend(batch_result)
             warnings.extend(batch_warnings)
@@ -840,35 +841,46 @@ class TranslationOrchestrator:
                     context_guidance=context_guidance,
                     max_tokens=max_tokens,
                     timeout=batch_timeout,
+                    is_canceled=is_canceled,
                 )
                 future_to_idx[future] = idx
 
-            for future in concurrent.futures.as_completed(future_to_idx):
+            remaining = set(future_to_idx.keys())
+            while remaining:
                 if is_canceled and is_canceled():
-                    for f in future_to_idx:
+                    for f in remaining:
                         f.cancel()
                     raise InterruptedError("Translation canceled by user.")
-                idx = future_to_idx[future]
-                try:
-                    batch_result, batch_warnings, provider_name = future.result()
-                    translated_texts_map[idx] = batch_result
-                    warnings.extend(batch_warnings)
-                    if provider_name:
-                        providers_used.add(provider_name)
-                    if batch_callback is not None and base_segments is not None:
-                        start_offset = sum(len(batches[i][0]) for i in range(idx))
-                        self._emit_batch_callback(
-                            batch_callback=batch_callback,
-                            base_segments=base_segments,
-                            start_idx=start_offset,
-                            translated_texts=batch_result,
-                            provider=provider_name or provider_type,
-                            polished=True,
-                        )
-                except Exception as exc:
-                    if isinstance(exc, (TranslationValidationError, InterruptedError)):
-                        raise
-                    raise Exception(f"Batch {idx + 1} failed: {exc}") from exc
+                done, remaining = concurrent.futures.wait(
+                    remaining, timeout=0.25, return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                for future in done:
+                    if is_canceled and is_canceled():
+                        for f in remaining:
+                            f.cancel()
+                        raise InterruptedError("Translation canceled by user.")
+                    idx = future_to_idx[future]
+                    try:
+                        batch_result, batch_warnings, provider_name = future.result()
+                        translated_texts_map[idx] = batch_result
+                        warnings.extend(batch_warnings)
+                        if provider_name:
+                            providers_used.add(provider_name)
+                        if batch_callback is not None and base_segments is not None:
+                            start_offset = sum(len(batches[i][0]) for i in range(idx))
+                            self._emit_batch_callback(
+                                batch_callback=batch_callback,
+                                base_segments=base_segments,
+                                start_idx=start_offset,
+                                translated_texts=batch_result,
+                                provider=provider_name or provider_type,
+                                polished=True,
+                            )
+                    except Exception as exc:
+                        if isinstance(exc, (TranslationValidationError, InterruptedError)):
+                            raise
+                        warnings.append(f"Batch {idx + 1} AI polishing failed ({exc}); kept draft.")
+                        translated_texts_map[idx] = batches[idx][1]
 
         merged = []
         for idx in range(len(batches)):
