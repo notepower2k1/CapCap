@@ -501,13 +501,6 @@ class LauncherWindow(QDialog):
         title = self._title_label
         title.setStyleSheet("font-size: 26px; font-weight: 800; color: #ffffff;")
         title_box.addWidget(title)
-        self._version_badge = QLabel("v8.0.3")
-        self._version_badge.setStyleSheet(
-            "color: #4ecdc4; font-size: 11px; font-weight: 700; "
-            "background-color: #12283a; border: 1px solid #1e455f; "
-            "border-radius: 4px; padding: 2px 6px;"
-        )
-        title_box.addWidget(self._version_badge)
         title_box.addStretch()
         self._subtitle_label = QLabel("Video Translation & Voiceover Studio")
         subtitle = self._subtitle_label
