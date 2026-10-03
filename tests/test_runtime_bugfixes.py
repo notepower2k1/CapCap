@@ -398,36 +398,48 @@ class TestRuntimeBugfixes(unittest.TestCase):
                 self.assertEqual(svc._hf_endpoint(), "https://mirror.capcap.com")
 
     def test_whisper_turbo_download_unsets_mirror_and_falls_back(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = ResourceDownloadService(tmpdir)
 
-            called_models = []
+            called_snapshots = []
             seen_hf_endpoint = []
 
-            def fake_download_model(model_name, cache_dir=None):
-                called_models.append(model_name)
+            def fake_snapshot_download(repo_id, **kwargs):
+                called_snapshots.append(repo_id)
                 seen_hf_endpoint.append(os.environ.get("HF_ENDPOINT"))
-                if model_name == "turbo":
-                    raise RuntimeError("Failed to resolve turbo")
-                return cache_dir
+                return tmpdir
 
             with patch.dict(os.environ, {"HF_ENDPOINT": "https://hf-mirror.com"}):
-                with patch("faster_whisper.download_model", side_effect=fake_download_model), \
+                with patch("huggingface_hub.snapshot_download", side_effect=fake_snapshot_download), \
                      patch.object(svc, "is_resource_installed", return_value=True):
                     svc.download_resource("whisper:turbo")
 
-                # Verify HF_ENDPOINT was unset during download_model calls
-                self.assertEqual(seen_hf_endpoint, [None, None])
-                # Verify fallback to full mobiuslabsgmbh repo id
+                # Verify HF_ENDPOINT was unset during snapshot_download calls
+                self.assertEqual(seen_hf_endpoint, [None])
+                # Verify snapshot_download was called with mobiuslabsgmbh repo id
                 self.assertEqual(
-                    called_models,
-                    ["turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo"],
+                    called_snapshots,
+                    ["mobiuslabsgmbh/faster-whisper-large-v3-turbo"],
                 )
                 # Verify HF_ENDPOINT was restored afterwards
                 self.assertEqual(os.environ.get("HF_ENDPOINT"), "https://hf-mirror.com")
                 # Verify symlinks warning was suppressed
                 self.assertEqual(os.environ.get("HF_HUB_DISABLE_SYMLINKS_WARNING"), "1")
+
+            # Also test fallback to faster_whisper.download_model when snapshot_download fails
+            called_fallback = []
+            def fake_download_model(model_name, cache_dir=None):
+                called_fallback.append(model_name)
+                return cache_dir
+
+            with patch.dict(os.environ, {"HF_ENDPOINT": "https://hf-mirror.com"}):
+                with patch("huggingface_hub.snapshot_download", side_effect=RuntimeError("HF Hub unreachable")), \
+                     patch("faster_whisper.download_model", side_effect=fake_download_model), \
+                     patch.object(svc, "is_resource_installed", return_value=True):
+                    svc.download_resource("whisper:turbo")
+
+                self.assertEqual(called_fallback, ["turbo"])
 
     def test_loading_overlay_suppresses_logo_and_text_layers(self):
         from unittest.mock import MagicMock
@@ -548,7 +560,201 @@ class TestRuntimeBugfixes(unittest.TestCase):
         self.assertIsNone(mock_gui._logo_overlay_track)
         self.assertIsNone(mock_gui._logo_overlay_layer)
 
+    def test_whisper_is_resource_installed_requires_model_bin(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            svc = ResourceDownloadService(tmpdir)
+            svc._whisper_cache_root = lambda: tmpdir
+
+            # 1. Directory with only config.json and incomplete files -> False
+            model_hub_dir = Path(tmpdir) / "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo"
+            model_hub_dir.mkdir(parents=True, exist_ok=True)
+            (model_hub_dir / "config.json").write_text("{}")
+            blobs_dir = model_hub_dir / "blobs"
+            blobs_dir.mkdir(parents=True, exist_ok=True)
+            (blobs_dir / "model.bin.incomplete").write_bytes(b"")
+
+            self.assertFalse(
+                svc.is_resource_installed("whisper:turbo"),
+                "Whisper Turbo should NOT be marked installed when model.bin is missing or incomplete",
+            )
+
+            # 2. Directory contains snapshots/<hash>/model.bin with size > 0 -> True
+            snap_dir = model_hub_dir / "snapshots" / "test_snapshot_hash"
+            snap_dir.mkdir(parents=True, exist_ok=True)
+            snap_bin = snap_dir / "model.bin"
+            snap_bin.write_bytes(b"dummy weights data")
+
+            self.assertTrue(
+                svc.is_resource_installed("whisper:turbo"),
+                "Whisper Turbo should be marked installed when snapshots/<hash>/model.bin exists and has positive size",
+            )
+
+            # Verify no collision: Turbo installed must NOT make large-v3 or distil-large-v3 appear installed
+            self.assertFalse(
+                svc.is_resource_installed("whisper:large-v3"),
+                "Whisper large-v3 must NOT be marked installed when only turbo is downloaded",
+            )
+            self.assertFalse(
+                svc.is_resource_installed("whisper:distil-large-v3"),
+                "Whisper distil-large-v3 must NOT be marked installed when only turbo is downloaded",
+            )
+
+    def test_resource_manager_button_states_installed_vs_missing(self):
+        from unittest.mock import patch
+        from PySide6.QtWidgets import QDialog
+        from ui.views.resource_manager import open_resource_manager
+        from services.resource_download_service import ResourceDownloadService
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            svc = ResourceDownloadService(tmpdir)
+            mock_resources = [
+                {
+                    "id": "whisper:turbo",
+                    "name": "Whisper Turbo",
+                    "kind": "whisper",
+                    "status": "missing",
+                    "status_label": "Missing",
+                    "auto_download_supported": True,
+                    "target_dir": tmpdir,
+                },
+                {
+                    "id": "voice:pack",
+                    "name": "Piper Voice Pack",
+                    "kind": "voice",
+                    "status": "installed",
+                    "status_label": "Ready",
+                    "auto_download_supported": True,
+                    "target_dir": tmpdir,
+                },
+            ]
+            created_dialogs = []
+            orig_init = QDialog.__init__
+            def _fake_init(self, *args, **kwargs):
+                orig_init(self, *args, **kwargs)
+                created_dialogs.append(self)
+
+            with patch.object(ResourceDownloadService, "list_resources", return_value=mock_resources), \
+                 patch.object(QDialog, "exec", return_value=None), \
+                 patch.object(QDialog, "__init__", _fake_init):
+                open_resource_manager(tmpdir)
+
+            self.assertTrue(len(created_dialogs) > 0)
+            dlg = created_dialogs[-1]
+            rows = getattr(dlg, "_resource_rows", {})
+            self.assertIn("whisper:turbo", rows)
+            self.assertIn("voice:pack", rows)
+
+            # Missing resource button has primaryBtn styling
+            missing_btn = rows["whisper:turbo"]["download_btn"]
+            self.assertEqual(missing_btn.objectName(), "primaryBtn")
+            self.assertEqual(missing_btn.text(), "Download Whisper")
+
+            # Installed resource button has Re-download text and no primaryBtn
+            installed_btn = rows["voice:pack"]["download_btn"]
+            self.assertEqual(installed_btn.objectName(), "")
+            self.assertEqual(installed_btn.text(), "Re-download")
+
+    def test_resource_download_service_progress_reporting_formats(self):
+        from unittest.mock import patch, MagicMock
+        from services.resource_download_service import ResourceDownloadService
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            svc = ResourceDownloadService(tmpdir)
+            progress_calls = []
+            def progress_cb(pct, msg):
+                progress_calls.append((pct, msg))
+
+            # 1. Test _download_file progress format with MB and %
+            fake_resp = MagicMock()
+            fake_resp.headers = {"content-length": str(10 * 1024 * 1024)}
+            fake_resp.iter_content.return_value = [b"x" * (1024 * 1024)] * 10
+            fake_resp.__enter__.return_value = fake_resp
+            fake_resp.__exit__.return_value = None
+
+            dest_file = os.path.join(tmpdir, "test_file.bin")
+            with patch("requests.get", return_value=fake_resp):
+                svc._download_file("http://example.com/file.bin", dest_file, label="Testing File", progress_cb=progress_cb)
+
+            self.assertTrue(any("Testing File" in msg and "MB" in msg for _, msg in progress_calls))
+            first_download_call = [msg for _, msg in progress_calls if "Testing File 10%" in msg]
+            self.assertTrue(len(first_download_call) > 0)
+            self.assertIn("1.0/10.0 MB", first_download_call[0])
+
+            # 2. Test _download_and_extract_zip progress format
+            progress_calls.clear()
+            dest_dir = os.path.join(tmpdir, "extracted_zip")
+            with patch("requests.get", return_value=fake_resp), \
+                 patch("zipfile.ZipFile"):
+                svc._download_and_extract_zip("http://example.com/file.zip", dest_dir, progress_cb=progress_cb)
+
+            self.assertTrue(any("Downloading... 10% (1.0/10.0 MB)" in msg for _, msg in progress_calls))
+            self.assertTrue(any("Extracting files... (95%)" in msg for _, msg in progress_calls))
+
+            # 3. Test _download_and_extract_tar progress format
+            progress_calls.clear()
+            dest_tar_dir = os.path.join(tmpdir, "extracted_tar")
+            def fake_urlretrieve(url, path, reporthook=None):
+                if reporthook:
+                    reporthook(1, 1024 * 1024, 10 * 1024 * 1024)
+            with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve), \
+                 patch("tarfile.open"):
+                svc._download_and_extract_tar("http://example.com/file.tar.bz2", dest_tar_dir, progress_cb=progress_cb)
+
+            self.assertTrue(any("Downloading... 10% (1.0/10.0 MB)" in msg for _, msg in progress_calls))
+            self.assertTrue(any("Extracting files... (95%)" in msg for _, msg in progress_calls))
+
+    def test_i18n_resource_translations(self):
+        from ui.i18n import _translate_text
+        self.assertEqual(_translate_text("Re-download", "vi"), "Tải lại")
+        self.assertEqual(_translate_text("Extracting files... (95%)", "vi"), "Đang giải nén tệp... (95%)")
+        self.assertEqual(_translate_text("Extracting files...", "vi"), "Đang giải nén tệp...")
+
+    def test_whisper_load_raises_file_not_found_when_weights_missing(self):
+        from unittest.mock import patch
+        import whisper_processor
+
+        with patch.object(ResourceDownloadService, "is_resource_installed", return_value=False):
+            with self.assertRaises(FileNotFoundError) as ctx:
+                whisper_processor._load_whisper_model("turbo")
+            self.assertIn("Resource Manager", str(ctx.exception))
+            self.assertIn("turbo", str(ctx.exception))
+
+    def test_whisper_cached_snapshot_requires_positive_model_bin_size(self):
+        from unittest.mock import patch
+        import whisper_processor
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fw_dir = Path(tmpdir)
+            snapshot_dir = fw_dir / "models--Systran--faster-whisper-turbo" / "snapshots" / "test_snapshot"
+            snapshot_dir.mkdir(parents=True)
+            empty_bin = snapshot_dir / "model.bin"
+            empty_bin.touch()
+
+            with patch("whisper_processor.models_path", return_value=str(fw_dir)):
+                # Should be None when model.bin is 0 bytes
+                self.assertIsNone(whisper_processor._cached_model_snapshot("turbo"))
+
+                # Should return snapshot path when model.bin has positive size
+                empty_bin.write_bytes(b"dummy model weights")
+                self.assertEqual(whisper_processor._cached_model_snapshot("turbo"), str(snapshot_dir))
+
+                self.assertIsNone(
+                    whisper_processor._cached_model_snapshot("large-v3"),
+                    "large-v3 snapshot must NOT resolve to turbo model directory",
+                )
+
+                # Also test the exact Hugging Face repo name that caused the collision:
+                mobius_turbo = fw_dir / "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo" / "snapshots" / "mobius_snap"
+                mobius_turbo.mkdir(parents=True)
+                (mobius_turbo / "model.bin").write_bytes(b"dummy mobius turbo weights")
+
+                self.assertIsNone(
+                    whisper_processor._cached_model_snapshot("large-v3"),
+                    "large-v3 snapshot must NOT resolve to faster-whisper-large-v3-turbo directory",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -17,6 +17,36 @@ import requests
 from runtime_paths import app_path, bin_path, bundle_root, join_root, models_path, subprocess_hidden_kwargs, subprocess_text_kwargs
 
 
+def _matches_whisper_model_dir(dir_name: str, model_name: str) -> bool:
+    """Return True if dir_name accurately corresponds to model_name, avoiding substring collisions."""
+    dname = dir_name.lower().strip()
+    target = model_name.lower().strip()
+
+    if dname == target:
+        return True
+
+    if dname.startswith("models--"):
+        parts = dname.split("--")
+        repo = parts[-1] if len(parts) >= 3 else dname[len("models--"):]
+    else:
+        repo = dname
+
+    if target in ("turbo", "large-v3-turbo"):
+        return "turbo" in repo
+
+    if "turbo" in repo:
+        return False
+
+    if "distil" in target:
+        base = target.replace("distil-", "")
+        return "distil" in repo and (repo.endswith(f"-{target}") or base in repo)
+
+    if "distil" in repo:
+        return False
+
+    return repo == target or repo.endswith(f"-{target}")
+
+
 class ResourceDownloadService:
     HF_MIRROR_ENDPOINT = "https://hf-mirror.com"
     WHISPER_ZIP_FILES = {
@@ -447,13 +477,32 @@ class ResourceDownloadService:
         for child in root.iterdir():
             if not child.is_dir():
                 continue
-            name = child.name.lower()
-            if normalized == name:
-                matches.append(str(child))
-                continue
-            if name.startswith("models--") and normalized in name:
+            if _matches_whisper_model_dir(child.name, normalized):
                 matches.append(str(child))
         return matches
+
+    def _is_whisper_installed(self, model_name: str) -> bool:
+        """Verify that a Whisper model directory actually contains model.bin with positive size."""
+        for model_dir in self._whisper_cache_dirs(model_name):
+            try:
+                p = Path(model_dir)
+                if not p.is_dir():
+                    continue
+                # 1. Direct model directory (e.g. unzipped from zipResource)
+                direct_bin = p / "model.bin"
+                if direct_bin.is_file() and direct_bin.stat().st_size > 0:
+                    return True
+                # 2. Hugging Face snapshot directory (snapshots/<hash>/model.bin)
+                snapshots_dir = p / "snapshots"
+                if snapshots_dir.is_dir():
+                    for snap in snapshots_dir.iterdir():
+                        if snap.is_dir():
+                            snap_bin = snap / "model.bin"
+                            if snap_bin.is_file() and snap_bin.stat().st_size > 0:
+                                return True
+            except Exception:
+                continue
+        return False
 
     def _is_vieneu_installed(self) -> bool:
         """Check whether both VieNeu-TTS v3 Turbo and MOSS audio tokenizer are present."""
@@ -935,13 +984,7 @@ class ResourceDownloadService:
             return os.path.isfile(self._speaker_diarization_embedding_path())
         if resource_id.startswith("whisper:"):
             model_name = resource_id.split(":", 1)[1].strip().lower()
-            for model_dir in self._whisper_cache_dirs(model_name):
-                try:
-                    if os.path.isdir(model_dir) and any(Path(model_dir).iterdir()):
-                        return True
-                except Exception:
-                    continue
-            return False
+            return self._is_whisper_installed(model_name)
         if resource_id == "voice:pack":
             return self._voice_pack_status("vi") == "installed"
         if resource_id == "voice:pack-en":
@@ -1019,7 +1062,9 @@ class ResourceDownloadService:
                                     downloaded += len(chunk)
                                     if progress_cb and total_size > 0:
                                         percent = min(99, int((downloaded / total_size) * 100))
-                                        progress_cb(percent, f"Downloading... ({percent}%)")
+                                        mb_done = downloaded / (1024 * 1024)
+                                        mb_total = total_size / (1024 * 1024)
+                                        progress_cb(percent, f"Downloading... {percent}% ({mb_done:.1f}/{mb_total:.1f} MB)")
 
                     print(f"[Download] Download complete. File size: {os.path.getsize(tmp_path)} bytes")
                     download_succeeded = True
@@ -1039,7 +1084,7 @@ class ResourceDownloadService:
                 raise last_err or RuntimeError(f"Failed to download from {zip_url}")
 
             if progress_cb:
-                progress_cb(90, "Extracting zip file...")
+                progress_cb(95, "Extracting files... (95%)")
 
             print(f"[Download] Extracting zip to {extract_to}...")
             with zipfile.ZipFile(tmp_path, "r") as zip_ref:
@@ -1075,11 +1120,13 @@ class ResourceDownloadService:
                 if progress_cb and total_size > 0:
                     downloaded = block_num * block_size
                     percent = min(99, int((downloaded / total_size) * 100))
-                    progress_cb(percent, f"Downloading... ({percent}%)")
+                    mb_done = downloaded / (1024 * 1024)
+                    mb_total = total_size / (1024 * 1024)
+                    progress_cb(percent, f"Downloading... {percent}% ({mb_done:.1f}/{mb_total:.1f} MB)")
 
             urllib.request.urlretrieve(archive_url, tmp_path, reporthook=_report_progress)
             if progress_cb:
-                progress_cb(90, "Extracting archive...")
+                progress_cb(95, "Extracting files... (95%)")
 
             root = os.path.abspath(extract_to)
             with tarfile.open(tmp_path, "r:*") as archive:
@@ -1140,7 +1187,9 @@ class ResourceDownloadService:
                                     downloaded += len(chunk)
                                     if progress_cb and total_size > 0:
                                         percent = min(99, int((downloaded / total_size) * 100))
-                                        progress_cb(percent, f"{label} ({percent}%)")
+                                        mb_done = downloaded / (1024 * 1024)
+                                        mb_total = total_size / (1024 * 1024)
+                                        progress_cb(percent, f"{label} {percent}% ({mb_done:.1f}/{mb_total:.1f} MB)")
 
                     download_succeeded = True
                     break
@@ -1278,10 +1327,12 @@ class ResourceDownloadService:
             class _Tqdm(hf_tqdm):
                 def update(self, n=1):
                     super().update(n)
-                    if progress_cb and self.total and self.total > 0:
+                    if progress_cb and self.total and self.total > 1000:
                         raw_pct = min(99, max(0, int((self.n / self.total) * 100)))
                         scaled = start_pct + int((end_pct - start_pct) * raw_pct / 100)
-                        progress_cb(scaled, f"{label} ({scaled}%)")
+                        mb_done = self.n / (1024 * 1024)
+                        mb_total = self.total / (1024 * 1024)
+                        progress_cb(scaled, f"{label} {scaled}% ({mb_done:.1f}/{mb_total:.1f} MB)")
             return _Tqdm
 
         if progress_cb:
@@ -1330,21 +1381,60 @@ class ResourceDownloadService:
                 self._download_and_extract_zip(zip_url, target_dir, progress_cb)
             elif model_name in ("large-v3", "turbo", "distil-large-v3"):
                 if progress_cb:
-                    progress_cb(10, f"Downloading Whisper {model_name} from Hugging Face...")
-                from faster_whisper import download_model
+                    progress_cb(5, f"Connecting to Hugging Face for Whisper {model_name}...")
+                repo_id = {
+                    "turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+                    "large-v3": "Systran/faster-whisper-large-v3",
+                    "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
+                }.get(model_name, model_name)
+                allow_patterns = [
+                    "config.json",
+                    "preprocessor_config.json",
+                    "model.bin",
+                    "tokenizer.json",
+                    "vocabulary.*",
+                ]
                 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
                 old_endpoint = os.environ.pop("HF_ENDPOINT", None)
+
+                # Clean up any 0-byte incomplete blobs from previously interrupted downloads
                 try:
+                    cache_root = Path(self._whisper_cache_root())
+                    for blob in cache_root.glob("**/blobs/*.incomplete"):
+                        if blob.is_file() and blob.stat().st_size == 0:
+                            blob.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+                try:
+                    from huggingface_hub import snapshot_download
+                    from huggingface_hub.utils import tqdm as hf_tqdm
+
+                    def _make_whisper_tqdm(start_pct: int = 5, end_pct: int = 98):
+                        class _Tqdm(hf_tqdm):
+                            def update(self, n=1):
+                                super().update(n)
+                                if progress_cb and self.total and self.total > 10000:
+                                    raw_pct = min(99, max(0, int((self.n / self.total) * 100)))
+                                    scaled = start_pct + int((end_pct - start_pct) * raw_pct / 100)
+                                    mb_done = self.n / (1024 * 1024)
+                                    mb_total = self.total / (1024 * 1024)
+                                    progress_cb(scaled, f"Downloading Whisper {model_name}... {scaled}% ({mb_done:.1f}/{mb_total:.1f} MB)")
+                        return _Tqdm
+
                     try:
-                        download_model(model_name, cache_dir=self._whisper_cache_root())
+                        snapshot_download(
+                            repo_id=repo_id,
+                            cache_dir=self._whisper_cache_root(),
+                            allow_patterns=allow_patterns,
+                            tqdm_class=_make_whisper_tqdm(5, 98),
+                        )
                     except Exception as primary_err:
-                        if model_name == "turbo":
-                            try:
-                                download_model("mobiuslabsgmbh/faster-whisper-large-v3-turbo", cache_dir=self._whisper_cache_root())
-                            except Exception as fallback_err:
-                                raise fallback_err from primary_err
-                        else:
-                            raise
+                        from faster_whisper import download_model
+                        try:
+                            download_model(model_name, cache_dir=self._whisper_cache_root())
+                        except Exception as fallback_err:
+                            raise fallback_err from primary_err
                 finally:
                     if old_endpoint is not None:
                         os.environ["HF_ENDPOINT"] = old_endpoint

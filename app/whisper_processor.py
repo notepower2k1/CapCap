@@ -51,6 +51,36 @@ KNOWN_FASTER_WHISPER_MODELS = {
 }
 
 
+def _matches_whisper_model_dir(dir_name: str, model_name: str) -> bool:
+    """Return True if dir_name accurately corresponds to model_name, avoiding substring collisions."""
+    dname = dir_name.lower().strip()
+    target = model_name.lower().strip()
+
+    if dname == target:
+        return True
+
+    if dname.startswith("models--"):
+        parts = dname.split("--")
+        repo = parts[-1] if len(parts) >= 3 else dname[len("models--"):]
+    else:
+        repo = dname
+
+    if target in ("turbo", "large-v3-turbo"):
+        return "turbo" in repo
+
+    if "turbo" in repo:
+        return False
+
+    if "distil" in target:
+        base = target.replace("distil-", "")
+        return "distil" in repo and (repo.endswith(f"-{target}") or base in repo)
+
+    if "distil" in repo:
+        return False
+
+    return repo == target or repo.endswith(f"-{target}")
+
+
 def _cached_model_snapshot(model_name: str) -> str | None:
     """Return the newest complete Hugging Face cache snapshot for a model."""
     fw_dir = Path(models_path("faster_whisper"))
@@ -60,18 +90,17 @@ def _cached_model_snapshot(model_name: str) -> str | None:
     for child in fw_dir.iterdir():
         if not child.is_dir():
             continue
-        cname = child.name.lower()
-        if (cname.startswith("models--") and normalized in cname) or cname == normalized:
+        if _matches_whisper_model_dir(child.name, normalized):
             snapshots_dir = child / "snapshots"
             if snapshots_dir.is_dir():
                 snapshots = sorted(
-                    (p for p in snapshots_dir.iterdir() if p.is_dir() and (p / "model.bin").is_file()),
+                    (p for p in snapshots_dir.iterdir() if p.is_dir() and (p / "model.bin").is_file() and (p / "model.bin").stat().st_size > 0),
                     key=lambda p: p.stat().st_mtime,
                     reverse=True,
                 )
                 if snapshots:
                     return str(snapshots[0])
-            if (child / "model.bin").is_file():
+            if (child / "model.bin").is_file() and (child / "model.bin").stat().st_size > 0:
                 return str(child)
     return None
 
@@ -283,6 +312,14 @@ def _load_whisper_model(model_name):
 
     original_name = str(model_name)
     if not os.path.isdir(str(model_name)):
+        from services.resource_download_service import ResourceDownloadService
+        svc = ResourceDownloadService(_workspace_root())
+        clean_name = str(model_name).strip().lower()
+        if not svc.is_resource_installed(f"whisper:{clean_name}"):
+            raise FileNotFoundError(
+                f"Whisper model '{model_name}' is not installed or incomplete (model.bin missing). "
+                f"Please open Resource Manager (Quản lý tài nguyên) and download Whisper {model_name} first."
+            )
         model_kwargs["download_root"] = _faster_whisper_cache_dir()
     cache_key = (str(model_name), str(model_kwargs["device"]), str(model_kwargs["compute_type"]))
     with _WHISPER_MODEL_LOCK:
@@ -306,7 +343,7 @@ def _load_whisper_model(model_name):
             load_thread.start()
             load_thread.join(timeout=120)
             if load_thread.is_alive():
-                raise TimeoutError("WhisperModel load timed out after 120s (CUDA may be hanging)")
+                raise TimeoutError(f"WhisperModel load timed out after 120s ({model_name} on {runtime['label']})")
             if load_error[0]:
                 raise load_error[0]
             model = load_result[0]
@@ -317,6 +354,8 @@ def _load_whisper_model(model_name):
             _WHISPER_MODEL_CACHE[cache_key] = model
             return model
         except Exception as exc:
+            if isinstance(exc, FileNotFoundError):
+                raise
             if runtime["device"] == "cuda":
                 fallback_kwargs = {
                     "device": "cpu",
@@ -343,7 +382,7 @@ def _load_whisper_model(model_name):
                 fb_thread.start()
                 fb_thread.join(timeout=120)
                 if fb_thread.is_alive():
-                    raise TimeoutError("WhisperModel CPU fallback load timed out after 120s")
+                    raise TimeoutError(f"WhisperModel CPU fallback load timed out after 120s ({model_name})")
                 if fb_error[0]:
                     raise fb_error[0]
                 model = fb_result[0]

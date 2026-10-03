@@ -156,7 +156,15 @@ def open_resource_manager(workspace_root: str = None, parent=None,
             button.setText(str(message or t("Downloading...")))
         else:
             button.setEnabled(bool(row.get("download_supported", False)))
-            button.setText(t(str(row.get("download_label", "Download"))))
+            is_installed = row.get("item", {}).get("status") == "installed"
+            if is_installed:
+                button.setText(t("Re-download"))
+                button.setObjectName("")
+            else:
+                button.setText(t(str(row.get("download_label", "Download"))))
+                button.setObjectName("primaryBtn")
+            button.style().unpolish(button)
+            button.style().polish(button)
 
     def _on_download_progress(percent: int, message: str):
         resource_id = active_resource_id[0]
@@ -167,7 +175,9 @@ def open_resource_manager(workspace_root: str = None, parent=None,
             value = int(percent)
         except (TypeError, ValueError):
             value = -1
-        if value >= 0:
+        if message:
+            _set_download_button(row, active=True, message=message)
+        elif value >= 0:
             _set_download_button(row, active=True, message=f"{t('Downloading...')} {max(0, min(100, value))}%")
         else:
             _set_download_button(row, active=True, message=t("Downloading..."))
@@ -296,21 +306,7 @@ def open_resource_manager(workspace_root: str = None, parent=None,
         button_row.setSpacing(8)
         button_row.addStretch(1)
 
-        download_url = str(item.get("open_url", "") or item.get("download_url", "")).strip()
-        download_btn = QPushButton(t("Open Download Page"), dialog)
-        download_btn.setObjectName("primaryBtn")
-        download_btn.setEnabled(bool(download_url))
-        if download_url:
-            download_btn.setToolTip(download_url)
-        download_btn.clicked.connect(
-            lambda _checked=False, url=download_url: _open_url(url)
-        )
-        button_row.addWidget(download_btn)
-
         resource_id = str(item.get("id", "") or "").strip()
-        # Every resource with a service-side download handler gets a one-click
-        # action.  The existing Open Download Page action remains available as
-        # a manual/alternative path.
         download_supported = bool(
             item.get("auto_download_supported", False)
             and service.supports_auto_download(resource_id)
@@ -331,14 +327,34 @@ def open_resource_manager(workspace_root: str = None, parent=None,
             "voice:pack-en": "Download Voices",
             "voice:vieneu": "Download VieNeu Models",
         }.get(resource_id, "Download")
+
+        # 1. One-click download button (primary when missing, subtle when already installed)
+        is_installed = item.get("status") == "installed"
         if download_supported:
-            resource_download_btn = QPushButton(t(download_label), dialog)
+            btn_text = t("Re-download") if is_installed else t(download_label)
+            resource_download_btn = QPushButton(btn_text, dialog)
+            if not is_installed:
+                resource_download_btn.setObjectName("primaryBtn")
             resource_download_btn.setToolTip(t("Download this resource into the target folder"))
             resource_download_btn.clicked.connect(
                 lambda _checked=False, rid=item["id"]: _start_download(rid)
             )
             button_row.addWidget(resource_download_btn)
 
+        # 2. Secondary Open Download Page button
+        download_url = str(item.get("open_url", "") or item.get("download_url", "")).strip()
+        download_btn = QPushButton(t("Open Download Page"), dialog)
+        if not download_supported:
+            download_btn.setObjectName("primaryBtn")
+        download_btn.setEnabled(bool(download_url))
+        if download_url:
+            download_btn.setToolTip(download_url)
+        download_btn.clicked.connect(
+            lambda _checked=False, url=download_url: _open_url(url)
+        )
+        button_row.addWidget(download_btn)
+
+        # 3. Open Storage Folder button
         open_folder_btn = QPushButton(t("Open Storage Folder"), dialog)
         open_folder_btn.setEnabled(bool(target_dir))
         open_folder_btn.clicked.connect(
