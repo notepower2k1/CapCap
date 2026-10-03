@@ -93,11 +93,11 @@ vieneu_hiddenimports = (
     + collect_submodules("sea_g2p")
 )
 av_hiddenimports = collect_submodules("av")
-engines_hiddenimports = collect_submodules("engines")
-services_hiddenimports = collect_submodules("services")
-workflows_hiddenimports = collect_submodules("workflows")
-translation_hiddenimports = collect_submodules("translation")
-capcut_hiddenimports = collect_submodules("capcut")
+engines_hiddenimports = collect_submodules("engines") + collect_submodules("app.engines")
+services_hiddenimports = collect_submodules("services") + collect_submodules("app.services")
+workflows_hiddenimports = collect_submodules("workflows") + collect_submodules("app.workflows")
+translation_hiddenimports = collect_submodules("translation") + collect_submodules("app.translation")
+capcut_hiddenimports = collect_submodules("capcut") + collect_submodules("app.capcut")
 
 # Exclude heavy packages we don't use
 excludes = [
