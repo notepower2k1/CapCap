@@ -6,7 +6,8 @@ conflicts with MPV.
 """
 import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QProgressBar, QFrame, QGraphicsOpacityEffect
+    QWidget, QVBoxLayout, QLabel, QProgressBar, QFrame, QGraphicsOpacityEffect,
+    QPushButton
 )
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QEvent
 from PySide6.QtGui import QPainter, QColor
@@ -34,6 +35,22 @@ class MainWindowLoadingOverlay(QWidget):
                 background-color: #141b27;
                 border: 1px solid #23334d;
                 border-radius: 12px;
+            }
+            QPushButton#overlayActionBtn {
+                background-color: #0284c7;
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: 700;
+                border: none;
+                border-radius: 6px;
+                padding: 9px 24px;
+                min-height: 22px;
+            }
+            QPushButton#overlayActionBtn:hover {
+                background-color: #0ea5e9;
+            }
+            QPushButton#overlayActionBtn:pressed {
+                background-color: #0369a1;
             }
         """)
 
@@ -86,6 +103,12 @@ class MainWindowLoadingOverlay(QWidget):
         self.status_label.setAlignment(Qt.AlignCenter)
         card_layout.addWidget(self.status_label)
 
+        self.action_btn = QPushButton(t("Back to Launcher"), self.card)
+        self.action_btn.setObjectName("overlayActionBtn")
+        self.action_btn.setCursor(Qt.PointingHandCursor)
+        self.action_btn.hide()
+        card_layout.addWidget(self.action_btn, 0, Qt.AlignCenter)
+
         main_layout.addWidget(self.card, 0, Qt.AlignCenter)
         main_layout.addStretch(1)
 
@@ -117,14 +140,44 @@ class MainWindowLoadingOverlay(QWidget):
     def show_for_video(self, video_path: str = "", max_timeout_ms: int = 4000):
         """Show overlay with video name and start safety timeout."""
         name = os.path.basename(video_path) if video_path else ""
+        self.title_label.setText(t("CapCap Video Translator"))
         self.subtitle_label.setText(name)
         self.subtitle_label.setVisible(bool(name))
+        self.progress_bar.show()
+        self.status_label.setText(t("Loading project & initializing player..."))
+        if hasattr(self, "action_btn"):
+            self.action_btn.hide()
         if self.parent():
             self.setGeometry(self.parent().rect())
         self.show()
         self.raise_()
         if max_timeout_ms > 0:
             self._safety_timer.start(max_timeout_ms)
+
+    def show_completion(self, title: str, status: str, button_text: str = "", on_action=None):
+        """Display a completion card with an action button (e.g. Return to Launcher)."""
+        self._safety_timer.stop()
+        self.progress_bar.hide()
+        self.subtitle_label.hide()
+        self.title_label.setText(title)
+        self.status_label.setText(status)
+        if button_text and on_action:
+            self.action_btn.setText(button_text)
+            try:
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=RuntimeWarning)
+                    self.action_btn.clicked.disconnect()
+            except Exception:
+                pass
+            self.action_btn.clicked.connect(on_action)
+            self.action_btn.show()
+        else:
+            self.action_btn.hide()
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+        self.show()
+        self.raise_()
 
     def set_status(self, text: str):
         self.status_label.setText(text)

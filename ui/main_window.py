@@ -17292,31 +17292,31 @@ class VideoTranslatorGUI(QMainWindow):
 
         if removed_paths:
             self.log(f"[Clean Project] Removed {len(removed_paths)} intermediate paths.")
-            detail_lines = [t("Cleaned these groups:")]
             for group_name, paths in removed_groups.items():
                 if paths:
-                    detail_lines.append(t("- {group}: {count} item(s)", group=t(group_name), count=len(paths)))
-            QMessageBox.information(
-                self,
-                t("Clean Project"),
-                t("Removed {count} intermediate paths for the current project.", count=len(removed_paths))
-                + "\n\n" + "\n".join(detail_lines),
+                    self.log(f"[Clean Project] - {group_name}: {len(paths)} item(s)")
+            summary_text = t("Removed {count} intermediate files and cached preview assets.", count=len(removed_paths))
+        else:
+            summary_text = t("No removable intermediate files were found.")
+
+        def _do_return():
+            self.hide_loading_overlay(fade=False)
+            self._return_to_launcher(
+                project_removed_from_recent=True,
+                persist_project_data=False,
+                target_video_path=cleaning_video_path,
+            )
+
+        overlay = getattr(self, "_loading_overlay", None)
+        if overlay is not None:
+            overlay.show_completion(
+                title="✅ " + t("Clean Project Completed"),
+                status=summary_text,
+                button_text=t("Quay về Launcher"),
+                on_action=_do_return,
             )
         else:
-            QMessageBox.information(
-                self,
-                t("Clean Project"),
-                t("No removable intermediate files were found for the current project."),
-            )
-        self.hide_loading_overlay(fade=False)
-        # The project directory above has intentionally been deleted. Do not
-        # persist the in-memory timeline while returning to the launcher,
-        # because that would recreate projects/<project_id>/timeline.json.
-        self._return_to_launcher(
-            project_removed_from_recent=True,
-            persist_project_data=False,
-            target_video_path=cleaning_video_path,
-        )
+            _do_return()
 
     def _return_to_launcher(self, project_removed_from_recent=True, *, persist_project_data=True, target_video_path=""):
         # Keep the complete saved timeline when returning to the launcher.

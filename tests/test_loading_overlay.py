@@ -14,6 +14,7 @@ from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication, QWidget
 from widgets.loading_overlay import MainWindowLoadingOverlay
 from main_window import VideoTranslatorGUI
+from ui.i18n import t
 
 app = QApplication.instance() or QApplication([])
 
@@ -86,6 +87,36 @@ class TestMainWindowLoadingOverlay(unittest.TestCase):
 
         VideoTranslatorGUI.hide_loading_overlay(gui, fade=True)
         gui._loading_overlay.dismiss.assert_called_once_with(fade=True)
+
+    def test_show_completion(self):
+        called = []
+        def on_click():
+            called.append(True)
+
+        self.overlay.show_completion(
+            title="✅ Clean Project Completed",
+            status="Removed 5 files",
+            button_text=t("Back to Launcher"),
+            on_action=on_click,
+        )
+        self.assertTrue(self.overlay.isVisible())
+        self.assertEqual(self.overlay.title_label.text(), "✅ Clean Project Completed")
+        self.assertEqual(self.overlay.status_label.text(), "Removed 5 files")
+        self.assertFalse(self.overlay.subtitle_label.isVisible())
+        self.assertFalse(self.overlay.progress_bar.isVisible())
+        self.assertTrue(self.overlay.action_btn.isVisible())
+        self.assertEqual(self.overlay.action_btn.text(), t("Back to Launcher"))
+
+        self.overlay.action_btn.click()
+        self.assertEqual(called, [True])
+
+        # Test show_for_video resets the card state
+        self.overlay.show_for_video("sample.mp4")
+        self.assertTrue(self.overlay.isVisible())
+        self.assertFalse(self.overlay.action_btn.isVisible())
+        self.assertTrue(self.overlay.progress_bar.isVisible())
+        self.assertEqual(self.overlay.subtitle_label.text(), "sample.mp4")
+        self.assertTrue(self.overlay.subtitle_label.isVisible())
 
 
 if __name__ == "__main__":
