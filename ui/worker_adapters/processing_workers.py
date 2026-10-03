@@ -301,7 +301,7 @@ class TranslationWorker(QThread):
                 raise
             self.finished.emit(translated_srt, "", fallback_notice)
         except Exception as exc:
-            if self._is_canceled or str(exc) == "canceled":
+            if self._is_canceled or isinstance(exc, InterruptedError):
                 self.finished.emit("", "canceled", "")
                 return
             print(f"Translation Thread Error: {exc}")

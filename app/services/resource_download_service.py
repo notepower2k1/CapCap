@@ -1339,9 +1339,12 @@ class ResourceDownloadService:
                         download_model(model_name, cache_dir=self._whisper_cache_root())
                     except Exception as primary_err:
                         if model_name == "turbo":
-                            download_model("mobiuslabsgmbh/faster-whisper-large-v3-turbo", cache_dir=self._whisper_cache_root())
+                            try:
+                                download_model("mobiuslabsgmbh/faster-whisper-large-v3-turbo", cache_dir=self._whisper_cache_root())
+                            except Exception as fallback_err:
+                                raise fallback_err from primary_err
                         else:
-                            raise primary_err
+                            raise
                 finally:
                     if old_endpoint is not None:
                         os.environ["HF_ENDPOINT"] = old_endpoint

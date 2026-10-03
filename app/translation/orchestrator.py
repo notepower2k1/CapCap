@@ -732,7 +732,10 @@ class TranslationOrchestrator:
         translated_texts: list[str] = []
 
         is_ollama = (provider_type or "").strip().lower() == "ollama"
-        batch_timeout = int(os.getenv("CAPCAP_OLLAMA_TIMEOUT", "3600")) if is_ollama else int(os.getenv("CAPCAP_AI_TIMEOUT", "300"))
+        try:
+            batch_timeout = int(os.getenv("CAPCAP_OLLAMA_TIMEOUT") or "3600") if is_ollama else int(os.getenv("CAPCAP_AI_TIMEOUT") or "300")
+        except (ValueError, TypeError):
+            batch_timeout = 3600 if is_ollama else 300
 
         ledger = RollingContextLedger(base_context=context_guidance)
 
@@ -814,7 +817,10 @@ class TranslationOrchestrator:
         providers_used = set()
         translated_texts_map = {}
         is_ollama = (provider_type or "").strip().lower() == "ollama"
-        batch_timeout = int(os.getenv("CAPCAP_OLLAMA_TIMEOUT", "3600")) if is_ollama else int(os.getenv("CAPCAP_AI_TIMEOUT", "300"))
+        try:
+            batch_timeout = int(os.getenv("CAPCAP_OLLAMA_TIMEOUT") or "3600") if is_ollama else int(os.getenv("CAPCAP_AI_TIMEOUT") or "300")
+        except (ValueError, TypeError):
+            batch_timeout = 3600 if is_ollama else 300
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
             future_to_idx = {}
             for idx, batch_item in enumerate(batches):

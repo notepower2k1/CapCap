@@ -653,6 +653,7 @@ class SubtitleController:
 
     def __init__(self, gui):
         self.gui = gui
+        self._translation_placeholder = ""
 
     def _show_translation_progress(self, *, is_retranslation: bool, provider_name: str = ""):
         """Show elapsed time for both first-time and repeated translation."""
@@ -1026,7 +1027,9 @@ class SubtitleController:
         is_retranslation = bool(
             self.gui.current_translated_segments or self.gui.translated_text.toPlainText().strip()
         )
-        self.gui.translated_text.setText(t("Translating with the selected provider... please wait."))
+        placeholder = t("Translating with the selected provider... please wait.")
+        self.gui.translated_text.setText(placeholder)
+        self._translation_placeholder = placeholder
         self.gui.translate_btn.setEnabled(False)
         self.gui.progress_bar.setValue(80)
         self.gui.update_project_step("translate_raw", "running")
@@ -1226,8 +1229,9 @@ class SubtitleController:
             if error == "canceled":
                 self.gui.log("[Translation] Translation canceled by user.")
                 self.gui.update_project_step("translate_raw", "pending")
-                placeholder = t("Translating with the selected provider... please wait.")
-                if self.gui.translated_text.toPlainText().strip() == placeholder:
+                stored = getattr(self, "_translation_placeholder", None)
+                current = self.gui.translated_text.toPlainText().strip()
+                if stored and current == stored.strip():
                     self.gui.translated_text.clear()
                 self.gui.refresh_ui_state()
                 return

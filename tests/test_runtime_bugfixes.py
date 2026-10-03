@@ -517,35 +517,33 @@ class TestRuntimeBugfixes(unittest.TestCase):
         self.assertIsNone(mock_gui._text_overlay_track)
         self.assertIsNone(mock_gui._text_overlay_layer)
 
-        # 3. Test load_project_context clears logo when logo_track is None
+        # 3. Test load_project_context clears logo when no L1 Logo track exists
         mock_gui = MagicMock()
-        mock_gui.timeline._timeline.tracks = []
+        mock_gui.timeline._timeline.tracks = []  # No logo track
         mock_gui.video_view = MagicMock()
         mock_gui._logo_overlay_track = "existing_track"
         mock_gui._logo_overlay_layer = "existing_layer"
-        mock_gui._refresh_text_layer_preview = MagicMock()
+        mock_state = MagicMock()
+        mock_state.settings = {}
+        mock_gui.project_bridge.load_context.return_value = {
+            "artifacts": {},
+            "last_original_srt_path": "",
+            "last_translated_srt_path": "",
+            "last_extracted_audio": "",
+            "last_vocals_path": "",
+            "last_music_path": "",
+            "last_voice_vi_path": "",
+            "last_mixed_vi_path": "",
+            "current_segment_models": [],
+            "current_translated_segment_models": [],
+            "current_segments": [],
+            "current_translated_segments": [],
+        }
 
-        # Run only the logo clearing section of load_project_context
-        # to verify clear_logo is invoked when logo_track is absent
-        try:
-            logo_track = next(
-                (
-                    track for track in mock_gui.timeline._timeline.tracks
-                    if str(getattr(track, "name", "")) == "L1 Logo"
-                    and getattr(track, "layers", None)
-                ),
-                None,
-            )
-            if logo_track is not None:
-                pass
-            else:
-                if hasattr(mock_gui, "video_view") and hasattr(mock_gui.video_view, "clear_logo"):
-                    mock_gui.video_view.clear_logo()
-                mock_gui._logo_overlay_track = None
-                mock_gui._logo_overlay_layer = None
-        except Exception:
-            pass
+        # Call the actual method
+        VideoTranslatorGUI.load_project_context(mock_gui, mock_state)
 
+        # Verify clear_logo was called
         mock_gui.video_view.clear_logo.assert_called_once()
         self.assertIsNone(mock_gui._logo_overlay_track)
         self.assertIsNone(mock_gui._logo_overlay_layer)
