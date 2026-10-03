@@ -888,14 +888,23 @@ class VideoTranslatorGUI(QMainWindow):
             from ui.widgets.loading_overlay import MainWindowLoadingOverlay
         self._loading_overlay = MainWindowLoadingOverlay(self)
         self._loading_overlay.hide()
+        self._project_loading_in_progress = False
 
     def show_loading_overlay(self, video_path: str = "", timeout_ms: int = 4000):
+        self._project_loading_in_progress = True
+        if hasattr(self, "video_view") and hasattr(self.video_view, "subtitle_item"):
+            try:
+                self.video_view.subtitle_item.set_text("")
+                self.video_view.subtitle_item.hide()
+            except Exception:
+                pass
         overlay = getattr(self, "_loading_overlay", None)
         if overlay is not None:
             target = video_path or getattr(self, "_current_video_path", "")
             overlay.show_for_video(target, timeout_ms)
 
     def hide_loading_overlay(self, fade: bool = True):
+        self._project_loading_in_progress = False
         overlay = getattr(self, "_loading_overlay", None)
         if overlay is not None:
             overlay.dismiss(fade=fade)
@@ -4508,6 +4517,11 @@ class VideoTranslatorGUI(QMainWindow):
             self.saved_subtitle_style_combo.addItem(name, name)
         self.saved_subtitle_style_combo.setCurrentIndex(0)
         self.saved_subtitle_style_combo.blockSignals(False)
+        has_selection = self.saved_subtitle_style_combo.currentIndex() > 0
+        if hasattr(self, "rename_subtitle_style_btn"):
+            self.rename_subtitle_style_btn.setEnabled(has_selection)
+        if hasattr(self, "delete_subtitle_style_btn"):
+            self.delete_subtitle_style_btn.setEnabled(has_selection)
 
     def save_current_subtitle_style_preset(self):
         name, ok = QInputDialog.getText(self, t("Save Style"), t("Preset name:"))
@@ -4522,7 +4536,65 @@ class VideoTranslatorGUI(QMainWindow):
         if idx >= 0:
             self.saved_subtitle_style_combo.setCurrentIndex(idx)
 
+    def rename_current_subtitle_style_preset(self):
+        if not hasattr(self, "saved_subtitle_style_combo"):
+            return
+        index = self.saved_subtitle_style_combo.currentIndex()
+        if index <= 0:
+            return
+        old_name = str(self.saved_subtitle_style_combo.itemData(index) or "").strip()
+        if not old_name:
+            return
+        new_name, ok = QInputDialog.getText(
+            self, "Đổi tên preset", "Tên mới:", text=old_name
+        )
+        if not ok or not (new_name or "").strip():
+            return
+        new_name = new_name.strip()
+        if new_name == old_name:
+            return
+        saved = self._read_saved_subtitle_style_presets()
+        if new_name in saved:
+            QMessageBox.warning(self, "Đổi tên preset", f"Đã tồn tại preset tên '{new_name}'.")
+            return
+        if old_name in saved:
+            saved[new_name] = saved.pop(old_name)
+            self.settings.setValue("saved_subtitle_styles", json.dumps(saved, ensure_ascii=False))
+            self.refresh_saved_subtitle_style_presets()
+            idx = self.saved_subtitle_style_combo.findData(new_name)
+            if idx >= 0:
+                self.saved_subtitle_style_combo.setCurrentIndex(idx)
+
+    def delete_current_subtitle_style_preset(self):
+        if not hasattr(self, "saved_subtitle_style_combo"):
+            return
+        index = self.saved_subtitle_style_combo.currentIndex()
+        if index <= 0:
+            return
+        preset_name = str(self.saved_subtitle_style_combo.itemData(index) or "").strip()
+        if not preset_name:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Xóa preset",
+            f"Bạn có chắc muốn xóa preset '{preset_name}' không?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        saved = self._read_saved_subtitle_style_presets()
+        if preset_name in saved:
+            saved.pop(preset_name, None)
+            self.settings.setValue("saved_subtitle_styles", json.dumps(saved, ensure_ascii=False))
+            self.refresh_saved_subtitle_style_presets()
+
     def load_selected_subtitle_style_preset(self, index: int):
+        has_selection = index > 0
+        if hasattr(self, "rename_subtitle_style_btn"):
+            self.rename_subtitle_style_btn.setEnabled(has_selection)
+        if hasattr(self, "delete_subtitle_style_btn"):
+            self.delete_subtitle_style_btn.setEnabled(has_selection)
         if index <= 0:
             return
         preset_name = self.saved_subtitle_style_combo.itemData(index)
@@ -6336,6 +6408,10 @@ class VideoTranslatorGUI(QMainWindow):
     def update_subtitle_preview_style(self):
         if not hasattr(self, "video_view"):
             return
+        if getattr(self, "_subtitle_preset_apply_in_progress", False):
+            return
+        if getattr(self, "_project_loading_in_progress", False):
+            return
         item = self.video_view.subtitle_item
         has_video = bool(self.video_path_edit.text().strip())
         has_segments = bool(self.get_active_segments())
@@ -6617,6 +6693,9 @@ class VideoTranslatorGUI(QMainWindow):
         if selected == "custom":
             self._capture_subtitle_custom_style_state()
         self.on_subtitle_position_mode_changed()
+        self.update_subtitle_preview_style()
+        if hasattr(self, "media_player") and not self.media_player.is_playing():
+            self._show_subtitle_drag_layer()
 
     def _update_animation_time_visibility(self):
         current_animation = current_source_text(self.subtitle_animation_combo).strip().lower()
@@ -14334,6 +14413,11 @@ class VideoTranslatorGUI(QMainWindow):
         """Show a representative live subtitle as the paused drag target."""
         if not hasattr(self, "video_view") or getattr(self, "_preview_video_has_burned_subtitles", False):
             return
+        if getattr(self, "_project_loading_in_progress", False):
+            return
+        overlay = getattr(self, "_loading_overlay", None)
+        if overlay is not None and overlay.isVisible():
+            return
         items = list(segments or self.live_preview_segments or self.get_active_segments() or [])
         if not items:
             return
@@ -17577,7 +17661,13 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception as exc:
                 print(f"[Preview] Deferred media load error: {exc}")
             finally:
-                QTimer.singleShot(150, lambda: self.hide_loading_overlay())
+                def _on_overlay_dismissed():
+                    self.hide_loading_overlay(fade=False)
+                    if hasattr(self, "sync_live_subtitle_preview"):
+                        self.sync_live_subtitle_preview()
+                    if hasattr(self, "media_player") and not self.media_player.is_playing():
+                        self._show_subtitle_drag_layer()
+                QTimer.singleShot(150, _on_overlay_dismissed)
 
         QTimer.singleShot(50, _deferred_load_media)
 

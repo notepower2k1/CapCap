@@ -1583,7 +1583,8 @@ class MpvVideoView(QWidget):
             self.logo_overlay.sync_to_view()
             self.logo_overlay.show()
             self.logo_overlay.raise_()
-        if self._subtitle_track_visible and self.subtitle_item.current_text:
+        win = self.window()
+        if not getattr(win, "_project_loading_in_progress", False) and self._subtitle_track_visible and self.subtitle_item.current_text:
             self.subtitle_item.show()
         self.blur_overlay.sync_to_view()
         self.mask_overlay.sync_to_view()
@@ -1614,6 +1615,9 @@ class MpvVideoView(QWidget):
     def _restore_subtitle_overlay(self):
         if not self.isVisible():
             return
+        win = self.window()
+        if getattr(win, "_project_loading_in_progress", False):
+            return
         modal = QApplication.activeModalWidget()
         if modal is not None and modal.isVisible():
             return
@@ -1630,7 +1634,8 @@ class MpvVideoView(QWidget):
     def set_subtitle_track_visible(self, visible: bool):
         """Set logical TS1 visibility independently of native window focus."""
         self._subtitle_track_visible = bool(visible)
-        if not self._subtitle_track_visible:
+        win = self.window()
+        if getattr(win, "_project_loading_in_progress", False) or not self._subtitle_track_visible:
             self.subtitle_item.hide()
         elif self.subtitle_item.current_text and self.isVisible():
             self.reposition_subtitle()
