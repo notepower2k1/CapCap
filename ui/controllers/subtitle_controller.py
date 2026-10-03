@@ -107,6 +107,7 @@ class TranslationPromptDialog(QDialog):
         # Provider note label
         self.provider_hint = QLabel()
         self.provider_hint.setObjectName("fieldHint")
+        self.provider_hint.setWordWrap(True)
         layout.addWidget(self.provider_hint)
 
         # Preset Selector
@@ -219,6 +220,13 @@ class TranslationPromptDialog(QDialog):
         elif provider == "bing":
             self.provider_hint.setText(t("💡 Bing Translator translates directly via web API (free, no key). It does not use LLM system prompts."))
             self.resize(self.width(), 240)
+        elif provider == "ollama":
+            self.provider_hint.setText(t("⚠️ Ollama runs directly on your computer hardware (GPU/CPU/RAM). Translation speed depends on your specs; if it exceeds timeout, it will automatically fall back to Google Translate."))
+            self.prompt_edit.setEnabled(True)
+            self.preset_combo.setEnabled(True)
+            self.auto_context_cb.setEnabled(True)
+            self.review_context_cb.setEnabled(self.auto_context_cb.isChecked())
+            self.resize(self.width(), 620)
         else:
             self.provider_hint.setText("")
             self.prompt_edit.setEnabled(True)

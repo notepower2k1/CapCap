@@ -124,6 +124,11 @@ class TranslationOrchestrator:
                         print("[AI Translation] Speaker Diarization: DISABLED (No speaker tags found in transcript cues)")
                     print(f"[AI Translation] Auto Dialogue Context: {'ENABLED (Pass 1 active)' if auto_context_enabled else 'DISABLED'}")
                     print("=" * 60)
+                    if (provider_type or "").strip().lower() == "ollama":
+                        print(
+                            "[AI Translation] ⚠️ LƯU Ý: Ollama chạy trực tiếp trên phần cứng máy tính (GPU/CPU/RAM). "
+                            "Tốc độ xử lý phụ thuộc vào cấu hình máy; nếu vượt quá thời gian chờ (timeout), hệ thống sẽ tự động thất bại và chuyển sang Google Translate."
+                        )
 
                     if context_guidance == "__SKIP__":
                         print("[AI Translation] Dialogue context & address rules explicitly skipped by user.")

@@ -1011,6 +1011,8 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Remote API": "API từ xa",
     "Removed {count} intermediate paths for the current project.": "Đã xóa {count} đường dẫn trung gian của dự án hiện tại.",
     "Requires a running Ollama server. Default model: gemma4:31b-cloud": "Cần máy chủ Ollama đang chạy. Model mặc định: gemma4:31b-cloud",
+    "Requires a running Ollama server. Speed depends on your hardware; tasks will fail/fallback if timeout expires.": "Cần máy chủ Ollama đang chạy. Tốc độ phụ thuộc phần cứng máy; nếu vượt quá thời gian chờ (timeout) sẽ tự động chuyển sang Google Translate.",
+    "⚠️ Ollama runs directly on your computer hardware (GPU/CPU/RAM). Translation speed depends on your specs; if it exceeds timeout, it will automatically fall back to Google Translate.": "⚠️ Ollama chạy trực tiếp trên phần cứng máy tính (GPU/CPU/RAM). Tốc độ dịch phụ thuộc cấu hình máy; nếu quá tải hoặc hết thời gian chờ (timeout), hệ thống sẽ tự động chuyển sang Google Translate.",
     "Rewrite Unavailable": "Không thể viết lại",
     "Rewrite content must stay in valid SRT format.": "Nội dung viết lại phải giữ đúng định dạng SRT hợp lệ.",
     "Rewriting...": "Đang viết lại...",

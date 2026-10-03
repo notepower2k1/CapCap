@@ -15598,7 +15598,7 @@ class VideoTranslatorGUI(QMainWindow):
                 base_url_edit.setText("http://localhost:11434/v1")
                 key_edit.clear()
                 model_edit.setText("gemma4:31b-cloud")
-                provider_hint.setText(t("Requires a running Ollama server. Default model: gemma4:31b-cloud"))
+                provider_hint.setText(t("Requires a running Ollama server. Speed depends on your hardware; tasks will fail/fallback if timeout expires."))
             model_edit.setReadOnly(False)
             adjust_dialog_size()
 
