@@ -51,7 +51,7 @@ CapCap includes an advanced AI dialogue analysis and pronoun consistency framewo
 ## Media Preview (MPV Backend) & Frame Inspector
 
 - **Native MPV Playback**: Smooth, hardware-accelerated playback of video and audio powered by `libmpv` (with seamless Qt Multimedia fallback).
-  - *Troubleshooting*: If the MPV player fails to start (e.g. error 126 or missing DLLs), install Microsoft Visual C++ Redistributable x64 via `installer\vc_redist.x64.exe`.
+  - *Troubleshooting*: If the MPV player fails to start (e.g. error 126 or missing DLLs), install Microsoft Visual C++ Redistributable x64 via `installer\vc_redist.x64.exe` or download directly from [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 - **Timeline Synchronization**: Dragging or scrubbing the Timeline playhead seeks the MPV player instantly.
 - **Exact Frame Preview & Large Frame Preview**: Inspect the current frame with pixel precision to review visual overlays, hardcoded subtitle positions, and blur masks.
 - **Fast Preview**: Quickly render a 5-second sample of the current timeline section to check subtitle formatting, audio mix, and visual layers before performing a full export.

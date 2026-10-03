@@ -44,5 +44,6 @@ recent_projects.json
 *.spec
 dist_installer/
 installer/*.exe
+!installer/vc_redist.x64.exe
 *.zip
 bug*.png

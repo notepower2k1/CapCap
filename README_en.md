@@ -72,7 +72,7 @@ Most CapCap settings can be configured directly from within the application.
 
 CapCap uses **libmpv** by default for smooth, frame-accurate video playback and preview:
 * **Visual C++ Requirement:** `libmpv-2.dll` requires **Microsoft Visual C++ 2015–2022 Redistributable (x64)** (version >= 14.20).
-* **If MPV fails to load** (shows an error or falls back to Qt player): Simply run the bundled installer at `installer\vc_redist.x64.exe` (or download it from Microsoft).
+* **If MPV fails to load** (shows an error or falls back to Qt player): Run the bundled installer at `installer\vc_redist.x64.exe` or download the latest official installer from [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 * **Updating / Using External MPV Library:** If you need to update or provide a custom 64-bit MPV library, place `libmpv-2.dll` into the `bin/mpv/` directory.
 
 ## ❤️ Support CapCap

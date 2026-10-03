@@ -5,12 +5,12 @@
 - Windows 10/11
 - Python 3.11 when running from source
 - FFmpeg and libmpv are included in the application resources
-- Microsoft Visual C++ 2015-2022 Redistributable (x64) (version >= 14.20) for `libmpv-2.dll` (installer available at `installer\vc_redist.x64.exe`)
+- Microsoft Visual C++ 2015-2022 Redistributable (x64) (version >= 14.20) for `libmpv-2.dll` (installer available at `installer\vc_redist.x64.exe` or download from [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe))
 - CPU mode works on systems without an NVIDIA GPU
 
 ### Media Preview & MPV Troubleshooting
 
-If MPV fails to load (error 126 / missing DLLs), run `installer\vc_redist.x64.exe` to install the Microsoft Visual C++ runtime, or place a compatible 64-bit `libmpv-2.dll` into `bin/mpv/`.
+If MPV fails to load (error 126 / missing DLLs), run `installer\vc_redist.x64.exe` or download from [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) to install the Microsoft Visual C++ runtime, or place a compatible 64-bit `libmpv-2.dll` into `bin/mpv/`.
 
 ## GPU mode
 

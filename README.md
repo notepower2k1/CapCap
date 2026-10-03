@@ -72,7 +72,7 @@ Phần lớn thiết lập của CapCap có thể được cấu hình trực ti
 
 CapCap mặc định sử dụng **libmpv** để xem trước video mượt mà và chuẩn xác từng khung hình:
 * **Yêu cầu Visual C++:** `libmpv-2.dll` yêu cầu **Microsoft Visual C++ 2015–2022 Redistributable (x64)** (phiên bản >= 14.20).
-* **Nếu MPV không khởi động được** (báo lỗi hoặc tự động chuyển về Qt player): Bạn chỉ cần chạy file cài đặt có sẵn tại `installer\vc_redist.x64.exe` (hoặc tải từ trang chủ Microsoft).
+* **Nếu MPV không khởi động được** (báo lỗi hoặc tự động chuyển về Qt player): Bạn có thể chạy file có sẵn tại `installer\vc_redist.x64.exe` hoặc tải trực tiếp bản mới nhất từ [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 * **Cập nhật / Sử dụng thư viện MPV ngoài:** Nếu muốn nâng cấp hoặc dùng thư viện MPV tùy chỉnh, hãy đặt file `libmpv-2.dll` (bản 64-bit) vào thư mục `bin/mpv/`.
 
 ## ❤️ Ủng hộ CapCap
