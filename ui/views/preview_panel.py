@@ -2099,10 +2099,20 @@ def build_preview_panel(gui):
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
     )
 
-    # Collapse handle strip removed - the track inspector is always
-    # expanded. Previously this contained a toggle button and a pin
-    # icon; both are now hidden and the empty strip has been removed.
+    # Collapse tab: a narrow vertical strip on the left edge of the inspector.
+    gui.inspector_collapse_tab = QPushButton("\u25b6")
+    gui.inspector_collapse_tab.setObjectName("inspectorCollapseTab")
+    gui.inspector_collapse_tab.setFixedWidth(16)
+    gui.inspector_collapse_tab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+    gui.inspector_collapse_tab.setToolTip("Hide/show inspector panel")
+    gui.inspector_collapse_tab.setCheckable(True)
+    gui.inspector_collapse_tab.setChecked(True)  # expanded by default
+    gui.inspector_collapse_tab.clicked.connect(gui.toggle_inspector_panel)
+    inspector_shell_layout.addWidget(gui.inspector_collapse_tab)
     inspector_shell_layout.addWidget(gui.inspector_stack, 1)
+    # Assign as the subtitle_inspector_toggle_btn so existing set_inspector_collapsed
+    # logic can still sync its text
+    gui.subtitle_inspector_toggle_btn = gui.inspector_collapse_tab
 
     gui.subtitle_inspector_shell = inspector_shell
     # Initial width; the actual value is recomputed by

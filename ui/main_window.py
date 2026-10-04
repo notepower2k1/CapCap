@@ -318,6 +318,21 @@ class VideoTranslatorGUI(QMainWindow):
                 background-color: #1d3047;
                 border-color: #4d82b5;
             }
+            QPushButton#sidebarCollapseTab, QPushButton#inspectorCollapseTab {
+                background-color: #162638;
+                color: #8ad7ff;
+                border: 1px solid #24384f;
+                border-radius: 3px;
+                font-size: 10px;
+                font-weight: 900;
+                padding: 0px;
+                min-width: 16px;
+                max-width: 16px;
+            }
+            QPushButton#sidebarCollapseTab:hover, QPushButton#inspectorCollapseTab:hover {
+                background-color: #1d3047;
+                border-color: #4d82b5;
+            }
             QLabel#heroTitle {
                 font-size: 20px;
                 font-weight: 700;
@@ -896,7 +911,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._setup_shortcuts()
 
     def _setup_shortcuts(self):
-        self._sidebar_toggle_shortcut = QShortcut(QKeySequence("Ctrl+B"), self, self.toggle_sidebar_panel)
+        pass
 
     def show_loading_overlay(self, video_path: str = "", timeout_ms: int = 4000):
         self._project_loading_in_progress = True
@@ -6107,11 +6122,9 @@ class VideoTranslatorGUI(QMainWindow):
 
     def toggle_sidebar_panel(self):
         """Show or hide the left sidebar panel. Disabled when video is playing."""
-        # Safety: never toggle while video is playing.
         if getattr(self, "_review_mode_active", False):
-            btn = getattr(self, "toggle_sidebar_btn", None)
+            btn = getattr(self, "sidebar_collapse_tab", None)
             if btn is not None:
-                # Restore button visual state without triggering recursion
                 btn.blockSignals(True)
                 scroll = getattr(self, "left_panel_scroll_area", None)
                 btn.setChecked(scroll.isVisible() if scroll else True)
@@ -6122,12 +6135,32 @@ class VideoTranslatorGUI(QMainWindow):
             return
         visible = not scroll.isVisible()
         scroll.setVisible(visible)
-        btn = getattr(self, "toggle_sidebar_btn", None)
+        btn = getattr(self, "sidebar_collapse_tab", None)
         if btn is not None:
             btn.setChecked(visible)
-            btn.setText("◀ Sidebar" if visible else "▶ Sidebar")
-        # Trigger layout/overlay reposition
+            btn.setText("\u25c0" if visible else "\u25b6")
         QTimer.singleShot(30, self._resync_preview_region_overlays)
+        QTimer.singleShot(30, self.reposition_subtitle)
+
+    def toggle_inspector_panel(self):
+        """Show or hide the inspector panel. Disabled when video is playing."""
+        if getattr(self, "_review_mode_active", False):
+            btn = getattr(self, "inspector_collapse_tab", None)
+            if btn is not None:
+                btn.blockSignals(True)
+                stack = getattr(self, "inspector_stack", None)
+                btn.setChecked(stack.isVisible() if stack else True)
+                btn.blockSignals(False)
+            return
+        stack = getattr(self, "inspector_stack", None)
+        if stack is None:
+            return
+        visible = not stack.isVisible()
+        self.set_inspector_collapsed(not visible)
+        btn = getattr(self, "inspector_collapse_tab", None)
+        if btn is not None:
+            btn.setChecked(visible)
+            btn.setText("\u25b6" if visible else "\u25c0")
         QTimer.singleShot(30, self.reposition_subtitle)
 
     def toggle_controls_panel(self):
@@ -11265,8 +11298,7 @@ class VideoTranslatorGUI(QMainWindow):
         shell = getattr(self, "subtitle_inspector_shell", None)
         if shell is None:
             return
-        # The handle was removed - no extra handle width to add.
-        handle_width = 0
+        handle_width = 16 if getattr(self, "inspector_collapse_tab", None) is not None else 0
 
         if bool(getattr(self, "_inspector_collapsed", False)):
             target_width = handle_width
@@ -11396,7 +11428,7 @@ class VideoTranslatorGUI(QMainWindow):
         if toggle_btn is not None:
             toggle_btn.blockSignals(True)
             toggle_btn.setChecked(not bool(collapsed))
-            toggle_btn.setText("▶" if collapsed else "◀")
+            toggle_btn.setText("◀" if collapsed else "▶")
             toggle_btn.setToolTip(t("Show track inspector" if collapsed else "Hide track inspector"))
             toggle_btn.blockSignals(False)
 
@@ -13094,12 +13126,12 @@ class VideoTranslatorGUI(QMainWindow):
         # Disable UI collapse toggles during playback to prevent Qt layout
         # disruption while video frames are being rendered.
         try:
-            sidebar_btn = getattr(self, "toggle_sidebar_btn", None)
+            sidebar_btn = getattr(self, "sidebar_collapse_tab", None)
             if sidebar_btn is not None:
                 sidebar_btn.setEnabled(not is_playing)
-            inspector_toggle = getattr(self, "subtitle_inspector_toggle_btn", None)
-            if inspector_toggle is not None and not self.is_inspector_anchored():
-                inspector_toggle.setEnabled(not is_playing)
+            inspector_btn = getattr(self, "inspector_collapse_tab", None)
+            if inspector_btn is not None:
+                inspector_btn.setEnabled(not is_playing)
         except Exception:
             pass
         QTimer.singleShot(0, self.refresh_ui_state)

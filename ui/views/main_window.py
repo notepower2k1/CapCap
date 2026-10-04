@@ -33,7 +33,7 @@ def build_main_window_ui(gui):
     root_layout.setSpacing(15)
     gui.root_layout = root_layout
 
-    scroll_area = _build_left_panel(gui)
+    sidebar_widget = _build_left_panel(gui)
     root_layout.addWidget(_build_header_bar(gui))
 
     content_layout = QHBoxLayout()
@@ -41,7 +41,7 @@ def build_main_window_ui(gui):
     gui.content_layout = content_layout
     right_panel = build_preview_panel(gui)
 
-    content_layout.addWidget(scroll_area)
+    content_layout.addWidget(sidebar_widget)
     content_layout.addWidget(right_panel, 1)
     gui.right_panel = right_panel
     root_layout.addLayout(content_layout, 1)
@@ -101,15 +101,6 @@ def _build_header_bar(gui):
     gui.preview_5s_btn.setMinimumWidth(140)
     gui.preview_5s_btn.setToolTip("Render five seconds with final export subtitle styling")
     layout.addWidget(gui.preview_5s_btn)
-
-    gui.toggle_sidebar_btn = QPushButton("◀ Sidebar")
-    gui.toggle_sidebar_btn.setObjectName("secondaryActionBtn")
-    gui.toggle_sidebar_btn.setMinimumHeight(42)
-    gui.toggle_sidebar_btn.setToolTip("Show/hide left sidebar panel (Ctrl+B)")
-    gui.toggle_sidebar_btn.setCheckable(True)
-    gui.toggle_sidebar_btn.setChecked(True)  # sidebar visible by default
-    gui.toggle_sidebar_btn.clicked.connect(gui.toggle_sidebar_panel)
-    layout.addWidget(gui.toggle_sidebar_btn)
 
     gui.toggle_panel_btn = QPushButton("Control")
     gui.toggle_panel_btn.setObjectName("secondaryActionBtn")
@@ -193,7 +184,30 @@ def _build_left_panel(gui):
 
     build_start_group(gui, left_layout)
     build_advanced_group(gui, left_layout)
-    return scroll_area
+
+    # Wrap scroll_area in an outer container so we can add a toggle tab
+    # on the right edge that collapses/expands the sidebar.
+    sidebar_wrapper = QWidget()
+    sidebar_wrapper.setObjectName("sidebarWrapper")
+    sidebar_wrapper.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+    wrapper_layout = QHBoxLayout(sidebar_wrapper)
+    wrapper_layout.setContentsMargins(0, 0, 0, 0)
+    wrapper_layout.setSpacing(0)
+    wrapper_layout.addWidget(scroll_area)
+
+    # Collapse tab: a narrow vertical strip on the right edge of the sidebar
+    gui.sidebar_collapse_tab = QPushButton("\u25c0")
+    gui.sidebar_collapse_tab.setObjectName("sidebarCollapseTab")
+    gui.sidebar_collapse_tab.setFixedWidth(16)
+    gui.sidebar_collapse_tab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+    gui.sidebar_collapse_tab.setToolTip("Hide/show sidebar")
+    gui.sidebar_collapse_tab.setCheckable(True)
+    gui.sidebar_collapse_tab.setChecked(True)  # visible by default
+    gui.sidebar_collapse_tab.clicked.connect(gui.toggle_sidebar_panel)
+    wrapper_layout.addWidget(gui.sidebar_collapse_tab)
+
+    gui.sidebar_wrapper = sidebar_wrapper
+    return sidebar_wrapper
 
 
 def _connect_ui_signals(gui):
@@ -440,23 +454,15 @@ def _initialize_ui_state(gui):
     gui.on_output_mode_changed(gui.output_mode_combo.currentText())
     gui.update_project_header()
     gui.refresh_ui_state()
-    # Restore anchor preference from settings. If user previously had
-    # the inspector anchored, keep it open; otherwise start collapsed.
-    if gui.is_subtitle_inspector_anchored():
-        gui._inspector_collapsed = False
-    else:
-        gui._inspector_collapsed = True
-    gui.set_inspector_collapsed(gui._inspector_collapsed)
-    # If collapsed on startup, switch the stack to default (no card) so
-    # only the handle is visible.
-    if gui._inspector_collapsed and hasattr(gui, "inspector_stack"):
-        gui.inspector_stack.setCurrentIndex(2)
+    # Inspector starts expanded by default
+    gui._inspector_collapsed = False
+    gui.set_inspector_collapsed(False)
     # Sync shell width to current collapsed state
     if hasattr(gui, "_sync_subtitle_inspector_shell_width"):
         try:
-            gui._sync_subtitle_inspector_shell_width(visible=not gui._inspector_collapsed)
+            gui._sync_subtitle_inspector_shell_width(visible=True)
         except Exception:
             pass
     gui.sync_segment_editor_rows()
-    gui.set_controls_panel_visible(False)
+    gui.set_controls_panel_visible(True)
 
