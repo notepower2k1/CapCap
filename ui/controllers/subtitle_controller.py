@@ -38,7 +38,7 @@ except ImportError:
 
 
 class TranslationPromptDialog(QDialog):
-    def __init__(self, parent, src_lang: str = "zh", target_lang: str = "vi"):
+    def __init__(self, parent, src_lang: str = "zh", target_lang: str = "vi", segment_count: int = 0):
         super().__init__(parent)
         self.settings = getattr(parent, "settings", None) or QSettings("CapCap", "VideoTranslatorGUI")
         self.setWindowTitle(t("Translation Settings & Prompt Review"))
@@ -46,6 +46,7 @@ class TranslationPromptDialog(QDialog):
         self.setMinimumHeight(240)
         self.src_lang = str(src_lang or "zh").strip().lower()
         self.target_lang = str(target_lang or "vi").strip().lower()
+        self._segment_count = int(segment_count or 0)
 
         self.selected_provider = "google_ai_studio"
         self.selected_batch_size = 80
@@ -67,6 +68,19 @@ class TranslationPromptDialog(QDialog):
         subtitle = QLabel("Review AI provider and prompt preset before translating.")
         subtitle.setObjectName("dialogSubtitle")
         layout.addWidget(subtitle)
+
+        # Segment count + batch strategy summary (shown only when segment_count > 0)
+        if self._segment_count > 0:
+            if self._segment_count <= 400:
+                strategy_hint = t("Short video — AI will translate in a single full-context pass.")
+            else:
+                strategy_hint = t("Long video — AI will translate in sequential batches for consistency.")
+            info_label = QLabel(
+                f"\u2022 {t('Segments to translate:')} {self._segment_count}  ·  {strategy_hint}"
+            )
+            info_label.setObjectName("fieldHint")
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label)
 
         # Provider field
         provider_col = QVBoxLayout()
@@ -916,10 +930,20 @@ class SubtitleController:
             self.gui.last_original_srt_path = out_path
             self.gui.processed_artifacts["srt_original"] = out_path
             self.gui.persist_transcription_project_data(segments, out_path)
-            QMessageBox.information(self.gui, t("Success"), f"{t('Transcription completed!')}\n{t('Original SRT saved to:')} {out_path}")
+            seg_count = len(segments)
+            self.gui.log(f"[Transcript] Completed: {seg_count} segments generated.")
+            QMessageBox.information(
+                self.gui, t("Success"),
+                f"{t('Transcription completed!')} ({seg_count} {t('segments')})\n{t('Original SRT saved to:')} {out_path}"
+            )
         else:
+            seg_count = len(segments)
+            self.gui.log(f"[Transcript] Completed: {seg_count} segments generated.")
             self.gui.persist_transcription_project_data(segments)
-            QMessageBox.information(self.gui, t("Success"), t("Transcription completed!"))
+            QMessageBox.information(
+                self.gui, t("Success"),
+                f"{t('Transcription completed!')} ({seg_count} {t('segments')})"
+            )
 
         self.gui.refresh_ui_state()
         self.gui.schedule_auto_frame_preview()
@@ -984,7 +1008,8 @@ class SubtitleController:
 
         if show_prompt_dialog:
             try:
-                dialog = TranslationPromptDialog(self.gui, src_lang=src_lang, target_lang=target_lang)
+                seg_count = len(getattr(self.gui, "current_segments", None) or [])
+                dialog = TranslationPromptDialog(self.gui, src_lang=src_lang, target_lang=target_lang, segment_count=seg_count)
                 if dialog.exec() != QDialog.Accepted:
                     self.gui.log("[Translation] Translation canceled by user.")
                     return
@@ -1306,13 +1331,21 @@ class SubtitleController:
             self.gui.last_translated_srt_path = out_path
             self.gui.processed_artifacts["srt_translated"] = out_path
             self.gui.persist_translation_project_data(self.gui.current_translated_segments, out_path)
-            message = f"{t('Process complete! Subtitle saved and loaded for preview:')}\n{out_path}"
+            seg_count = len(self.gui.current_translated_segments or [])
+            self.gui.log(f"[Translation] Completed: {seg_count} segments translated.")
+            message = (
+                f"{t('Translation complete!')} ({seg_count} {t('segments')})\n"
+                f"{t('Process complete! Subtitle saved and loaded for preview:')}\n{out_path}"
+            )
             if fallback_text:
                 message = f"{fallback_text}\n\n{message}"
             QMessageBox.information(self.gui, t("Finished"), message)
         else:
+            seg_count = len(self.gui.current_translated_segments or [])
+            self.gui.log(f"[Translation] Completed: {seg_count} segments translated.")
             self.gui.persist_translation_project_data(self.gui.current_translated_segments)
-            message = fallback_text if fallback_text else t("Translation complete!")
+            base_msg = f"{t('Translation complete!')} ({seg_count} {t('segments')})"
+            message = f"{fallback_text}\n\n{base_msg}" if fallback_text else base_msg
             QMessageBox.information(self.gui, t("Finished"), message)
 
         if fallback_notice:

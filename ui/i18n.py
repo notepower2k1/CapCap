@@ -1302,6 +1302,10 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Generate Voice": "Tạo giọng đọc",
     "{engine} Completed": "{engine} đã hoàn tất",
     "{provider} Completed": "{provider} đã hoàn tất",
+    "Segments to translate:": "Số câu cần dịch:",
+    "Short video — AI will translate in a single full-context pass.": "Video ngắn — AI sẽ dịch toàn bộ trong 1 lượt gửi duy nhất.",
+    "Long video — AI will translate in sequential batches for consistency.": "Video dài — AI sẽ dịch theo nhóm tuần tự để đảm bảo nhất quán.",
+    "segments": "câu",
 }
 
 
