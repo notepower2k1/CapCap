@@ -374,6 +374,15 @@ class VideoTranslatorGUI(QMainWindow):
                 font-size: 11px;
                 font-weight: 700;
             }
+            QLabel#subtitleSummaryBadge {
+                background-color: #142e47;
+                color: #6ee7d6;
+                border: 1px solid #2e597d;
+                border-radius: 999px;
+                padding: 2px 10px;
+                font-size: 11px;
+                font-weight: 700;
+            }
             QLabel#statusChip {
                 background-color: #152537;
                 color: #dbe5f3;

@@ -1436,19 +1436,17 @@ def build_preview_panel(gui):
     inspector_layout.setSpacing(6)
 
     inspector_header = QHBoxLayout()
-    inspector_header.setSpacing(8)
-    inspector_copy = QVBoxLayout()
-    inspector_copy.setSpacing(2)
+    inspector_header.setSpacing(10)
     inspector_title = QLabel("Subtitle Inspector")
     inspector_title.setObjectName("statusHeadline")
-    inspector_copy.addWidget(inspector_title)
+    inspector_header.addWidget(inspector_title)
+
     gui.subtitle_inspector_summary_label = QLabel("")
-    gui.subtitle_inspector_summary_label.setObjectName("helperLabel")
-    gui.subtitle_inspector_summary_label.setWordWrap(True)
-    gui.subtitle_inspector_summary_label.setVisible(True)
-    inspector_copy.addWidget(gui.subtitle_inspector_summary_label)
-    inspector_header.addLayout(inspector_copy, 1)
-    inspector_header.addStretch(0)
+    gui.subtitle_inspector_summary_label.setObjectName("subtitleSummaryBadge")
+    gui.subtitle_inspector_summary_label.setAlignment(Qt.AlignCenter)
+    gui.subtitle_inspector_summary_label.setVisible(False)
+    inspector_header.addWidget(gui.subtitle_inspector_summary_label)
+    inspector_header.addStretch(1)
     inspector_layout.addLayout(inspector_header)
 
     # --- Action buttons at top ---
