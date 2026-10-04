@@ -1436,11 +1436,8 @@ def build_preview_panel(gui):
     inspector_layout.setSpacing(6)
 
     inspector_header = QHBoxLayout()
-    inspector_header.setSpacing(10)
-    inspector_title = QLabel("Subtitle Inspector")
-    inspector_title.setObjectName("statusHeadline")
-    inspector_header.addWidget(inspector_title)
-
+    inspector_header.setSpacing(8)
+    inspector_header.setContentsMargins(0, 0, 0, 0)
     gui.subtitle_inspector_summary_label = QLabel("")
     gui.subtitle_inspector_summary_label.setObjectName("subtitleSummaryBadge")
     gui.subtitle_inspector_summary_label.setAlignment(Qt.AlignCenter)
@@ -1543,9 +1540,6 @@ def build_preview_panel(gui):
     audio_copy = QVBoxLayout()
     audio_copy.setSpacing(0)
     audio_copy.setContentsMargins(0, 0, 0, 0)
-    audio_title = QLabel("Audio")
-    audio_title.setObjectName("statusHeadline")
-    audio_copy.addWidget(audio_title)
     # Information labels (track name, layer count) are kept for
     # internal use (e.g. _current_audio_track_for_inspector reads
     # the track name) but hidden from the user.
@@ -1648,9 +1642,6 @@ def build_preview_panel(gui):
     blur_layout.setContentsMargins(12, 10, 12, 10)
     blur_layout.setSpacing(6)
 
-    blur_title = QLabel("Blur")
-    blur_title.setObjectName("statusHeadline")
-    blur_layout.addWidget(blur_title)
     gui.blur_inspector_track_name_label = QLabel("-")
     gui.blur_inspector_track_name_label.setObjectName("helperLabel")
     gui.blur_inspector_track_name_label.setVisible(False)
@@ -1758,9 +1749,6 @@ def build_preview_panel(gui):
     logo_layout.setContentsMargins(12, 10, 12, 10)
     logo_layout.setSpacing(6)
 
-    logo_title = QLabel("L1 Logo")
-    logo_title.setObjectName("statusHeadline")
-    logo_layout.addWidget(logo_title)
     gui.logo_inspector_summary_label = QLabel(
         "Adjust the watermark image on the video. Drag the logo on the "
         "preview to reposition; use the controls below for opacity and "
@@ -1833,9 +1821,6 @@ def build_preview_panel(gui):
     mask_layout.setContentsMargins(12, 10, 12, 10)
     mask_layout.setSpacing(6)
 
-    mask_title = QLabel("M1 Mask")
-    mask_title.setObjectName("statusHeadline")
-    mask_layout.addWidget(mask_title)
     gui.mask_inspector_summary_label = QLabel(
         "Drag the mask on the video to move it. Drag a corner to "
         "resize. The X button deletes the mask. The mask is applied "
@@ -1899,9 +1884,6 @@ def build_preview_panel(gui):
     text_layout = QVBoxLayout(text_inspector_card)
     text_layout.setContentsMargins(12, 10, 12, 10)
     text_layout.setSpacing(8)
-    text_title = QLabel("Text Layer")
-    text_title.setObjectName("statusHeadline")
-    text_layout.addWidget(text_title)
     _add_layer_timing_controls(text_layout, "text")
     gui.text_inspector_content = QTextEdit()
     gui.text_inspector_content.setPlaceholderText("Enter text")
@@ -1965,9 +1947,6 @@ def build_preview_panel(gui):
     default_layout = QVBoxLayout(default_inspector_card)
     default_layout.setContentsMargins(14, 14, 14, 14)
     default_layout.setSpacing(10)
-    default_title = QLabel("Track Inspector")
-    default_title.setObjectName("statusHeadline")
-    default_layout.addWidget(default_title)
     gui.default_inspector_summary_label = QLabel(
         "Click a layer on a track to view its settings."
     )
@@ -1985,9 +1964,6 @@ def build_preview_panel(gui):
     video_layout = QVBoxLayout(video_inspector_card)
     video_layout.setContentsMargins(14, 14, 14, 14)
     video_layout.setSpacing(10)
-    video_title = QLabel("V1 Video")
-    video_title.setObjectName("statusHeadline")
-    video_layout.addWidget(video_title)
     gui.video_inspector_summary_label = QLabel(
         "Adjust the look of the original video. The filter is applied to the "
         "export and the live preview."

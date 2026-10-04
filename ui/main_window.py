@@ -11492,6 +11492,17 @@ class VideoTranslatorGUI(QMainWindow):
 
         self._syncing_segment_editor = True
         try:
+            parent_scroll_bar = None
+            saved_scroll_pos = 0
+            if hasattr(self, "subtitle_inspector_card") and self.subtitle_inspector_card:
+                p = self.subtitle_inspector_card.parent()
+                while p:
+                    if isinstance(p, QScrollArea):
+                        parent_scroll_bar = p.verticalScrollBar()
+                        saved_scroll_pos = parent_scroll_bar.value()
+                        break
+                    p = p.parent()
+
             self._clear_segment_editor_rows()
             self._segment_editor_rows = []
             rows = self._segment_editor_display_rows()
@@ -11556,31 +11567,28 @@ class VideoTranslatorGUI(QMainWindow):
                 original_label.setObjectName("helperLabel")
                 original_label.setVisible(show_original and bool(row["original"].strip()))
 
-                # Speaker assignment (hidden if speaker diarization is disabled and no speakers detected)
+                # Speaker assignment and voice speed
+                speaker_speed_row = QHBoxLayout()
+                speaker_speed_row.setContentsMargins(0, 0, 0, 0)
+                speaker_speed_row.setSpacing(8)
+
                 speaker_ids = self._detected_speaker_ids()
                 diarization_enabled = (
                     hasattr(self, "is_speaker_diarization_enabled") and self.is_speaker_diarization_enabled()
                 ) or bool(speaker_ids)
                 if diarization_enabled and speaker_ids:
-                    speaker_row = QHBoxLayout()
-                    speaker_row.setContentsMargins(0, 0, 0, 0)
-                    speaker_row.setSpacing(8)
                     segment_source = self.current_translated_segments or self.current_segments or []
                     selected_speaker = ""
                     if 0 <= idx < len(segment_source):
                         selected_speaker = str(segment_source[idx].get("speaker", "") or "").strip()
-                    try:
-                        speaker_position = speaker_ids.index(selected_speaker)
-                    except ValueError:
-                        speaker_position = -1
                     speaker_indicator = QLabel()
                     speaker_indicator.setFixedSize(10, 10)
                     speaker_indicator.setStyleSheet(
                         "background: %s; border-radius: 5px; border: 1px solid #dcecff;"
                         % (self._speaker_color_hex(selected_speaker) if selected_speaker else "#53657d")
                     )
-                    speaker_row.addWidget(speaker_indicator)
-                    speaker_row.addWidget(QLabel(t("Speaker:")))
+                    speaker_speed_row.addWidget(speaker_indicator)
+                    speaker_speed_row.addWidget(QLabel(t("Speaker:")))
                     speaker_combo = QComboBox()
                     for position, speaker_id in enumerate(speaker_ids):
                         speaker_combo.addItem(self._speaker_display_name(speaker_id, position), speaker_id)
@@ -11597,14 +11605,9 @@ class VideoTranslatorGUI(QMainWindow):
                             segment_index, str(combo.currentData() or "")
                         )
                     )
-                    speaker_row.addWidget(speaker_combo, 1)
-                    speaker_row.addStretch()
-                    card_layout.addLayout(speaker_row)
+                    speaker_speed_row.addWidget(speaker_combo, 1)
 
-                speed_row = QHBoxLayout()
-                speed_row.setContentsMargins(0, 0, 0, 0)
-                speed_row.setSpacing(8)
-                speed_label = QLabel(t("Voice Speed:"))
+                speed_label = QLabel(t("Speed:") if (diarization_enabled and speaker_ids) else t("Voice Speed:"))
                 speed_label.setObjectName("helperLabel")
                 speed_spin = ReliableDoubleSpinBox()
                 speed_spin.setRange(0.5, 3.0)
@@ -11612,17 +11615,18 @@ class VideoTranslatorGUI(QMainWindow):
                 speed_spin.setDecimals(1)
                 speed_spin.setValue(float(row.get("voice_speed", 1.0)))
                 speed_spin.setSuffix("x")
-                speed_spin.setFixedWidth(85)
+                speed_spin.setFixedWidth(75 if (diarization_enabled and speaker_ids) else 85)
                 speed_spin.setFixedHeight(26)
                 speed_spin.setStyleSheet("QDoubleSpinBox { padding: 2px 4px; border-radius: 6px; }")
                 speed_spin.valueChanged.connect(
                     lambda val, idx=idx: self.on_segment_voice_speed_changed(idx, val)
                 )
-                speed_row.addWidget(speed_label)
-                speed_row.addWidget(speed_spin)
-                speed_row.addStretch()
+                speaker_speed_row.addWidget(speed_label)
+                speaker_speed_row.addWidget(speed_spin)
+                if not (diarization_enabled and speaker_ids):
+                    speaker_speed_row.addStretch()
 
-                card_layout.addLayout(speed_row)
+                card_layout.addLayout(speaker_speed_row)
 
                 # Video Freeze / Extension controls
                 ext_dur = float(row.get("extended_duration", 0.0) or 0.0)
@@ -11808,6 +11812,8 @@ class VideoTranslatorGUI(QMainWindow):
                 self._update_segment_spoken_status(idx)
 
             self._set_segment_editor_highlight(selected_index)
+            if parent_scroll_bar is not None:
+                parent_scroll_bar.setValue(saved_scroll_pos)
         finally:
             self._syncing_segment_editor = False
 
