@@ -966,10 +966,13 @@ class TranslationOrchestrator:
                 "[AI Translation] Full-context single pass: "
                 f"segments={len(source_texts)}, input~{input_tokens} tokens, output~{response_tokens} tokens."
             )
+            # Give the full provider output limit so the model is never cut short.
+            # For cloud APIs (8192/65536) this is free; for Ollama (4096) it is still safe.
+            single_pass_tokens = output_limit
             return ([(
                 list(source_texts),
                 list(translated_texts) if translated_texts is not None else None,
-                min(output_limit, max(1024, response_tokens)),
+                single_pass_tokens,
                 list(source_speakers) if source_speakers is not None else None,
             )], True)
 
@@ -1006,7 +1009,7 @@ class TranslationOrchestrator:
                 batches.append((
                     current_source,
                     current_drafts,
-                    max(1024, min(4096, current_response_tokens + 128)),
+                    max(1024, min(output_limit, math.ceil(current_response_tokens * 2.5) + 256)),
                     current_speakers,
                 ))
                 current_source = []
@@ -1025,7 +1028,7 @@ class TranslationOrchestrator:
             batches.append((
                 current_source,
                 current_drafts,
-                max(1024, min(4096, current_response_tokens + 128)),
+                max(1024, min(output_limit, math.ceil(current_response_tokens * 2.5) + 256)),
                 current_speakers,
             ))
         return batches, False
