@@ -747,7 +747,7 @@ class LauncherWindow(QDialog):
         footer_row = QHBoxLayout()
         footer_row.setContentsMargins(0, 0, 0, 0)
         footer_row.addStretch()
-        self._footer_version_label = QLabel("Version 8.0.3")
+        self._footer_version_label = QLabel("Version 8.0.4")
         self._footer_version_label.setStyleSheet("color: #4a6382; font-size: 11px; font-weight: 600;")
         footer_row.addWidget(self._footer_version_label)
         root.addLayout(footer_row)
