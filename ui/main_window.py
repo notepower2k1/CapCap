@@ -17815,9 +17815,21 @@ class VideoTranslatorGUI(QMainWindow):
                         if hasattr(self, "media_player") and not self.media_player.is_playing():
                             self._show_subtitle_drag_layer()
                         if hasattr(self, "video_view"):
-                            overlay = getattr(self.video_view, "logo_overlay", None)
-                            if overlay is not None and getattr(overlay, "_regions", None) and getattr(self.video_view, "_logo_track_visible", True):
-                                overlay.sync_to_view()
+                            logo_ov = getattr(self.video_view, "logo_overlay", None)
+                            if logo_ov is not None and getattr(logo_ov, "_regions", None) and getattr(self.video_view, "_logo_track_visible", True):
+                                logo_ov.sync_to_view()
+                            text_ov = getattr(self.video_view, "text_overlay", None)
+                            if text_ov is not None:
+                                if getattr(self, "_text_overlay_track", None) is not None and getattr(self, "_text_overlay_layer", None) is not None:
+                                    try:
+                                        text_ov.sync_to_view()
+                                    except Exception:
+                                        pass
+                                else:
+                                    try:
+                                        text_ov.hide()
+                                    except Exception:
+                                        pass
                     QTimer.singleShot(150, _on_overlay_dismissed)
 
             QTimer.singleShot(50, _deferred_load_media)
