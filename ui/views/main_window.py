@@ -102,6 +102,15 @@ def _build_header_bar(gui):
     gui.preview_5s_btn.setToolTip("Render five seconds with final export subtitle styling")
     layout.addWidget(gui.preview_5s_btn)
 
+    gui.toggle_sidebar_btn = QPushButton("◀ Sidebar")
+    gui.toggle_sidebar_btn.setObjectName("secondaryActionBtn")
+    gui.toggle_sidebar_btn.setMinimumHeight(42)
+    gui.toggle_sidebar_btn.setToolTip("Show/hide left sidebar panel (Ctrl+B)")
+    gui.toggle_sidebar_btn.setCheckable(True)
+    gui.toggle_sidebar_btn.setChecked(True)  # sidebar visible by default
+    gui.toggle_sidebar_btn.clicked.connect(gui.toggle_sidebar_panel)
+    layout.addWidget(gui.toggle_sidebar_btn)
+
     gui.toggle_panel_btn = QPushButton("Control")
     gui.toggle_panel_btn.setObjectName("secondaryActionBtn")
     gui.toggle_panel_btn.setMinimumHeight(42)

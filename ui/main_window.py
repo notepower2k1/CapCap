@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
                              QColorDialog, QTabWidget, QDialog, QSizePolicy, QInputDialog, QLayout,
                              QSpinBox)
 from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QEvent, Signal, QPoint, QRect
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QIcon, QImage, QKeySequence, QPixmap, QTextCursor
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QIcon, QImage, QKeySequence, QPixmap, QShortcut, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
 APP_PATH = os.path.join(os.path.dirname(__file__), '..', 'app')
@@ -893,6 +893,10 @@ class VideoTranslatorGUI(QMainWindow):
         self._loading_overlay = MainWindowLoadingOverlay(parent_widget)
         self._loading_overlay.hide()
         self._project_loading_in_progress = False
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self):
+        self._sidebar_toggle_shortcut = QShortcut(QKeySequence("Ctrl+B"), self, self.toggle_sidebar_panel)
 
     def show_loading_overlay(self, video_path: str = "", timeout_ms: int = 4000):
         self._project_loading_in_progress = True
@@ -6096,6 +6100,35 @@ class VideoTranslatorGUI(QMainWindow):
                 event.accept()
                 return
         super().keyPressEvent(event)
+
+    def reposition_subtitle(self):
+        if hasattr(self, "video_view") and hasattr(self.video_view, "reposition_subtitle"):
+            self.video_view.reposition_subtitle()
+
+    def toggle_sidebar_panel(self):
+        """Show or hide the left sidebar panel. Disabled when video is playing."""
+        # Safety: never toggle while video is playing.
+        if getattr(self, "_review_mode_active", False):
+            btn = getattr(self, "toggle_sidebar_btn", None)
+            if btn is not None:
+                # Restore button visual state without triggering recursion
+                btn.blockSignals(True)
+                scroll = getattr(self, "left_panel_scroll_area", None)
+                btn.setChecked(scroll.isVisible() if scroll else True)
+                btn.blockSignals(False)
+            return
+        scroll = getattr(self, "left_panel_scroll_area", None)
+        if scroll is None:
+            return
+        visible = not scroll.isVisible()
+        scroll.setVisible(visible)
+        btn = getattr(self, "toggle_sidebar_btn", None)
+        if btn is not None:
+            btn.setChecked(visible)
+            btn.setText("◀ Sidebar" if visible else "▶ Sidebar")
+        # Trigger layout/overlay reposition
+        QTimer.singleShot(30, self._resync_preview_region_overlays)
+        QTimer.singleShot(30, self.reposition_subtitle)
 
     def toggle_controls_panel(self):
         # Hide-controls is disabled - the workflow panel is always visible.
@@ -11343,11 +11376,8 @@ class VideoTranslatorGUI(QMainWindow):
         # on Play) just hide the details without collapsing the shell.
 
     def set_inspector_collapsed(self, collapsed: bool):
-        """Collapse or expand the inspector shell. The track layer
-        inspector is always expanded - collapse is disabled.
-        """
-        collapsed = False
-        self._inspector_collapsed = False
+        """Collapse or expand the inspector shell."""
+        self._inspector_collapsed = bool(collapsed)
         # Sync shell width
         try:
             self._sync_subtitle_inspector_shell_width(visible=not bool(collapsed))
@@ -13059,6 +13089,17 @@ class VideoTranslatorGUI(QMainWindow):
                 pass
         try:
             self._apply_mask_to_preview()
+        except Exception:
+            pass
+        # Disable UI collapse toggles during playback to prevent Qt layout
+        # disruption while video frames are being rendered.
+        try:
+            sidebar_btn = getattr(self, "toggle_sidebar_btn", None)
+            if sidebar_btn is not None:
+                sidebar_btn.setEnabled(not is_playing)
+            inspector_toggle = getattr(self, "subtitle_inspector_toggle_btn", None)
+            if inspector_toggle is not None and not self.is_inspector_anchored():
+                inspector_toggle.setEnabled(not is_playing)
         except Exception:
             pass
         QTimer.singleShot(0, self.refresh_ui_state)
