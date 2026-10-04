@@ -17818,12 +17818,9 @@ class VideoTranslatorGUI(QMainWindow):
                             self.sync_live_subtitle_preview()
                         if hasattr(self, "media_player") and not self.media_player.is_playing():
                             self._show_subtitle_drag_layer()
-                        if hasattr(self, "video_view"):
-                            logo_ov = getattr(self.video_view, "logo_overlay", None)
-                            if logo_ov is not None and getattr(logo_ov, "_regions", None) and getattr(self.video_view, "_logo_track_visible", True):
-                                logo_ov.sync_to_view()
-                        if hasattr(self, "_refresh_text_layer_preview"):
-                            self._refresh_text_layer_preview()
+                        self._timed_layer_preview_signature = None
+                        if hasattr(self, "refresh_timed_layer_preview"):
+                            self.refresh_timed_layer_preview()
                     QTimer.singleShot(150, _on_overlay_dismissed)
 
             QTimer.singleShot(50, _deferred_load_media)

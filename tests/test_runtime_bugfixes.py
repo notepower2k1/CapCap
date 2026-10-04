@@ -805,6 +805,84 @@ class TestRuntimeBugfixes(unittest.TestCase):
         overlay.set_suppressed(False)
         self.assertFalse(overlay.isVisible())
 
+    def test_refresh_timed_layer_preview_restores_active_layers(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui._project_loading_in_progress = False
+        gui._timed_layer_preview_signature = None
+        gui._logo_track_preview_visible = True
+        gui.media_player = MagicMock()
+        gui.media_player.position.return_value = 0
+        gui.video_view = MagicMock()
+
+        logo_layer = MagicMock(id="logo_1", type="image", source="test.png", start_time=0.0, end_time=5.0)
+        mask_layer = MagicMock(id="mask_1", type="mask", start_time=0.0, end_time=5.0)
+        blur_layer = MagicMock(
+            id="blur_1",
+            type="blur",
+            start_time=0.0,
+            end_time=5.0,
+            position_x=0.1,
+            position_y=0.1,
+            width=0.2,
+            height=0.2,
+            blur_strength=20.0,
+            blur_opacity=1.0,
+            pixelate=False,
+            pixelate_size=12,
+        )
+        text_layer = MagicMock(id="text_1", type="text", start_time=0.0, end_time=5.0)
+
+        track_logo = MagicMock(name="L1 Logo", layers=[logo_layer])
+        track_logo.name = "L1 Logo"
+        track_mask = MagicMock(name="M1", layers=[mask_layer])
+        track_mask.name = "M1"
+        track_blur = MagicMock(name="B1", layers=[blur_layer])
+        track_blur.name = "B1"
+        track_text = MagicMock(name="T1", layers=[text_layer])
+        track_text.name = "T1"
+
+        gui.timeline = MagicMock()
+        gui.timeline._timeline = MagicMock()
+        gui.timeline._timeline.tracks = [track_logo, track_mask, track_blur, track_text]
+        gui.timeline._selected_layer_id = ""
+
+        gui._layer_is_active_at_preview_time.return_value = True
+        gui._preview_is_playing.return_value = False
+        gui._deferred_effect_layer_id_for.return_value = None
+        gui._current_mask_regions_payload.return_value = [{"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2}]
+        gui._blur_effect_enabled.return_value = True
+
+        VideoTranslatorGUI.refresh_timed_layer_preview(gui, position_ms=0)
+
+        # Verify text layer preview refresh
+        gui._refresh_text_layer_preview.assert_called_once_with("")
+        # Verify logo layer overlay restored
+        gui._show_logo_overlay.assert_called_once_with(track_logo, logo_layer, editable=False)
+        # Verify mask regions set and applied to preview
+        gui.video_view.set_mask_regions.assert_called_once()
+        self.assertTrue(gui._apply_mask_to_preview.called)
+        # Verify blur regions set and applied to preview
+        gui.video_view.set_blur_regions_normalized.assert_called_once()
+        self.assertTrue(gui.apply_preview_blur_region.called)
+
+    def test_show_logo_overlay_guards_during_project_loading(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui._project_loading_in_progress = True
+        gui.video_view = MagicMock()
+
+        track = MagicMock(name="L1 Logo")
+        layer = MagicMock(source="path/to/logo.png")
+
+        # When project loading is in progress, _show_logo_overlay must return early
+        VideoTranslatorGUI._show_logo_overlay(gui, track, layer)
+        gui.video_view.show_logo.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
