@@ -126,13 +126,6 @@ def parse_numbered_line_items(raw: str) -> list[tuple[int, str]]:
             stripped = raw_line.strip()
             if not stripped:
                 continue
-            if any(stripped.startswith(preamble) for preamble in (
-                "Assistant:", "Translation:", "Trợ lý:", "Dịch:", "Note:",
-            )) or stripped.lower() in ("sure.", "sure!", "ok.", "ok!", "okay.", "okay!") or re.match(
-                r"^(Here(?:'s| is| are| you)| Let me| Sure,| I'(?:ll|m) | The following|Certainly|Of course)",
-                stripped, re.IGNORECASE
-            ):
-                continue
             body_lines.append(stripped)
         normalized = " ".join(body_lines).strip()
         while True:
@@ -154,13 +147,6 @@ def parse_numbered_line_items(raw: str) -> list[tuple[int, str]]:
     for line in cleaned.splitlines():
         stripped = line.strip()
         if not stripped:
-            continue
-        if any(stripped.startswith(preamble) for preamble in (
-            "Assistant:", "Translation:", "Trợ lý:", "Dịch:", "Note:",
-        )) or stripped.lower() in ("sure.", "sure!", "ok.", "ok!", "okay.", "okay!") or re.match(
-            r"^(Here(?:'s| is| are| you)| Let me| Sure,| I'(?:ll|m) | The following|Certainly|Of course)",
-            stripped, re.IGNORECASE
-        ):
             continue
         match = re.match(r"^\s*\d+\.\s*(.+?)\s*$", line)
         if match:
