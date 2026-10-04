@@ -1290,10 +1290,14 @@ class _TextLayerOverlayWindow(QWidget):
     def attach_to_view(self, view): self._target_view = view
     def set_suppressed(self, suppressed):
         self._suppressed = bool(suppressed)
-        if self._suppressed:
+        win = self._target_view.window() if self._target_view else None
+        is_loading = getattr(win, "_project_loading_in_progress", False)
+        if self._suppressed or is_loading:
             super().hide()
         elif self._items and self._target_view and self._target_view.isVisible():
-            self.sync_to_view(); super().show(); self.raise_()
+            self.sync_to_view()
+            super().show()
+            self.raise_()
     def set_editable(self, editable):
         """Make the tool overlay interactive only in paused Edit Mode."""
         self._editable = bool(editable)
@@ -1305,11 +1309,23 @@ class _TextLayerOverlayWindow(QWidget):
         self.update()
     def set_items(self, items, active_id=""):
         self._items, self._active_id = list(items or []), str(active_id or "")
-        self.sync_to_view(); self._update_input_mask(); self.update()
-        if self._items and not self._suppressed and self._target_view and self._target_view.isVisible(): self.show(); self.raise_()
-        elif not self._items: self.hide()
+        self.sync_to_view()
+        self._update_input_mask()
+        self.update()
+        win = self._target_view.window() if self._target_view else None
+        is_loading = getattr(win, "_project_loading_in_progress", False)
+        if self._items and not self._suppressed and not is_loading and self._target_view and self._target_view.isVisible():
+            self.show()
+            self.raise_()
+        else:
+            self.hide()
     def sync_to_view(self):
-        if not self._target_view: return
+        if not self._target_view:
+            return
+        win = self._target_view.window() if self._target_view else None
+        if getattr(win, "_project_loading_in_progress", False):
+            self.hide()
+            return
         canvas = self._target_view.get_preview_canvas_rect()
         if canvas.width() > 0 and canvas.height() > 0:
             canvas_rect = canvas.toRect() if hasattr(canvas, "toRect") else canvas
@@ -1564,7 +1580,9 @@ class MpvVideoView(QWidget):
         self.mask_overlay.sync_to_view()
         if self.text_overlay is not None:
             self.text_overlay.sync_to_view()
-            if self.text_overlay._items and not self.text_overlay._suppressed:
+            win = self.window()
+            is_loading = getattr(win, "_project_loading_in_progress", False)
+            if self.text_overlay._items and not self.text_overlay._suppressed and not is_loading:
                 self.text_overlay.show()
                 self.text_overlay.raise_()
         self.update()
@@ -2109,6 +2127,12 @@ class MpvVideoView(QWidget):
         if hasattr(self, "logo_overlay") and self.logo_overlay is not None:
             self.logo_overlay.set_editable(False)
             self.logo_overlay.clear_region()
+
+    def clear_text(self):
+        if hasattr(self, "text_overlay") and self.text_overlay is not None:
+            self.text_overlay.set_editable(False)
+            self.text_overlay.set_items([])
+            self.text_overlay.hide()
 
     def has_blur_region(self) -> bool:
         return self.blur_overlay.has_region()

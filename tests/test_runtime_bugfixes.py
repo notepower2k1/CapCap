@@ -754,6 +754,57 @@ class TestRuntimeBugfixes(unittest.TestCase):
                     "large-v3 snapshot must NOT resolve to faster-whisper-large-v3-turbo directory",
                 )
 
+    def test_refresh_text_layer_preview_hides_during_loading(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui._project_loading_in_progress = True
+        gui.video_view = MagicMock()
+        text_ov = MagicMock()
+        gui.video_view.text_overlay = text_ov
+
+        VideoTranslatorGUI._refresh_text_layer_preview(gui)
+
+        text_ov.hide.assert_called_once()
+        gui.video_view.set_text_layers.assert_not_called()
+
+    def test_mpv_video_view_clear_text(self):
+        from unittest.mock import MagicMock
+        from ui.widgets.mpv_video_view import MpvVideoView
+
+        view = MagicMock(spec=MpvVideoView)
+        overlay = MagicMock()
+        view.text_overlay = overlay
+
+        MpvVideoView.clear_text(view)
+
+        overlay.set_editable.assert_called_once_with(False)
+        overlay.set_items.assert_called_once_with([])
+        overlay.hide.assert_called_once()
+
+    def test_text_layer_overlay_sync_to_view_hides_during_project_loading(self):
+        from unittest.mock import MagicMock
+        from ui.widgets.mpv_video_view import _TextLayerOverlayWindow
+
+        overlay = _TextLayerOverlayWindow()
+        mock_win = MagicMock()
+        mock_win._project_loading_in_progress = True
+        mock_target = MagicMock()
+        mock_target.window.return_value = mock_win
+        mock_target.isVisible.return_value = True
+        overlay._target_view = mock_target
+
+        overlay.show()
+        overlay.sync_to_view()
+        self.assertFalse(overlay.isVisible())
+
+        overlay.set_items([{"text": "hello"}])
+        self.assertFalse(overlay.isVisible())
+
+        overlay.set_suppressed(False)
+        self.assertFalse(overlay.isVisible())
+
 
 if __name__ == "__main__":
     unittest.main()

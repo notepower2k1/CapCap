@@ -8434,6 +8434,10 @@ class VideoTranslatorGUI(QMainWindow):
                 if str(getattr(getattr(layer, "type", ""), "value", getattr(layer, "type", ""))).lower() == "text"]
 
     def _refresh_text_layer_preview(self, active_id=""):
+        if getattr(self, "_project_loading_in_progress", False):
+            if hasattr(self, "video_view") and getattr(self.video_view, "text_overlay", None) is not None:
+                self.video_view.text_overlay.hide()
+            return
         if not hasattr(self, "video_view") or not hasattr(self.video_view, "set_text_layers"):
             return
         from app.layers.text import TEXT_LAYER_EXPORT_SCALE
@@ -17818,18 +17822,8 @@ class VideoTranslatorGUI(QMainWindow):
                             logo_ov = getattr(self.video_view, "logo_overlay", None)
                             if logo_ov is not None and getattr(logo_ov, "_regions", None) and getattr(self.video_view, "_logo_track_visible", True):
                                 logo_ov.sync_to_view()
-                            text_ov = getattr(self.video_view, "text_overlay", None)
-                            if text_ov is not None:
-                                if getattr(self, "_text_overlay_track", None) is not None and getattr(self, "_text_overlay_layer", None) is not None:
-                                    try:
-                                        text_ov.sync_to_view()
-                                    except Exception:
-                                        pass
-                                else:
-                                    try:
-                                        text_ov.hide()
-                                    except Exception:
-                                        pass
+                        if hasattr(self, "_refresh_text_layer_preview"):
+                            self._refresh_text_layer_preview()
                     QTimer.singleShot(150, _on_overlay_dismissed)
 
             QTimer.singleShot(50, _deferred_load_media)
