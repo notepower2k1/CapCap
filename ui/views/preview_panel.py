@@ -1424,13 +1424,13 @@ def build_preview_panel(gui):
     # when the user clicks a layer on the matching track type.
     inspector_stack = QStackedWidget()
     inspector_stack.setMinimumWidth(400)
-    inspector_stack.setMaximumWidth(560)
+    inspector_stack.setMaximumWidth(600)
     gui.inspector_stack = inspector_stack
 
     inspector_card = QFrame()
     inspector_card.setObjectName("statusCard")
-    inspector_card.setMinimumWidth(400)
-    inspector_card.setMaximumWidth(560)
+    inspector_card.setMinimumWidth(450)
+    inspector_card.setMaximumWidth(600)
     inspector_layout = QVBoxLayout(inspector_card)
     inspector_layout.setContentsMargins(10, 6, 10, 6)
     inspector_layout.setSpacing(6)
@@ -1445,7 +1445,7 @@ def build_preview_panel(gui):
     gui.subtitle_inspector_summary_label = QLabel("")
     gui.subtitle_inspector_summary_label.setObjectName("helperLabel")
     gui.subtitle_inspector_summary_label.setWordWrap(True)
-    gui.subtitle_inspector_summary_label.setVisible(False)
+    gui.subtitle_inspector_summary_label.setVisible(True)
     inspector_copy.addWidget(gui.subtitle_inspector_summary_label)
     inspector_header.addLayout(inspector_copy, 1)
     inspector_header.addStretch(0)

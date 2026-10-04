@@ -11259,7 +11259,7 @@ class VideoTranslatorGUI(QMainWindow):
             if responsive_width > 0:
                 widest = max(responsive_width, min(widest, 440))
             else:
-                widest = max(400, min(widest, 560))
+                widest = max(450, min(widest, 600))
             target_width = handle_width + widest
         shell.setMinimumWidth(target_width)
         shell.setMaximumWidth(target_width)
@@ -11272,7 +11272,8 @@ class VideoTranslatorGUI(QMainWindow):
         if not count:
             self._selected_segment_index = -1
             if hasattr(self, "subtitle_inspector_summary_label"):
-                self.subtitle_inspector_summary_label.setText(t("Selected subtitle: none"))
+                self.subtitle_inspector_summary_label.setText("")
+                self.subtitle_inspector_summary_label.setVisible(False)
             if hasattr(self, "rewrite_selected_segment_btn"):
                 self.rewrite_selected_segment_btn.setEnabled(False)
             return
@@ -11282,9 +11283,9 @@ class VideoTranslatorGUI(QMainWindow):
             selected_index = int(rows[0].get("segment_index", 0))
         self._selected_segment_index = selected_index
         if hasattr(self, "subtitle_inspector_summary_label"):
-            self.subtitle_inspector_summary_label.setText(
-                t("Selected subtitle: Block {index} / {count}", index=selected_index + 1, count=count)
-            )
+            lbl = self.subtitle_inspector_summary_label
+            lbl.setText(f"#{selected_index + 1} / {count}")
+            lbl.setVisible(True)
         if hasattr(self, "rewrite_selected_segment_btn"):
             self.rewrite_selected_segment_btn.setEnabled(translation_ready)
 
