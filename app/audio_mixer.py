@@ -1004,3 +1004,69 @@ def mix_pcm_block(blocks: list[np.ndarray], gains: list[float]) -> np.ndarray:
     np.clip(out, -1.0, 1.0, out=out)
     return out
 
+
+def patch_audio_segment_inplace(
+    output_wav_path: str,
+    start_seconds: float,
+    duration_seconds: float,
+    new_segment_wav_path: str | None = None,
+    target_sr: int = 16000,
+) -> bool:
+    """Patch a segment in a 16-bit PCM mono WAV file in-place without rewriting the entire file.
+
+    - If new_segment_wav_path is None or empty: fills the duration with silence (0x00).
+    - If new_segment_wav_path is provided: reads audio at target_sr, converts to 16-bit PCM,
+      and writes it at the target byte offset.
+    Returns True if successfully patched, False otherwise.
+    """
+    if not output_wav_path or not os.path.exists(output_wav_path):
+        return False
+    if duration_seconds <= 0 and not new_segment_wav_path:
+        return False
+
+    try:
+        with open(output_wav_path, "r+b") as f:
+            # Locate the 'data' chunk in the RIFF WAV header
+            f.seek(12)
+            data_offset = -1
+            data_size = 0
+            while True:
+                chunk_header = f.read(8)
+                if len(chunk_header) < 8:
+                    break
+                chunk_id = chunk_header[:4]
+                chunk_len = int.from_bytes(chunk_header[4:], "little")
+                if chunk_id == b"data":
+                    data_offset = f.tell()
+                    data_size = chunk_len
+                    break
+                f.seek(chunk_len, 1)
+
+            if data_offset < 0:
+                # Fallback to standard 44-byte WAV header
+                data_offset = 44
+
+            byte_offset = data_offset + int(round(max(0.0, float(start_seconds)) * target_sr)) * 2
+
+            if new_segment_wav_path and os.path.exists(new_segment_wav_path):
+                clip_data, _ = _read_audio_to_mono_float32(new_segment_wav_path, target_sr=target_sr)
+                if clip_data.size > 0:
+                    pcm_int16 = np.clip(clip_data * 32767.0, -32768, 32767).astype(np.int16)
+                    pcm_bytes = pcm_int16.tobytes()
+                else:
+                    target_bytes = int(round(float(duration_seconds) * target_sr)) * 2
+                    pcm_bytes = b"\x00" * max(0, target_bytes)
+            else:
+                target_bytes = int(round(float(duration_seconds) * target_sr)) * 2
+                pcm_bytes = b"\x00" * max(0, target_bytes)
+
+            if pcm_bytes:
+                f.seek(byte_offset)
+                f.write(pcm_bytes)
+                f.flush()
+            return True
+    except Exception as exc:
+        print(f"[AudioMixer] patch_audio_segment_inplace error: {exc}")
+        return False
+
+

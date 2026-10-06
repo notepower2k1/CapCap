@@ -883,6 +883,102 @@ class TestRuntimeBugfixes(unittest.TestCase):
         VideoTranslatorGUI._show_logo_overlay(gui, track, layer)
         gui.video_view.show_logo.assert_not_called()
 
+    def test_patch_audio_segment_inplace_silence(self):
+        import numpy as np
+        import soundfile as sf
+        from app.audio_mixer import patch_audio_segment_inplace
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wav_path = os.path.join(tmpdir, "test_silence.wav")
+            sr = 16000
+            data = np.full(sr, 1000, dtype=np.int16)
+            sf.write(wav_path, data, sr, subtype="PCM_16")
+
+            result = patch_audio_segment_inplace(wav_path, start_seconds=0.2, duration_seconds=0.2)
+            self.assertTrue(result)
+
+            patched_data, patched_sr = sf.read(wav_path, dtype="int16")
+            self.assertEqual(patched_sr, sr)
+            self.assertEqual(len(patched_data), sr)
+
+            # Untouched before 0.2s
+            np.testing.assert_array_equal(patched_data[:3200], 1000)
+            # Silence (0) at 0.2s - 0.4s (samples 3200 to 6400)
+            np.testing.assert_array_equal(patched_data[3200:6400], 0)
+            # Untouched after 0.4s
+            np.testing.assert_array_equal(patched_data[6400:], 1000)
+
+    def test_apply_generated_tts_texts_no_off_by_one_on_empty_text(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui.current_translated_segments = [
+            {"text": "Hello", "start": 0.0, "end": 1.0},
+            {"text": "", "start": 1.0, "end": 2.0},
+            {"text": "World", "start": 2.0, "end": 3.0},
+        ]
+        voice_segments = [
+            {"text": "Hello", "tts_text": "Xin chao"},
+            {"text": "", "tts_text": ""},
+            {"text": "World", "tts_text": "The gioi"},
+        ]
+
+        VideoTranslatorGUI._apply_generated_tts_texts(gui, voice_segments)
+
+        self.assertEqual(gui.current_translated_segments[0].get("tts_text"), "Xin chao")
+        self.assertEqual(gui.current_translated_segments[1].get("tts_text", ""), "")
+        self.assertEqual(gui.current_translated_segments[2].get("tts_text"), "The gioi")
+
+    def test_apply_generated_tts_texts_does_not_collapse_grouped_sub_segment_timing(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui.current_translated_segments = [
+            {"text": "Sub 1", "tts_group_id": "grp1", "start": 0.0, "end": 2.0},
+            {"text": "Sub 2", "tts_group_id": "grp1", "start": 2.5, "end": 5.0},
+        ]
+        voice_segments = [
+            {"text": "Group text", "tts_text": "Group TTS", "tts_group_id": "grp1", "start": 0.0, "end": 5.0},
+        ]
+
+        VideoTranslatorGUI._apply_generated_tts_texts(gui, voice_segments)
+
+        self.assertEqual(gui.current_translated_segments[0]["start"], 0.0)
+        self.assertEqual(gui.current_translated_segments[1]["start"], 2.5)
+
+    def test_on_segment_translation_edited_clears_tts_cache(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui._syncing_segment_editor = False
+        gui.current_segments = [{"start": 0.0, "end": 2.0}]
+        gui.current_translated_segments = [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "text": "Old",
+                "tts_text": "Old TTS",
+                "dubbing_vi": "Old Dub",
+                "_wav_path": "/fake/old.wav",
+                "voice_edited": True,
+            }
+        ]
+        gui.last_voice_vi_path = ""
+        editor = MagicMock()
+        editor.toPlainText.return_value = "New translated text"
+
+        VideoTranslatorGUI.on_segment_translation_edited(gui, 0, editor)
+
+        self.assertEqual(gui.current_translated_segments[0]["text"], "New translated text")
+        self.assertNotIn("tts_text", gui.current_translated_segments[0])
+        self.assertNotIn("dubbing_vi", gui.current_translated_segments[0])
+        self.assertNotIn("_wav_path", gui.current_translated_segments[0])
+        self.assertIs(gui.current_translated_segments[0]["voice_edited"], False)
+        self.assertIs(gui._voiceover_force_refresh, True)
+
 
 if __name__ == "__main__":
     unittest.main()

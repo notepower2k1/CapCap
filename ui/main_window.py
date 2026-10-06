@@ -11874,9 +11874,24 @@ class VideoTranslatorGUI(QMainWindow):
                 for idx, base in enumerate(base_segments)
             ]
 
-        self.current_translated_segments[index]["text"] = editor.toPlainText().strip()
-        self.current_translated_segments[index].setdefault("manual_highlights", [])
-        self._reconcile_manual_highlights(self.current_translated_segments[index])
+        target_seg = self.current_translated_segments[index]
+        target_seg["text"] = editor.toPlainText().strip()
+        target_seg.pop("tts_text", None)
+        target_seg.pop("dubbing_vi", None)
+        target_seg.pop("_wav_path", None)
+        target_seg["voice_edited"] = False
+        self._voiceover_force_refresh = True
+
+        if not target_seg["text"] and getattr(self, "last_voice_vi_path", None) and os.path.exists(self.last_voice_vi_path):
+            from app.audio_mixer import patch_audio_segment_inplace
+            start_s = float(target_seg.get("start", 0.0))
+            end_s = float(target_seg.get("end", 0.0))
+            dur_s = max(0.0, end_s - start_s)
+            if dur_s > 0:
+                patch_audio_segment_inplace(self.last_voice_vi_path, start_s, dur_s)
+
+        target_seg.setdefault("manual_highlights", [])
+        self._reconcile_manual_highlights(target_seg)
         self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
         self._sync_segment_highlight_chip_row(index)
         self._sync_hidden_translated_text_from_segments()
@@ -16638,8 +16653,6 @@ class VideoTranslatorGUI(QMainWindow):
         positional_updates = []
         for seg in list(voice_segments or []):
             tts_text = ' '.join(str((seg or {}).get("tts_text") or (seg or {}).get("text") or "").split()).strip()
-            if not tts_text:
-                continue
             subtitle_vi = ' '.join(str((seg or {}).get("subtitle_vi") or (seg or {}).get("text") or "").split()).strip()
             dubbing_vi = ' '.join(str((seg or {}).get("dubbing_vi") or tts_text).split()).strip()
             action_taken = str((seg or {}).get("action_taken") or "").strip().lower()
@@ -16699,21 +16712,23 @@ class VideoTranslatorGUI(QMainWindow):
             seg["attempt_count"] = next_payload["attempt_count"]
             if next_payload.get("_wav_path"):
                 seg["_wav_path"] = next_payload["_wav_path"]
-            # Sync start/end from the voice workflow so the SRT reflects the
-            # actual TTS audio duration (see _extend_segment_ends_to_audio).
-            new_start = next_payload.get("start")
-            new_end = next_payload.get("end")
-            if new_start is not None and new_end is not None and new_end > new_start:
-                try:
-                    old_start = float(seg.get("start", 0.0))
-                    old_end = float(seg.get("end", 0.0))
-                except (TypeError, ValueError):
-                    old_start = old_end = None
-                if old_start is not None and old_end is not None:
-                    if abs(new_start - old_start) > 0.01 or abs(new_end - old_end) > 0.01:
-                        seg["start"] = new_start
-                        seg["end"] = new_end
-                        updated = True
+            # When group_id is present, multiple sub-segments share the same group_id.
+            # Do NOT overwrite their individual start/end times with the entire group's start/end,
+            # which would collapse them onto the same time slice!
+            if not group_id:
+                new_start = next_payload.get("start")
+                new_end = next_payload.get("end")
+                if new_start is not None and new_end is not None and new_end > new_start:
+                    try:
+                        old_start = float(seg.get("start", 0.0))
+                        old_end = float(seg.get("end", 0.0))
+                    except (TypeError, ValueError):
+                        old_start = old_end = None
+                    if old_start is not None and old_end is not None:
+                        if abs(new_start - old_start) > 0.01 or abs(new_end - old_end) > 0.01:
+                            seg["start"] = new_start
+                            seg["end"] = new_end
+                            updated = True
             new_original_end = next_payload.get("_original_end")
             if new_original_end is not None:
                 seg["_original_end"] = new_original_end
