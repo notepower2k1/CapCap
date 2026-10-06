@@ -147,6 +147,12 @@ def sync_segments_to_dub_subtitle_layers(
                 k: v for k, v in d.items() if k != "text"
             }
             d_meta = d.get("metadata") if isinstance(d.get("metadata"), dict) else {}
+            raw_row = d.get("row_index") if d.get("row_index") is not None else d_meta.get("row_index")
+            if raw_row is not None:
+                try:
+                    existing.metadata["row_index"] = int(raw_row)
+                except (TypeError, ValueError):
+                    pass
             raw_ae = d.get("_audio_end") if d.get("_audio_end") is not None else d_meta.get("_audio_end")
             if raw_ae is not None:
                 try:
@@ -191,6 +197,12 @@ def sync_segments_to_dub_subtitle_layers(
                 k: v for k, v in d.items() if k != "text"
             }
             d_meta = d.get("metadata") if isinstance(d.get("metadata"), dict) else {}
+            raw_row = d.get("row_index") if d.get("row_index") is not None else d_meta.get("row_index")
+            if raw_row is not None:
+                try:
+                    layer.metadata["row_index"] = int(raw_row)
+                except (TypeError, ValueError):
+                    pass
             raw_ae = d.get("_audio_end") if d.get("_audio_end") is not None else d_meta.get("_audio_end")
             if raw_ae is not None:
                 try:
@@ -243,6 +255,7 @@ def sync_layers_to_segments(timeline: Timeline) -> list[dict[str, Any]]:
                 continue
             d: dict[str, Any] = dict(layer.metadata.get("_seg_dict", {}))
             d["id"] = int(d.get("id", 0))
+            d["row_index"] = int(layer.metadata.get("row_index", 0) or 0)
             d["start"] = layer.start
             d["end"] = layer.end
             d["text"] = layer.text

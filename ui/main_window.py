@@ -11118,13 +11118,19 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_timeline_segment_timing_changed(self, index: int, start: float, end: float):
         updated = False
+        row_idx = 0
+        if hasattr(self, "timeline") and hasattr(self.timeline, "get_segment_row_index"):
+            row_idx = self.timeline.get_segment_row_index(index)
+
         if 0 <= index < len(self.current_segments or []):
             self._apply_segment_timing(self.current_segments[index], start, end)
+            self.current_segments[index]["row_index"] = row_idx
             self.current_segment_models = self._dict_segments_to_models(self.current_segments, translated=False)
             self._sync_hidden_transcript_text_from_segments()
             updated = True
         if 0 <= index < len(self.current_translated_segments or []):
             self._apply_segment_timing(self.current_translated_segments[index], start, end)
+            self.current_translated_segments[index]["row_index"] = row_idx
             self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
             self._sync_hidden_translated_text_from_segments()
             updated = True

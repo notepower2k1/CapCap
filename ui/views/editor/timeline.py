@@ -251,7 +251,8 @@ class EditorTimeline(QGraphicsView):
             self._init_default_tracks()
 
         self._overlap_layout_cache.clear()
-        self._overlap_row_assignments.clear()
+        # Preserve existing row assignments rather than clearing all of them,
+        # so user-assigned rows are not reset when segments are refreshed.
 
         seg_dicts = []
         for seg in segments:
@@ -966,7 +967,12 @@ class EditorTimeline(QGraphicsView):
                     row_intervals.append([])
                     row_starts.append([])
                 row_index = preferred
-            elif preferred is not None and 0 <= preferred < len(row_intervals):
+            elif preferred is not None and preferred >= 0:
+                # Expand row intervals up to preferred so layers on row 1+ do not
+                # collapse down to row 0 simply because row 0 has free space.
+                while len(row_intervals) <= preferred:
+                    row_intervals.append([])
+                    row_starts.append([])
                 if can_use(preferred, start, end):
                     row_index = preferred
 
@@ -1008,19 +1014,45 @@ class EditorTimeline(QGraphicsView):
         for layer in ordered:
             lid = str(getattr(layer, "id", ""))
             pref = previous.get(lid)
+            meta = getattr(layer, "metadata", None) or {}
+            if isinstance(meta, dict) and meta.get("row_index") is not None:
+                try:
+                    pref = int(meta["row_index"])
+                except (TypeError, ValueError):
+                    pass
             if pref is not None and pref >= 0 and lid != selected_id:
                 stable.append(layer)
                 stable_ids.add(lid)
         adaptive = [layer for layer in ordered if str(getattr(layer, "id", "")) not in stable_ids]
         for layer in stable:
-            assign(layer, previous.get(str(getattr(layer, "id", ""))))
+            lid = str(getattr(layer, "id", ""))
+            pref = previous.get(lid)
+            meta = getattr(layer, "metadata", None) or {}
+            if isinstance(meta, dict) and meta.get("row_index") is not None:
+                try:
+                    pref = int(meta["row_index"])
+                except (TypeError, ValueError):
+                    pass
+            assign(layer, pref)
+            if isinstance(getattr(layer, "metadata", None), dict):
+                layer.metadata["row_index"] = layer_rows_by_id.get(lid, 0)
         for layer in adaptive:
-            is_selected = str(getattr(layer, "id", "")) == selected_id
+            lid = str(getattr(layer, "id", ""))
+            is_selected = lid == selected_id
+            pref = pinned_row if is_selected and pinned_row >= 0 else previous.get(lid)
+            meta = getattr(layer, "metadata", None) or {}
+            if not is_selected and isinstance(meta, dict) and meta.get("row_index") is not None:
+                try:
+                    pref = int(meta["row_index"])
+                except (TypeError, ValueError):
+                    pass
             assign(
                 layer,
-                pinned_row if is_selected and pinned_row >= 0 else previous.get(str(getattr(layer, "id", ""))),
+                pref,
                 force_preferred=bool(is_selected and pinned_row >= 0),
             )
+            if isinstance(getattr(layer, "metadata", None), dict):
+                layer.metadata["row_index"] = layer_rows_by_id.get(lid, 0)
         layer_rows = [layer_rows_by_id.get(str(getattr(layer, "id", "")), 0) for layer in ordered]
         self._overlap_row_assignments[str(track_id)] = layer_rows_by_id
         return layer_rows, max(1, len(row_intervals))
@@ -2205,6 +2237,8 @@ class EditorTimeline(QGraphicsView):
                     "anchor_time": self._pos_to_time(pos.x(), scroll_x),
                     "start_time": float(layer.start),
                     "end_time": float(self._get_effective_layer_end(layer)),
+                    "anchor_y": pos.y() + scroll_y,
+                    "initial_row": self._layer_row_index(track, layer),
                 }
                 self.viewport().update()
                 event.accept()
@@ -2248,6 +2282,11 @@ class EditorTimeline(QGraphicsView):
             if layer and str(getattr(track, "id", "") or "") == str(drag.get("track_id", "") or ""):
                 start = float(layer.start)
                 end = float(self._get_effective_layer_end(layer))
+                final_row = int(drag.get("row_index", 0) or 0)
+                if isinstance(getattr(layer, "metadata", None), dict):
+                    layer.metadata["row_index"] = final_row
+                self._overlap_row_assignments.setdefault(str(track.id), {})[lid] = final_row
+                self._rebuild_track_heights()
                 self.layerTimingChanged.emit(lid, start, end)
                 idx = self.segment_index_for_layer_id(lid)
                 if idx >= 0:
@@ -2279,6 +2318,17 @@ class EditorTimeline(QGraphicsView):
             track, layer = self._find_layer_by_id(drag["layer_id"])
             if layer and str(getattr(track, "id", "") or "") == str(drag.get("track_id", "") or ""):
                 if drag["type"] == "move":
+                    if self._should_overlap_stack(track):
+                        delta_y = (pos.y() + scroll_y) - float(drag.get("anchor_y", pos.y() + scroll_y))
+                        row_delta = int(round(delta_y / float(max(1, self.CHILD_TRACK_H))))
+                        target_row = max(0, int(drag.get("initial_row", 0)) + row_delta)
+                        if target_row != drag.get("row_index"):
+                            drag["row_index"] = target_row
+                            if isinstance(getattr(layer, "metadata", None), dict):
+                                layer.metadata["row_index"] = target_row
+                            self._overlap_row_assignments.setdefault(str(track.id), {})[drag["layer_id"]] = target_row
+                            self._rebuild_track_heights()
+
                     delta = t - float(drag["anchor_time"])
                     original_start = float(drag["start_time"])
                     original_end = float(drag["end_time"])
@@ -2487,3 +2537,33 @@ class EditorTimeline(QGraphicsView):
                     return layer.id
             return ""
         return ""
+
+    def get_segment_row_index(self, index: int) -> int:
+        """Return the current overlap row index for the segment at the given index."""
+        if not self._timeline:
+            return 0
+        for track in self._timeline.tracks:
+            if self._is_subtitle_track(track):
+                for layer in track.layers:
+                    meta = getattr(layer, "metadata", None) or {}
+                    seg_idx = -1
+                    if isinstance(meta, dict):
+                        try:
+                            seg_idx = int(meta.get("_seg_index", -1))
+                        except (TypeError, ValueError):
+                            seg_idx = -1
+                    if seg_idx == -1:
+                        try:
+                            seg_idx = int(getattr(layer, "z_index", -1))
+                        except (TypeError, ValueError):
+                            seg_idx = -1
+                    if seg_idx == index:
+                        try:
+                            return int(meta.get("row_index", 0) or 0)
+                        except (TypeError, ValueError):
+                            return 0
+        return 0
+
+
+TimelineView = EditorTimeline
+

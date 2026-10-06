@@ -8,6 +8,7 @@ Unit tests for in-process thumbnail decoding and O(1) streaming waveform generat
 from __future__ import annotations
 
 import io
+import importlib.util
 import os
 import shutil
 import sys
@@ -604,6 +605,125 @@ class TestTimelineVisuals(unittest.TestCase):
         self.assertEqual(len(completed_events), 1)
         self.assertEqual(completed_events[0][0], "req_wf_cycle")
         self.assertEqual(len(finished_events), 1, "Native QThread.finished must be emitted for waveform worker")
+
+
+class TestTimelineStickyRowAndMultiRowDrag(unittest.TestCase):
+    """Test sticky row index assignment and vertical drag across multiple rows."""
+
+    def setUp(self):
+        from PySide6.QtWidgets import QApplication
+
+        self.app = QApplication.instance() or QApplication([])
+
+        timeline_path = os.path.join(PROJECT_ROOT, "ui", "views", "editor", "timeline.py")
+        spec = importlib.util.spec_from_file_location("editor_timeline_mod", timeline_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.EditorTimeline = mod.EditorTimeline
+
+    def test_sticky_row_assignment_does_not_collapse_to_row_zero(self):
+        timeline = self.EditorTimeline()
+        timeline.set_duration(20.0)
+
+        # Set segments with two overlapping segments:
+        # seg 0: start 1.0, end 3.0
+        # seg 1: start 2.0, end 4.0
+        # Initially seg 1 gets row 1 because seg 0 is on row 0.
+        segments = [
+            {"start": 1.0, "end": 3.0, "text": "seg0"},
+            {"start": 2.0, "end": 4.0, "text": "seg1"},
+        ]
+        timeline.set_segments(segments)
+        self.assertEqual(timeline.get_segment_row_index(1), 1)
+
+        # Move seg 0 away to non-overlapping time [5.0, 7.0] and recompute rows
+        track = next(t for t in timeline._timeline.tracks if timeline._is_subtitle_track(t))
+        seg0_layer = next(l for l in track.layers if (l.metadata or {}).get("_seg_index") == 0)
+        seg0_layer.start = 5.0
+        seg0_layer.end = 7.0
+        timeline._rebuild_track_heights()
+
+        # Verify that seg 1 still has row 1 and did NOT collapse to row 0
+        self.assertEqual(timeline.get_segment_row_index(1), 1)
+
+        # Also verify with set_segments updating seg 0 to [5.0, 7.0] and seg 1 at [2.0, 4.0] with row_index=1
+        timeline.set_segments([
+            {"start": 5.0, "end": 7.0, "text": "seg0"},
+            {"start": 2.0, "end": 4.0, "text": "seg1", "row_index": 1},
+        ])
+        self.assertEqual(timeline.get_segment_row_index(1), 1)
+
+    def test_drag_vertical_delta_changes_row_index(self):
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+
+        timeline = self.EditorTimeline()
+        timeline.set_duration(20.0)
+        timeline.set_segments([{"start": 1.0, "end": 3.0, "text": "seg0"}])
+
+        track = next(t for t in timeline._timeline.tracks if timeline._is_subtitle_track(t))
+        layer = track.layers[0]
+
+        anchor_y = 100.0
+        timeline._drag_state = {
+            "type": "move",
+            "layer_id": layer.id,
+            "track_id": str(getattr(track, "id", "") or ""),
+            "anchor_y": anchor_y,
+            "initial_row": 0,
+            "row_index": 0,
+            "anchor_time": 1.0,
+            "start_time": 1.0,
+            "end_time": 3.0,
+        }
+
+        # Create a QMouseEvent with position at (100.0, 100.0 + timeline.CHILD_TRACK_H)
+        target_pos = QPointF(100.0, anchor_y + float(timeline.CHILD_TRACK_H))
+        event = QMouseEvent(
+            QEvent.Type.MouseMove,
+            target_pos,
+            target_pos,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        timeline.mouseMoveEvent(event)
+
+        self.assertEqual(timeline._drag_state["row_index"], 1)
+
+    def test_clamp_layer_move_allows_crossing_different_rows(self):
+        timeline = self.EditorTimeline()
+        timeline.set_duration(20.0)
+        timeline.set_segments([
+            {"start": 2.0, "end": 4.0, "text": "layer_a"},
+            {"start": 3.0, "end": 5.0, "text": "layer_b"},
+        ])
+
+        track = next(t for t in timeline._timeline.tracks if timeline._is_subtitle_track(t))
+        layer_a = track.layers[0]
+        layer_b = track.layers[1]
+
+        # Verify initial rows
+        self.assertEqual(timeline.get_segment_row_index(0), 0)
+        self.assertEqual(timeline.get_segment_row_index(1), 1)
+
+        # Set timeline._drag_state so layer B is pinned to row 1
+        timeline._drag_state = {
+            "type": "move",
+            "layer_id": layer_b.id,
+            "track_id": str(getattr(track, "id", "") or ""),
+            "row_index": 1,
+            "initial_row": 1,
+            "anchor_y": 100.0,
+            "anchor_time": 3.0,
+            "start_time": 3.0,
+            "end_time": 5.0,
+        }
+
+        # Call timeline._clamp_layer_move(track, layer_b, 2.5, 4.5)
+        # Verify layer B can move to 2.5 without being clamped by layer A at [2.0, 4.0]
+        clamped_start = timeline._clamp_layer_move(track, layer_b, 2.5, 4.5)
+        self.assertEqual(clamped_start, 2.5)
 
 
 if __name__ == "__main__":
