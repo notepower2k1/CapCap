@@ -176,6 +176,9 @@ def sync_segments_to_dub_subtitle_layers(
                 existing.metadata["time_warp_id"] = str(raw_warp)
             else:
                 existing.metadata.pop("time_warp_id", None)
+            existing.metadata["_tts_dirty"] = bool(
+                d.get("_tts_dirty", False) or d_meta.get("_tts_dirty", False)
+            )
             layer = existing
         else:
             seg_speed = d.get("voice_speed", 1.0)
@@ -226,6 +229,9 @@ def sync_segments_to_dub_subtitle_layers(
                 layer.metadata["time_warp_id"] = str(raw_warp)
             else:
                 layer.metadata.pop("time_warp_id", None)
+            layer.metadata["_tts_dirty"] = bool(
+                d.get("_tts_dirty", False) or d_meta.get("_tts_dirty", False)
+            )
             target.layers.append(layer)
         new_layers.append(layer)
 
@@ -263,6 +269,7 @@ def sync_layers_to_segments(timeline: Timeline) -> list[dict[str, Any]]:
             d["dubbing_vi"] = layer.dub_text
             d["subtitle_vi"] = layer.text
             d["voice_speed"] = layer.voice_speed
+            d["_tts_dirty"] = bool(layer.metadata.get("_tts_dirty", False))
             if "final_text" in d and d["final_text"]:
                 d["final_text"] = layer.text
             segments.append(d)
@@ -325,6 +332,7 @@ def sync_tts_to_dub_subtitle_layers(
             continue
         layer.audio_path = str(voice_track_path)
         layer.metadata["_audio_end"] = audio_end
+        layer.metadata["_tts_dirty"] = False
 
 
 def sync_blur_regions_to_layers(

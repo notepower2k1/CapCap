@@ -383,6 +383,15 @@ class VideoTranslatorGUI(QMainWindow):
                 font-size: 11px;
                 font-weight: 700;
             }
+            QLabel#ttsStatusBadge {
+                background-color: #3b2505;
+                color: #fbbf24;
+                border: 1px solid #f59e0b;
+                border-radius: 999px;
+                padding: 2px 8px;
+                font-size: 11px;
+                font-weight: 700;
+            }
             QLabel#statusChip {
                 background-color: #152537;
                 color: #dbe5f3;
@@ -6941,6 +6950,7 @@ class VideoTranslatorGUI(QMainWindow):
                     "extended_duration": float(reference.get("extended_duration", 0.0) or 0.0),
                     "time_warp_id": str(reference.get("time_warp_id", "") or ""),
                     "_audio_end": float(reference.get("_audio_end", 0.0) or 0.0),
+                    "_tts_dirty": bool(reference.get("_tts_dirty", False) or translated.get("_tts_dirty", False)),
                 }
             )
         return rows
@@ -11358,8 +11368,14 @@ class VideoTranslatorGUI(QMainWindow):
             if hasattr(self, "subtitle_inspector_summary_label"):
                 self.subtitle_inspector_summary_label.setText("")
                 self.subtitle_inspector_summary_label.setVisible(False)
+            if hasattr(self, "subtitle_inspector_tts_status_label"):
+                self.subtitle_inspector_tts_status_label.setText("")
+                self.subtitle_inspector_tts_status_label.setVisible(False)
             if hasattr(self, "rewrite_selected_segment_btn"):
                 self.rewrite_selected_segment_btn.setEnabled(False)
+            if hasattr(self, "audio_inspector_regenerate_voice_btn"):
+                self.audio_inspector_regenerate_voice_btn.setText(t("Regenerate voice"))
+                self.audio_inspector_regenerate_voice_btn.setEnabled(False)
             return
 
         selected_index = self._get_effective_selected_segment_index(rows)
@@ -11372,6 +11388,30 @@ class VideoTranslatorGUI(QMainWindow):
             lbl.setVisible(True)
         if hasattr(self, "rewrite_selected_segment_btn"):
             self.rewrite_selected_segment_btn.setEnabled(translation_ready)
+
+        is_dirty = False
+        if 0 <= selected_index < len(self.current_translated_segments or []):
+            is_dirty = bool((self.current_translated_segments[selected_index] or {}).get("_tts_dirty", False))
+        elif 0 <= selected_index < len(rows):
+            is_dirty = bool(rows[selected_index].get("_tts_dirty", False))
+
+        badge = getattr(self, "subtitle_inspector_tts_status_label", None)
+        regen_btn = getattr(self, "audio_inspector_regenerate_voice_btn", None)
+
+        if is_dirty:
+            if badge is not None:
+                badge.setText("⚡ " + t("Needs TTS"))
+                badge.setVisible(True)
+            if regen_btn is not None:
+                regen_btn.setText("⚡ " + t("Regenerate voice"))
+                regen_btn.setEnabled(True)
+        else:
+            if badge is not None:
+                badge.setText("")
+                badge.setVisible(False)
+            if regen_btn is not None:
+                regen_btn.setText(t("Regenerate voice"))
+                regen_btn.setEnabled(bool(getattr(self, "last_voice_vi_path", "") or translation_ready))
 
     def _translation_phase_complete(self) -> bool:
         """Return whether translated subtitle data is a completed artifact."""
@@ -11886,6 +11926,7 @@ class VideoTranslatorGUI(QMainWindow):
         target_seg.pop("dubbing_vi", None)
         target_seg.pop("_wav_path", None)
         target_seg["voice_edited"] = False
+        target_seg["_tts_dirty"] = True
         self._voiceover_force_refresh = True
 
         if not target_seg["text"] and getattr(self, "last_voice_vi_path", None) and os.path.exists(self.last_voice_vi_path):
@@ -11902,6 +11943,8 @@ class VideoTranslatorGUI(QMainWindow):
         self._sync_segment_highlight_chip_row(index)
         self._sync_hidden_translated_text_from_segments()
         self.schedule_live_subtitle_preview_refresh()
+        self.apply_segments_to_timeline()
+        self._update_subtitle_inspector_summary()
         self.refresh_ui_state()
 
     def on_segment_voice_speed_changed(self, index: int, value: float):
@@ -13713,10 +13756,34 @@ class VideoTranslatorGUI(QMainWindow):
             btn.setEnabled(True)
             btn.setText(t("Regenerate voice"))
 
+        segs = self.current_translated_segments or self.current_segments or []
+        seg = segs[index] if 0 <= index < len(segs) else {}
+        start_s = float(seg.get("start", 0.0))
+        end_s = float(seg.get("end", 0.0))
+        dur_s = max(0.0, end_s - start_s)
+
         if getattr(self, "last_voice_vi_path", "") and os.path.exists(self.last_voice_vi_path):
-            self.run_voiceover()
-        else:
+            from app.audio_mixer import patch_audio_segment_inplace
+            patch_audio_segment_inplace(self.last_voice_vi_path, start_s, dur_s, new_segment_wav_path=audio_path)
+            if seg:
+                seg["_wav_path"] = audio_path
+                seg["_tts_dirty"] = False
             self._apply_segment_audio_end_to_timeline(index=index, audio_path=audio_path)
+            self.apply_segments_to_timeline()
+            self._update_subtitle_inspector_summary()
+            self.refresh_ui_state()
+            try:
+                self.play_audio_preview_file(audio_path)
+            except Exception as exc:
+                self.show_error(t("Audio Preview Failed"), t("Could not play the generated preview audio."), str(exc))
+        else:
+            if seg:
+                seg["_wav_path"] = audio_path
+                seg["_tts_dirty"] = False
+            self._apply_segment_audio_end_to_timeline(index=index, audio_path=audio_path)
+            self.apply_segments_to_timeline()
+            self._update_subtitle_inspector_summary()
+            self.refresh_ui_state()
             try:
                 self.play_audio_preview_file(audio_path)
             except Exception as exc:
@@ -16716,6 +16783,7 @@ class VideoTranslatorGUI(QMainWindow):
             seg["action_taken"] = next_payload["action_taken"]
             seg["ratio"] = next_payload["ratio"]
             seg["attempt_count"] = next_payload["attempt_count"]
+            seg["_tts_dirty"] = False
             if next_payload.get("_wav_path"):
                 seg["_wav_path"] = next_payload["_wav_path"]
             # When group_id is present, multiple sub-segments share the same group_id.

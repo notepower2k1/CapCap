@@ -1717,6 +1717,10 @@ class EditorTimeline(QGraphicsView):
         is_subtitle_type = layer_type in (LayerType.SUBTITLE, LayerType.DUB_SUBTITLE)
         layer_metadata = getattr(layer, "metadata", None) or {}
         segment_metadata = layer_metadata.get("_seg_dict", {}) if isinstance(layer_metadata, dict) else {}
+        is_tts_dirty = bool(
+            (layer_metadata.get("_tts_dirty", False) if isinstance(layer_metadata, dict) else False)
+            or (segment_metadata.get("_tts_dirty", False) if isinstance(segment_metadata, dict) else False)
+        )
         speaker = str(
             (segment_metadata.get("speaker", "") if isinstance(segment_metadata, dict) else "")
             or (layer_metadata.get("speaker", "") if isinstance(layer_metadata, dict) else "")
@@ -1746,7 +1750,10 @@ class EditorTimeline(QGraphicsView):
         # Fast path for low-zoom overview bars (Level of Detail)
         if w <= 6:
             painter.fillRect(QRectF(x, y, max(1, w), h), fill)
-            if is_selected:
+            if is_tts_dirty:
+                painter.setPen(QPen(QColor("#f59e0b"), 1, Qt.DashLine if not is_selected else Qt.SolidLine))
+                painter.drawRect(QRectF(x, y, max(1, w), h))
+            elif is_selected:
                 painter.setPen(QPen(QColor("#4a8cff"), 1))
                 painter.drawRect(QRectF(x, y, max(1, w), h))
             elif speaker and speaker == self._highlighted_speaker:
@@ -1898,7 +1905,8 @@ class EditorTimeline(QGraphicsView):
             else:
                 label = layer.name or layer.type.value.title()
             short_label = os.path.basename(label) if os.path.sep in label else label
-            max_label_w = min(w_base - 8, view_w - x - 4) if w_ext > 4 else min(w - 8, view_w - x - 4)
+            badge_space = 16 if (is_tts_dirty and w >= 28) else 0
+            max_label_w = min(w_base - 8 - badge_space, view_w - x - 4) if w_ext > 4 else min(w - 8 - badge_space, view_w - x - 4)
             text_rect = QRectF(x + 4, y, max(max_label_w, 10), h)
             elided = painter.fontMetrics().elidedText(short_label, Qt.ElideRight, int(text_rect.width()))
             painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, elided)
@@ -1912,12 +1920,27 @@ class EditorTimeline(QGraphicsView):
                 and h >= 14
             ):
                 # Tint glyph amber if voice is overflowing and needs sync
-                glyph_x = x + w_base - 14 if w_ext > 4 else x + w - 14
+                offset_right = 14 + badge_space
+                glyph_x = x + w_base - offset_right if w_ext > 4 else x + w - offset_right
                 glyph_color = QColor("#fbbf24") if excess_voice > 0.05 else QColor("#ffffff")
                 self._draw_audio_glyph(painter, glyph_x, y + (h - 10) / 2, glyph_color)
                 painter.setBrush(Qt.NoBrush)
 
-        if is_selected:
+        if is_tts_dirty and w >= 28:
+            painter.save()
+            painter.setPen(QColor("#fbbf24"))
+            badge_font = QFont("Segoe UI", 8, QFont.Bold)
+            painter.setFont(badge_font)
+            badge_x = x + w_base - 15 if w_ext > 4 else x + w - 15
+            badge_rect = QRectF(badge_x, y, 14, h)
+            painter.drawText(badge_rect, Qt.AlignCenter, "⚡")
+            painter.restore()
+
+        if is_tts_dirty:
+            painter.setPen(QPen(QColor("#f59e0b"), 2, Qt.DashLine if not is_selected else Qt.SolidLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(path)
+        elif is_selected:
             painter.setPen(QPen(QColor("#4a8cff"), 2))
             painter.setBrush(Qt.NoBrush)
             painter.drawPath(path)

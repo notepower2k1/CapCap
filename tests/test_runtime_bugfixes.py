@@ -978,6 +978,77 @@ class TestRuntimeBugfixes(unittest.TestCase):
         self.assertNotIn("_wav_path", gui.current_translated_segments[0])
         self.assertIs(gui.current_translated_segments[0]["voice_edited"], False)
         self.assertIs(gui._voiceover_force_refresh, True)
+        self.assertIs(gui.current_translated_segments[0]["_tts_dirty"], True)
+
+    def test_apply_generated_tts_texts_clears_tts_dirty(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui.current_translated_segments = [
+            {"start": 0.0, "end": 2.0, "text": "Segment 1", "_tts_dirty": True}
+        ]
+        voice_segments = [
+            {"start": 0.0, "end": 2.0, "tts_text": "Spoken 1", "subtitle_vi": "Segment 1"}
+        ]
+        VideoTranslatorGUI._apply_generated_tts_texts(gui, voice_segments)
+        self.assertFalse(gui.current_translated_segments[0]["_tts_dirty"])
+
+    def test_subtitle_inspector_tts_status_and_regenerate_button(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+        from PySide6.QtWidgets import QLabel, QPushButton
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui._translation_phase_complete = MagicMock(return_value=True)
+        gui._get_effective_selected_segment_index = MagicMock(return_value=0)
+        gui.subtitle_inspector_summary_label = QLabel()
+        gui.subtitle_inspector_tts_status_label = QLabel()
+        gui.audio_inspector_regenerate_voice_btn = QPushButton()
+        gui.rewrite_selected_segment_btn = QPushButton()
+        gui.last_voice_vi_path = "voice.wav"
+
+        # Case 1: Segment is dirty
+        from ui.i18n import t
+        gui.current_translated_segments = [{"_tts_dirty": True}]
+        rows = [{"segment_index": 0, "_tts_dirty": True}]
+        VideoTranslatorGUI._update_subtitle_inspector_summary(gui, rows)
+        self.assertTrue(gui.subtitle_inspector_tts_status_label.isVisible())
+        self.assertIn(t("Needs TTS"), gui.subtitle_inspector_tts_status_label.text())
+        self.assertIn(t("Regenerate voice"), gui.audio_inspector_regenerate_voice_btn.text())
+        self.assertIn("⚡", gui.audio_inspector_regenerate_voice_btn.text())
+        self.assertTrue(gui.audio_inspector_regenerate_voice_btn.isEnabled())
+
+        # Case 2: Segment is not dirty
+        gui.current_translated_segments = [{"_tts_dirty": False}]
+        rows = [{"segment_index": 0, "_tts_dirty": False}]
+        VideoTranslatorGUI._update_subtitle_inspector_summary(gui, rows)
+        self.assertFalse(gui.subtitle_inspector_tts_status_label.isVisible())
+        self.assertNotIn("⚡", gui.audio_inspector_regenerate_voice_btn.text())
+        self.assertTrue(gui.audio_inspector_regenerate_voice_btn.isEnabled())
+
+    def test_on_segment_audio_preview_ready_inplace_patch(self):
+        from unittest.mock import MagicMock, patch
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui.last_voice_vi_path = "D:/dummy/voice.wav"
+        gui.current_translated_segments = [
+            {"start": 1.0, "end": 3.0, "text": "Segment 1", "_tts_dirty": True}
+        ]
+        gui.current_segments = gui.current_translated_segments
+        gui._segment_preview_threads = {}
+        gui.audio_inspector_regenerate_voice_btn = MagicMock()
+
+        with patch("os.path.exists", return_value=True), \
+             patch("app.audio_mixer.patch_audio_segment_inplace") as mock_patch:
+            VideoTranslatorGUI.on_segment_audio_preview_ready(gui, 0, "D:/dummy/seg_0.wav", "")
+
+            mock_patch.assert_called_once_with("D:/dummy/voice.wav", 1.0, 2.0, new_segment_wav_path="D:/dummy/seg_0.wav")
+            self.assertEqual(gui.current_translated_segments[0]["_wav_path"], "D:/dummy/seg_0.wav")
+            self.assertFalse(gui.current_translated_segments[0]["_tts_dirty"])
+            gui.apply_segments_to_timeline.assert_called_once()
+            gui._update_subtitle_inspector_summary.assert_called_once()
 
 
 if __name__ == "__main__":

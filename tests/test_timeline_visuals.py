@@ -725,6 +725,52 @@ class TestTimelineStickyRowAndMultiRowDrag(unittest.TestCase):
         clamped_start = timeline._clamp_layer_move(track, layer_b, 2.5, 4.5)
         self.assertEqual(clamped_start, 2.5)
 
+    def test_sync_tts_dirty_and_timeline_visual_indicator(self):
+        from app.layers.sync_bridge import (
+            sync_segments_to_dub_subtitle_layers,
+            sync_layers_to_segments,
+            sync_tts_to_dub_subtitle_layers,
+        )
+        from app.layers.timeline import Timeline
+        from PySide6.QtGui import QPainter, QPixmap
+
+        timeline = Timeline()
+        timeline.duration = 10.0
+        segments = [
+            {"start": 1.0, "end": 3.0, "text": "Segment 1", "_tts_dirty": True},
+            {"start": 4.0, "end": 6.0, "text": "Segment 2", "_tts_dirty": False},
+        ]
+        sync_segments_to_dub_subtitle_layers(timeline, segments)
+
+        track = next(t for t in timeline.tracks if t.name == "TS1")
+        self.assertEqual(len(track.layers), 2)
+        self.assertTrue(track.layers[0].metadata.get("_tts_dirty"))
+        self.assertFalse(track.layers[1].metadata.get("_tts_dirty"))
+
+        # Test sync_layers_to_segments preserves dirty state
+        read_segs = sync_layers_to_segments(timeline)
+        self.assertTrue(read_segs[0].get("_tts_dirty"))
+        self.assertFalse(read_segs[1].get("_tts_dirty"))
+
+        # Test sync_tts_to_dub_subtitle_layers clears dirty state
+        sync_tts_to_dub_subtitle_layers(timeline, "fake_voice.wav", read_segs)
+        self.assertFalse(track.layers[0].metadata.get("_tts_dirty"))
+
+        # Test _draw_standard_layer_bar with dirty layer
+        editor_timeline = self.EditorTimeline()
+        pix = QPixmap(200, 50)
+        painter = QPainter(pix)
+        try:
+            track.layers[0].metadata["_tts_dirty"] = True
+            editor_timeline._draw_standard_layer_bar(
+                painter, track.layers[0], 10, 5, 80, 20, 200, is_selected=False
+            )
+            editor_timeline._draw_standard_layer_bar(
+                painter, track.layers[0], 10, 5, 80, 20, 200, is_selected=True
+            )
+        finally:
+            painter.end()
+
 
 if __name__ == "__main__":
     unittest.main()

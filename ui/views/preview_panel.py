@@ -1443,6 +1443,11 @@ def build_preview_panel(gui):
     gui.subtitle_inspector_summary_label.setAlignment(Qt.AlignCenter)
     gui.subtitle_inspector_summary_label.setVisible(False)
     inspector_header.addWidget(gui.subtitle_inspector_summary_label)
+    gui.subtitle_inspector_tts_status_label = QLabel("")
+    gui.subtitle_inspector_tts_status_label.setObjectName("ttsStatusBadge")
+    gui.subtitle_inspector_tts_status_label.setAlignment(Qt.AlignCenter)
+    gui.subtitle_inspector_tts_status_label.setVisible(False)
+    inspector_header.addWidget(gui.subtitle_inspector_tts_status_label)
     inspector_header.addStretch(1)
     inspector_layout.addLayout(inspector_header)
 
@@ -1456,7 +1461,7 @@ def build_preview_panel(gui):
     gui.normalizer_dict_btn.setToolTip("Project-specific Piper pronunciation dictionary")
     gui.audio_inspector_regenerate_voice_btn = QPushButton("Regenerate voice")
     gui.audio_inspector_regenerate_voice_btn.setToolTip(
-        "Re-generate the dubbed voice for the currently selected segment."
+        t("Re-generate the dubbed voice for this segment and patch audio in-place")
     )
     gui.rewrite_translation_btn.setEnabled(False)
     gui.subtitle_editor_btn.setEnabled(False)
@@ -1465,7 +1470,7 @@ def build_preview_panel(gui):
     gui.rewrite_translation_btn.setVisible(False)
     gui.subtitle_editor_btn.setVisible(False)
     gui.normalizer_dict_btn.setVisible(False)
-    gui.audio_inspector_regenerate_voice_btn.setVisible(False)
+    gui.audio_inspector_regenerate_voice_btn.setVisible(True)
     gui.subtitle_editor_btn.clicked.connect(gui.open_subtitle_editor)
     inspector_actions_row.addWidget(gui.rewrite_translation_btn)
     inspector_actions_row.addWidget(gui.subtitle_editor_btn)
