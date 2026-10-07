@@ -2088,8 +2088,26 @@ class SubtitleController:
                             if fld in base:
                                 d[fld] = base[fld]
                     segments.append(d)
+            elif base_segments and len(edited_texts) != len(base_segments):
+                self.gui.log(
+                    f"[Subtitle Warning] 'Keep timeline' could not be applied: editor has {len(edited_texts)} cues, "
+                    f"project has {len(base_segments)} cues."
+                )
         if not segments:
-            segments = self.gui.parse_srt_to_segments(srt_text)
+            is_valid, parsed, parse_err = self.gui.validate_srt_text(srt_text)
+            if is_valid:
+                segments = parsed
+            else:
+                segments = []
+                if show_message:
+                    self.gui.log(f"[Subtitle Error] Failed to parse edited translated SRT: {parse_err}")
+                    QMessageBox.warning(
+                        self.gui,
+                        t("Error"),
+                        f"{t('Could not parse edited translated SRT:')}\n\n{parse_err}\n\n"
+                        f"{t('Tip: Keep standard SRT format:\n1\n00:00:01,000 --> 00:00:02,000\ntext')}",
+                    )
+                return False
         # Imported/edited SRT files cannot carry diarization metadata.  When
         # cue order is unchanged, restore the speaker assignment from the
         # existing project regardless of the timeline-preserve preference.
@@ -2111,14 +2129,6 @@ class SubtitleController:
                         for fld in ("provider", "translation_provider"):
                             if fld in metadata_base[idx] and fld not in segment:
                                 segment[fld] = metadata_base[idx][fld]
-        if not segments:
-            if show_message:
-                QMessageBox.warning(
-                    self.gui,
-                    t("Error"),
-                    t("Could not parse edited translated SRT.\n\nTip: Keep standard SRT format:\n1\\n00:00:01,000 --> 00:00:02,000\\ntext"),
-                )
-            return False
 
         default_provider = str(
             provider

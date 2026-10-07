@@ -7,6 +7,7 @@ from .presentation_helpers import (
     get_output_mode_key,
 )
 from .srt_helpers import (
+    diagnose_srt_timeline,
     extract_subtitle_text_entries,
     format_segments_to_srt,
     format_timestamp,
@@ -19,6 +20,7 @@ __all__ = [
     "build_guidance_state",
     "build_preview_context_text",
     "build_workflow_hint",
+    "diagnose_srt_timeline",
     "extract_subtitle_text_entries",
     "format_segments_to_srt",
     "format_timestamp",

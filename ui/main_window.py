@@ -34,6 +34,7 @@ from helpers import (
     build_guidance_state,
     build_preview_context_text,
     build_workflow_hint,
+    diagnose_srt_timeline,
     extract_subtitle_text_entries,
     format_segments_to_srt,
     format_timestamp,
@@ -906,6 +907,9 @@ class VideoTranslatorGUI(QMainWindow):
 
     def validate_srt_text(self, srt_text, expected_len=None):
         return validate_srt_text(srt_text, expected_len=expected_len)
+
+    def diagnose_srt_timeline(self, imported_segments, base_segments, time_diff_threshold=1.5):
+        return diagnose_srt_timeline(imported_segments, base_segments, time_diff_threshold=time_diff_threshold)
 
     def extract_subtitle_text_entries(self, srt_text):
         return extract_subtitle_text_entries(srt_text)
@@ -13890,9 +13894,15 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.warning(self, t("Import Failed"), t("The selected subtitle file is empty."))
             return
 
-        imported_segments = self.parse_srt_to_segments(srt_text)
-        if not imported_segments:
-            QMessageBox.warning(self, t("Import Failed"), t("The selected file could not be parsed as a valid SRT subtitle."))
+        is_valid, imported_segments, parse_error = self.validate_srt_text(srt_text)
+        if not is_valid or not imported_segments:
+            self.log(f"[Import Error] Failed to parse original subtitle {file_path}: {parse_error}")
+            QMessageBox.critical(
+                self,
+                t("SRT Syntax Error"),
+                f"{t('The subtitle file contains syntax errors:')}\n\n{parse_error}\n\n"
+                f"{t('Tip: Ensure each subtitle block has an index, time range (00:00:00,000 --> 00:00:00,000), and text.')}",
+            )
             return
 
         self.current_segments = imported_segments
@@ -13932,9 +13942,15 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.warning(self, t("Import Failed"), t("The selected subtitle file is empty."))
             return
 
-        imported_segments = self.parse_srt_to_segments(srt_text)
-        if not imported_segments:
-            QMessageBox.warning(self, t("Import Failed"), t("The selected file could not be parsed as a valid SRT subtitle."))
+        is_valid, imported_segments, parse_error = self.validate_srt_text(srt_text)
+        if not is_valid or not imported_segments:
+            self.log(f"[Import Error] Failed to parse translated subtitle {file_path}: {parse_error}")
+            QMessageBox.critical(
+                self,
+                t("SRT Syntax Error"),
+                f"{t('The subtitle file contains syntax errors:')}\n\n{parse_error}\n\n"
+                f"{t('Tip: Ensure each subtitle block has an index, time range (00:00:00,000 --> 00:00:00,000), and text.')}",
+            )
             return
 
         # An SRT only stores text/timestamps. Keep diarization metadata from
@@ -13944,6 +13960,64 @@ class VideoTranslatorGUI(QMainWindow):
         # cue boundaries or a different number of cues.
         base_segments = self.current_translated_segments or self.current_segments
         if base_segments:
+            diagnosis = self.diagnose_srt_timeline(imported_segments, base_segments)
+            if diagnosis.get("has_desync"):
+                self.log(f"[Import Warning] Subtitle timeline check for '{os.path.basename(file_path)}':")
+                self.log(
+                    f"  • Base cues: {diagnosis['base_count']} | Imported cues: {diagnosis['imported_count']} "
+                    f"(Difference: {diagnosis['count_diff']:+d})"
+                )
+                if diagnosis.get("first_desync"):
+                    fd = diagnosis["first_desync"]
+                    self.log(
+                        f"  • First discrepancy at Cue #{fd['cue_number']}:\n"
+                        f"      Original: [{fd['base_timestamp']}] \"{fd['base_text'][:60]}\"\n"
+                        f"      Imported: [{fd['imported_timestamp']}] \"{fd['imported_text'][:60]}\"\n"
+                        f"      Time delta: {fd['time_diff_seconds']:+.2f}s | Reason: {fd['hint']}"
+                    )
+                for dc in diagnosis.get("desync_cues", [])[1:5]:
+                    self.log(
+                        f"  • Cue #{dc['cue_number']}: diff {dc['time_diff_seconds']:+.2f}s "
+                        f"(Orig: {dc['base_timestamp']} vs Imp: {dc['imported_timestamp']})"
+                    )
+
+                if not diagnosis.get("count_match"):
+                    fd = diagnosis.get("first_desync")
+                    cue_info = ""
+                    if fd:
+                        cue_info = (
+                            f"\n\n{t('First discrepancy at Cue #{index}:', index=fd['cue_number'])}\n"
+                            f"• {t('Original')}: [{fd['base_timestamp']}] \"{fd['base_text'][:50]}\"\n"
+                            f"• {t('Imported')}: [{fd['imported_timestamp']}] \"{fd['imported_text'][:50]}\"\n"
+                            f"• {t('Diagnosis')}: {fd['hint']}"
+                        )
+
+                    msg_box = QMessageBox(self)
+                    msg_box.setIcon(QMessageBox.Warning)
+                    msg_box.setWindowTitle(t("Subtitle Timeline Mismatch"))
+                    msg_box.setText(
+                        f"{t('Imported subtitle segment count does not match the project:')}\n"
+                        f"• {t('Original / Project:')} {diagnosis['base_count']} {t('segments')}\n"
+                        f"• {t('Imported file:')} {diagnosis['imported_count']} {t('segments')} ({diagnosis['count_diff']:+d})"
+                        f"{cue_info}\n\n"
+                        f"⚠️ {t('Warning: If you continue, Keep Original Timeline cannot be applied cleanly, which may cause TTS audio or subtitles to desync.')}\n\n"
+                        f"{t('Do you want to import anyway or cancel to fix the file?')}"
+                    )
+                    import_btn = msg_box.addButton(t("Import Anyway"), QMessageBox.AcceptRole)
+                    cancel_btn = msg_box.addButton(t("Cancel & Review"), QMessageBox.RejectRole)
+                    msg_box.setDefaultButton(cancel_btn)
+                    msg_box.exec()
+
+                    if msg_box.clickedButton() != import_btn:
+                        self.log(f"[Import] Cancelled by user to review Cue #{fd['cue_number'] if fd else '?'}.")
+                        return
+                    self.log(f"[Import] User proceeded with import despite count mismatch ({diagnosis['imported_count']} vs {diagnosis['base_count']}).")
+                elif not self.keep_timeline_cb.isChecked() and diagnosis.get("first_desync"):
+                    fd = diagnosis["first_desync"]
+                    self.log(
+                        f"[Import Info] Imported {len(imported_segments)} segments. Timestamps differ from original at "
+                        f"Cue #{fd['cue_number']} ({fd['time_diff_seconds']:+.2f}s). Enable 'Keep Original Timeline' to align them automatically."
+                    )
             for imported in imported_segments:
                 try:
                     start = float(imported.get("start", 0.0))

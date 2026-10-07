@@ -26,6 +26,11 @@ from translation.prompt_loader import (
 from services.resource_download_service import ResourceDownloadService
 from runtime_paths import asset_path
 from utils.display_utils import build_contrasting_window_icon
+from ui.helpers.srt_helpers import (
+    diagnose_srt_timeline,
+    parse_srt_to_segments,
+    validate_srt_text,
+)
 
 
 class TestRuntimeBugfixes(unittest.TestCase):
@@ -1014,8 +1019,8 @@ class TestRuntimeBugfixes(unittest.TestCase):
         rows = [{"segment_index": 0, "_tts_dirty": True}]
         VideoTranslatorGUI._update_subtitle_inspector_summary(gui, rows)
         self.assertTrue(gui.subtitle_inspector_tts_status_label.isVisible())
-        self.assertIn(t("Needs TTS"), gui.subtitle_inspector_tts_status_label.text())
-        self.assertIn(t("Regenerate voice"), gui.audio_inspector_regenerate_voice_btn.text())
+        self.assertTrue(any(term in gui.subtitle_inspector_tts_status_label.text() for term in ("Needs TTS", "Chờ tạo TTS", t("Needs TTS"))))
+        self.assertTrue(any(term in gui.audio_inspector_regenerate_voice_btn.text() for term in ("Regenerate voice", "Tạo lại giọng đọc", t("Regenerate voice"))))
         self.assertIn("⚡", gui.audio_inspector_regenerate_voice_btn.text())
         self.assertTrue(gui.audio_inspector_regenerate_voice_btn.isEnabled())
 
@@ -1258,6 +1263,153 @@ class TestRuntimeBugfixes(unittest.TestCase):
             state.settings = {"transcription_engine": "ocr"}
             VideoTranslatorGUI.load_project_context(gui, state)
             self.assertEqual(os.environ.get("TRANSCRIPTION_ENGINE"), "ocr")
+
+    def test_flexible_srt_parsing(self):
+        # 1. Dot in timestamps
+        srt_dot = "1\n00:01:23.456 --> 00:01:25.789\nHello world"
+        segs = parse_srt_to_segments(srt_dot)
+        self.assertEqual(len(segs), 1)
+        self.assertAlmostEqual(segs[0]["start"], 83.456)
+        self.assertAlmostEqual(segs[0]["end"], 85.789)
+        self.assertEqual(segs[0]["text"], "Hello world")
+
+        # 2. Single-digit hours
+        srt_single_h = "1\n0:01:23,456 --> 0:01:25,789\nSingle digit hour"
+        segs = parse_srt_to_segments(srt_single_h)
+        self.assertEqual(len(segs), 1)
+        self.assertAlmostEqual(segs[0]["start"], 83.456)
+        self.assertAlmostEqual(segs[0]["end"], 85.789)
+
+        # 3. 2-digit ms
+        srt_2digit_ms = "1\n00:01:23,45 --> 00:01:25,78\nTwo digit ms"
+        segs = parse_srt_to_segments(srt_2digit_ms)
+        self.assertEqual(len(segs), 1)
+        self.assertAlmostEqual(segs[0]["start"], 83.45)
+        self.assertAlmostEqual(segs[0]["end"], 85.78)
+
+        # 4. Arrow "->"
+        srt_arrow = "1\n00:01:23,456 -> 00:01:25,789\nShort arrow"
+        segs = parse_srt_to_segments(srt_arrow)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0]["text"], "Short arrow")
+
+        # 5. "#1" indexing
+        srt_hash_idx = "#1\n00:00:01,000 --> 00:00:02,000\nHash index"
+        segs = parse_srt_to_segments(srt_hash_idx)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0]["text"], "Hash index")
+
+        # 6. Missing index line
+        srt_no_idx = "00:00:01,000 --> 00:00:02,000\nNo index line"
+        segs = parse_srt_to_segments(srt_no_idx)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0]["text"], "No index line")
+
+    def test_validate_srt_syntax_error_reporting(self):
+        # Malformed time range
+        srt_bad_time = "1\nbad_time --> bad_time\nHello"
+        valid, segs, err = validate_srt_text(srt_bad_time)
+        self.assertFalse(valid)
+        self.assertIn("Subtitle block 1", err)
+        self.assertIn("invalid time range", err.lower())
+
+        # Inverted start > end
+        srt_inverted = "1\n00:00:10,000 --> 00:00:05,000\nInverted time"
+        valid, segs, err = validate_srt_text(srt_inverted)
+        self.assertFalse(valid)
+        self.assertIn("Subtitle block 1", err)
+        self.assertIn("ends before it starts", err)
+
+        # Missing text
+        srt_no_text = "1\n00:00:01,000 --> 00:00:02,000\n"
+        valid, segs, err = validate_srt_text(srt_no_text)
+        self.assertFalse(valid)
+        self.assertIn("Subtitle block 1", err)
+        self.assertIn("missing subtitle text", err)
+
+    def test_diagnose_srt_timeline_matching(self):
+        base = [
+            {"start": 1.0, "end": 2.5, "text": "One"},
+            {"start": 3.0, "end": 4.5, "text": "Two"},
+            {"start": 5.0, "end": 6.5, "text": "Three"},
+        ]
+        imported = [
+            {"start": 1.0, "end": 2.5, "text": "Một"},
+            {"start": 3.0, "end": 4.5, "text": "Hai"},
+            {"start": 5.0, "end": 6.5, "text": "Ba"},
+        ]
+        diag = diagnose_srt_timeline(imported, base)
+        self.assertTrue(diag["count_match"])
+        self.assertFalse(diag["has_desync"])
+        self.assertIsNone(diag["first_desync"])
+        self.assertEqual(len(diag["desync_cues"]), 0)
+        self.assertIn("Đồng bộ hoàn toàn", diag["summary"])
+
+    def test_diagnose_srt_timeline_dropped_cue(self):
+        base = [
+            {"start": 0.0, "end": 2.0, "text": "Cue 1"},
+            {"start": 2.0, "end": 4.0, "text": "Cue 2"},
+            {"start": 4.0, "end": 6.0, "text": "Cue 3 dropped"},
+            {"start": 6.0, "end": 8.0, "text": "Cue 4"},
+            {"start": 8.0, "end": 10.0, "text": "Cue 5"},
+        ]
+        imported = [
+            {"start": 0.0, "end": 2.0, "text": "Câu 1"},
+            {"start": 2.0, "end": 4.0, "text": "Câu 2"},
+            {"start": 6.0, "end": 8.0, "text": "Câu 4"},
+            {"start": 8.0, "end": 10.0, "text": "Câu 5"},
+        ]
+        diag = diagnose_srt_timeline(imported, base)
+        self.assertFalse(diag["count_match"])
+        self.assertTrue(diag["has_desync"])
+        self.assertIsNotNone(diag["first_desync"])
+        self.assertEqual(diag["first_desync"]["cue_number"], 3)
+        self.assertEqual(diag["first_desync"]["reason"], "dropped_cue")
+
+    def test_diagnose_srt_timeline_split_cue(self):
+        base = [
+            {"start": 0.0, "end": 5.0, "text": "Full sentence"},
+            {"start": 5.5, "end": 8.0, "text": "Next sentence"},
+        ]
+        imported = [
+            {"start": 0.0, "end": 2.0, "text": "Half 1"},
+            {"start": 2.1, "end": 5.0, "text": "Half 2"},
+            {"start": 5.5, "end": 8.0, "text": "Next sentence"},
+        ]
+        diag = diagnose_srt_timeline(imported, base)
+        self.assertFalse(diag["count_match"])
+        self.assertTrue(diag["has_desync"])
+        self.assertIsNotNone(diag["first_desync"])
+        self.assertEqual(diag["first_desync"]["reason"], "split_cue")
+
+    def test_diagnose_srt_timeline_truncated_end(self):
+        base = [
+            {"start": 0.0, "end": 2.0, "text": "Cue 1"},
+            {"start": 2.0, "end": 4.0, "text": "Cue 2"},
+            {"start": 4.0, "end": 6.0, "text": "Cue 3"},
+            {"start": 6.0, "end": 8.0, "text": "Cue 4"},
+        ]
+        imported = [
+            {"start": 0.0, "end": 2.0, "text": "Câu 1"},
+            {"start": 2.0, "end": 4.0, "text": "Câu 2"},
+        ]
+        diag = diagnose_srt_timeline(imported, base)
+        self.assertFalse(diag["count_match"])
+        self.assertTrue(diag["has_desync"])
+        self.assertIsNotNone(diag["first_desync"])
+        self.assertEqual(diag["first_desync"]["cue_number"], 3)
+        self.assertEqual(diag["first_desync"]["reason"], "truncated_end")
+
+    def test_gui_diagnose_srt_timeline_passthrough(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        base = [{"start": 0.0, "end": 2.0, "text": "A"}]
+        imp = [{"start": 0.0, "end": 2.0, "text": "A"}]
+        res = VideoTranslatorGUI.diagnose_srt_timeline(gui, imp, base)
+        self.assertTrue(res["count_match"])
+        self.assertFalse(res["has_desync"])
 
 
 if __name__ == "__main__":

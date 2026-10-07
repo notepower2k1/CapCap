@@ -1308,6 +1308,21 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Short video — AI will translate in a single full-context pass.": "Video ngắn — AI sẽ dịch toàn bộ trong 1 lượt gửi duy nhất.",
     "Long video — AI will translate in sequential batches for consistency.": "Video dài — AI sẽ dịch theo nhóm tuần tự để đảm bảo nhất quán.",
     "segments": "câu",
+    "SRT Syntax Error": "Lỗi định dạng SRT",
+    "The subtitle file contains syntax errors:": "Tệp phụ đề có lỗi định dạng cú pháp:",
+    "Please check and fix the file at the indicated block.": "Vui lòng kiểm tra và sửa tệp tại khối phụ đề được chỉ ra.",
+    "Tip: Ensure each subtitle block has an index, time range (00:00:00,000 --> 00:00:00,000), and text.": "Gợi ý: Đảm bảo mỗi khối phụ đề có số thứ tự, dòng thời gian (00:00:00,000 --> 00:00:00,000) và văn bản.",
+    "Subtitle Timeline Mismatch": "Lệch dòng thời gian phụ đề",
+    "Imported subtitle segment count does not match the project:": "Số lượng câu phụ đề nhập vào không khớp với dự án:",
+    "Original / Project:": "Bản gốc / Dự án:",
+    "Imported file:": "Tệp nhập vào:",
+    "First discrepancy at Cue #{index}:": "Điểm không khớp đầu tiên tại Câu #{index}:",
+    "Diagnosis:": "Chẩn đoán:",
+    "Warning: If you continue, Keep Original Timeline cannot be applied cleanly, which may cause TTS audio or subtitles to desync.": "Cảnh báo: Nếu tiếp tục, tùy chọn Giữ timeline gốc sẽ không thể áp dụng chuẩn xác, có thể khiến giọng đọc TTS hoặc phụ đề bị lệch.",
+    "Do you want to import anyway or cancel to fix the file?": "Bạn có muốn tiếp tục nhập hay hủy để kiểm tra lại tệp?",
+    "Import Anyway": "Tiếp tục nhập",
+    "Cancel & Review": "Hủy để kiểm tra",
+    "Could not parse edited translated SRT:": "Không thể phân tích phụ đề dịch đã chỉnh sửa:",
 }
 
 
