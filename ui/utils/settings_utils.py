@@ -14,20 +14,51 @@ def save_user_settings(gui):
     # cached values so reopening another project always starts from defaults.
     for key in ("output_quality", "output_fps", "output_ratio", "output_scale_mode"):
         s.remove(key)
-    # Project-dependent output/filter/style/voice values are intentionally
+    # Project-dependent output/filter/style values are intentionally
     # not stored in global QSettings. Remove keys written by older builds.
     for key in (
         "video_filter_preset", "video_filter_intensity", "video_filter_overrides", "video_filter_modified",
-        "free_voice_name", "free_voice_value", "voice_engine", "premium_voice_name", "premium_voice_value",
-        "voice_tier", "subtitle_font", "subtitle_size", "subtitle_animation", "subtitle_animation_time",
-        "subtitle_preset", "subtitle_position_mode", "subtitle_align", "subtitle_custom_x", "subtitle_custom_y",
+        "premium_voice_name", "premium_voice_value", "voice_tier",
+        "subtitle_font", "subtitle_size", "subtitle_animation", "subtitle_animation_time",
+        "subtitle_position_mode", "subtitle_align", "subtitle_custom_x", "subtitle_custom_y",
         "subtitle_x_offset", "subtitle_vertical_offset", "subtitle_color", "subtitle_background_color",
         "subtitle_background", "subtitle_background_width", "subtitle_background_shape", "subtitle_background_radius",
         "subtitle_outline", "subtitle_background_alpha", "subtitle_bold", "subtitle_speaker_colors",
         "subtitle_auto_keyword_highlight", "subtitle_highlight_color", "subtitle_highlight_mode",
-        "voice_speed", "audio_handling_mode", "voice_gender", "voice_timing_sync_mode",
+        "audio_handling_mode",
     ):
         s.remove(key)
+
+    # Subtitle style controls (serialized to JSON)
+    if hasattr(gui, "_current_subtitle_style_controls_state"):
+        try:
+            style_payload = gui._current_subtitle_style_controls_state()
+            if style_payload:
+                # Ensure single_line is NOT persisted as True
+                style_payload["single_line"] = False
+                s.setValue("subtitle_style_controls", json.dumps(style_payload))
+                if "preset" in style_payload:
+                    s.setValue("subtitle_preset", str(style_payload["preset"]))
+        except Exception:
+            pass
+
+    # Voice settings
+    if hasattr(gui, "voice_engine_combo"):
+        s.setValue("voice_engine", str(gui.voice_engine_combo.currentData() or gui.voice_engine_combo.currentText() or ""))
+    if hasattr(gui, "free_voice_combo"):
+        s.setValue("free_voice_value", str(gui.free_voice_combo.currentData() or ""))
+        s.setValue("free_voice_name", str(gui.free_voice_combo.currentText() or ""))
+    if hasattr(gui, "voice_gender_combo"):
+        s.setValue("voice_gender", str(gui.voice_gender_combo.currentText() or "Female"))
+    if hasattr(gui, "voice_speed_spin"):
+        s.setValue("voice_speed", str(gui.voice_speed_spin.currentText() or "1.0x (Normal)"))
+    if hasattr(gui, "voice_timing_sync_combo"):
+        s.setValue("voice_timing_sync_mode", current_source_text(gui.voice_timing_sync_combo))
+
+    # Default transcription engine
+    current_engine = gui.get_transcription_engine() if hasattr(gui, "get_transcription_engine") else os.getenv("TRANSCRIPTION_ENGINE", "sensevoice")
+    s.setValue("default_transcription_engine", current_engine)
+
     s.setValue("source_lang", current_source_text(gui.lang_whisper_combo))
     s.setValue("whisper_model_name", getattr(gui, "selected_whisper_model_name", "auto"))
     s.setValue("final_output_folder", gui.final_output_folder_edit.text())
@@ -35,7 +66,7 @@ def save_user_settings(gui):
     s.setValue("srt_output_folder", gui.srt_output_folder_edit.text())
     s.setValue("voice_output_folder", gui.voice_output_folder_edit.text())
     s.setValue("audio_source", gui.audio_source_edit.text())
-    # Speaker diarization choices are also intentionally not cached.
+    # Speaker diarization choices are intentionally session-local and not cached.
     s.remove("speaker_diarization")
     s.remove("speaker_diarization_num_speakers")
     s.setValue("background_audio", gui.bg_music_edit.text())
@@ -80,11 +111,6 @@ def load_user_settings(gui):
     gui.selected_whisper_model_name = str(
         s.value("whisper_model_name", getattr(gui, "selected_whisper_model_name", "auto")) or "auto"
     ).strip().lower()
-    # Older versions only offered Medium and persisted it as the implicit
-    # default. Migrate that legacy default to Auto once Small is available.
-    small_model_dir = os.path.join(gui.workspace_root, "models", "faster_whisper", "small")
-    if gui.selected_whisper_model_name == "medium" and os.path.isdir(small_model_dir):
-        gui.selected_whisper_model_name = "auto"
     source_index = gui.lang_whisper_combo.findData(source_lang)
     if source_index < 0:
         source_index = gui.lang_whisper_combo.findText(source_lang)
@@ -114,12 +140,57 @@ def load_user_settings(gui):
         active_provider = "google_ai_studio"
     os.environ["OPENAI_PROVIDER"] = active_provider
     s.setValue("translation_provider", active_provider)
+
+    saved_default_engine = str(s.value("default_transcription_engine", "") or "").strip().lower()
+    if saved_default_engine in {"whisper", "sensevoice", "ocr", "capcut"}:
+        os.environ["TRANSCRIPTION_ENGINE"] = saved_default_engine
+
     # Voice selection, audio mode, subtitle style, and filters use the widget
     # defaults for a new session/project; they are not inherited globally.
     if hasattr(gui, "use_premium_voice_radio"):
         gui.use_premium_voice_radio.setChecked(False)
     if hasattr(gui, "use_free_voice_radio"):
         gui.use_free_voice_radio.setChecked(True)
+
+    # Restore Voice settings
+    saved_engine = str(s.value("voice_engine", "") or "").strip()
+    if saved_engine and hasattr(gui, "voice_engine_combo"):
+        idx = gui.voice_engine_combo.findData(saved_engine)
+        if idx < 0:
+            idx = gui.voice_engine_combo.findText(saved_engine)
+        if idx >= 0:
+            gui.voice_engine_combo.setCurrentIndex(idx)
+
+    saved_gender = str(s.value("voice_gender", "") or "").strip()
+    if saved_gender and hasattr(gui, "voice_gender_combo"):
+        idx = gui.voice_gender_combo.findText(saved_gender)
+        if idx >= 0:
+            gui.voice_gender_combo.setCurrentIndex(idx)
+
+    saved_speed = str(s.value("voice_speed", "") or "").strip()
+    if saved_speed and hasattr(gui, "voice_speed_spin"):
+        idx = gui.voice_speed_spin.findText(saved_speed)
+        if idx >= 0:
+            gui.voice_speed_spin.setCurrentIndex(idx)
+        else:
+            gui.voice_speed_spin.setEditText(saved_speed)
+
+    saved_free_voice = str(s.value("free_voice_value", "") or "").strip()
+    if saved_free_voice and hasattr(gui, "free_voice_combo"):
+        if hasattr(gui, "set_voice_combo_value"):
+            gui.set_voice_combo_value(gui.free_voice_combo, saved_free_voice)
+        else:
+            idx = gui.free_voice_combo.findData(saved_free_voice)
+            if idx >= 0:
+                gui.free_voice_combo.setCurrentIndex(idx)
+
+    saved_sync = str(s.value("voice_timing_sync_mode", "") or "").strip()
+    if saved_sync and hasattr(gui, "voice_timing_sync_combo"):
+        if not set_current_source_text(gui.voice_timing_sync_combo, saved_sync):
+            idx = gui.voice_timing_sync_combo.findText(saved_sync)
+            if idx >= 0:
+                gui.voice_timing_sync_combo.setCurrentIndex(idx)
+
     gui.keep_timeline_cb.setChecked(True)
     if hasattr(gui, "anchor_inspector_cb"):
         gui.anchor_inspector_cb.setChecked(
@@ -130,6 +201,7 @@ def load_user_settings(gui):
         auto_preview_enabled = False
         s.setValue("auto_preview_frame", False)
     gui.auto_preview_frame_cb.setChecked(auto_preview_enabled)
+
     # Subtitle style controls retain their UI defaults for a new session.
     if hasattr(gui, "speaker_diarization_cb"):
         gui.speaker_diarization_cb.setChecked(False)
@@ -152,9 +224,39 @@ def load_user_settings(gui):
     else:
         gui.on_advanced_toggled(advanced_open)
     gui.on_audio_source_mode_changed()
-    gui.on_subtitle_preset_changed()
-    if hasattr(gui, "_capture_subtitle_custom_style_state"):
-        gui._capture_subtitle_custom_style_state()
+    raw_style = s.value("subtitle_style_controls", None)
+    applied_style = False
+    if raw_style:
+        try:
+            style_dict = json.loads(raw_style) if isinstance(raw_style, str) else raw_style
+            if isinstance(style_dict, dict) and style_dict and hasattr(gui, "_apply_subtitle_style_controls_state"):
+                # Strictly force single_line to False
+                style_dict["single_line"] = False
+                preset = str(style_dict.get("preset", "youtube")).lower()
+                radio_map = {
+                    "tiktok": getattr(gui, "subtitle_preset_tiktok_radio", None),
+                    "youtube": getattr(gui, "subtitle_preset_youtube_radio", None),
+                    "minimal": getattr(gui, "subtitle_preset_minimal_radio", None),
+                    "short": getattr(gui, "subtitle_preset_minimal_radio", None),
+                    "custom": getattr(gui, "subtitle_preset_custom_radio", None),
+                }
+                radio = radio_map.get(preset)
+                if radio is not None:
+                    radio.setChecked(True)
+                gui._apply_subtitle_style_controls_state(style_dict)
+                if hasattr(gui, "subtitle_single_line_cb"):
+                    gui.subtitle_single_line_cb.setChecked(False)
+                gui._subtitle_custom_style_state = dict(style_dict)
+                applied_style = True
+        except Exception:
+            pass
+    if not applied_style:
+        gui.on_subtitle_preset_changed()
+        if hasattr(gui, "_capture_subtitle_custom_style_state"):
+            gui._capture_subtitle_custom_style_state()
+
+    if hasattr(gui, "subtitle_single_line_cb"):
+        gui.subtitle_single_line_cb.setChecked(False)
     gui.update_subtitle_preview_style()
     gui.on_output_mode_changed(current_source_text(gui.output_mode_combo))
 

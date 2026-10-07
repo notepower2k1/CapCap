@@ -1365,11 +1365,17 @@ class VideoTranslatorGUI(QMainWindow):
         return key
 
     def get_transcription_engine(self) -> str:
-        """Return the recognition source for the open project, never a stale global preference."""
+        """Return the recognition source for the open project, falling back to user's saved default."""
         state = getattr(self, "current_project_state", None)
         settings = getattr(state, "settings", {}) if state is not None else {}
         value = str(settings.get("transcription_engine", "") or "").strip().lower()
-        return value if value in {"whisper", "sensevoice", "ocr", "capcut"} else _default_asr_engine()
+        if value in {"whisper", "sensevoice", "ocr", "capcut"}:
+            return value
+        settings_obj = getattr(self, "settings", None)
+        saved_default = str(settings_obj.value("default_transcription_engine", "") or "").strip().lower() if settings_obj is not None else ""
+        if saved_default in {"whisper", "sensevoice", "ocr", "capcut"}:
+            return saved_default
+        return _default_asr_engine()
 
     def set_project_transcription_engine(self, engine: str) -> None:
         """Apply a project-local source choice and clear incompatible range state."""
@@ -1377,6 +1383,9 @@ class VideoTranslatorGUI(QMainWindow):
         if engine not in {"whisper", "sensevoice", "ocr", "capcut"}:
             engine = _default_asr_engine()
         previous = self.get_transcription_engine()
+        settings_obj = getattr(self, "settings", None)
+        if settings_obj is not None:
+            settings_obj.setValue("default_transcription_engine", engine)
         os.environ["TRANSCRIPTION_ENGINE"] = engine
         state = getattr(self, "current_project_state", None)
         if state is not None:
@@ -1895,8 +1904,12 @@ class VideoTranslatorGUI(QMainWindow):
 
         if self.free_voice_combo.count() > 0:
             self.free_voice_combo.setCurrentIndex(0)
+        settings_obj = getattr(self, "settings", None)
+        saved_free = str(settings_obj.value("free_voice_value", "") or "").strip() if settings_obj is not None else ""
         if previous_free and self.free_voice_combo.findData(previous_free) >= 0:
             self.set_voice_combo_value(self.free_voice_combo, previous_free)
+        elif saved_free and self.free_voice_combo.findData(saved_free) >= 0:
+            self.set_voice_combo_value(self.free_voice_combo, saved_free)
         elif current_engine == "vieneu":
             if self.free_voice_combo.findData("vieneu:Minh Đức") >= 0:
                 self.set_voice_combo_value(self.free_voice_combo, "vieneu:Minh Đức")
@@ -5027,9 +5040,11 @@ class VideoTranslatorGUI(QMainWindow):
         self._allow_post_pipeline_preview_assets = False
         # Subtitle Source is stored only with this project.  Old projects
         # without a value start from the normal default instead of inheriting
-        # the last global .env selection.
+        settings_obj = getattr(self, "settings", None)
+        saved_default_engine = str(settings_obj.value("default_transcription_engine", "") or "").strip().lower() if settings_obj is not None else ""
+        fallback_engine = saved_default_engine if saved_default_engine in {"whisper", "sensevoice", "ocr", "capcut"} else _default_asr_engine()
         project_engine = str(getattr(state, "settings", {}).get("transcription_engine", "") or "").strip().lower()
-        os.environ["TRANSCRIPTION_ENGINE"] = project_engine if project_engine in {"whisper", "sensevoice", "ocr"} else _default_asr_engine()
+        os.environ["TRANSCRIPTION_ENGINE"] = project_engine if project_engine in {"whisper", "sensevoice", "ocr", "capcut"} else fallback_engine
         audio_handling_mode = str(getattr(state, "settings", {}).get("audio_handling_mode", "") or "").strip().lower()
         if audio_handling_mode and hasattr(self, "audio_handling_combo"):
             combo_index = self.audio_handling_combo.findData(audio_handling_mode)
@@ -15654,11 +15669,21 @@ class VideoTranslatorGUI(QMainWindow):
             if provider == "google_ai_studio":
                 legacy = str(os.getenv("OPENAI_PROVIDER") or "").strip().lower() == "gemini"
                 return (
-                    os.getenv("GOOGLE_AI_STUDIO_API_KEY", "") or (os.getenv("OPENAI_API_KEY", "") if legacy else ""),
-                    os.getenv("GOOGLE_AI_STUDIO_MODEL", "") or (os.getenv("OPENAI_MODEL", "") if legacy else ""),
-                    os.getenv("GOOGLE_AI_STUDIO_BASE_URL", "") or (os.getenv("OPENAI_BASE_URL", "") if legacy else ""),
+                    os.getenv("GOOGLE_AI_STUDIO_API_KEY", "") or (os.getenv("OPENAI_API_KEY", "") if legacy else "") or str(self.settings.value("google_ai_studio_api_key", "") or ""),
+                    os.getenv("GOOGLE_AI_STUDIO_MODEL", "") or (os.getenv("OPENAI_MODEL", "") if legacy else "") or str(self.settings.value("google_ai_studio_model", "") or ""),
+                    os.getenv("GOOGLE_AI_STUDIO_BASE_URL", "") or (os.getenv("OPENAI_BASE_URL", "") if legacy else "") or str(self.settings.value("google_ai_studio_base_url", "") or ""),
                 )
-            return (os.getenv("OPENAI_API_KEY", ""), os.getenv("OPENAI_MODEL", ""), os.getenv("OPENAI_BASE_URL", ""))
+            elif provider == "ollama":
+                return (
+                    "",
+                    os.getenv("OLLAMA_MODEL", "") or os.getenv("OPENAI_MODEL", "") or str(self.settings.value("ollama_model", "") or "gemma4:31b-cloud"),
+                    os.getenv("OLLAMA_BASE_URL", "") or os.getenv("OPENAI_BASE_URL", "") or str(self.settings.value("ollama_base_url", "") or "http://localhost:11434/v1"),
+                )
+            return (
+                os.getenv("OPENAI_API_KEY", "") or str(self.settings.value("openai_api_key", "") or ""),
+                os.getenv("OPENAI_MODEL", "") or str(self.settings.value("openai_model", "") or ""),
+                os.getenv("OPENAI_BASE_URL", "") or str(self.settings.value("openai_base_url", "") or ""),
+            )
 
         initial_key, initial_model, initial_base_url = _provider_values(current_provider)
 
@@ -15813,9 +15838,10 @@ class VideoTranslatorGUI(QMainWindow):
                 provider_hint.setText(t("Get an API key at https://platform.openai.com/api-keys"))
             elif p == "ollama":
                 model_label.setText(t("AI Model:"))
-                base_url_edit.setText("http://localhost:11434/v1")
+                key, model, base_url = _provider_values(p)
+                base_url_edit.setText(base_url or "http://localhost:11434/v1")
                 key_edit.clear()
-                model_edit.setText("gemma4:31b-cloud")
+                model_edit.setText(model or "gemma4:31b-cloud")
                 provider_hint.setText(t("Requires a running Ollama server. Speed depends on your hardware; tasks will fail/fallback if timeout expires."))
             model_edit.setReadOnly(False)
             adjust_dialog_size()
@@ -15976,6 +16002,8 @@ class VideoTranslatorGUI(QMainWindow):
         new_base_url = base_url_edit.text().strip()
 
         self.selected_whisper_model_name = new_whisper
+        self.settings.setValue("default_transcription_engine", new_engine)
+        self.settings.setValue("whisper_model_name", new_whisper)
         self.settings.setValue("ocr_backend", new_ocr_backend)
         os.environ["OCR_BACKEND"] = new_ocr_backend
 
@@ -16032,6 +16060,9 @@ class VideoTranslatorGUI(QMainWindow):
                     "CAPCAP_TRANSLATION_PRESET_ID": new_preset,
                 }
             elif new_provider == "google_ai_studio":
+                self.settings.setValue("google_ai_studio_api_key", new_key)
+                self.settings.setValue("google_ai_studio_model", new_model or "gemini-3.7-flash")
+                self.settings.setValue("google_ai_studio_base_url", new_base_url or "https://generativelanguage.googleapis.com/v1beta/openai/")
                 updates = {
                     "AI_POLISHER_PROVIDER": "google_ai_studio",
                     "OPENAI_PROVIDER": "google_ai_studio",
@@ -16041,6 +16072,8 @@ class VideoTranslatorGUI(QMainWindow):
                     "CAPCAP_TRANSLATION_PRESET_ID": new_preset,
                 }
             elif new_provider == "ollama":
+                self.settings.setValue("ollama_model", new_model)
+                self.settings.setValue("ollama_base_url", new_base_url or "http://localhost:11434/v1")
                 updates = {
                     "AI_POLISHER_PROVIDER": "ollama",
                     "OPENAI_PROVIDER": "ollama",
@@ -16050,6 +16083,9 @@ class VideoTranslatorGUI(QMainWindow):
                     "CAPCAP_TRANSLATION_PRESET_ID": new_preset,
                 }
             else:
+                self.settings.setValue("openai_api_key", new_key)
+                self.settings.setValue("openai_model", new_model or "gpt-4o-mini")
+                self.settings.setValue("openai_base_url", new_base_url or "https://api.openai.com/v1/")
                 updates = {
                     "AI_POLISHER_PROVIDER": "openai",
                     "OPENAI_PROVIDER": "openai",

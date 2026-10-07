@@ -1050,8 +1050,218 @@ class TestRuntimeBugfixes(unittest.TestCase):
             gui.apply_segments_to_timeline.assert_called_once()
             gui._update_subtitle_inspector_summary.assert_called_once()
 
+    def test_user_settings_save_and_load_workflow_preferences(self):
+        import json
+        from unittest.mock import MagicMock
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QComboBox, QLineEdit, QCheckBox, QRadioButton
+        from ui.utils.settings_utils import save_user_settings, load_user_settings
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ini_path = os.path.join(tmp_dir, "test_workflow_prefs.ini")
+            settings = QSettings(ini_path, QSettings.IniFormat)
+
+            gui = MagicMock()
+            gui.settings = settings
+            del gui.set_voice_combo_value
+
+            # Configure Voice settings on gui
+            gui.voice_engine_combo = QComboBox()
+            gui.voice_engine_combo.addItem("Edge TTS", "edge-tts")
+            gui.voice_engine_combo.addItem("VieNeu-TTS", "vieneu")
+            gui.voice_engine_combo.setCurrentIndex(1)
+
+            gui.free_voice_combo = QComboBox()
+            gui.free_voice_combo.addItem("Voice A", "voice_a_val")
+            gui.free_voice_combo.addItem("Voice B", "voice_b_val")
+            gui.free_voice_combo.setCurrentIndex(1)
+
+            gui.voice_gender_combo = QComboBox()
+            gui.voice_gender_combo.addItems(["Female", "Male"])
+            gui.voice_gender_combo.setCurrentText("Male")
+
+            gui.voice_speed_spin = QComboBox()
+            gui.voice_speed_spin.addItems(["1.0x (Normal)", "1.2x (Fast)"])
+            gui.voice_speed_spin.setCurrentText("1.2x (Fast)")
+
+            gui.voice_timing_sync_combo = QComboBox()
+            gui.voice_timing_sync_combo.addItem("Speed up voice to fit")
+            gui.voice_timing_sync_combo.setCurrentText("Speed up voice to fit")
+
+            gui.get_transcription_engine = MagicMock(return_value="whisper")
+
+            # Configure Subtitle style
+            gui._current_subtitle_style_controls_state = MagicMock(return_value={
+                "preset": "custom",
+                "font": "Arial",
+                "size": 28,
+                "color": "#FFFF00",
+                "background_color": "#000000",
+                "animation": "pop",
+                "animation_time": 0.5,
+                "single_line": True,
+            })
+            gui.subtitle_single_line_cb = QCheckBox()
+            gui.subtitle_single_line_cb.setChecked(True)
+            gui.subtitle_preset_custom_radio = QRadioButton()
+            gui.subtitle_preset_youtube_radio = QRadioButton()
+            gui.subtitle_preset_tiktok_radio = QRadioButton()
+            gui.subtitle_preset_minimal_radio = QRadioButton()
+            applied_styles = []
+            gui._apply_subtitle_style_controls_state = MagicMock(side_effect=lambda state: applied_styles.append(dict(state)))
+
+            # Configure Session-local / canvas / diarization widgets on gui
+            gui.output_quality_combo = QComboBox()
+            gui.output_quality_combo.addItems(["Default", "High", "Low"])
+            gui.output_quality_combo.setCurrentIndex(1)
+
+            gui.output_fps_combo = QComboBox()
+            gui.output_fps_combo.addItems(["Default", "60", "30"])
+            gui.output_fps_combo.setCurrentIndex(1)
+
+            gui.speaker_diarization_cb = QCheckBox()
+            gui.speaker_diarization_cb.setChecked(True)
+
+            gui.speaker_diarization_speakers_combo = QComboBox()
+            gui.speaker_diarization_speakers_combo.addItem("Auto", -1)
+            gui.speaker_diarization_speakers_combo.addItem("2 Speakers", 2)
+            gui.speaker_diarization_speakers_combo.setCurrentIndex(1)
+
+            # Pre-populate settings with session-local keys
+            settings.setValue("output_quality", "High")
+            settings.setValue("output_fps", "60")
+            settings.setValue("audio_handling_mode", "separate")
+            settings.setValue("speaker_diarization", True)
+
+            # Other required fields on gui
+            gui.output_mode_combo = QComboBox()
+            gui.output_mode_combo.addItem("Vietnamese subtitles + voice")
+            gui.lang_whisper_combo = QComboBox()
+            gui.lang_whisper_combo.addItem("zh", "zh")
+            gui.selected_whisper_model_name = "auto"
+            gui.final_output_folder_edit = QLineEdit("C:/out")
+            gui.audio_folder_edit = QLineEdit("C:/audio")
+            gui.srt_output_folder_edit = QLineEdit("C:/srt")
+            gui.voice_output_folder_edit = QLineEdit("C:/voice")
+            gui.audio_source_edit = QLineEdit("C:/audio_src")
+            gui.bg_music_edit = QLineEdit("C:/bg")
+            gui.mixed_audio_edit = QLineEdit("C:/mixed")
+            gui.video_path_edit = QLineEdit("")
+            gui.auto_preview_frame_cb = QCheckBox()
+            gui.keep_timeline_cb = QCheckBox()
+            gui.anchor_inspector_cb = QCheckBox()
+            gui.ai_dubbing_rewrite_cb = QCheckBox()
+            gui.toggle_advanced_btn = MagicMock()
+            gui.toggle_advanced_btn.isChecked.return_value = False
+            gui.use_generated_audio_radio = QRadioButton()
+            gui.use_existing_audio_radio = QRadioButton()
+            gui.use_free_voice_radio = QRadioButton()
+            gui.use_premium_voice_radio = QRadioButton()
+
+            # Call save_user_settings
+            save_user_settings(gui)
+
+            # Assert in QSettings:
+            self.assertEqual(settings.value("voice_engine"), "vieneu")
+            self.assertEqual(settings.value("free_voice_value"), "voice_b_val")
+            self.assertEqual(settings.value("free_voice_name"), "Voice B")
+            self.assertEqual(settings.value("voice_gender"), "Male")
+            self.assertEqual(settings.value("voice_speed"), "1.2x (Fast)")
+            self.assertEqual(settings.value("voice_timing_sync_mode"), "Speed up voice to fit")
+            self.assertEqual(settings.value("default_transcription_engine"), "whisper")
+            self.assertTrue(settings.contains("subtitle_style_controls"))
+            self.assertFalse(json.loads(settings.value("subtitle_style_controls"))["single_line"])
+            self.assertEqual(settings.value("subtitle_preset"), "custom")
+            self.assertFalse(settings.contains("output_quality"))
+            self.assertFalse(settings.contains("output_fps"))
+            self.assertFalse(settings.contains("audio_handling_mode"))
+            self.assertFalse(settings.contains("speaker_diarization"))
+
+            # Now test load_user_settings(gui):
+            gui.voice_engine_combo.setCurrentIndex(0)
+            gui.free_voice_combo.setCurrentIndex(0)
+            gui.voice_gender_combo.setCurrentIndex(0)
+            gui.voice_speed_spin.setCurrentIndex(0)
+            gui.output_quality_combo.setCurrentIndex(2)
+            gui.output_fps_combo.setCurrentIndex(2)
+            gui.speaker_diarization_cb.setChecked(True)
+            gui.subtitle_single_line_cb.setChecked(True)
+
+            load_user_settings(gui)
+
+            # Assert:
+            self.assertEqual(gui.voice_engine_combo.currentData(), "vieneu")
+            self.assertEqual(gui.free_voice_combo.currentData(), "voice_b_val")
+            self.assertEqual(gui.voice_gender_combo.currentText(), "Male")
+            self.assertEqual(gui.voice_speed_spin.currentText(), "1.2x (Fast)")
+            self.assertEqual(gui.voice_timing_sync_combo.currentText(), "Speed up voice to fit")
+            self.assertEqual(os.environ.get("TRANSCRIPTION_ENGINE"), "whisper")
+            self.assertTrue(len(applied_styles) > 0)
+            self.assertEqual(applied_styles[-1].get("preset"), "custom")
+            self.assertFalse(applied_styles[-1].get("single_line"))
+            self.assertFalse(gui.subtitle_single_line_cb.isChecked())
+            self.assertEqual(gui.output_quality_combo.currentIndex(), 0)
+            self.assertEqual(gui.output_fps_combo.currentIndex(), 0)
+            self.assertFalse(gui.speaker_diarization_cb.isChecked())
+            self.assertEqual(gui.speaker_diarization_speakers_combo.currentData(), -1)
+
+    def test_get_transcription_engine_falls_back_to_saved_default(self):
+        from ui.main_window import VideoTranslatorGUI
+        from unittest.mock import MagicMock
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QComboBox
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ini_path = os.path.join(tmp_dir, "test_asr_fallback.ini")
+            settings = QSettings(ini_path, QSettings.IniFormat)
+            gui = MagicMock(spec=VideoTranslatorGUI)
+            gui.settings = settings
+            settings.setValue("default_transcription_engine", "whisper")
+
+            # Case A: gui.current_project_state = None
+            gui.current_project_state = None
+            self.assertEqual(VideoTranslatorGUI.get_transcription_engine(gui), "whisper")
+
+            # Case B: gui.current_project_state = MagicMock(); gui.current_project_state.settings = {}
+            gui.current_project_state = MagicMock()
+            gui.current_project_state.settings = {}
+            self.assertEqual(VideoTranslatorGUI.get_transcription_engine(gui), "whisper")
+
+            # Case C: gui.current_project_state.settings = {"transcription_engine": "sensevoice"}
+            gui.current_project_state.settings = {"transcription_engine": "sensevoice"}
+            self.assertEqual(VideoTranslatorGUI.get_transcription_engine(gui), "sensevoice")
+
+            # Case D: load_project_context
+            # With empty project engine:
+            state = MagicMock()
+            state.settings = {}
+            gui.project_bridge = MagicMock()
+            gui.project_bridge.load_context.return_value = {
+                "artifacts": {},
+                "last_original_srt_path": "",
+                "last_translated_srt_path": "",
+                "last_extracted_audio": "",
+                "last_vocals_path": "",
+                "last_music_path": "",
+                "last_voice_vi_path": "",
+                "last_mixed_vi_path": "",
+                "current_segment_models": [],
+                "current_translated_segment_models": [],
+                "current_segments": [],
+                "current_translated_segments": [],
+            }
+            gui.audio_handling_combo = QComboBox()
+            VideoTranslatorGUI.load_project_context(gui, state)
+            self.assertEqual(os.environ.get("TRANSCRIPTION_ENGINE"), "whisper")
+
+            # With specific project engine:
+            state.settings = {"transcription_engine": "ocr"}
+            VideoTranslatorGUI.load_project_context(gui, state)
+            self.assertEqual(os.environ.get("TRANSCRIPTION_ENGINE"), "ocr")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
