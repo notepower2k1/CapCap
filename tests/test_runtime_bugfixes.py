@@ -1411,6 +1411,104 @@ class TestRuntimeBugfixes(unittest.TestCase):
         self.assertTrue(res["count_match"])
         self.assertFalse(res["has_desync"])
 
+    def test_export_audio_missing_warnings(self):
+        from unittest.mock import MagicMock, patch
+        from ui.main_window import VideoTranslatorGUI
+        from ui.i18n import t
+
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui.processed_artifacts = {}
+        gui.last_voice_vi_path = ""
+        gui.last_music_path = ""
+        gui.last_extracted_audio = ""
+        gui.last_mixed_vi_path = ""
+
+        with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
+            VideoTranslatorGUI.export_dubbed_voice(gui)
+            mock_warn.assert_called_once()
+            self.assertIn(mock_warn.call_args[0][1], ("Missing Audio", "Chưa có âm thanh", t("Missing Audio")))
+
+        with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
+            VideoTranslatorGUI.export_background_music(gui)
+            mock_warn.assert_called_once()
+            self.assertIn(mock_warn.call_args[0][1], ("Missing Audio", "Chưa có âm thanh", t("Missing Audio")))
+
+        with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
+            VideoTranslatorGUI.export_mixed_audio(gui)
+            mock_warn.assert_called_once()
+            self.assertIn(mock_warn.call_args[0][1], ("Missing Audio", "Chưa có âm thanh", t("Missing Audio")))
+
+    def test_export_audio_success(self):
+        from unittest.mock import MagicMock, patch
+        from ui.main_window import VideoTranslatorGUI
+        from ui.i18n import t
+
+        with tempfile.TemporaryDirectory() as td:
+            src_voice = os.path.join(td, "src_voice.wav")
+            with open(src_voice, "wb") as f:
+                f.write(b"RIFFdummyvoicedata")
+
+            target_save = os.path.join(td, "exported_voice.wav")
+
+            gui = MagicMock(spec=VideoTranslatorGUI)
+            gui.processed_artifacts = {"voice_vi": src_voice}
+            gui.video_path_edit = MagicMock()
+            gui.video_path_edit.text.return_value = "C:/videos/my_clip.mp4"
+            gui.log = MagicMock()
+
+            with patch("PySide6.QtWidgets.QFileDialog.getSaveFileName", return_value=(target_save, "wav")), \
+                 patch("PySide6.QtWidgets.QMessageBox.information") as mock_info:
+                VideoTranslatorGUI.export_dubbed_voice(gui)
+
+                self.assertTrue(os.path.exists(target_save))
+                with open(target_save, "rb") as f:
+                    self.assertEqual(f.read(), b"RIFFdummyvoicedata")
+                mock_info.assert_called_once()
+                self.assertIn(mock_info.call_args[0][1], ("Saved", "Đã lưu", t("Saved")))
+                gui.log.assert_called_once()
+
+            # Background music export success
+            src_bg = os.path.join(td, "src_bg.wav")
+            with open(src_bg, "wb") as f:
+                f.write(b"RIFFdummybgdata")
+            target_bg = os.path.join(td, "exported_bg.wav")
+            gui.processed_artifacts = {"music": src_bg}
+            with patch("PySide6.QtWidgets.QFileDialog.getSaveFileName", return_value=(target_bg, "wav")), \
+                 patch("PySide6.QtWidgets.QMessageBox.information") as mock_info:
+                VideoTranslatorGUI.export_background_music(gui)
+                self.assertTrue(os.path.exists(target_bg))
+                with open(target_bg, "rb") as f:
+                    self.assertEqual(f.read(), b"RIFFdummybgdata")
+                mock_info.assert_called_once()
+                self.assertIn(mock_info.call_args[0][1], ("Saved", "Đã lưu", t("Saved")))
+
+            # Mixed audio export success with voice fallback
+            target_mix = os.path.join(td, "exported_mix.wav")
+            gui.processed_artifacts = {"voice_vi": src_voice}
+            with patch("PySide6.QtWidgets.QFileDialog.getSaveFileName", return_value=(target_mix, "wav")), \
+                 patch("PySide6.QtWidgets.QMessageBox.information") as mock_info:
+                VideoTranslatorGUI.export_mixed_audio(gui)
+                self.assertTrue(os.path.exists(target_mix))
+                with open(target_mix, "rb") as f:
+                    self.assertEqual(f.read(), b"RIFFdummyvoicedata")
+                mock_info.assert_called_once()
+                self.assertIn(mock_info.call_args[0][1], ("Saved", "Đã lưu", t("Saved")))
+
+    def test_export_audio_menu_built(self):
+        from unittest.mock import MagicMock
+        from PySide6.QtWidgets import QPushButton
+        from ui.views.main_window import _build_header_bar
+
+        gui = MagicMock()
+        gui.run_all_btn = QPushButton()
+        gui.export_btn = QPushButton()
+        gui.preview_5s_btn = QPushButton()
+        _build_header_bar(gui)
+        self.assertIsNotNone(gui.export_audio_menu)
+        self.assertIsNotNone(gui.export_voice_action)
+        self.assertIsNotNone(gui.export_bg_music_action)
+        self.assertIsNotNone(gui.export_mixed_audio_action)
+
 
 if __name__ == "__main__":
     unittest.main()

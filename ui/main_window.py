@@ -13873,6 +13873,97 @@ class VideoTranslatorGUI(QMainWindow):
             handle.write(srt_text)
         QMessageBox.information(self, t("Saved"), f"{t('Translated subtitle exported to:')}\n\n{file_path}")
 
+    def export_dubbed_voice(self):
+        voice_path = str(
+            self.processed_artifacts.get("voice_vi")
+            or getattr(self, "last_voice_vi_path", "")
+            or ""
+        ).strip()
+        if not voice_path or not os.path.exists(voice_path):
+            QMessageBox.warning(self, t("Missing Audio"), t("No dubbed voice audio is ready yet. Please run TTS first."))
+            return
+        video_base = os.path.splitext(os.path.basename(self.video_path_edit.text().strip() or "dubbed_voice"))[0]
+        suggested_name = f"{video_base}_voice.wav"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            t("Export Dubbed Voice"),
+            suggested_name,
+            t("WAV Audio (*.wav);;All Files (*)"),
+        )
+        if not save_path:
+            return
+        import shutil
+        try:
+            shutil.copyfile(voice_path, save_path)
+            self.log(f"[Export] Dubbed voice exported to: {save_path}")
+            QMessageBox.information(self, t("Saved"), f"{t('Dubbed voice exported to:')}\n\n{save_path}")
+        except Exception as exc:
+            self.show_error(t("Export Failed"), t("Could not export audio file."), str(exc))
+
+    def export_background_music(self):
+        bg_path = str(
+            self.processed_artifacts.get("music")
+            or getattr(self, "last_music_path", "")
+            or self.processed_artifacts.get("audio_extracted")
+            or getattr(self, "last_extracted_audio", "")
+            or ""
+        ).strip()
+        if not bg_path or not os.path.exists(bg_path):
+            QMessageBox.warning(self, t("Missing Audio"), t("No background music audio is ready yet."))
+            return
+        video_base = os.path.splitext(os.path.basename(self.video_path_edit.text().strip() or "background_music"))[0]
+        suggested_name = f"{video_base}_bg_music.wav"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            t("Export Background Music"),
+            suggested_name,
+            t("WAV Audio (*.wav);;All Files (*)"),
+        )
+        if not save_path:
+            return
+        import shutil
+        try:
+            shutil.copyfile(bg_path, save_path)
+            self.log(f"[Export] Background music exported to: {save_path}")
+            QMessageBox.information(self, t("Saved"), f"{t('Background music exported to:')}\n\n{save_path}")
+        except Exception as exc:
+            self.show_error(t("Export Failed"), t("Could not export audio file."), str(exc))
+
+    def export_mixed_audio(self):
+        mix_path = str(
+            self.processed_artifacts.get("mixed_vi")
+            or getattr(self, "last_mixed_vi_path", "")
+            or ""
+        ).strip()
+        if not mix_path or not os.path.exists(mix_path):
+            voice_path = str(
+                self.processed_artifacts.get("voice_vi")
+                or getattr(self, "last_voice_vi_path", "")
+                or ""
+            ).strip()
+            if voice_path and os.path.exists(voice_path):
+                mix_path = voice_path
+            else:
+                QMessageBox.warning(self, t("Missing Audio"), t("No mixed audio is ready yet."))
+                return
+        video_base = os.path.splitext(os.path.basename(self.video_path_edit.text().strip() or "audio_mix"))[0]
+        suggested_name = f"{video_base}_audio_mix.wav"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            t("Export Full Audio Mix"),
+            suggested_name,
+            t("WAV Audio (*.wav);;All Files (*)"),
+        )
+        if not save_path:
+            return
+        import shutil
+        try:
+            shutil.copyfile(mix_path, save_path)
+            self.log(f"[Export] Full audio mix exported to: {save_path}")
+            QMessageBox.information(self, t("Saved"), f"{t('Full audio mix exported to:')}\n\n{save_path}")
+        except Exception as exc:
+            self.show_error(t("Export Failed"), t("Could not export audio file."), str(exc))
+
     def import_original_srt(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self,

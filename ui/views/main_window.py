@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, Q
 from .advanced_tabs import build_advanced_group
 from .preview_panel import build_preview_panel
 from .start_panel import build_start_group
+from ui.i18n import t
 
 
 class _TitleBar(QFrame):
@@ -120,11 +121,22 @@ def _build_header_bar(gui):
     more_menu = QMenu(gui.more_actions_btn)
     more_menu.setObjectName("headerMoreMenu")
 
-    gui.download_subtitle_action = more_menu.addAction("Export Translated SRT…")
+    gui.download_subtitle_action = more_menu.addAction(t("Export Translated SRT…"))
     gui.download_subtitle_action.triggered.connect(gui.download_subtitle)
-    gui.download_original_action = more_menu.addAction("Export Source SRT…")
+    gui.download_original_action = more_menu.addAction(t("Export Source SRT…"))
     gui.download_original_action.triggered.connect(gui.download_original_script)
-    gui.preview_5s_action = more_menu.addAction("Fast Preview (5 seconds)")
+
+    export_audio_menu = more_menu.addMenu(t("Export Audio"))
+    export_audio_menu.setObjectName("headerMoreMenu")
+    gui.export_audio_menu = export_audio_menu
+    gui.export_voice_action = export_audio_menu.addAction(t("Export Dubbed Voice (WAV)…"))
+    gui.export_voice_action.triggered.connect(gui.export_dubbed_voice)
+    gui.export_bg_music_action = export_audio_menu.addAction(t("Export Background Music (WAV)…"))
+    gui.export_bg_music_action.triggered.connect(gui.export_background_music)
+    gui.export_mixed_audio_action = export_audio_menu.addAction(t("Export Full Audio Mix (WAV)…"))
+    gui.export_mixed_audio_action.triggered.connect(gui.export_mixed_audio)
+
+    gui.preview_5s_action = more_menu.addAction(t("Fast Preview (5 seconds)"))
     gui.preview_5s_action.triggered.connect(gui.preview_5s_btn.click)
     more_menu.addSeparator()
     gui.clean_project_action = more_menu.addAction("Clean")
