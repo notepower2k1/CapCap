@@ -15152,7 +15152,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.run_all_btn.setEnabled(v_ok and not self._pipeline_active)
         self.preview_frame_btn.setEnabled(v_ok and bool(self.get_active_segments()))
         self.preview_5s_btn.setEnabled(v_ok)
-        if hasattr(self, "preview_5s_action"):
+        if getattr(self, "preview_5s_action", None) is not None:
             self.preview_5s_action.setEnabled(v_ok)
         self.export_btn.setEnabled(can_export)
         if hasattr(self, "download_subtitle_action"):

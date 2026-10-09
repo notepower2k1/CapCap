@@ -577,6 +577,7 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Voice only": "Chỉ giọng đọc",
     "Subtitle only": "Chỉ phụ đề",
     "Subtitle + voice": "Phụ đề + giọng đọc",
+    "Export Subtitles": "Xuất phụ đề",
     "Vietnamese subtitles only": "Chỉ phụ đề tiếng Việt",
     "Vietnamese voice only": "Chỉ giọng tiếng Việt",
     "Vietnamese subtitles + voice": "Phụ đề tiếng Việt + giọng đọc",

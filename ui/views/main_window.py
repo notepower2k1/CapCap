@@ -121,9 +121,12 @@ def _build_header_bar(gui):
     more_menu = QMenu(gui.more_actions_btn)
     more_menu.setObjectName("headerMoreMenu")
 
-    gui.download_subtitle_action = more_menu.addAction(t("Export Translated SRT…"))
+    export_subtitles_menu = more_menu.addMenu(t("Export Subtitles"))
+    export_subtitles_menu.setObjectName("headerMoreMenu")
+    gui.export_subtitles_menu = export_subtitles_menu
+    gui.download_subtitle_action = export_subtitles_menu.addAction(t("Export Translated SRT…"))
     gui.download_subtitle_action.triggered.connect(gui.download_subtitle)
-    gui.download_original_action = more_menu.addAction(t("Export Source SRT…"))
+    gui.download_original_action = export_subtitles_menu.addAction(t("Export Source SRT…"))
     gui.download_original_action.triggered.connect(gui.download_original_script)
 
     export_audio_menu = more_menu.addMenu(t("Export Audio"))
@@ -136,8 +139,7 @@ def _build_header_bar(gui):
     gui.export_mixed_audio_action = export_audio_menu.addAction(t("Export Full Audio Mix (WAV)…"))
     gui.export_mixed_audio_action.triggered.connect(gui.export_mixed_audio)
 
-    gui.preview_5s_action = more_menu.addAction(t("Fast Preview (5 seconds)"))
-    gui.preview_5s_action.triggered.connect(gui.preview_5s_btn.click)
+    gui.preview_5s_action = None
     more_menu.addSeparator()
     gui.clean_project_action = more_menu.addAction("Clean")
     gui.clean_project_action.triggered.connect(gui.clean_current_project)

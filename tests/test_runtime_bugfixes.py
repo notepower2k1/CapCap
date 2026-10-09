@@ -1504,10 +1504,14 @@ class TestRuntimeBugfixes(unittest.TestCase):
         gui.export_btn = QPushButton()
         gui.preview_5s_btn = QPushButton()
         _build_header_bar(gui)
+        self.assertIsNotNone(gui.export_subtitles_menu)
+        self.assertIsNotNone(gui.download_subtitle_action)
+        self.assertIsNotNone(gui.download_original_action)
         self.assertIsNotNone(gui.export_audio_menu)
         self.assertIsNotNone(gui.export_voice_action)
         self.assertIsNotNone(gui.export_bg_music_action)
         self.assertIsNotNone(gui.export_mixed_audio_action)
+        self.assertIsNone(getattr(gui, "preview_5s_action", None))
 
     def test_processing_workers_get_voice_preview_utils(self):
         from ui.worker_adapters.processing_workers import _get_voice_preview_utils
