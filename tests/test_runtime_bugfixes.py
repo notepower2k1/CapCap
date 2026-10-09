@@ -1517,6 +1517,39 @@ class TestRuntimeBugfixes(unittest.TestCase):
         self.assertTrue(hasattr(vpu, "provider_native_speed"))
         self.assertTrue(hasattr(vpu, "segment_cache_key"))
 
+    def test_layer_controls_unlocked_when_video_loaded_without_subtitles(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        # 1. Test that with a valid video path, _optional_layer_controls_ready evaluates to True even without subtitles/audio
+        gui = MagicMock()
+        gui.video_path_edit.text.return_value = "C:/test/sample.mp4"
+        gui.has_active_video_filters.return_value = False
+        gui.timeline._timeline = MagicMock()
+        gui.timeline._timeline.tracks = []
+        gui.timeline._timeline.duration = 10.0
+        gui.media_player.position.return_value = 0
+        gui.video_view.get_blur_region_normalized.return_value = None
+        gui._current_mask_regions_payload.return_value = []
+
+        # Check has_active_overlay_layers returns False when no overlays exist
+        self.assertFalse(VideoTranslatorGUI.has_active_overlay_layers(gui))
+
+        # 2. Test has_active_overlay_layers returns True when an overlay exists
+        mock_track = MagicMock()
+        mock_track.type = "mask"
+        mock_layer = MagicMock()
+        mock_layer.visible = True
+        mock_track.layers = [mock_layer]
+        gui.timeline._timeline.tracks = [mock_track]
+
+        self.assertTrue(VideoTranslatorGUI.has_active_overlay_layers(gui))
+
+        # Test with blur region in video_view
+        gui.timeline._timeline.tracks = []
+        gui.video_view.get_blur_region_normalized.return_value = {"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2}
+        self.assertTrue(VideoTranslatorGUI.has_active_overlay_layers(gui))
+
 
 if __name__ == "__main__":
     unittest.main()

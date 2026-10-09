@@ -1132,8 +1132,16 @@ class PreviewController:
                 translated_ass_path = ""
 
         if mode in ("subtitle", "both") and (not translated_srt_path or not os.path.exists(translated_srt_path)):
-            QMessageBox.warning(self.gui, t("Error"), t("Translated subtitle file not found. Translate or import an SRT first."))
-            return
+            has_overlays = bool(hasattr(self.gui, "has_active_overlay_layers") and self.gui.has_active_overlay_layers())
+            if has_overlays:
+                empty_srt = self.gui.get_project_temp_path("subtitles", "empty_export.srt", create_parent=True)
+                with open(empty_srt, "w", encoding="utf-8") as f:
+                    f.write("")
+                translated_srt_path = empty_srt
+                translated_ass_path = ""
+            else:
+                QMessageBox.warning(self.gui, t("Error"), t("Translated subtitle file not found. Translate or import an SRT first."))
+                return
 
         if mode in ("voice", "both") and (not chosen_audio or not os.path.exists(chosen_audio)):
             QMessageBox.warning(
@@ -1345,14 +1353,25 @@ class PreviewController:
         if not video_path or not os.path.exists(video_path):
             if show_dialog:
                 QMessageBox.warning(self.gui, t("Error"), t("Please choose a video first."))
+            return
+
+        mode = self._effective_render_mode_without_tts(self.gui.get_output_mode_key())
+        preview_srt_path = ""
         preview_segments = []
         if mode in ("subtitle", "both"):
             preview_srt_path, preview_segments = self.build_full_active_subtitle_srt()
         has_active_video_filters = bool(hasattr(self.gui, "has_active_video_filters") and self.gui.has_active_video_filters())
-        if mode in ("subtitle", "both") and not preview_srt_path and not has_active_video_filters:
-            if show_dialog:
-                QMessageBox.warning(self.gui, t("Error"), t("No active subtitle track is available for frame preview."))
-            return
+        has_overlays = bool(hasattr(self.gui, "has_active_overlay_layers") and self.gui.has_active_overlay_layers())
+        if mode in ("subtitle", "both") and not preview_srt_path:
+            if has_active_video_filters or has_overlays:
+                empty_srt = self.gui.get_project_temp_path("subtitles", "empty_frame_preview.srt", create_parent=True)
+                with open(empty_srt, "w", encoding="utf-8") as f:
+                    f.write("")
+                preview_srt_path = empty_srt
+            else:
+                if show_dialog:
+                    QMessageBox.warning(self.gui, t("Error"), t("No active subtitle track is available for frame preview."))
+                return
 
         if self.gui._frame_preview_running:
             self.gui._pending_auto_frame_preview = True
@@ -1574,7 +1593,7 @@ class PreviewController:
         has_active_video_filters = bool(hasattr(self.gui, "has_active_video_filters") and self.gui.has_active_video_filters())
         self.gui.log(f"[Preview] has_active_video_filters={has_active_video_filters}")
         mask_regions, logo_layers, _text_layers = self._extract_overlay_layers()
-        has_overlays = bool(mask_regions or logo_layers)
+        has_overlays = bool(mask_regions or logo_layers or (hasattr(self.gui, "has_active_overlay_layers") and self.gui.has_active_overlay_layers()))
         has_warps = bool(getattr(self.gui, "video_time_warps", []))
         self.gui._preview_video_has_burned_subtitles = bool(mode == "subtitle" and (has_active_video_filters or has_overlays))
 
@@ -1605,8 +1624,14 @@ class PreviewController:
         if mode in ("subtitle", "both"):
             preview_srt_path, preview_segments = self.build_full_active_subtitle_srt()
             if not preview_srt_path:
-                QMessageBox.warning(self.gui, t("Error"), t("No active subtitle track is available for video preview."))
-                return
+                if has_active_video_filters or has_overlays:
+                    empty_srt = self.gui.get_project_temp_path("subtitles", "empty_preview.srt", create_parent=True)
+                    with open(empty_srt, "w", encoding="utf-8") as f:
+                        f.write("")
+                    preview_srt_path = empty_srt
+                else:
+                    QMessageBox.warning(self.gui, t("Error"), t("No active subtitle track is available for video preview."))
+                    return
             subtitle_style = self.gui.get_subtitle_export_style(segments=preview_segments)
         else:
             subtitle_style = self.gui.get_subtitle_export_style()

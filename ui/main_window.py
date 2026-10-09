@@ -5876,6 +5876,30 @@ class VideoTranslatorGUI(QMainWindow):
         active = bool(state.get("active"))
         return active
 
+    def has_active_overlay_layers(self) -> bool:
+        """Check if any overlay layers (mask, logo/image, text, blur) exist in the timeline or preview."""
+        if self.has_active_video_filters() if hasattr(self, "has_active_video_filters") else False:
+            return True
+        if hasattr(self, "video_view") and hasattr(self.video_view, "get_blur_region_normalized"):
+            blur_reg = self.video_view.get_blur_region_normalized()
+            if blur_reg:
+                return True
+        if hasattr(self, "_current_mask_regions_payload"):
+            try:
+                masks = self._current_mask_regions_payload()
+                if masks:
+                    return True
+            except Exception:
+                pass
+        tl = getattr(getattr(self, "timeline", None), "_timeline", None)
+        if tl and getattr(tl, "tracks", None):
+            for t in tl.tracks:
+                track_type = str(getattr(t.type, "value", t.type) or "").lower()
+                if track_type in ("mask", "image", "text", "blur") and getattr(t, "layers", None):
+                    if any(getattr(layer, "visible", True) for layer in t.layers):
+                        return True
+        return False
+
     def on_output_ratio_changed(self, *_args):
         if hasattr(self, "video_view") and hasattr(self.video_view, "set_preview_aspect_ratio"):
             self.video_view.set_preview_aspect_ratio(self.get_output_ratio_key())
@@ -9621,19 +9645,29 @@ class VideoTranslatorGUI(QMainWindow):
         if self._preview_is_playing():
             return
 
-        if layer_type in {"blur", "logo", "mask", "text", "image", "sticker"} and not bool(
-            getattr(self, "_optional_layer_controls_ready", False)
-        ):
-            QMessageBox.information(
+        video_path = self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
+        v_ok = bool(video_path and os.path.exists(video_path))
+        if layer_type in {"blur", "logo", "mask", "text", "image", "sticker"} and not v_ok:
+            QMessageBox.warning(
                 self,
-                t("Generate Video First"),
-                t("Complete video generation before adding Blur, Logo, Mask, Text, or other overlay layers."),
+                t("Error"),
+                t("Please choose a video first."),
             )
             return
 
         tl = self.timeline._timeline
         if not tl:
             return
+        if getattr(tl, "duration", 0.0) <= 0.0 and v_ok:
+            try:
+                from video_processor import get_video_duration
+                d = get_video_duration(video_path)
+                if d and d > 0:
+                    tl.duration = float(d)
+                    if hasattr(self, "timeline") and hasattr(self.timeline, "set_duration"):
+                        self.timeline.set_duration(int(d * 1000))
+            except Exception:
+                pass
 
         from app.layers.base import LayerType
         from app.layers.sync_bridge import find_or_create_track
@@ -14913,9 +14947,11 @@ class VideoTranslatorGUI(QMainWindow):
         # remains optional: if it has not been generated, Export and Fast
         # Preview retain the source audio and burn the translated subtitles.
         # Voice-only projects without subtitles keep their historical rule.
+        has_overlays = self.has_active_overlay_layers()
         can_export = v_ok and (
             has_subtitle_track
             or (mode == "voice" and has_voice_audio)
+            or has_overlays
         )
 
         self.extract_btn.setEnabled(v_ok)
@@ -15001,17 +15037,16 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "stop_btn"):
             self.stop_btn.setEnabled(v_ok and not voice_running)
         if hasattr(self, "blur_area_btn"):
-            self.blur_area_btn.setEnabled(can_export and not review_mode)
+            self.blur_area_btn.setEnabled(self._optional_layer_controls_ready)
         if hasattr(self, "add_music_layer_btn"):
             # Music is an audio track, not a visual overlay; it can be added
             # as soon as a source video is selected, but never while Review
             # Mode is active or a voice/render worker is running.
             source_video = self._resolve_preview_original_video_path()
             self.add_music_layer_btn.setEnabled(bool(source_video) and not review_mode and not voice_running)
-        # Overlay tracks are only meaningful once the generated output is
-        # ready. Keep their controls disabled before that point so users
-        # cannot create layers against an incomplete video workflow.
-        self._optional_layer_controls_ready = bool(can_export and not voice_running and not review_mode)
+        # Overlay tracks can be added freely as soon as a source video is loaded
+        # and playback is not actively running.
+        self._optional_layer_controls_ready = bool(v_ok and not voice_running and not review_mode)
         for button_name in ("blur_add_btn", "add_logo_btn", "add_mask_btn", "add_text_btn"):
             button = getattr(self, button_name, None)
             if button is not None:
