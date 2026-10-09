@@ -1614,6 +1614,50 @@ class TestRuntimeBugfixes(unittest.TestCase):
         self.assertTrue("Translating subtitles" in footer_call or "Đang dịch phụ đề" in footer_call)
         status_label.setText.assert_called_with("42%")
 
+    def test_optional_layer_controls_ready_initialized_and_refresh_ui_state(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        # 1. VideoTranslatorGUI instance initializes _optional_layer_controls_ready without startup error
+        win = VideoTranslatorGUI()
+        try:
+            self.assertTrue(hasattr(win, "_optional_layer_controls_ready"))
+            self.assertFalse(win._optional_layer_controls_ready)
+        finally:
+            win.close()
+            win.deleteLater()
+
+        # 2. In refresh_ui_state, blur_area_btn.setEnabled succeeds even if _optional_layer_controls_ready
+        # was not pre-set on mock, verifying calculation order before button state update
+        mock_gui = MagicMock()
+        mock_gui.video_path_edit.text.return_value = ""
+        mock_gui.audio_source_edit.text.return_value = ""
+        mock_gui.transcript_text.toPlainText.return_value = ""
+        mock_gui.translated_text.toPlainText.return_value = ""
+        mock_gui.current_project_state.steps = {}
+        mock_gui.current_segments = []
+        mock_gui.current_translated_segments = []
+        mock_gui.video_time_warps = []
+        mock_gui._preview_is_playing.return_value = False
+        mock_gui._translation_phase_complete.return_value = False
+        mock_gui.resolve_selected_audio_path.return_value = ""
+        mock_gui.last_translated_srt_path = ""
+        mock_gui.get_output_mode_key.return_value = "subtitle"
+        mock_gui.get_output_scale_mode_key.return_value = "fit"
+        mock_gui.get_output_fill_focus.return_value = (0.5, 0.5)
+        mock_gui.get_active_segments.return_value = []
+        mock_gui.voice_catalog_entries_all = []
+        mock_gui.timeline = None
+        mock_gui.has_active_overlay_layers.return_value = False
+        mock_gui.using_existing_audio_source.return_value = False
+        del mock_gui._optional_layer_controls_ready
+        self.assertFalse(hasattr(mock_gui, "_optional_layer_controls_ready"))
+
+        # Must succeed without AttributeError
+        VideoTranslatorGUI.refresh_ui_state(mock_gui)
+        self.assertTrue(hasattr(mock_gui, "_optional_layer_controls_ready"))
+        mock_gui.blur_area_btn.setEnabled.assert_called_with(mock_gui._optional_layer_controls_ready)
+
 
 if __name__ == "__main__":
     unittest.main()

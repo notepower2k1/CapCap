@@ -784,6 +784,7 @@ class VideoTranslatorGUI(QMainWindow):
         # Simple pipeline runner (Run All)
         self._pipeline_active = False
         self._pipeline_step = ""
+        self._optional_layer_controls_ready = False
 
         # Pre-rendered video state
         self.last_preview_video_path = ""
@@ -15036,6 +15037,9 @@ class VideoTranslatorGUI(QMainWindow):
             self.play_btn.setEnabled(v_ok and not voice_running and not getattr(self, "_styled_preview_running", False))
         if hasattr(self, "stop_btn"):
             self.stop_btn.setEnabled(v_ok and not voice_running)
+        # Overlay tracks can be added freely as soon as a source video is loaded
+        # and playback is not actively running.
+        self._optional_layer_controls_ready = bool(v_ok and not voice_running and not review_mode)
         if hasattr(self, "blur_area_btn"):
             self.blur_area_btn.setEnabled(self._optional_layer_controls_ready)
         if hasattr(self, "add_music_layer_btn"):
@@ -15044,9 +15048,6 @@ class VideoTranslatorGUI(QMainWindow):
             # Mode is active or a voice/render worker is running.
             source_video = self._resolve_preview_original_video_path()
             self.add_music_layer_btn.setEnabled(bool(source_video) and not review_mode and not voice_running)
-        # Overlay tracks can be added freely as soon as a source video is loaded
-        # and playback is not actively running.
-        self._optional_layer_controls_ready = bool(v_ok and not voice_running and not review_mode)
         for button_name in ("blur_add_btn", "add_logo_btn", "add_mask_btn", "add_text_btn"):
             button = getattr(self, button_name, None)
             if button is not None:
