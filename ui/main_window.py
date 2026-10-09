@@ -3500,9 +3500,14 @@ class VideoTranslatorGUI(QMainWindow):
 
         source_video = self._resolve_preview_original_video_path()
         current_source = self._normalize_local_file_path(str(getattr(self.media_player, "_source_path", "") or ""))
+        preview_source = self._normalize_local_file_path(str(getattr(self, "last_preview_video_path", "") or ""))
         should_apply = bool(force) or not current_source
         if source_video and current_source:
-            should_apply = bool(force) or os.path.abspath(current_source) == os.path.abspath(source_video)
+            should_apply = (
+                bool(force)
+                or os.path.abspath(current_source) == os.path.abspath(source_video)
+                or (bool(preview_source) and os.path.abspath(current_source) == os.path.abspath(preview_source))
+            )
 
         if should_apply:
             self._apply_preview_audio_track_selection()
@@ -16890,7 +16895,7 @@ class VideoTranslatorGUI(QMainWindow):
                     if hasattr(self, "_sync_audio_mix_controls_from_tracks"):
                         self._sync_audio_mix_controls_from_tracks()
                     if hasattr(self, "sync_preview_audio_track_to_output"):
-                        self.sync_preview_audio_track_to_output()
+                        self.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
                 if bg_path:
                     self.update_project_step("mix_audio", "skipped")
                 self.log("[Voiceover] Reusing existing generated audio. Generate did not call TTS again.")
@@ -17187,7 +17192,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         self.schedule_timeline_visual_refresh(waveform=True, thumbnails=False)
         self.refresh_ui_state()
-        self.sync_preview_audio_track_to_output()
+        self.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
 
         if not getattr(self, "_pipeline_active", False) and not pipeline_advanced:
             QMessageBox.information(

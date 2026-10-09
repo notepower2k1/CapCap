@@ -1763,6 +1763,30 @@ class PreviewController:
                 self.gui.media_player.clear_subtitle()
             else:
                 self.gui.sync_live_subtitle_preview()
+
+            # MPV runs with ao=null (video-only). When setSource() loaded preview_path above,
+            # it reset native_audio_engine's tracks to empty. We must re-attach the audio
+            # track so preview playback is not silent!
+            audio_source = (
+                getattr(self.gui, "last_mixed_vi_path", "")
+                or getattr(self.gui, "last_voice_vi_path", "")
+                or preview_path
+            )
+            if audio_source and os.path.exists(audio_source):
+                if hasattr(self.gui.media_player, "set_audio_tracks_snapshot"):
+                    dur = self.gui._audio_total_duration_ms() / 1000.0
+                    tracks = [{
+                        "id": "preview_audio",
+                        "path": audio_source,
+                        "start": 0.0,
+                        "end": dur,
+                        "volume": 100.0,
+                        "muted": False,
+                        "is_original_video": False,
+                    }]
+                    self.gui.media_player.set_audio_tracks_snapshot(tracks, getattr(self.gui, "video_time_warps", []))
+                if hasattr(self.gui.media_player, "set_audio_file"):
+                    self.gui.media_player.set_audio_file(audio_source)
             self.gui.sync_preview_audio_track_to_output(apply_to_player=False)
             if getattr(self.gui, "_play_video_filter_preview_when_ready", False):
                 self.gui._play_video_filter_preview_when_ready = False

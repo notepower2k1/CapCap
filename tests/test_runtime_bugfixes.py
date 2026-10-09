@@ -1858,8 +1858,43 @@ class TestRuntimeBugfixes(unittest.TestCase):
             )
             mock_gui._sync_timeline_mute_to_gui.assert_called_once()
             mock_gui._sync_audio_mix_controls_from_tracks.assert_called_once()
-            mock_gui.sync_preview_audio_track_to_output.assert_called_once()
+            mock_gui.sync_preview_audio_track_to_output.assert_called_once_with(apply_to_player=True, force=True)
             mock_gui._pipeline_advance.assert_called_once_with("voiceover")
+
+    def test_on_preview_ready_reattaches_audio_tracks(self):
+        from unittest.mock import MagicMock
+        from ui.controllers.preview_controller import PreviewController
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            preview_video = os.path.join(tmpdir, "preview.mp4")
+            with open(preview_video, "wb") as f:
+                f.write(b"fake_mp4_data")
+            voice_audio = os.path.join(tmpdir, "voice.wav")
+            with open(voice_audio, "wb") as f:
+                f.write(b"fake_wav_data")
+
+            mock_gui = MagicMock()
+            mock_gui.processed_artifacts = {}
+            mock_gui.last_voice_vi_path = voice_audio
+            mock_gui.last_mixed_vi_path = ""
+            mock_gui._audio_total_duration_ms.return_value = 5000.0
+            mock_gui.video_time_warps = []
+            mock_gui._preview_video_has_burned_subtitles = False
+            mock_gui._pipeline_active = False
+
+            controller = PreviewController(mock_gui)
+            controller.on_preview_ready(preview_video, None)
+
+            # Verify set_audio_tracks_snapshot was called with the re-attached audio
+            mock_gui.media_player.set_audio_tracks_snapshot.assert_called_once()
+            args, _ = mock_gui.media_player.set_audio_tracks_snapshot.call_args
+            tracks, warps = args
+            self.assertEqual(len(tracks), 1)
+            self.assertEqual(tracks[0]["id"], "preview_audio")
+            self.assertEqual(tracks[0]["path"], voice_audio)
+            self.assertEqual(tracks[0]["end"], 5.0)
+            mock_gui.media_player.set_audio_file.assert_called_once_with(voice_audio)
+            mock_gui.sync_preview_audio_track_to_output.assert_called_once_with(apply_to_player=False)
 
 
 if __name__ == "__main__":
