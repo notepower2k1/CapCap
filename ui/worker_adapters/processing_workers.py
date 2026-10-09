@@ -32,6 +32,41 @@ def _normalizer_signature(dictionary) -> str:
         return ""
 
 
+def _get_voice_preview_utils():
+    """Robustly resolve voice_preview_utils across source and frozen environments."""
+    try:
+        from app.utils import voice_preview_utils as _vpu
+        return _vpu
+    except (ImportError, ModuleNotFoundError):
+        pass
+
+    try:
+        from utils import voice_preview_utils as _vpu
+        return _vpu
+    except (ImportError, ModuleNotFoundError):
+        pass
+
+    import importlib.util
+    from runtime_paths import bundle_root, join_root
+    candidates = [
+        os.path.join(bundle_root(), "app", "utils", "voice_preview_utils.py"),
+        os.path.join(bundle_root(), "utils", "voice_preview_utils.py"),
+        os.path.join(join_root("app", "utils", "voice_preview_utils.py")),
+        os.path.join(os.path.dirname(__file__), "..", "..", "app", "utils", "voice_preview_utils.py"),
+    ]
+    for cand in candidates:
+        if os.path.isfile(cand):
+            try:
+                spec = importlib.util.spec_from_file_location("capcap_voice_preview_utils", cand)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+            except Exception:
+                continue
+
+    raise ImportError("Cannot resolve voice_preview_utils module in source or frozen bundle")
+
+
 class VocalSeparationWorker(QThread):
     finished = Signal(str, str, str)
     progress = Signal(int, str)
@@ -1210,11 +1245,7 @@ class SegmentAudioPreviewWorker(QThread):
             cache_temp_dir = self.cache_temp_dir or preview_temp_dir
             os.makedirs(cache_temp_dir, exist_ok=True)
 
-            import importlib.util
-            _vpu_path = os.path.join(APP_PATH, "utils", "voice_preview_utils.py")
-            _vpu_spec = importlib.util.spec_from_file_location("_voice_preview_utils", _vpu_path)
-            _vpu = importlib.util.module_from_spec(_vpu_spec)
-            _vpu_spec.loader.exec_module(_vpu)
+            _vpu = _get_voice_preview_utils()
             clamp_requested_speed = _vpu.clamp_requested_speed
             load_manifest = _vpu.load_manifest
             provider_native_speed = _vpu.provider_native_speed

@@ -1509,6 +1509,14 @@ class TestRuntimeBugfixes(unittest.TestCase):
         self.assertIsNotNone(gui.export_bg_music_action)
         self.assertIsNotNone(gui.export_mixed_audio_action)
 
+    def test_processing_workers_get_voice_preview_utils(self):
+        from ui.worker_adapters.processing_workers import _get_voice_preview_utils
+        vpu = _get_voice_preview_utils()
+        self.assertTrue(hasattr(vpu, "voice_provider"))
+        self.assertTrue(hasattr(vpu, "clamp_requested_speed"))
+        self.assertTrue(hasattr(vpu, "provider_native_speed"))
+        self.assertTrue(hasattr(vpu, "segment_cache_key"))
+
 
 if __name__ == "__main__":
     unittest.main()

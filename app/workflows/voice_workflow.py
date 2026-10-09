@@ -8,11 +8,37 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from services import EngineRuntime, ProjectService
 from translation import render_prompt
 
-# Force-load from app/utils/ (ui/utils/ may shadow it)
-_vpu_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "utils", "voice_preview_utils.py")
-_vpu_spec = importlib.util.spec_from_file_location("capcap_voice_preview_utils", _vpu_path)
-_vpu = importlib.util.module_from_spec(_vpu_spec)
-_vpu_spec.loader.exec_module(_vpu)
+def _resolve_voice_preview_utils():
+    try:
+        from app.utils import voice_preview_utils as _vpu
+        return _vpu
+    except (ImportError, ModuleNotFoundError):
+        pass
+    try:
+        from utils import voice_preview_utils as _vpu
+        return _vpu
+    except (ImportError, ModuleNotFoundError):
+        pass
+    import importlib.util
+    from runtime_paths import bundle_root, join_root
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "utils", "voice_preview_utils.py"),
+        os.path.join(bundle_root(), "utils", "voice_preview_utils.py"),
+        os.path.join(bundle_root(), "app", "utils", "voice_preview_utils.py"),
+        os.path.join(join_root("app", "utils", "voice_preview_utils.py")),
+    ]
+    for cand in candidates:
+        if os.path.isfile(cand):
+            try:
+                spec = importlib.util.spec_from_file_location("capcap_voice_preview_utils", cand)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+            except Exception:
+                continue
+    raise ImportError("Cannot load voice_preview_utils")
+
+_vpu = _resolve_voice_preview_utils()
 clamp_requested_speed = _vpu.clamp_requested_speed
 load_manifest = _vpu.load_manifest
 manifest_path = _vpu.manifest_path
