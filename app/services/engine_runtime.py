@@ -205,6 +205,9 @@ class EngineRuntime:
     def get_video_dimensions(self, video_path: str):
         return self.ffmpeg.get_video_dimensions(video_path)
 
+    def get_video_duration(self, video_path: str) -> float:
+        return self.ffmpeg.get_video_duration(video_path)
+
     def generate_srt(self, segments, output_path: str, max_gap_ms: float = 100.0) -> str:
         return self.subtitle.generate_srt(segments, output_path, max_gap_ms=max_gap_ms)
 

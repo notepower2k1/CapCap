@@ -231,6 +231,15 @@ class TestTimeWarpExportAndPreview(unittest.TestCase):
         self.assertAlmostEqual(render_segments[2]["start"], 5.4, places=2)
         self.assertAlmostEqual(render_segments[2]["end"], 7.95, places=2)
 
+    @patch("video_processor.get_video_duration", return_value=15.5)
+    def test_engine_runtime_and_export_workflow_get_video_duration(self, mock_dur):
+        from services import EngineRuntime
+        runtime = EngineRuntime()
+        self.assertEqual(runtime.get_video_duration("dummy.mp4"), 15.5)
+
+        workflow = ExportWorkflow(workspace_root=self.workspace_root)
+        self.assertEqual(workflow._get_video_duration("dummy.mp4"), 15.5)
+
 
 if __name__ == "__main__":
     unittest.main()

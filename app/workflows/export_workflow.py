@@ -141,6 +141,18 @@ class ExportWorkflow:
         os.makedirs(tmp_dir, exist_ok=True)
         return os.path.join(tmp_dir, f"final_warped_{int(time.time())}.mp4")
 
+    def _get_video_duration(self, video_path: str) -> float:
+        if hasattr(self.engine_runtime, "get_video_duration"):
+            try:
+                return float(self.engine_runtime.get_video_duration(video_path) or 0.0)
+            except Exception:
+                pass
+        try:
+            from video_processor import get_video_duration
+            return float(get_video_duration(video_path) or 0.0)
+        except Exception:
+            return 0.0
+
     def _export_subtitle_video(
         self,
         *,
@@ -667,7 +679,7 @@ class ExportWorkflow:
                         video_path,
                         tmp_warped_video,
                         warps,
-                        self.engine_runtime.get_video_duration(video_path),
+                        self._get_video_duration(video_path),
                         fps=target_fps or 30.0,
                         include_audio=False,
                     )
@@ -727,7 +739,7 @@ class ExportWorkflow:
                         video_path,
                         tmp_warped_video,
                         warps,
-                        self.engine_runtime.get_video_duration(video_path),
+                        self._get_video_duration(video_path),
                         fps=target_fps or 30.0,
                         include_audio=False,
                     )

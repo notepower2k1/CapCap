@@ -1,5 +1,4 @@
 from video_processor import embed_ass_subtitles, embed_subtitles, extract_audio, get_video_dimensions
-from video_processor import embed_ass_subtitles, embed_subtitles, extract_audio, get_video_dimensions
 
 
 class FFmpegAdapter:
@@ -86,3 +85,10 @@ class FFmpegAdapter:
 
     def get_video_dimensions(self, video_path: str):
         return get_video_dimensions(video_path)
+
+    def get_video_duration(self, video_path: str) -> float:
+        try:
+            import video_processor
+            return float(video_processor.get_video_duration(video_path) or 0.0)
+        except Exception:
+            return 0.0
