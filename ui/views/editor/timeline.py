@@ -962,14 +962,7 @@ class EditorTimeline(QGraphicsView):
             end = max(end, audio_end)
 
             row_index = -1
-            if force_preferred and preferred is not None and preferred >= 0:
-                while len(row_intervals) <= preferred:
-                    row_intervals.append([])
-                    row_starts.append([])
-                row_index = preferred
-            elif preferred is not None and preferred >= 0:
-                # Expand row intervals up to preferred so layers on row 1+ do not
-                # collapse down to row 0 simply because row 0 has free space.
+            if preferred is not None and preferred >= 0:
                 while len(row_intervals) <= preferred:
                     row_intervals.append([])
                     row_starts.append([])
@@ -1133,6 +1126,68 @@ class EditorTimeline(QGraphicsView):
         """Backward-compatible alias for subtitle timing callers."""
         return self._clamp_layer_resize(track, layer, edge, value)
 
+    def _can_place_layer_on_row(self, track, layer, row_index: int, proposed_start: float, duration: float) -> tuple[bool, float]:
+        """Check if layer can fit on row_index around proposed_start without overlapping other layers on that row.
+        Returns (can_fit: bool, clamped_start: float).
+        """
+        if not self._should_overlap_stack(track):
+            return True, proposed_start
+
+        row_map = self._overlap_row_assignments.get(str(getattr(track, "id", "")), {})
+        other_layers = [
+            item for item in getattr(track, "layers", [])
+            if item is not layer and getattr(item, "visible", True) and (
+                row_map.get(str(getattr(item, "id", "")), (getattr(item, "metadata", None) or {}).get("row_index", 0)) == row_index
+            )
+        ]
+        if not other_layers:
+            clamped = max(0.0, min(proposed_start, max(0.0, self._duration - duration)))
+            return True, clamped
+
+        sorted_items = sorted(other_layers, key=lambda x: float(getattr(x, "start", 0.0) or 0.0))
+
+        # Build all empty gaps on row_index: list of (g_start, g_end)
+        gaps: list[tuple[float, float]] = []
+        first_start = float(getattr(sorted_items[0], "start", 0.0) or 0.0)
+        if first_start > 0.001:
+            gaps.append((0.0, first_start))
+
+        for i in range(len(sorted_items) - 1):
+            left_end = float(self._get_effective_layer_end(sorted_items[i]))
+            right_start = float(getattr(sorted_items[i + 1], "start", 0.0) or 0.0)
+            if right_start > left_end + 0.001:
+                gaps.append((left_end, right_start))
+
+        last_end = float(self._get_effective_layer_end(sorted_items[-1]))
+        if last_end < self._duration - 0.001:
+            gaps.append((last_end, self._duration))
+
+        proposed_mid = proposed_start + duration / 2.0
+
+        # Find the gap that contains proposed_mid (or closest gap)
+        target_gap = None
+        min_dist = float("inf")
+        for g_start, g_end in gaps:
+            if g_start - 0.001 <= proposed_mid <= g_end + 0.001:
+                target_gap = (g_start, g_end)
+                break
+            gap_mid = (g_start + g_end) / 2.0
+            dist = abs(proposed_mid - gap_mid)
+            if dist < min_dist:
+                min_dist = dist
+                target_gap = (g_start, g_end)
+
+        if target_gap is not None:
+            g_start, g_end = target_gap
+            gap_size = g_end - g_start
+            if gap_size < duration - 0.001:
+                # The gap is strictly smaller than the segment duration! Cannot fit!
+                return False, proposed_start
+            clamped = max(g_start, min(proposed_start, g_end - duration))
+            return True, clamped
+
+        return False, proposed_start
+
     def _clamp_layer_move(self, track, layer, start: float, end: float) -> float:
         """Clamp a body drag without moving any neighboring layer."""
         if track is None:
@@ -1160,11 +1215,18 @@ class EditorTimeline(QGraphicsView):
         upper = self._duration - duration
         for item in visible:
             item_start = float(getattr(item, "start", 0.0) or 0.0)
-            item_end = float(getattr(item, "end", item_start) or item_start)
+            item_end = float(self._get_effective_layer_end(item))
             if item_end <= original_start + 0.001:
                 lower = max(lower, item_end)
             elif item_start >= original_end - 0.001:
                 upper = min(upper, item_start - duration)
+        if lower > upper:
+            # The gap between lower and upper is smaller than duration!
+            # Layer cannot fit between them; keep it on its original valid side
+            if start <= (lower + upper) / 2.0:
+                return min(start, upper)
+            else:
+                return max(start, lower)
         return max(lower, min(start, upper))
 
     def paintEvent(self, event):
@@ -2341,26 +2403,40 @@ class EditorTimeline(QGraphicsView):
             track, layer = self._find_layer_by_id(drag["layer_id"])
             if layer and str(getattr(track, "id", "") or "") == str(drag.get("track_id", "") or ""):
                 if drag["type"] == "move":
+                    delta = t - float(drag["anchor_time"])
+                    original_start = float(drag["start_time"])
+                    original_end = float(drag["end_time"])
+                    duration = max(self.MIN_DUR, original_end - original_start)
+                    proposed_start = original_start + delta
+
                     if self._should_overlap_stack(track):
                         delta_y = (pos.y() + scroll_y) - float(drag.get("anchor_y", pos.y() + scroll_y))
                         row_delta = int(round(delta_y / float(max(1, self.CHILD_TRACK_H))))
                         target_row = max(0, int(drag.get("initial_row", 0)) + row_delta)
-                        if target_row != drag.get("row_index"):
-                            drag["row_index"] = target_row
-                            if isinstance(getattr(layer, "metadata", None), dict):
-                                layer.metadata["row_index"] = target_row
-                            self._overlap_row_assignments.setdefault(str(track.id), {})[drag["layer_id"]] = target_row
-                            self._rebuild_track_heights()
+                        current_row = int(drag.get("row_index", drag.get("initial_row", 0)) or 0)
+                        if target_row != current_row:
+                            can_fit, _ = self._can_place_layer_on_row(track, layer, target_row, proposed_start, duration)
+                            if can_fit:
+                                drag["row_index"] = target_row
+                                if isinstance(getattr(layer, "metadata", None), dict):
+                                    layer.metadata["row_index"] = target_row
+                                self._overlap_row_assignments.setdefault(str(track.id), {})[drag["layer_id"]] = target_row
+                                self._rebuild_track_heights()
+                            else:
+                                # Target row does not have enough room in this gap; keep on initial/current row
+                                fallback_row = int(drag.get("initial_row", 0) or 0)
+                                if drag.get("row_index") != fallback_row:
+                                    drag["row_index"] = fallback_row
+                                    if isinstance(getattr(layer, "metadata", None), dict):
+                                        layer.metadata["row_index"] = fallback_row
+                                    self._overlap_row_assignments.setdefault(str(track.id), {})[drag["layer_id"]] = fallback_row
+                                    self._rebuild_track_heights()
 
-                    delta = t - float(drag["anchor_time"])
-                    original_start = float(drag["start_time"])
-                    original_end = float(drag["end_time"])
-                    proposed_start = original_start + delta
                     new_start = self._clamp_layer_move(
-                        track, layer, proposed_start, proposed_start + (original_end - original_start)
+                        track, layer, proposed_start, proposed_start + duration
                     )
                     layer.start = new_start
-                    layer.end = new_start + (original_end - original_start)
+                    layer.end = new_start + duration
                 elif drag["type"] == "resize_left":
                     new_start = min(t, drag["end_time"] - self.MIN_DUR)
                     new_start = max(0.0, new_start)

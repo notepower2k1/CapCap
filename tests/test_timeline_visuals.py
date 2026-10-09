@@ -725,6 +725,106 @@ class TestTimelineStickyRowAndMultiRowDrag(unittest.TestCase):
         clamped_start = timeline._clamp_layer_move(track, layer_b, 2.5, 4.5)
         self.assertEqual(clamped_start, 2.5)
 
+    def test_cannot_squeeze_into_row_if_gap_too_small(self):
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+
+        timeline = self.EditorTimeline()
+        timeline.set_duration(20.0)
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "seg0"},
+            {"start": 8.0, "end": 15.0, "text": "seg1"},
+            {"start": 2.0, "end": 7.0, "text": "seg2"},
+        ]
+        timeline.set_segments(segments)
+
+        track = next(t for t in timeline._timeline.tracks if timeline._is_subtitle_track(t))
+        self.assertEqual(timeline.get_segment_row_index(0), 0)
+        self.assertEqual(timeline.get_segment_row_index(1), 0)
+        self.assertEqual(timeline.get_segment_row_index(2), 1)
+
+        seg2_layer = next(l for l in track.layers if (l.metadata or {}).get("_seg_index") == 2)
+        anchor_y = 100.0
+        timeline._drag_state = {
+            "type": "move",
+            "layer_id": seg2_layer.id,
+            "track_id": str(getattr(track, "id", "") or ""),
+            "anchor_y": anchor_y,
+            "initial_row": 1,
+            "row_index": 1,
+            "anchor_time": 2.0,
+            "start_time": 2.0,
+            "end_time": 7.0,
+        }
+
+        # Drag vertically UP towards row 0 (delta_y = -CHILD_TRACK_H)
+        target_x = 2.0 * timeline.pixels_per_second + timeline.CONTENT_LEFT_PAD
+        target_pos = QPointF(float(target_x), anchor_y - float(timeline.CHILD_TRACK_H))
+        event = QMouseEvent(
+            QEvent.Type.MouseMove,
+            target_pos,
+            target_pos,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        timeline.mouseMoveEvent(event)
+
+        # Because gap on row 0 is (8.0 - 5.0) = 3.0s < duration 5.0s,
+        # seg2 cannot squeeze into row 0 and must remain on row 1
+        self.assertEqual(timeline._drag_state["row_index"], 1)
+        self.assertEqual(timeline._overlap_row_assignments.get(str(track.id), {}).get(seg2_layer.id), 1)
+
+    def test_can_squeeze_into_row_if_gap_large_enough(self):
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+
+        timeline = self.EditorTimeline()
+        timeline.set_duration(20.0)
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "seg0"},
+            {"start": 12.0, "end": 15.0, "text": "seg1"},
+            {"start": 6.0, "end": 9.0, "text": "seg2", "row_index": 1},
+        ]
+        timeline.set_segments(segments)
+
+        track = next(t for t in timeline._timeline.tracks if timeline._is_subtitle_track(t))
+        self.assertEqual(timeline.get_segment_row_index(0), 0)
+        self.assertEqual(timeline.get_segment_row_index(1), 0)
+        self.assertEqual(timeline.get_segment_row_index(2), 1)
+
+        seg2_layer = next(l for l in track.layers if (l.metadata or {}).get("_seg_index") == 2)
+        anchor_y = 100.0
+        timeline._drag_state = {
+            "type": "move",
+            "layer_id": seg2_layer.id,
+            "track_id": str(getattr(track, "id", "") or ""),
+            "anchor_y": anchor_y,
+            "initial_row": 1,
+            "row_index": 1,
+            "anchor_time": 6.0,
+            "start_time": 6.0,
+            "end_time": 9.0,
+        }
+
+        # Drag vertically UP towards row 0 (delta_y = -CHILD_TRACK_H)
+        target_x = 6.0 * timeline.pixels_per_second + timeline.CONTENT_LEFT_PAD
+        target_pos = QPointF(float(target_x), anchor_y - float(timeline.CHILD_TRACK_H))
+        event = QMouseEvent(
+            QEvent.Type.MouseMove,
+            target_pos,
+            target_pos,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        timeline.mouseMoveEvent(event)
+
+        # Gap on row 0 is (12.0 - 5.0) = 7.0s >= duration 3.0s,
+        # seg2 can squeeze into row 0!
+        self.assertEqual(timeline._drag_state["row_index"], 0)
+        self.assertEqual(timeline._overlap_row_assignments.get(str(track.id), {}).get(seg2_layer.id), 0)
+
     def test_sync_tts_dirty_and_timeline_visual_indicator(self):
         from app.layers.sync_bridge import (
             sync_segments_to_dub_subtitle_layers,

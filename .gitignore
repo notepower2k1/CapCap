@@ -47,3 +47,4 @@ installer/*.exe
 !installer/vc_redist.x64.exe
 *.zip
 bug*.png
+logs/*
