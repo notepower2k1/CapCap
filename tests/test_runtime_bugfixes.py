@@ -1550,6 +1550,70 @@ class TestRuntimeBugfixes(unittest.TestCase):
         gui.video_view.get_blur_region_normalized.return_value = {"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2}
         self.assertTrue(VideoTranslatorGUI.has_active_overlay_layers(gui))
 
+    def test_remote_api_server_status_resets_on_phase_change(self):
+        from app.remote_api_server import _set_status, _get_status
+
+        _set_status("transcription", "transcribing", progress=99, detail="whisper 99%")
+        status = _get_status()
+        self.assertEqual(status["phase"], "transcription")
+        self.assertEqual(status["message"], "transcribing")
+        self.assertEqual(status["progress"], 99)
+        self.assertEqual(status["detail"], "whisper 99%")
+
+        _set_status("translation", "translating", progress=None, detail="")
+        status2 = _get_status()
+        self.assertEqual(status2["phase"], "translation")
+        self.assertEqual(status2["message"], "translating")
+        self.assertEqual(status2["progress"], 0)
+        self.assertEqual(status2["detail"], "")
+
+    def test_pipeline_controller_prepare_step_started_resets_label_and_tracks_phase(self):
+        from unittest.mock import MagicMock
+        from ui.controllers.pipeline_controller import PipelineController
+
+        gui = MagicMock()
+        controller = PipelineController(gui)
+
+        status_label = MagicMock()
+        ai_process_step = MagicMock()
+        ai_process_step.status_label = status_label
+
+        dialog = MagicMock()
+        dialog.steps = {"ai_process": ai_process_step}
+        controller.progress_dialog = dialog
+
+        controller._on_prepare_step_started("translation")
+
+        self.assertEqual(controller.prepare_step_id, "translation")
+        gui.update_project_step.assert_called_with("translate_raw", "running")
+        status_label.setText.assert_called_with("0%")
+
+    def test_pipeline_controller_prepare_step_progress_translation_fallback(self):
+        from unittest.mock import MagicMock
+        from ui.controllers.pipeline_controller import PipelineController
+        from ui.i18n import t
+
+        gui = MagicMock()
+        gui._pipeline_active = True
+        controller = PipelineController(gui)
+
+        status_label = MagicMock()
+        ai_process_step = MagicMock()
+        ai_process_step.status_label = status_label
+
+        footer = MagicMock()
+        dialog = MagicMock()
+        dialog.steps = {"ai_process": ai_process_step}
+        dialog.step_order = ["ai_process"]
+        dialog.footer = footer
+        controller.progress_dialog = dialog
+
+        controller._on_prepare_step_progress("translation", 42, "", "")
+        footer_call = footer.setText.call_args[0][0]
+        self.assertIn("42%", footer_call)
+        self.assertTrue("Translating subtitles" in footer_call or "Đang dịch phụ đề" in footer_call)
+        status_label.setText.assert_called_with("42%")
+
 
 if __name__ == "__main__":
     unittest.main()

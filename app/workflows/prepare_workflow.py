@@ -964,7 +964,7 @@ class PrepareWorkflow:
         else:
             print(f"\n--- Step 4: Translating to {target_language} ---")
 
-            _report_step("translation")
+            _report_step("translation", "Translating subtitles...", percent=0)
             translate_started = time.perf_counter()
             project_state.set_step_status("translate_raw", "running")
             self.project_service.save_project(project_state)
@@ -1058,6 +1058,16 @@ class PrepareWorkflow:
                             streamed_translation_executor.shutdown(wait=True)
                             streamed_translation_executor = None
 
+                total_trans_cues = max(1, len(raw_segments))
+
+                def _on_translate_batch(start_idx: int, batch_segments: list[dict]) -> None:
+                    if tts_prefetch_enabled and batch_segments:
+                        _prefetch_batch(start_idx, batch_segments)
+                    completed_cues = min(total_trans_cues, int(start_idx) + len(batch_segments or []))
+                    pct = min(100, max(0, int((completed_cues / total_trans_cues) * 100)))
+                    msg = f"Translating subtitles: {completed_cues}/{total_trans_cues} cues ({pct}%)"
+                    _report_step("translation", msg, pct)
+
                 if cached_translation_signature == translation_signature and cached_translation_path and os.path.exists(cached_translation_path):
                     cached_models = self.project_service.load_segment_artifact(project_state, "translation_final")
                     if cached_models:
@@ -1080,7 +1090,7 @@ class PrepareWorkflow:
                             enable_polish=translator_ai,
                             optimize_subtitles=optimize_subtitles,
                             style_instruction=project_state.translator_style,
-                            batch_callback=_prefetch_batch if tts_prefetch_enabled else None,
+                            batch_callback=_on_translate_batch,
                         )
                         segment_models = self.segment_service.apply_translations(segment_models, translated_segments)
                         self.project_service.save_segment_artifact(
@@ -1097,7 +1107,7 @@ class PrepareWorkflow:
                         enable_polish=translator_ai,
                         optimize_subtitles=optimize_subtitles,
                         style_instruction=project_state.translator_style,
-                        batch_callback=_prefetch_batch if tts_prefetch_enabled else None,
+                        batch_callback=_on_translate_batch,
                     )
                     segment_models = self.segment_service.apply_translations(segment_models, translated_segments)
                     self.project_service.save_segment_artifact(
@@ -1106,6 +1116,7 @@ class PrepareWorkflow:
                         os.path.join("translation", "translation_final.json"),
                         segment_models,
                     )
+                _report_step("translation", "Translation complete", 100)
                 project_state.set_setting("translation_signature", translation_signature)
                 provider_counts = {}
                 for sm in segment_models:

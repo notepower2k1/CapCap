@@ -39,6 +39,7 @@ class PipelineController:
         self.local_worker_api_url = ""
         self.local_worker_api_token = ""
         self.prepare_run_id = 0
+        self.prepare_step_id = ""
         self.prepare_status_timer = None
         self.prepare_status_phase = ""
         self.active_processing_device = "cpu"
@@ -502,7 +503,7 @@ class PipelineController:
         self.gui.prepare_workflow_thread.step_started.connect(self._on_prepare_step_started)
         if hasattr(self.gui.prepare_workflow_thread, "progress"):
             self.gui.prepare_workflow_thread.progress.connect(
-                lambda pct, msg: self._on_prepare_step_progress("transcription", pct, detail=msg)
+                lambda pct, msg: self._on_prepare_step_progress(getattr(self, "prepare_step_id", "transcription") or "transcription", pct, detail=msg)
             )
         self.gui.prepare_workflow_thread.finished.connect(
             lambda project_state_path, error, run_id=prepare_run_id: self.on_prepare_workflow_finished(
@@ -518,11 +519,14 @@ class PipelineController:
         # its active phase into the GUI's in-memory project state.  This lets
         # Stop mark the correct phase failed instead of leaving a stale
         # completed artifact to drive the sidebar badge.
+        self.prepare_step_id = str(step_id or "")
         if step_id == "translation":
             try:
                 self.gui.update_project_step("translate_raw", "running")
             except Exception:
                 pass
+            if self.progress_dialog and "ai_process" in self.progress_dialog.steps:
+                self.progress_dialog.steps["ai_process"].status_label.setText("0%")
         labels = {
             "prepare": "Preparing project",
             "extract_audio": "Extracting audio",
@@ -555,7 +559,10 @@ class PipelineController:
 
         disp_text = t(str(detail or message).strip())
         if not disp_text:
-            disp_text = t("Transcribing audio ({percent}%)", percent=pct) if pct is not None else t("Processing...")
+            if str(phase or "").lower() == "translation":
+                disp_text = t("Translating subtitles ({percent}%)", percent=pct) if pct is not None else t("Translating subtitles...")
+            else:
+                disp_text = t("Transcribing audio ({percent}%)", percent=pct) if pct is not None else t("Processing...")
 
         # Update PipelineProgressDialog
         if self.progress_dialog:

@@ -76,15 +76,23 @@ _STATUS = {"phase": "idle", "message": "Idle", "progress": 0, "detail": ""}
 
 def _set_status(phase: str, message: str = "", progress: int | None = None, detail: str = "") -> None:
     with _STATUS_LOCK:
-        _STATUS["phase"] = str(phase or "idle")
+        current_phase = _STATUS.get("phase", "idle")
+        phase_str = str(phase or "idle")
+        phase_changed = (phase_str != current_phase)
+        _STATUS["phase"] = phase_str
         _STATUS["message"] = str(message or _STATUS["phase"])
         if progress is not None:
             try:
                 _STATUS["progress"] = max(0, min(100, int(progress)))
             except (ValueError, TypeError):
                 pass
+        elif phase_changed:
+            _STATUS["progress"] = 0
+
         if detail:
             _STATUS["detail"] = str(detail)
+        elif phase_changed:
+            _STATUS["detail"] = ""
 
 
 def _get_status() -> dict:
