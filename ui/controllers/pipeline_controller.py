@@ -406,11 +406,11 @@ class PipelineController:
         if is_remote_profile():
             # Backend runs separate + transcribe + translate in one batch.
             # Cleaner voice (separation) is handled inside the batch silently.
-            self.progress_dialog.add_step("ai_process", "Subtitle Processing (AI)")
+            self.progress_dialog.add_step("ai_process", t("Subtitle Processing (AI)"))
         else:
-            self.progress_dialog.add_step("ai_process", "Subtitle Processing (AI)")
-        self.progress_dialog.add_step("voiceover", "Synthesizing AI Voiceover")
-        self.progress_dialog.add_step("preview", "Preparing Video Preview")
+            self.progress_dialog.add_step("ai_process", t("Subtitle Processing (AI)"))
+        self.progress_dialog.add_step("voiceover", t("Synthesizing AI Voiceover"))
+        self.progress_dialog.add_step("preview", t("Preparing Video Preview"))
         self.progress_dialog.show()
         self.progress_dialog.raise_()
         self.progress_dialog.activateWindow()
@@ -557,7 +557,12 @@ class PipelineController:
             except (ValueError, TypeError):
                 pass
 
-        disp_text = t(str(detail or message).strip())
+        raw_detail = str(detail or message).strip()
+        if raw_detail.startswith("Translating subtitles:"):
+            # Format nicely in current language: e.g. "Đang dịch phụ đề: 30/120 câu (25%)"
+            disp_text = raw_detail.replace("Translating subtitles:", t("Translating subtitles") + ":").replace("cues", t("segments"))
+        else:
+            disp_text = t(raw_detail)
         if not disp_text:
             if str(phase or "").lower() == "translation":
                 disp_text = t("Translating subtitles ({percent}%)", percent=pct) if pct is not None else t("Translating subtitles...")

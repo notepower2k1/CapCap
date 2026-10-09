@@ -10,10 +10,20 @@ except ImportError:
 def save_user_settings(gui):
     s = gui.settings
     s.setValue("output_mode", current_source_text(gui.output_mode_combo))
-    # Output/canvas choices are intentionally session-local. Remove legacy
-    # cached values so reopening another project always starts from defaults.
-    for key in ("output_quality", "output_fps", "output_ratio", "output_scale_mode"):
-        s.remove(key)
+    # Canvas & output settings
+    if hasattr(gui, "output_quality_combo"):
+        s.setValue("output_quality", str(gui.output_quality_combo.currentData() or ""))
+    if hasattr(gui, "output_fps_combo"):
+        s.setValue("output_fps", str(gui.output_fps_combo.currentData() or ""))
+    if hasattr(gui, "output_ratio_combo"):
+        s.setValue("output_ratio", str(gui.output_ratio_combo.currentData() or ""))
+    if hasattr(gui, "output_scale_mode_combo"):
+        s.setValue("output_scale_mode", str(gui.output_scale_mode_combo.currentData() or ""))
+
+    # Audio handling mode
+    if hasattr(gui, "audio_handling_combo"):
+        s.setValue("audio_handling_mode", str(gui.audio_handling_combo.currentData() or "fast"))
+
     # Project-dependent output/filter/style values are intentionally
     # not stored in global QSettings. Remove keys written by older builds.
     for key in (
@@ -25,7 +35,6 @@ def save_user_settings(gui):
         "subtitle_background", "subtitle_background_width", "subtitle_background_shape", "subtitle_background_radius",
         "subtitle_outline", "subtitle_background_alpha", "subtitle_bold", "subtitle_speaker_colors",
         "subtitle_auto_keyword_highlight", "subtitle_highlight_color", "subtitle_highlight_mode",
-        "audio_handling_mode",
     ):
         s.remove(key)
 
@@ -94,13 +103,26 @@ def load_user_settings(gui):
     # preferences while preserving the hidden compatibility combo.
     set_current_source_text(gui.output_mode_combo, "Vietnamese subtitles + voice")
     if hasattr(gui, "output_quality_combo"):
-        gui.output_quality_combo.setCurrentIndex(0)
+        saved_q = str(s.value("output_quality", "") or "")
+        idx = gui.output_quality_combo.findData(saved_q) if saved_q else 0
+        gui.output_quality_combo.setCurrentIndex(max(0, idx))
     if hasattr(gui, "output_fps_combo"):
-        gui.output_fps_combo.setCurrentIndex(0)
+        saved_fps = str(s.value("output_fps", "") or "")
+        idx = gui.output_fps_combo.findData(saved_fps) if saved_fps else 0
+        gui.output_fps_combo.setCurrentIndex(max(0, idx))
     if hasattr(gui, "output_ratio_combo"):
-        gui.output_ratio_combo.setCurrentIndex(0)
+        saved_r = str(s.value("output_ratio", "") or "")
+        idx = gui.output_ratio_combo.findData(saved_r) if saved_r else 0
+        gui.output_ratio_combo.setCurrentIndex(max(0, idx))
     if hasattr(gui, "output_scale_mode_combo"):
-        gui.output_scale_mode_combo.setCurrentIndex(0)
+        saved_s = str(s.value("output_scale_mode", "") or "")
+        idx = gui.output_scale_mode_combo.findData(saved_s) if saved_s else 0
+        gui.output_scale_mode_combo.setCurrentIndex(max(0, idx))
+    if hasattr(gui, "audio_handling_combo"):
+        saved_audio_mode = str(s.value("audio_handling_mode", "fast") or "fast")
+        idx = gui.audio_handling_combo.findData(saved_audio_mode)
+        if idx >= 0:
+            gui.audio_handling_combo.setCurrentIndex(idx)
     filter_preset = "original"
     filter_intensity = 75
     filter_overrides = {}

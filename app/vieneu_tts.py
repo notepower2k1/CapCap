@@ -196,21 +196,26 @@ VIENEU_PRESET_VOICE_META = {
 
 
 def setup_vieneu_hf_env():
-    """Ensure HF_HOME is set to existing local model directory if available."""
-    if "HF_HOME" in os.environ and os.path.isdir(os.environ["HF_HOME"]):
-        return
+    """Ensure HF_HOME is set to existing local model directory if available and enable offline mode."""
     local_vieneu = models_path("vieneu")
     local_hf = models_path("huggingface")
     local_vieneu_hub = os.path.join(local_vieneu, "hub", "models--pnnbao-ump--VieNeu-TTS-v3-Turbo")
     local_hf_hub = os.path.join(local_hf, "hub", "models--pnnbao-ump--VieNeu-TTS-v3-Turbo")
+    has_local_model = False
     if os.path.isdir(local_vieneu_hub) or os.path.isdir(os.path.join(local_vieneu, "models--pnnbao-ump--VieNeu-TTS-v3-Turbo")):
         os.environ["HF_HOME"] = local_vieneu
+        has_local_model = True
     elif os.path.isdir(local_hf_hub):
         os.environ["HF_HOME"] = local_hf
+        has_local_model = True
     elif os.path.isdir(local_vieneu):
         os.environ["HF_HOME"] = local_vieneu
     else:
         os.environ["HF_HOME"] = local_vieneu
+
+    if has_local_model:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 
 def get_bundled_voices_dir() -> str:

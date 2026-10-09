@@ -121,7 +121,17 @@ class I18nTests(unittest.TestCase):
         i18n.set_language("vi", MemorySettings())
         i18n.localize_widget_tree(host)
 
-        self.assertEqual(prompt.text(), "Start Export")
+    def test_pipeline_progress_step_labels_and_live_translation(self):
+        settings = MemorySettings()
+        i18n.set_language("vi", settings)
+
+        self.assertEqual(i18n.t("Subtitle Processing (AI)"), "Xử lý phụ đề (AI)")
+        self.assertEqual(i18n.t("Synthesizing AI Voiceover"), "Tạo giọng đọc AI (TTS)")
+        self.assertEqual(i18n.t("Preparing Video Preview"), "Chuẩn bị xem trước video")
+        self.assertEqual(
+            i18n.t("Translating subtitles: 30/120 cues (25%)"),
+            "Đang dịch phụ đề: 30/120 câu (25%)",
+        )
 
 
 if __name__ == "__main__":

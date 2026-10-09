@@ -16880,6 +16880,17 @@ class VideoTranslatorGUI(QMainWindow):
                     self.processed_artifacts["voice_vi"] = self.last_voice_vi_path
                     self.update_project_artifact("voice_vi", self.last_voice_vi_path)
                     self.update_project_step("generate_tts", "done")
+                    if hasattr(self, "timeline") and self.timeline:
+                        self.timeline.sync_tts_track(
+                            self.last_voice_vi_path,
+                            segments=self.current_translated_segments or self.current_segments,
+                        )
+                    if hasattr(self, "_sync_timeline_mute_to_gui"):
+                        self._sync_timeline_mute_to_gui()
+                    if hasattr(self, "_sync_audio_mix_controls_from_tracks"):
+                        self._sync_audio_mix_controls_from_tracks()
+                    if hasattr(self, "sync_preview_audio_track_to_output"):
+                        self.sync_preview_audio_track_to_output()
                 if bg_path:
                     self.update_project_step("mix_audio", "skipped")
                 self.log("[Voiceover] Reusing existing generated audio. Generate did not call TTS again.")

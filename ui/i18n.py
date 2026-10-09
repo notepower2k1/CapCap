@@ -524,7 +524,10 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Extract Audio": "Trích xuất âm thanh",
     "Separating vocals": "Đang tách giọng",
     "Preparing project": "Đang chuẩn bị dự án",
-    "Preparing Video Preview": "Đang chuẩn bị xem trước video",
+    "Preparing Video Preview": "Chuẩn bị xem trước video",
+    "Subtitle Processing (AI)": "Xử lý phụ đề (AI)",
+    "Synthesizing AI Voiceover": "Tạo giọng đọc AI (TTS)",
+    "cues": "câu",
     "Initializing workflow engine...": "Đang khởi tạo engine quy trình...",
     "Downloading... ": "Đang tải xuống... ",
     "Download in Progress": "Đang tải xuống",
@@ -1526,6 +1529,9 @@ def _translate_text(source: str, language: str) -> str:
     match = re.fullmatch(r"(\d+) music layer\(s\)", source)
     if match:
         return f"{match.group(1)} layer nhạc"
+    match = re.fullmatch(r"Translating subtitles:\s*(\d+)/(\d+)\s*(?:cues|segments)\s*\((\d+)%\)", source)
+    if match:
+        return f"Đang dịch phụ đề: {match.group(1)}/{match.group(2)} câu ({match.group(3)}%)"
     return source
 
 

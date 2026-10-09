@@ -1117,12 +1117,31 @@ class TestRuntimeBugfixes(unittest.TestCase):
 
             # Configure Session-local / canvas / diarization widgets on gui
             gui.output_quality_combo = QComboBox()
-            gui.output_quality_combo.addItems(["Default", "High", "Low"])
+            gui.output_quality_combo.addItem("Default", "source")
+            gui.output_quality_combo.addItem("1080p", "1080p")
+            gui.output_quality_combo.addItem("720p", "720p")
             gui.output_quality_combo.setCurrentIndex(1)
 
             gui.output_fps_combo = QComboBox()
-            gui.output_fps_combo.addItems(["Default", "60", "30"])
+            gui.output_fps_combo.addItem("Default", "source")
+            gui.output_fps_combo.addItem("60 FPS", "60")
+            gui.output_fps_combo.addItem("30 FPS", "30")
             gui.output_fps_combo.setCurrentIndex(1)
+
+            gui.output_ratio_combo = QComboBox()
+            gui.output_ratio_combo.addItem("Source", "source")
+            gui.output_ratio_combo.addItem("16:9", "16:9")
+            gui.output_ratio_combo.setCurrentIndex(1)
+
+            gui.output_scale_mode_combo = QComboBox()
+            gui.output_scale_mode_combo.addItem("Fit", "fit")
+            gui.output_scale_mode_combo.addItem("Fill", "fill")
+            gui.output_scale_mode_combo.setCurrentIndex(1)
+
+            gui.audio_handling_combo = QComboBox()
+            gui.audio_handling_combo.addItem("Fast", "fast")
+            gui.audio_handling_combo.addItem("Cleaner voice", "clean")
+            gui.audio_handling_combo.setCurrentIndex(1)
 
             gui.speaker_diarization_cb = QCheckBox()
             gui.speaker_diarization_cb.setChecked(True)
@@ -1133,9 +1152,6 @@ class TestRuntimeBugfixes(unittest.TestCase):
             gui.speaker_diarization_speakers_combo.setCurrentIndex(1)
 
             # Pre-populate settings with session-local keys
-            settings.setValue("output_quality", "High")
-            settings.setValue("output_fps", "60")
-            settings.setValue("audio_handling_mode", "separate")
             settings.setValue("speaker_diarization", True)
 
             # Other required fields on gui
@@ -1177,9 +1193,11 @@ class TestRuntimeBugfixes(unittest.TestCase):
             self.assertTrue(settings.contains("subtitle_style_controls"))
             self.assertFalse(json.loads(settings.value("subtitle_style_controls"))["single_line"])
             self.assertEqual(settings.value("subtitle_preset"), "custom")
-            self.assertFalse(settings.contains("output_quality"))
-            self.assertFalse(settings.contains("output_fps"))
-            self.assertFalse(settings.contains("audio_handling_mode"))
+            self.assertEqual(settings.value("output_quality"), "1080p")
+            self.assertEqual(settings.value("output_fps"), "60")
+            self.assertEqual(settings.value("output_ratio"), "16:9")
+            self.assertEqual(settings.value("output_scale_mode"), "fill")
+            self.assertEqual(settings.value("audio_handling_mode"), "clean")
             self.assertFalse(settings.contains("speaker_diarization"))
 
             # Now test load_user_settings(gui):
@@ -1187,8 +1205,11 @@ class TestRuntimeBugfixes(unittest.TestCase):
             gui.free_voice_combo.setCurrentIndex(0)
             gui.voice_gender_combo.setCurrentIndex(0)
             gui.voice_speed_spin.setCurrentIndex(0)
-            gui.output_quality_combo.setCurrentIndex(2)
-            gui.output_fps_combo.setCurrentIndex(2)
+            gui.output_quality_combo.setCurrentIndex(0)
+            gui.output_fps_combo.setCurrentIndex(0)
+            gui.output_ratio_combo.setCurrentIndex(0)
+            gui.output_scale_mode_combo.setCurrentIndex(0)
+            gui.audio_handling_combo.setCurrentIndex(0)
             gui.speaker_diarization_cb.setChecked(True)
             gui.subtitle_single_line_cb.setChecked(True)
 
@@ -1205,10 +1226,102 @@ class TestRuntimeBugfixes(unittest.TestCase):
             self.assertEqual(applied_styles[-1].get("preset"), "custom")
             self.assertFalse(applied_styles[-1].get("single_line"))
             self.assertFalse(gui.subtitle_single_line_cb.isChecked())
-            self.assertEqual(gui.output_quality_combo.currentIndex(), 0)
-            self.assertEqual(gui.output_fps_combo.currentIndex(), 0)
+            self.assertEqual(gui.output_quality_combo.currentData(), "1080p")
+            self.assertEqual(gui.output_fps_combo.currentData(), "60")
+            self.assertEqual(gui.output_ratio_combo.currentData(), "16:9")
+            self.assertEqual(gui.output_scale_mode_combo.currentData(), "fill")
+            self.assertEqual(gui.audio_handling_combo.currentData(), "clean")
             self.assertFalse(gui.speaker_diarization_cb.isChecked())
             self.assertEqual(gui.speaker_diarization_speakers_combo.currentData(), -1)
+
+    def test_canvas_and_audio_handling_settings_persistence(self):
+        from unittest.mock import MagicMock
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QComboBox, QLineEdit, QCheckBox, QRadioButton
+        from ui.utils.settings_utils import save_user_settings, load_user_settings
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ini_path = os.path.join(tmp_dir, "test_canvas_settings.ini")
+            settings = QSettings(ini_path, QSettings.IniFormat)
+
+            class MockGUI:
+                pass
+
+            gui = MockGUI()
+            gui.settings = settings
+            gui.output_mode_combo = QComboBox()
+            gui.output_mode_combo.addItem("Vietnamese subtitles + voice")
+            gui.lang_whisper_combo = QComboBox()
+            gui.final_output_folder_edit = QLineEdit("C:/out")
+            gui.audio_folder_edit = QLineEdit("C:/audio")
+            gui.srt_output_folder_edit = QLineEdit("C:/srt")
+            gui.voice_output_folder_edit = QLineEdit("C:/voice")
+            gui.audio_source_edit = QLineEdit("C:/src")
+            gui.bg_music_edit = QLineEdit("C:/bg")
+            gui.mixed_audio_edit = QLineEdit("C:/mix")
+            gui.video_path_edit = QLineEdit("")
+            gui.auto_preview_frame_cb = QCheckBox()
+            gui.keep_timeline_cb = QCheckBox()
+            gui.use_generated_audio_radio = QRadioButton()
+            gui.use_existing_audio_radio = QRadioButton()
+            gui.on_advanced_toggled = MagicMock()
+            gui.on_audio_source_mode_changed = MagicMock()
+            gui.on_subtitle_preset_changed = MagicMock()
+            gui.update_subtitle_preview_style = MagicMock()
+            gui.on_output_mode_changed = MagicMock()
+            gui.refresh_ui_state = MagicMock()
+
+            # Combo setup
+            gui.output_quality_combo = QComboBox()
+            gui.output_quality_combo.addItem("Max (source)", "source")
+            gui.output_quality_combo.addItem("720p", "720p")
+            gui.output_quality_combo.addItem("1080p (Full HD)", "1080p")
+            gui.output_quality_combo.setCurrentIndex(2)  # 1080p
+
+            gui.output_fps_combo = QComboBox()
+            gui.output_fps_combo.addItem("Source", "source")
+            gui.output_fps_combo.addItem("30 FPS", "30")
+            gui.output_fps_combo.addItem("60 FPS", "60")
+            gui.output_fps_combo.setCurrentIndex(2)  # 60
+
+            gui.output_ratio_combo = QComboBox()
+            gui.output_ratio_combo.addItem("Source", "source")
+            gui.output_ratio_combo.addItem("16:9", "16:9")
+            gui.output_ratio_combo.addItem("9:16", "9:16")
+            gui.output_ratio_combo.setCurrentIndex(1)  # 16:9
+
+            gui.output_scale_mode_combo = QComboBox()
+            gui.output_scale_mode_combo.addItem("Fit", "fit")
+            gui.output_scale_mode_combo.addItem("Fill", "fill")
+            gui.output_scale_mode_combo.setCurrentIndex(1)  # fill
+
+            gui.audio_handling_combo = QComboBox()
+            gui.audio_handling_combo.addItem("Fast", "fast")
+            gui.audio_handling_combo.addItem("Cleaner voice", "clean")
+            gui.audio_handling_combo.setCurrentIndex(1)  # clean
+
+            save_user_settings(gui)
+
+            self.assertEqual(settings.value("output_quality"), "1080p")
+            self.assertEqual(settings.value("output_fps"), "60")
+            self.assertEqual(settings.value("output_ratio"), "16:9")
+            self.assertEqual(settings.value("output_scale_mode"), "fill")
+            self.assertEqual(settings.value("audio_handling_mode"), "clean")
+
+            # Reset combos to index 0
+            gui.output_quality_combo.setCurrentIndex(0)
+            gui.output_fps_combo.setCurrentIndex(0)
+            gui.output_ratio_combo.setCurrentIndex(0)
+            gui.output_scale_mode_combo.setCurrentIndex(0)
+            gui.audio_handling_combo.setCurrentIndex(0)
+
+            load_user_settings(gui)
+
+            self.assertEqual(gui.output_quality_combo.currentData(), "1080p")
+            self.assertEqual(gui.output_fps_combo.currentData(), "60")
+            self.assertEqual(gui.output_ratio_combo.currentData(), "16:9")
+            self.assertEqual(gui.output_scale_mode_combo.currentData(), "fill")
+            self.assertEqual(gui.audio_handling_combo.currentData(), "clean")
 
     def test_get_transcription_engine_falls_back_to_saved_default(self):
         from ui.main_window import VideoTranslatorGUI
@@ -1661,6 +1774,92 @@ class TestRuntimeBugfixes(unittest.TestCase):
         VideoTranslatorGUI.refresh_ui_state(mock_gui)
         self.assertTrue(hasattr(mock_gui, "_optional_layer_controls_ready"))
         mock_gui.blur_area_btn.setEnabled.assert_called_with(mock_gui._optional_layer_controls_ready)
+
+    def test_setup_vieneu_hf_env_offline_mode(self):
+        from unittest.mock import patch
+        import vieneu_tts
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_hub_dir = os.path.join(
+                tmpdir, "vieneu", "hub", "models--pnnbao-ump--VieNeu-TTS-v3-Turbo"
+            )
+            os.makedirs(model_hub_dir, exist_ok=True)
+
+            def fake_models_path(*args):
+                if args and args[0] == "vieneu":
+                    return os.path.join(tmpdir, "vieneu", *args[1:])
+                return os.path.join(tmpdir, *args)
+
+            orig_env = os.environ.copy()
+            try:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+                os.environ.pop("TRANSFORMERS_OFFLINE", None)
+                os.environ.pop("HF_HOME", None)
+                with patch("vieneu_tts.models_path", side_effect=fake_models_path):
+                    vieneu_tts.setup_vieneu_hf_env()
+                self.assertEqual(os.environ.get("HF_HUB_OFFLINE"), "1")
+                self.assertEqual(os.environ.get("TRANSFORMERS_OFFLINE"), "1")
+                self.assertEqual(os.environ.get("HF_HOME"), os.path.join(tmpdir, "vieneu"))
+            finally:
+                os.environ.clear()
+                os.environ.update(orig_env)
+
+    def test_run_voiceover_cache_hit_syncs_preview_audio(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cached_audio = os.path.join(tmpdir, "cached_voice.wav")
+            with open(cached_audio, "wb") as f:
+                f.write(b"RIFFdummywavdata")
+
+            mock_gui = MagicMock(spec=VideoTranslatorGUI)
+            mock_state = MagicMock()
+            mock_state.settings = {"voice_signature": "sig_cached_123"}
+            mock_state.artifacts = {"voice_vi": cached_audio}
+            mock_gui.ensure_current_project.return_value = mock_state
+
+            mock_gui.translated_text = MagicMock()
+            mock_gui.translated_text.toPlainText.return_value = "1\n00:00:00,000 --> 00:00:01,000\nXin chào\n"
+            mock_gui._get_voiceover_segments.return_value = [{"start": 0.0, "end": 1.0, "text": "Xin chào"}]
+            mock_gui._resolve_active_voice_name.return_value = "Adam"
+            mock_gui.ensure_required_resources.return_value = True
+            mock_gui.voice_output_folder_edit = MagicMock()
+            mock_gui.voice_output_folder_edit.text.return_value = tmpdir
+            mock_gui.workspace_root = tmpdir
+            mock_gui.resolve_background_audio_path.return_value = ""
+            mock_gui.get_audio_handling_mode.return_value = "original"
+            mock_gui._parse_voice_speed_value.return_value = 1.0
+            mock_gui.voice_timing_sync_combo = MagicMock()
+            mock_gui.voice_timing_sync_combo.itemData.return_value = "Smart"
+            mock_gui.voice_timing_sync_combo.currentText.return_value = "Smart"
+            mock_gui.audio_a1_volume_slider = MagicMock()
+            mock_gui.audio_a1_volume_slider.value.return_value = 50
+            mock_gui.audio_a2_volume_slider = MagicMock()
+            mock_gui.audio_a2_volume_slider.value.return_value = 100
+            mock_gui.build_current_voice_signature.return_value = "sig_cached_123"
+            mock_gui._voiceover_force_refresh = False
+            mock_gui._normalize_local_file_path.side_effect = lambda p: p
+            mock_gui.last_voice_vi_path = ""
+            mock_gui.last_mixed_vi_path = ""
+            mock_gui.processed_artifacts = {}
+            mock_gui.current_translated_segments = [{"start": 0.0, "end": 1.0, "text": "Xin chào"}]
+            mock_gui.current_segments = []
+            mock_gui.timeline = MagicMock()
+            mock_gui.progress_bar = MagicMock()
+
+            # Execute run_voiceover on mock_gui
+            VideoTranslatorGUI.run_voiceover(mock_gui)
+
+            # Assert cache hit synced timeline and preview audio
+            mock_gui.timeline.sync_tts_track.assert_called_once_with(
+                cached_audio,
+                segments=mock_gui.current_translated_segments,
+            )
+            mock_gui._sync_timeline_mute_to_gui.assert_called_once()
+            mock_gui._sync_audio_mix_controls_from_tracks.assert_called_once()
+            mock_gui.sync_preview_audio_track_to_output.assert_called_once()
+            mock_gui._pipeline_advance.assert_called_once_with("voiceover")
 
 
 if __name__ == "__main__":
