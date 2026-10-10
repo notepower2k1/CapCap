@@ -182,12 +182,13 @@ class ExportWorkflow:
         effective_ass_path = ass_path if ass_path and os.path.exists(ass_path) else text_ass_path
         secondary_text_ass = text_ass_path if effective_ass_path != text_ass_path else ""
         warps = (subtitle_style or {}).get("video_time_warps")
+        resolved_blur = blur_regions if blur_regions else (subtitle_style or {}).get("blur_region")
         if effective_ass_path and os.path.exists(effective_ass_path):
             ok = self.engine_runtime.embed_ass_subtitles(
                 video_path,
                 effective_ass_path,
                 output_path,
-                blur_region=blur_regions if blur_regions else subtitle_style.get("blur_region"),
+                blur_region=resolved_blur,
                 mask_regions=mask_regions,
                 logo_layers=logo_layers,
                 text_ass_path=secondary_text_ass,
@@ -210,6 +211,8 @@ class ExportWorkflow:
                 srt_path,
                 output_path,
                 subtitle_style=self._subtitle_options(subtitle_style),
+                blur_region=resolved_blur,
+                blur_regions=resolved_blur,
                 mask_regions=mask_regions,
                 logo_layers=logo_layers,
                 text_image_layers=text_image_layers,
@@ -391,6 +394,26 @@ class ExportWorkflow:
                             "color": str(region.get("color", "#000000")),
                             "pixelate_size": int(region.get("pixelate_size", 12)),
                             "blur_strength": int(region.get("blur_strength", 20)),
+                        })
+
+            if not blur_regions:
+                blur_state = state.settings.get("blur_state", {})
+                print(f"[Export] Fallback: checking settings blur_state: {blur_state}")
+                if blur_state and blur_state.get("enabled", False):
+                    regions = blur_state.get("regions", [])
+                    print(f"[Export] Found {len(regions)} blur region(s) in settings")
+                    for region in regions:
+                        if not isinstance(region, dict):
+                            continue
+                        blur_regions.append({
+                            "x": float(region.get("x", 0.0)),
+                            "y": float(region.get("y", 0.0)),
+                            "width": float(region.get("width", 0.0)),
+                            "height": float(region.get("height", 0.0)),
+                            "blur_strength": float(region.get("blur_strength", 20.0)),
+                            "blur_opacity": float(region.get("blur_opacity", 1.0)),
+                            "start": max(0.0, float(region.get("start", 0.0))),
+                            "end": max(0.0, float(region.get("end", 0.0))),
                         })
         except Exception as e:
             print(f"Warning: Failed to extract overlay layers: {e}")
@@ -689,7 +712,7 @@ class ExportWorkflow:
 
                 self._emit_progress(on_progress, 25, "Muxing Vietnamese audio into the video...")
                 voice_output = output_path
-                if text_image_layers:
+                if text_image_layers or mask_regions or logo_layers or blur_regions:
                     tmp_mux_path = self._build_temp_mux_path(project_temp_dir)
                     voice_output = tmp_mux_path
                 self.engine_runtime.mux_audio_for_preview(

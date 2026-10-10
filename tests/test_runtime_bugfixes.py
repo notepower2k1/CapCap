@@ -2112,6 +2112,125 @@ class TestRuntimeBugfixes(unittest.TestCase):
             self.assertEqual(res, "")
             mock_worker_rej.requestInterruption.assert_called_once()
 
+    def test_export_workflow_extracts_blur_regions_from_settings_fallback(self):
+        from unittest.mock import MagicMock
+        from app.workflows.export_workflow import ExportWorkflow
+
+        mock_state = MagicMock()
+        mock_state.artifacts = {}
+        mock_state.settings = {
+            "blur_state": {
+                "enabled": True,
+                "regions": [
+                    {
+                        "x": 0.1,
+                        "y": 0.2,
+                        "width": 0.3,
+                        "height": 0.4,
+                        "blur_strength": 15.0,
+                        "blur_opacity": 0.8,
+                        "start": 1.0,
+                        "end": 5.0,
+                    }
+                ],
+            }
+        }
+
+        workflow = ExportWorkflow(workspace_root=".")
+        mask_regions, logo_layers, text_layers, blur_regions = workflow._extract_overlay_layers(mock_state)
+        self.assertEqual(len(blur_regions), 1)
+        self.assertAlmostEqual(blur_regions[0]["x"], 0.1)
+        self.assertAlmostEqual(blur_regions[0]["y"], 0.2)
+        self.assertAlmostEqual(blur_regions[0]["width"], 0.3)
+        self.assertAlmostEqual(blur_regions[0]["height"], 0.4)
+        self.assertAlmostEqual(blur_regions[0]["blur_strength"], 15.0)
+        self.assertAlmostEqual(blur_regions[0]["blur_opacity"], 0.8)
+        self.assertAlmostEqual(blur_regions[0]["start"], 1.0)
+        self.assertAlmostEqual(blur_regions[0]["end"], 5.0)
+
+    def test_export_workflow_voice_mode_muxes_temp_when_blur_present(self):
+        from unittest.mock import MagicMock, patch
+        from app.workflows.export_workflow import ExportWorkflow
+
+        workflow = ExportWorkflow(workspace_root=".")
+        workflow.engine_runtime = MagicMock()
+        workflow.engine_runtime.get_video_dimensions.return_value = (1920, 1080)
+        workflow.engine_runtime.get_video_fps.return_value = 30.0
+        workflow.engine_runtime.get_video_duration.return_value = 10.0
+        workflow.engine_runtime.mux_audio_for_preview.return_value = True
+        workflow._export_subtitle_video = MagicMock(return_value=True)
+        workflow._build_temp_mux_path = MagicMock(return_value="temp_mux_video.mp4")
+        workflow._ensure_subtitle_ass = MagicMock(return_value="subs.ass")
+
+        blur_regions = [{
+            "x": 0.1,
+            "y": 0.2,
+            "width": 0.3,
+            "height": 0.4,
+            "blur_strength": 20.0,
+            "blur_opacity": 1.0,
+            "start": 0.0,
+            "end": 5.0,
+        }]
+        workflow._extract_overlay_layers = MagicMock(return_value=([], [], [], blur_regions))
+
+        with patch("app.workflows.export_workflow.os.path.exists", return_value=True):
+            workflow.run(
+                video_path="input_video.mp4",
+                audio_path="input_audio.wav",
+                output_path="final_output.mp4",
+                mode="voice",
+                srt_path="subs.srt",
+                project_temp_dir="temp_dir",
+            )
+
+        workflow._build_temp_mux_path.assert_called_once_with("temp_dir")
+        workflow.engine_runtime.mux_audio_for_preview.assert_called_once()
+        mux_args, _ = workflow.engine_runtime.mux_audio_for_preview.call_args
+        self.assertEqual(mux_args[2], "temp_mux_video.mp4")
+        workflow._export_subtitle_video.assert_called_once()
+        _, export_kwargs = workflow._export_subtitle_video.call_args
+        self.assertEqual(export_kwargs.get("video_path"), "temp_mux_video.mp4")
+        self.assertEqual(export_kwargs.get("output_path"), "final_output.mp4")
+        self.assertEqual(export_kwargs.get("blur_regions"), blur_regions)
+
+    def test_engine_runtime_and_ffmpeg_adapter_embed_subtitles_accepts_blur_regions(self):
+        from unittest.mock import MagicMock, patch
+        from app.services.engine_runtime import EngineRuntime
+        from app.engines.ffmpeg_adapter import FFmpegAdapter
+
+        # 1. EngineRuntime forwards blur_region and blur_regions
+        mock_ffmpeg = MagicMock()
+        mock_ffmpeg.embed_subtitles.return_value = True
+        runtime = EngineRuntime()
+        runtime._instances["ffmpeg"] = mock_ffmpeg
+
+        blur_regions = [{"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4}]
+        res = runtime.embed_subtitles(
+            "video.mp4",
+            "subs.srt",
+            "out.mp4",
+            blur_regions=blur_regions,
+        )
+        self.assertTrue(res)
+        mock_ffmpeg.embed_subtitles.assert_called_once()
+        _, kwargs = mock_ffmpeg.embed_subtitles.call_args
+        self.assertEqual(kwargs.get("blur_regions"), blur_regions)
+
+        # 2. FFmpegAdapter accepts blur_regions and forwards resolved blur_region to embed_subtitles
+        adapter = FFmpegAdapter()
+        with patch("app.engines.ffmpeg_adapter.embed_subtitles", return_value=True) as mock_embed:
+            adapter_res = adapter.embed_subtitles(
+                "video.mp4",
+                "subs.srt",
+                "out.mp4",
+                blur_regions=blur_regions,
+            )
+            self.assertTrue(adapter_res)
+            mock_embed.assert_called_once()
+            _, embed_kw = mock_embed.call_args
+            self.assertEqual(embed_kw.get("blur_region"), blur_regions)
+
 
 if __name__ == "__main__":
     unittest.main()

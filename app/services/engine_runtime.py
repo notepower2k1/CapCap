@@ -154,12 +154,14 @@ class EngineRuntime:
             batch_callback=batch_callback,
         )
 
-    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False, video_quality="medium", video_time_warps=None, on_progress=None) -> bool:
+    def embed_subtitles(self, video_path: str, srt_path: str, output_path: str, *, subtitle_style=None, blur_region=None, blur_regions=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False, video_quality="medium", video_time_warps=None, on_progress=None) -> bool:
         return self.ffmpeg.embed_subtitles(
             video_path,
             srt_path,
             output_path,
             subtitle_style=subtitle_style,
+            blur_region=blur_region,
+            blur_regions=blur_regions,
             mask_regions=mask_regions,
             logo_layers=logo_layers,
             text_ass_path=text_ass_path,
