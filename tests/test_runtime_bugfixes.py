@@ -2025,6 +2025,93 @@ class TestRuntimeBugfixes(unittest.TestCase):
         backend.close()
         backend._player.terminate.assert_called_once()
 
+    def test_safely_retire_worker(self):
+        from unittest.mock import MagicMock
+        from ui.main_window import VideoTranslatorGUI
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import QEventLoop, QTimer
+
+        app = QApplication.instance() or QApplication([])
+        gui = VideoTranslatorGUI.__new__(VideoTranslatorGUI)
+
+        # 1. Calling with None does nothing
+        gui.safely_retire_worker(None)
+
+        # 2. Worker that is already finished is deleted immediately without entering _retiring_workers
+        finished_worker = MagicMock()
+        finished_worker.isFinished.return_value = True
+        gui.safely_retire_worker(finished_worker)
+        finished_worker.deleteLater.assert_called_once()
+        self.assertEqual(len(getattr(gui, "_retiring_workers", [])), 0)
+
+        # 3. Running worker is added to _retiring_workers
+        running_worker = MagicMock()
+        running_worker.isFinished.return_value = False
+        gui.safely_retire_worker(running_worker)
+        self.assertIn(running_worker, gui._retiring_workers)
+
+        # 4. When it finishes and timer ticks (processEvents), it should be removed and deleteLater called
+        running_worker.isFinished.return_value = True
+        loop = QEventLoop()
+        QTimer.singleShot(100, loop.quit)
+        loop.exec()
+
+        self.assertNotIn(running_worker, gui._retiring_workers)
+        running_worker.deleteLater.assert_called_once()
+
+    def test_on_translation_finished_safely_retires_worker(self):
+        from unittest.mock import MagicMock, patch
+        from ui.controllers.subtitle_controller import SubtitleController
+
+        mock_gui = MagicMock()
+        mock_worker = MagicMock()
+        mock_gui.translation_thread = mock_worker
+        controller = SubtitleController(mock_gui)
+        controller._close_translation_progress = MagicMock()
+
+        with patch("PySide6.QtWidgets.QMessageBox.information"):
+            controller.on_translation_finished("1\n00:00:01,000 --> 00:00:02,000\nHello\n", None)
+
+        self.assertIsNone(mock_gui.translation_thread)
+        mock_gui.safely_retire_worker.assert_called_once_with(mock_worker)
+
+    def test_show_launcher_accepted_does_not_request_interruption(self):
+        from unittest.mock import MagicMock, patch
+        from PySide6.QtWidgets import QDialog
+        from ui.views.launcher import show_launcher, _stale_launcher_workers
+
+        mock_worker = MagicMock()
+        mock_worker.isRunning.return_value = True
+        mock_worker.isFinished.return_value = False
+
+        mock_window = MagicMock()
+        mock_window.exec.return_value = QDialog.Accepted
+        mock_window.selected_video = "test_video.mp4"
+        mock_window._cache_worker = mock_worker
+
+        with patch("ui.views.launcher.LauncherWindow", return_value=mock_window):
+            res = show_launcher(None)
+            self.assertEqual(res, "test_video.mp4")
+            mock_worker.requestInterruption.assert_not_called()
+            self.assertIn(mock_worker, _stale_launcher_workers)
+
+        # Cleanup
+        if mock_worker in _stale_launcher_workers:
+            _stale_launcher_workers.remove(mock_worker)
+
+        # Also test rejection requests interruption
+        mock_worker_rej = MagicMock()
+        mock_worker_rej.isRunning.return_value = True
+        mock_window_rej = MagicMock()
+        mock_window_rej.exec.return_value = QDialog.Rejected
+        mock_window_rej.selected_video = ""
+        mock_window_rej._cache_worker = mock_worker_rej
+
+        with patch("ui.views.launcher.LauncherWindow", return_value=mock_window_rej):
+            res = show_launcher(None)
+            self.assertEqual(res, "")
+            mock_worker_rej.requestInterruption.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

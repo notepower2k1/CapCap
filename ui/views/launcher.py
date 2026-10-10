@@ -1581,18 +1581,6 @@ def show_launcher(settings_or_none, project_loader=None):
     w = LauncherWindow()
     result = w.exec()
     selected_video = str(getattr(w, "selected_video", "") or "")
-    worker = getattr(w, "_cache_worker", None)
-    if worker is not None and worker.isRunning():
-        try:
-            worker.requestInterruption()
-            worker.wait(1000)
-        except Exception:
-            pass
-        if worker.isRunning():
-            _stale_launcher_workers.append(worker)
-            worker.finished.connect(
-                lambda w=worker: _stale_launcher_workers.remove(w) if w in _stale_launcher_workers else None
-            )
     try:
         w.close()
         w.deleteLater()
@@ -1602,7 +1590,32 @@ def show_launcher(settings_or_none, project_loader=None):
     from PySide6.QtWidgets import QApplication
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     QApplication.processEvents()
+
     if result == QDialog.Accepted:
+        worker = getattr(w, "_cache_worker", None)
+        if worker is not None and worker.isRunning():
+            _stale_launcher_workers.append(worker)
+            def _check_done(target=worker):
+                try:
+                    if target.isFinished():
+                        if target in _stale_launcher_workers:
+                            _stale_launcher_workers.remove(target)
+                    else:
+                        from PySide6.QtCore import QTimer
+                        QTimer.singleShot(50, lambda: _check_done(target))
+                except Exception:
+                    pass
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(50, lambda: _check_done(worker))
         return selected_video
+
+    # User closed/cancelled launcher: interrupt and stop all workers cleanly
+    worker = getattr(w, "_cache_worker", None)
+    if worker is not None and worker.isRunning():
+        try:
+            worker.requestInterruption()
+            worker.wait(500)
+        except Exception:
+            pass
     stop_all_launcher_workers()
     return ""

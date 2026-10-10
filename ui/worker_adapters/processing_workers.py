@@ -253,8 +253,9 @@ class TranslationWorker(QThread):
         custom_prompt: str = "",
         segments=None,
         context_guidance: str = "",
+        parent=None,
     ):
-        super().__init__()
+        super().__init__(parent)
         self.srt_text = srt_text
         self.model_path = model_path
         self.src_lang = src_lang
@@ -484,8 +485,8 @@ class RewriteTranslationWorker(QThread):
     batch_ready = Signal(int, list)
     progress = Signal(int, int)
 
-    def __init__(self, source_segments, translated_segments, src_lang, style_instruction=""):
-        super().__init__()
+    def __init__(self, source_segments, translated_segments, src_lang, style_instruction="", parent=None):
+        super().__init__(parent)
         self.source_segments = source_segments
         self.translated_segments = translated_segments
         self.src_lang = src_lang
@@ -1185,8 +1186,8 @@ class FinalExportWorker(QThread):
     finished = Signal(str, str)
     progress = Signal(int, str)
 
-    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", output_ratio="source", output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, original_audio_gain_db=0.0, project_state_path="", project_temp_dir="", video_quality="medium"):
-        super().__init__()
+    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", output_ratio="source", output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, original_audio_gain_db=0.0, project_state_path="", project_temp_dir="", video_quality="medium", parent=None):
+        super().__init__(parent)
         self.workspace_root = workspace_root
         self.video_path = video_path
         self.output_path = output_path

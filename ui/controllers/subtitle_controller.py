@@ -757,14 +757,10 @@ class SubtitleController:
             retiring = getattr(self.gui, "_retiring_workers", None)
             if retiring is not None:
                 if not worker.isFinished():
-                    retiring.append(worker)
-                    try:
-                        worker.finished.connect(
-                            lambda w=worker: retiring.remove(w) if w in retiring else None
-                        )
-                    except Exception:
-                        pass
-                # else: thread already finished, GC will handle it
+                    if worker not in retiring:
+                        retiring.append(worker)
+            if hasattr(self.gui, "safely_retire_worker"):
+                self.gui.safely_retire_worker(worker)
             # Immediately clear translation_thread so user can re-translate without blocking
             self.gui.translation_thread = None
 
@@ -1103,6 +1099,7 @@ class SubtitleController:
             custom_prompt=chosen_prompt,
             segments=source_segments,
             context_guidance=confirmed_context,
+            parent=self.gui,
         )
         self.gui.translation_thread.finished.connect(self.gui.on_translation_finished)
         self.gui.translation_thread.progress.connect(self.on_translation_progress)
@@ -1282,8 +1279,11 @@ class SubtitleController:
     def on_translation_finished(self, translated_srt, error, fallback_notice=""):
         self._close_translation_progress()
         self.gui.translate_btn.setEnabled(True)
-        if getattr(self.gui, "translation_thread", None) is not None:
+        worker = getattr(self.gui, "translation_thread", None)
+        if worker is not None:
             self.gui.translation_thread = None
+            if hasattr(self.gui, "safely_retire_worker"):
+                self.gui.safely_retire_worker(worker)
         if error or not translated_srt:
             if error == "canceled":
                 self.gui.log("[Translation] Translation canceled by user.")
@@ -1479,6 +1479,11 @@ class SubtitleController:
         return False, [], "invalid", validation_error or "Invalid SRT format."
 
     def on_rewrite_translation_finished(self, translated_srt, error):
+        worker = getattr(self.gui, "rewrite_translation_thread", None)
+        if worker is not None:
+            self.gui.rewrite_translation_thread = None
+            if hasattr(self.gui, "safely_retire_worker"):
+                self.gui.safely_retire_worker(worker)
         self.gui.rewrite_translation_btn.setEnabled(True)
         self.gui.rewrite_translation_btn.setText(t("Rewrite"))
         if hasattr(self.gui, "_rewrite_generate_btn"):
@@ -1980,6 +1985,7 @@ class SubtitleController:
                 rewrite_base_segments,
                 self.gui.get_source_language_code(),
                 style_instruction=style_instruction,
+                parent=self.gui,
             )
             self.gui.rewrite_translation_thread.finished.connect(self.gui.on_rewrite_translation_finished)
             self.gui.rewrite_translation_thread.progress.connect(self.on_translation_progress)

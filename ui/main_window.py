@@ -17927,6 +17927,34 @@ class VideoTranslatorGUI(QMainWindow):
             self._media_backend_ready = False
         print("[Cleanup] Worker termination complete.")
 
+    def safely_retire_worker(self, worker):
+        """Safely retain a worker reference until its native OS thread finishes, preventing GC crash."""
+        if worker is None:
+            return
+        if not hasattr(self, "_retiring_workers"):
+            self._retiring_workers = []
+        if getattr(worker, "isFinished", lambda: True)():
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+            return
+        if worker not in self._retiring_workers:
+            self._retiring_workers.append(worker)
+        def _check_finished(target=worker):
+            try:
+                if getattr(target, "isFinished", lambda: True)():
+                    if target in self._retiring_workers:
+                        self._retiring_workers.remove(target)
+                    target.deleteLater()
+                else:
+                    from PySide6.QtCore import QTimer
+                    QTimer.singleShot(50, lambda: _check_finished(target))
+            except Exception:
+                pass
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(50, lambda: _check_finished(worker))
+
     def closeEvent(self, event):
         try:
             # A drag may have ended less than one debounce interval ago.

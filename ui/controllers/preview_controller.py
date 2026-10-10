@@ -1224,6 +1224,7 @@ class PreviewController:
             project_state_path=project_state_path,
             project_temp_dir=self.gui.get_project_temp_dir("export"),
             video_quality=chosen_quality,
+            parent=self.gui,
         )
         self.gui.export_thread.progress.connect(self.gui.on_export_progress)
         self.gui.export_thread.finished.connect(self.gui.on_export_finished)
@@ -1342,6 +1343,7 @@ class PreviewController:
             text_image_layers=text_image_layers,
             temp_dir=self.gui.get_project_temp_dir("preview"),
             video_time_warps=list(getattr(self.gui, "video_time_warps", []) or []),
+            parent=self.gui,
         )
         self.gui.quick_preview_thread.finished.connect(self.gui.on_quick_preview_ready)
         self.gui.quick_preview_thread.start()
@@ -1413,6 +1415,7 @@ class PreviewController:
             output_fill_focus_x=fill_focus_x,
             output_fill_focus_y=fill_focus_y,
             video_filter_state=self.gui.get_video_filter_state() if hasattr(self.gui, "get_video_filter_state") else {},
+            parent=self.gui,
         )
         self.gui.frame_preview_thread.finished.connect(self.gui.on_exact_frame_ready)
         self.gui.frame_preview_thread.start()
@@ -1513,7 +1516,11 @@ class PreviewController:
         self.gui.progress_bar.setValue(100)
 
         if error:
-            self.gui.export_thread = None
+            worker = getattr(self.gui, "export_thread", None)
+            if worker is not None:
+                self.gui.export_thread = None
+                if hasattr(self.gui, "safely_retire_worker"):
+                    self.gui.safely_retire_worker(worker)
             self.gui.update_project_step("export", "failed")
             self.gui.show_error(t("Error"), t("Final export failed."), error)
             return
@@ -1528,7 +1535,11 @@ class PreviewController:
             self.gui.log(f"[Export] Final video exported successfully: {output_path}")
             self.gui.log("[Export] Kept current preview/subtitle state so you can continue editing after export.")
 
-        self.gui.export_thread = None
+        worker = getattr(self.gui, "export_thread", None)
+        if worker is not None:
+            self.gui.export_thread = None
+            if hasattr(self.gui, "safely_retire_worker"):
+                self.gui.safely_retire_worker(worker)
 
     def on_quick_preview_ready(self, output_path, error):
         if hasattr(self.gui, "ensure_media_backend_ready"):
@@ -1539,7 +1550,12 @@ class PreviewController:
         self.gui.progress_bar.setValue(100)
 
         if error:
-            self.gui.preview_thread = None
+            for attr in ("quick_preview_thread", "preview_thread"):
+                worker = getattr(self.gui, attr, None)
+                if worker is not None:
+                    setattr(self.gui, attr, None)
+                    if hasattr(self.gui, "safely_retire_worker"):
+                        self.gui.safely_retire_worker(worker)
             self.gui.show_error(t("Error"), t("5-second preview failed."), error)
             return
 
@@ -1553,7 +1569,12 @@ class PreviewController:
                 self.gui.open_folder(os.path.dirname(output_path))
             self.gui.refresh_ui_state()
 
-        self.gui.preview_thread = None
+        for attr in ("quick_preview_thread", "preview_thread"):
+            worker = getattr(self.gui, attr, None)
+            if worker is not None:
+                setattr(self.gui, attr, None)
+                if hasattr(self.gui, "safely_retire_worker"):
+                    self.gui.safely_retire_worker(worker)
 
     def preview_video(self):
         self._start_video_preview()
@@ -1704,6 +1725,7 @@ class PreviewController:
             mask_regions=mask_regions,
             logo_layers=logo_layers,
             temp_dir=self.gui.get_project_temp_dir("preview"),
+            parent=self.gui,
         )
         self.gui.preview_thread.finished.connect(
             lambda preview_path, error: self.gui.on_preview_ready(preview_path, error, styled_signature)
