@@ -37,12 +37,36 @@ def _model_path():
     return _MODEL_PATH
 
 
+def _ensure_cuda_runtime() -> None:
+    """Ensure bundled/system CUDA and cuDNN runtime DLLs are available in PATH and os.add_dll_directory."""
+    try:
+        from runtime_paths import join_root, bin_path
+    except ImportError:
+        try:
+            from app.runtime_paths import join_root, bin_path
+        except ImportError:
+            return
+    current_path = os.environ.get("PATH", "")
+    for fw_name in ("cuda12_fw", "cuda12_fw_new"):
+        for candidate in (join_root("bin", fw_name), bin_path(fw_name)):
+            if candidate and os.path.isdir(candidate):
+                if candidate not in current_path:
+                    os.environ["PATH"] = candidate + os.pathsep + os.environ.get("PATH", "")
+                    current_path = os.environ["PATH"]
+                if hasattr(os, "add_dll_directory"):
+                    try:
+                        os.add_dll_directory(candidate)
+                    except Exception:
+                        pass
+
+
 def _get_session():
     global _ONNX_SESSION
     if _ONNX_SESSION is None:
         path = _model_path()
         if not os.path.exists(path):
             raise FileNotFoundError(f"ONNX model not found: {path}")
+        _ensure_cuda_runtime()
         available = ort.get_available_providers()
         providers = [p for p in ["CUDAExecutionProvider", "CPUExecutionProvider"] if p in available]
         _ONNX_SESSION = ort.InferenceSession(

@@ -1896,6 +1896,46 @@ class TestRuntimeBugfixes(unittest.TestCase):
             mock_gui.media_player.set_audio_file.assert_called_once_with(voice_audio)
             mock_gui.sync_preview_audio_track_to_output.assert_called_once_with(apply_to_player=False)
 
+    def test_vocal_processor_cuda_runtime_setup(self):
+        from unittest.mock import patch, MagicMock
+        import vocal_processor
+        import runtime_paths
+
+        old_path = os.environ.get("PATH", "")
+        old_session = vocal_processor._ONNX_SESSION
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                fake_cuda_dir = os.path.join(tmpdir, "cuda12_fw")
+                os.makedirs(fake_cuda_dir, exist_ok=True)
+
+                # 1. Verify _ensure_cuda_runtime adds cuda12_fw to PATH
+                with patch("runtime_paths.join_root", return_value=fake_cuda_dir), \
+                     patch("runtime_paths.bin_path", return_value=""):
+                    vocal_processor._ensure_cuda_runtime()
+                    self.assertIn(fake_cuda_dir, os.environ.get("PATH", ""))
+
+                # 2. Verify vocal_processor._get_session() initializes with CUDAExecutionProvider when available
+                vocal_processor._ONNX_SESSION = None
+                fake_model_path = os.path.join(tmpdir, "fake_model.onnx")
+                with open(fake_model_path, "wb") as f:
+                    f.write(b"onnx")
+
+                mock_session = MagicMock()
+                with patch("vocal_processor._model_path", return_value=fake_model_path), \
+                     patch.object(vocal_processor.ort, "get_available_providers", return_value=["CUDAExecutionProvider", "CPUExecutionProvider"]), \
+                     patch.object(vocal_processor.ort, "InferenceSession", return_value=mock_session) as mock_inf_sess, \
+                     patch("vocal_processor._ensure_cuda_runtime") as mock_ensure:
+                    session = vocal_processor._get_session()
+                    self.assertEqual(session, mock_session)
+                    mock_ensure.assert_called_once()
+                    mock_inf_sess.assert_called_once_with(
+                        fake_model_path,
+                        providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+                    )
+        finally:
+            os.environ["PATH"] = old_path
+            vocal_processor._ONNX_SESSION = old_session
+
 
 if __name__ == "__main__":
     unittest.main()
