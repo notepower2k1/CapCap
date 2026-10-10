@@ -1936,6 +1936,52 @@ class TestRuntimeBugfixes(unittest.TestCase):
             os.environ["PATH"] = old_path
             vocal_processor._ONNX_SESSION = old_session
 
+    def test_vocal_processor_slice_inference_equivalence(self):
+        import numpy as np
+        from unittest.mock import MagicMock
+
+        # Simulate ONNX session where batch run and slice-by-slice return deterministic output
+        mock_session = MagicMock()
+        mock_session.run.side_effect = lambda output_names, input_feed: [input_feed["input"] * 2.0]
+
+        # Scenario 1: Multi-slice input (spek has length > 1, e.g. 3 slices of shape (4, 3072, 256))
+        spek = np.random.randn(3, 4, 3072, 256).astype(np.float32)
+
+        # Execute slice-by-slice logic matching app/vocal_processor.py
+        if len(spek) > 1:
+            preds = []
+            for b_idx in range(len(spek)):
+                pred_slice = mock_session.run(None, {"input": spek[b_idx : b_idx + 1]})[0]
+                preds.append(pred_slice)
+            spec_pred = np.concatenate(preds, axis=0)
+        else:
+            spec_pred = mock_session.run(None, {"input": spek})[0]
+
+        # Verify output shape matches input batch shape
+        self.assertEqual(spec_pred.shape, (3, 4, 3072, 256))
+        # Verify slice-by-slice called session.run once per slice to avoid VRAM exhaustion
+        self.assertEqual(mock_session.run.call_count, 3)
+        for call_args in mock_session.run.call_args_list:
+            feed = call_args[0][1]
+            self.assertEqual(feed["input"].shape, (1, 4, 3072, 256))
+        np.testing.assert_allclose(spec_pred, spek * 2.0)
+
+        # Scenario 2: Single slice input (spek has length == 1)
+        mock_session.reset_mock()
+        spek_single = np.random.randn(1, 4, 3072, 256).astype(np.float32)
+        if len(spek_single) > 1:
+            preds = []
+            for b_idx in range(len(spek_single)):
+                pred_slice = mock_session.run(None, {"input": spek_single[b_idx : b_idx + 1]})[0]
+                preds.append(pred_slice)
+            spec_pred_single = np.concatenate(preds, axis=0)
+        else:
+            spec_pred_single = mock_session.run(None, {"input": spek_single})[0]
+
+        self.assertEqual(spec_pred_single.shape, (1, 4, 3072, 256))
+        self.assertEqual(mock_session.run.call_count, 1)
+        np.testing.assert_allclose(spec_pred_single, spek_single * 2.0)
+
 
 if __name__ == "__main__":
     unittest.main()

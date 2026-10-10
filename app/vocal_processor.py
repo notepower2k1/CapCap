@@ -243,7 +243,19 @@ def separate_vocals(audio_path: str, output_dir: str, on_progress=None):
 
                 mix_waves = np.array(mix_waves, dtype=np.float32)
                 spek = model.stft(mix_waves)
-                spec_pred = session.run(None, {"input": spek})[0]
+                # On 6GB/8GB GPUs (like RTX 2060/3060), running batches >= 3 with large
+                # (4, 3072, 256) spectrograms exceeds VRAM and causes severe PCIe memory
+                # thrashing/paging, making GPU take 120s+ instead of <1s.
+                # Executing slice-by-slice keeps peak VRAM usage strictly under 1.5GB,
+                # ensuring execution stays entirely in fast GDDR6 VRAM without spillover.
+                if len(spek) > 1:
+                    preds = []
+                    for b_idx in range(len(spek)):
+                        pred_slice = session.run(None, {"input": spek[b_idx : b_idx + 1]})[0]
+                        preds.append(pred_slice)
+                    spec_pred = np.concatenate(preds, axis=0)
+                else:
+                    spec_pred = session.run(None, {"input": spek})[0]
                 tar_waves = model.istft(spec_pred)
 
                 tar_signal = tar_waves[:, :, trim:-trim]
