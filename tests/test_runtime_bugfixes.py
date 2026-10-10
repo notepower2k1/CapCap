@@ -1982,6 +1982,49 @@ class TestRuntimeBugfixes(unittest.TestCase):
         self.assertEqual(mock_session.run.call_count, 1)
         np.testing.assert_allclose(spec_pred_single, spek_single * 2.0)
 
+    def test_stop_all_launcher_workers(self):
+        from unittest.mock import MagicMock
+        from views.launcher import stop_all_launcher_workers, _stale_launcher_workers
+
+        mock_worker = MagicMock()
+        mock_worker.isRunning.return_value = True
+        _stale_launcher_workers.append(mock_worker)
+        try:
+            stop_all_launcher_workers()
+            mock_worker.requestInterruption.assert_called_once()
+            self.assertEqual(len(_stale_launcher_workers), 0)
+        finally:
+            _stale_launcher_workers.clear()
+
+    def test_timeline_waveform_worker_interruption(self):
+        from ui.worker_adapters.processing_workers import TimelineWaveformWorker
+
+        worker = TimelineWaveformWorker("sig", "dummy.mp4", "", "", duration_s=10.0)
+        self.assertFalse(worker.isInterruptionRequested())
+        worker.requestInterruption()
+        self.assertTrue(worker.isInterruptionRequested())
+
+    def test_libmpv_closed_state_guards(self):
+        from unittest.mock import MagicMock
+        from ui.utils.media_backend import LibMpvMediaBackend
+
+        backend = LibMpvMediaBackend.__new__(LibMpvMediaBackend)
+        backend._is_closed = True
+        backend._player = MagicMock()
+        backend._source_path = "some_path.mp4"
+
+        # None of these should call into backend._player when _is_closed is True
+        backend.setSource("video.mp4")
+        backend._on_native_audio_sink_ready(True)
+        backend._apply_blur_filter()
+        backend._apply_current_subtitle()
+
+        backend._player.command.assert_not_called()
+
+        # Test close() cleans up player safely
+        backend.close()
+        backend._player.terminate.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

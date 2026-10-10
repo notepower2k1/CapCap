@@ -39,7 +39,7 @@ def _acquire_single_instance() -> bool:
         if not handle:
             return True
         _SINGLE_INSTANCE_HANDLE = handle
-        return kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+        return ctypes.get_last_error() != 183  # ERROR_ALREADY_EXISTS
     except Exception:
         # A mutex failure should never prevent the application from starting.
         return True
@@ -243,6 +243,7 @@ if __name__ == "__main__":
     os.chdir(app_root)
     runtime_logs = _capture_runtime_output()
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(True)
     apply_application_dark_theme(app)
 
     from PySide6.QtGui import QIcon
@@ -262,9 +263,10 @@ if __name__ == "__main__":
 
     video_path = show_launcher(None)
     if not video_path:
-        sys.exit(0)
+        os._exit(0)
 
     LauncherWindow.add_recent(None, video_path)
 
     window = launch_editor_for_video(video_path, runtime_logs)
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    os._exit(exit_code)

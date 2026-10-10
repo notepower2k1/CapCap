@@ -17803,6 +17803,18 @@ class VideoTranslatorGUI(QMainWindow):
         QTimer.singleShot(50, lambda: _relaunch_launcher(existing_window=self))
 
     def _terminate_workers(self, close_media: bool = True):
+        try:
+            from views.launcher import stop_all_launcher_workers
+            stop_all_launcher_workers()
+        except ImportError:
+            try:
+                from ui.views.launcher import stop_all_launcher_workers
+                stop_all_launcher_workers()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
         if hasattr(self, "_timeline_visual_refresh_timer"):
             self._timeline_visual_refresh_timer.stop()
         self._pending_timeline_waveform_refresh = False
@@ -17855,6 +17867,13 @@ class VideoTranslatorGUI(QMainWindow):
                         worker.requestInterruption()
                     worker.quit()
                     worker.wait(1000)
+                    if close_media and worker.isRunning():
+                        print(f"[Cleanup] Force terminating worker: {name}")
+                        try:
+                            worker.terminate()
+                            worker.wait(500)
+                        except Exception:
+                            pass
                     if worker.isRunning():
                         print(f"[Cleanup] Worker {name} still finishing, keeping safe reference...")
                         self._retiring_workers.append(worker)
@@ -17875,6 +17894,12 @@ class VideoTranslatorGUI(QMainWindow):
                             worker.requestInterruption()
                         worker.quit()
                         worker.wait(500)
+                        if close_media and worker.isRunning():
+                            try:
+                                worker.terminate()
+                                worker.wait(300)
+                            except Exception:
+                                pass
                         if worker.isRunning():
                             self._retiring_workers.append(worker)
                             worker.finished.connect(
@@ -17942,6 +17967,9 @@ class VideoTranslatorGUI(QMainWindow):
             self._terminate_workers(close_media=True)
         finally:
             super().closeEvent(event)
+            app_instance = QApplication.instance()
+            if app_instance is not None:
+                app_instance.quit()
 
     def toggle_play(self):
         toggle_play_impl(self)

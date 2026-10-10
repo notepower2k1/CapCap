@@ -272,8 +272,10 @@ def _extract_waveform_audio(video_path: str, temp_root: str) -> str:
     return audio_path if os.path.exists(audio_path) else ""
 
 
-def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=None) -> None:
+def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=None, is_cancelled=None) -> None:
     """Build the editor's static V1/A1 cache before opening the editor."""
+    if is_cancelled and is_cancelled():
+        return
     try:
         import numpy as np
         import subprocess
@@ -288,7 +290,7 @@ def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=
         os.makedirs(cache_dir, exist_ok=True)
 
         if callable(progress_cb):
-                progress_cb(t("Checking project cache..."), 20)
+            progress_cb(t("Checking project cache..."), 20)
 
         try:
             with open(manifest_path, "r", encoding="utf-8") as handle:
@@ -308,6 +310,9 @@ def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=
                 return
         except (OSError, ValueError, TypeError):
             pass
+
+        if is_cancelled and is_cancelled():
+            return
 
         duration_s = _get_video_duration(source)
         max_visual_dur = float(os.environ.get("CAPCAP_TIMELINE_VISUALS_MAX_DURATION", 3600.0))
@@ -331,6 +336,9 @@ def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=
                 progress_cb(t("Ready to open project!"), 100)
             return
 
+        if is_cancelled and is_cancelled():
+            return
+
         if callable(progress_cb):
             progress_cb(t("Extracting timeline waveform and thumbnails..."), 45)
 
@@ -346,12 +354,17 @@ def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=
         ]
         os.makedirs(thumb_dir, exist_ok=True)
 
+        if is_cancelled and is_cancelled():
+            return
+
         # Try native in-process thumbnail and waveform generation
         native_done = False
         try:
             from app.media_decode import build_waveform as native_build_waveform
 
             native_wf, native_dur = native_build_waveform(source)
+            if is_cancelled and is_cancelled():
+                return
             waveform = native_wf
             duration_s = max(duration_s, native_dur)
             # In native mode, thumbnails are generated in RAM on-demand by TimelineThumbnailWorker.
@@ -363,16 +376,25 @@ def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=
             print(f"[Launcher] Native visual prep error, falling back to FFmpeg: {ex}")
             native_done = False
 
+        if is_cancelled and is_cancelled():
+            return
+
         if not native_done:
             def build_waveform():
+                if is_cancelled and is_cancelled():
+                    return [], duration_s
                 waveform = []
                 audio_path = _extract_waveform_audio(source, temp_root)
                 waveform_duration = duration_s
+                if is_cancelled and is_cancelled():
+                    return [], duration_s
                 if audio_path and os.path.exists(audio_path):
                     with wave.open(audio_path, "rb") as audio_file:
                         frame_count = audio_file.getnframes()
                         sample_rate = max(1, audio_file.getframerate())
                         raw_samples = audio_file.readframes(frame_count)
+                    if is_cancelled and is_cancelled():
+                        return [], duration_s
                     samples = np.frombuffer(raw_samples, dtype=np.int16).astype(np.float32)
                     waveform_duration = max(waveform_duration, frame_count / sample_rate)
                     peak = float(np.max(np.abs(samples))) if samples.size else 0.0
@@ -381,6 +403,8 @@ def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=
                         bucket_count = int(min(1200, max(240, round(waveform_duration * 12.0))))
                         chunk_size = max(256, int(np.ceil(samples.size / max(1, bucket_count))))
                         for start in range(0, samples.size, chunk_size):
+                            if is_cancelled and is_cancelled():
+                                return [], duration_s
                             chunk = samples[start:start + chunk_size]
                             peak_value = float(np.max(np.abs(chunk))) if chunk.size else 0.0
                             rms_value = float(np.sqrt(np.mean(np.square(chunk)))) if chunk.size else 0.0
@@ -388,9 +412,13 @@ def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=
                 return waveform, waveform_duration
 
             def build_thumbnail(index_and_time):
+                if is_cancelled and is_cancelled():
+                    return None
                 index, timestamp_s = index_and_time
                 output_path = os.path.join(thumb_dir, f"launcher_{digest}_v4_{index:03d}.jpg")
                 if not os.path.exists(output_path):
+                    if is_cancelled and is_cancelled():
+                        return None
                     subprocess.run(
                         [_ffmpeg_path(), "-y", "-loglevel", "error", "-ss", f"{timestamp_s:.3f}",
                          "-i", source, "-frames:v", "1", "-q:v", "4",
@@ -419,6 +447,9 @@ def _prepare_timeline_visual_cache(video_path: str, temp_root: str, progress_cb=
                 raise waveform_error[0]
             waveform, duration_s = waveform_result if waveform_result else ([], duration_s)
 
+        if is_cancelled and is_cancelled():
+            return
+
         with open(manifest_path, "w", encoding="utf-8") as handle:
             json.dump({
                 "visual_version": 4, "source": source, "size": int(stat.st_size), "mtime_ns": int(stat.st_mtime_ns),
@@ -439,16 +470,40 @@ class VisualCacheWorker(QThread):
         super().__init__(parent)
         self.target_video = str(target_video or "")
         self.temp_root = str(temp_root or "")
+        self._cancelled = False
+
+    def requestInterruption(self):
+        self._cancelled = True
+        try:
+            super().requestInterruption()
+        except Exception:
+            pass
+
+    def isInterruptionRequested(self) -> bool:
+        if getattr(self, "_cancelled", False):
+            return True
+        try:
+            return super().isInterruptionRequested()
+        except Exception:
+            return False
 
     def run(self):
         def _on_progress(status, pct):
+            if self.isInterruptionRequested():
+                return
             self.progress.emit(str(status), int(pct))
         try:
-            _prepare_timeline_visual_cache(self.target_video, self.temp_root, progress_cb=_on_progress)
+            _prepare_timeline_visual_cache(
+                self.target_video,
+                self.temp_root,
+                progress_cb=_on_progress,
+                is_cancelled=self.isInterruptionRequested,
+            )
         except Exception as exc:
             print(f"[Launcher] Visual cache preparation error: {exc}")
-        self.progress.emit(t("Ready to open project!"), 100)
-        self.finished_prep.emit()
+        if not self.isInterruptionRequested():
+            self.progress.emit(t("Ready to open project!"), 100)
+            self.finished_prep.emit()
 
 
 class LauncherWindow(QDialog):
@@ -1506,6 +1561,21 @@ def _thumbnail_name(video_path: str) -> str:
 _stale_launcher_workers = []
 
 
+def stop_all_launcher_workers():
+    global _stale_launcher_workers
+    for w in list(_stale_launcher_workers):
+        if w is not None and w.isRunning():
+            try:
+                w.requestInterruption()
+                w.wait(500)
+                if w.isRunning():
+                    w.terminate()
+                    w.wait(300)
+            except Exception:
+                pass
+    _stale_launcher_workers.clear()
+
+
 def show_launcher(settings_or_none, project_loader=None):
     """Show launcher, return selected video path or empty string."""
     w = LauncherWindow()
@@ -1534,4 +1604,5 @@ def show_launcher(settings_or_none, project_loader=None):
     QApplication.processEvents()
     if result == QDialog.Accepted:
         return selected_video
+    stop_all_launcher_workers()
     return ""

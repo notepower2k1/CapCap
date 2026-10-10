@@ -617,14 +617,32 @@ class TimelineWaveformWorker(QThread):
 
     def __init__(self, request_signature, video_path, audio_path, temp_audio_path, duration_s: float = 0.0):
         super().__init__()
+        self._cancelled = False
         self.request_signature = request_signature
         self.video_path = str(video_path or "").strip()
         self.audio_path = str(audio_path or "").strip()
         self.temp_audio_path = str(temp_audio_path or "").strip()
         self.duration_s = max(0.0, float(duration_s or 0.0))
 
+    def requestInterruption(self):
+        self._cancelled = True
+        try:
+            super().requestInterruption()
+        except Exception:
+            pass
+
+    def isInterruptionRequested(self) -> bool:
+        if getattr(self, "_cancelled", False):
+            return True
+        try:
+            return super().isInterruptionRequested()
+        except Exception:
+            return False
+
     def run(self):
         try:
+            if self.isInterruptionRequested():
+                return
             max_visual_dur = float(os.environ.get("CAPCAP_TIMELINE_VISUALS_MAX_DURATION", 3600.0))
             if self.duration_s > max_visual_dur:
                 self.completed.emit(self.request_signature, [], self.duration_s, "")
@@ -635,25 +653,37 @@ class TimelineWaveformWorker(QThread):
                 self.completed.emit(self.request_signature, [], 0.0, "")
                 return
 
+            if self.isInterruptionRequested():
+                return
+
             # Try native in-process streaming waveform first
             try:
                 from app.media_decode import build_waveform, has_audio_stream
                 audio_status = has_audio_stream(source_media)
+                if self.isInterruptionRequested():
+                    return
                 if audio_status is False:
                     self.completed.emit(self.request_signature, [], float(self.duration_s), "")
                     return
                 if audio_status is True:
                     wf, dur = build_waveform(source_media)
+                    if self.isInterruptionRequested():
+                        return
                     dur_s = max(dur, self.duration_s)
                     self.completed.emit(self.request_signature, wf or [], dur_s, "")
                     return
             except Exception:
                 pass
 
+            if self.isInterruptionRequested():
+                return
+
             audio_path = self.audio_path if self.audio_path and os.path.exists(self.audio_path) else ""
             if not audio_path and self.video_path and os.path.exists(self.video_path):
                 temp_audio = self.temp_audio_path
                 if temp_audio and not os.path.exists(temp_audio):
+                    if self.isInterruptionRequested():
+                        return
                     os.makedirs(os.path.dirname(temp_audio), exist_ok=True)
                     ffmpeg = os.path.join(bin_path("ffmpeg"), "ffmpeg.exe")
                     subprocess.run(
@@ -682,6 +712,9 @@ class TimelineWaveformWorker(QThread):
                 if temp_audio and os.path.exists(temp_audio):
                     audio_path = temp_audio
 
+            if self.isInterruptionRequested():
+                return
+
             if not audio_path or not os.path.exists(audio_path):
                 self.completed.emit(self.request_signature, [], 0.0, "")
                 return
@@ -692,10 +725,16 @@ class TimelineWaveformWorker(QThread):
             from pydub import AudioSegment
             import numpy as np
 
+            if self.isInterruptionRequested():
+                return
+
             audio = AudioSegment.from_file(audio_path).set_channels(1)
             duration_s = max(0.0, len(audio) / 1000.0)
             if duration_s > max_visual_dur:
                 self.completed.emit(self.request_signature, [], duration_s, "")
+                return
+
+            if self.isInterruptionRequested():
                 return
 
             samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
@@ -711,6 +750,9 @@ class TimelineWaveformWorker(QThread):
                 return
             samples /= max(1.0, peak)
 
+            if self.isInterruptionRequested():
+                return
+
             # Build a lightweight envelope: fixed number of buckets regardless of video length.
             # This keeps the timeline readable without the FFT cost of a full spectrum view.
             # Keep this compact enough for instant drawing, but retain enough
@@ -721,6 +763,8 @@ class TimelineWaveformWorker(QThread):
             chunk_size = max(256, int(np.ceil(samples.size / max(1, bucket_count))))
             waveform = []
             for start in range(0, samples.size, chunk_size):
+                if self.isInterruptionRequested():
+                    return
                 chunk = samples[start:start + chunk_size]
                 if not chunk.size:
                     waveform.append(0.0)
@@ -731,6 +775,8 @@ class TimelineWaveformWorker(QThread):
                 value = max(peak_value, rms_value * 1.15)
                 waveform.append(min(1.0, max(0.03, value ** 0.85)))
 
+            if self.isInterruptionRequested():
+                return
             self.completed.emit(self.request_signature, waveform, duration_s, "")
         except Exception as exc:
             details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()

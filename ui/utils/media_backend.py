@@ -842,6 +842,8 @@ class MpvMediaPlayerBackend(QObject):
                 pass
 
     def setSource(self, source):
+        if getattr(self, "_is_closed", False):
+            return
         source_path = self._normalize_source(source)
         if not source_path:
             self.stop()
@@ -1125,6 +1127,8 @@ class MpvMediaPlayerBackend(QObject):
             self._native_audio_engine.set_track_gain(track_id, gain, muted)
 
     def _on_native_audio_sink_ready(self, ready: bool):
+        if getattr(self, "_is_closed", False):
+            return
         self._native_audio_active = bool(ready)
         if ready:
             self.log("[Preview] Native PCM PreviewAudioEngine sink ready and active")
@@ -1162,7 +1166,7 @@ class MpvMediaPlayerBackend(QObject):
 
     def close_native_audio(self):
         """Release native audio engine and workers cleanly."""
-        if self._native_audio_engine is not None:
+        if getattr(self, "_native_audio_engine", None) is not None:
             try:
                 self._native_audio_engine.close()
             except Exception:
@@ -1174,19 +1178,28 @@ class MpvMediaPlayerBackend(QObject):
         """Release backend resources cleanly."""
         self._is_closed = True
         if hasattr(self, "_poll_timer") and self._poll_timer.isActive():
-            self._poll_timer.stop()
+            try:
+                self._poll_timer.stop()
+            except Exception:
+                pass
         if hasattr(self, "_sync_timer") and self._sync_timer.isActive():
-            self._sync_timer.stop()
+            try:
+                self._sync_timer.stop()
+            except Exception:
+                pass
         try:
-            self._original_player.stop()
-            self._dubbed_player.stop()
+            if hasattr(self, "_original_player"):
+                self._original_player.stop()
+            if hasattr(self, "_dubbed_player"):
+                self._dubbed_player.stop()
         except Exception:
             pass
         self.close_native_audio()
-        try:
-            self._player.terminate()
-        except Exception:
-            pass
+        if hasattr(self, "_player") and self._player is not None:
+            try:
+                self._player.terminate()
+            except Exception:
+                pass
 
     def is_closed(self) -> bool:
         return getattr(self, "_is_closed", False)
@@ -1322,12 +1335,18 @@ class MpvMediaPlayerBackend(QObject):
         )
 
     def _apply_blur_filter(self):
+        if getattr(self, "_is_closed", False):
+            return
         self._apply_all_filters()
 
     def _apply_mask_filter(self):
+        if getattr(self, "_is_closed", False):
+            return
         self._apply_all_filters()
 
     def _apply_all_filters(self):
+        if getattr(self, "_is_closed", False):
+            return
         """Build a single combined lavfi filter for blur + mask and
         push it as one `vf add`.
 
@@ -1822,6 +1841,8 @@ class MpvMediaPlayerBackend(QObject):
         self._apply_current_subtitle()
 
     def _apply_current_subtitle(self):
+        if getattr(self, "_is_closed", False):
+            return
         if not self._source_path:
             return
         if not self._subtitle_ass_path or not os.path.exists(self._subtitle_ass_path):
@@ -1938,6 +1959,9 @@ class MpvMediaPlayerBackend(QObject):
 
     def playback_rate(self):
         return getattr(self, "_base_playback_rate", 1.0)
+
+
+LibMpvMediaBackend = MpvMediaPlayerBackend
 
 
 def create_media_backend(video_view):
