@@ -37,6 +37,7 @@ def translate_segments(
     optimize_subtitles=False,
     style_instruction="",
     batch_callback=None,
+    status_callback=None,
 ):
     from translation import TranslationOrchestrator
 
@@ -49,6 +50,7 @@ def translate_segments(
         optimize_subtitles=optimize_subtitles,
         style_instruction=style_instruction,
         batch_callback=batch_callback,
+        status_callback=status_callback,
     )
     if not result.success:
         raise TranslationError("; ".join(result.errors) or "Translation failed.")

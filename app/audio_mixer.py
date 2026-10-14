@@ -886,7 +886,7 @@ def mix_audio_tracks(
 
     Each track dictionary accepts ``path``, ``volume`` (percentage),
     ``muted``, ``start``/``end`` (seconds), ``source_start`` (seconds), and
-    ``loop``.  This is deliberately a small, deterministic compositor used
+    ``loop``, and ``time_warps`` for original source audio. This compositor is used
     by both preview and export so the track-volume controls have one meaning.
     A track with volume <= 0 or muted=True is skipped without opening its
     source file.  ``loop`` is useful for music beds that are shorter than the
@@ -939,6 +939,43 @@ def mix_audio_tracks(
                 continue
         if len(audio) == 0:
             continue
+
+        warps = raw.get("time_warps") or []
+        if warps:
+            from app.services.time_warp_service import TimeWarpService
+
+            # Only source audio is warped; dubbed files already follow timeline time.
+            duration = TimeWarpService.media_to_timeline_time(len(audio) / sample_rate, warps)
+            cut_times = {0.0, duration}
+            shift = 0.0
+            for warp in sorted(warps, key=lambda w: float(w.get("media_start", w.get("time", 0.0)))):
+                added = float(warp.get("duration", 0.0))
+                if added <= 0:
+                    continue
+                if warp.get("type", "freeze") == "slow":
+                    media_start = float(warp.get("media_start", warp.get("time", 0.0)))
+                    media_end = float(warp.get("media_end", media_start))
+                    start = media_start + shift
+                    end = start + max(0.001, media_end - media_start) + added
+                else:
+                    start = float(warp.get("time", 0.0)) + shift
+                    end = start + added
+                cut_times.update(t for t in (start, end) if 0.0 < t < duration)
+                shift += added
+
+            warped_audio = np.zeros(int(round(duration * sample_rate)), dtype=np.float32)
+            cuts = sorted(cut_times)
+            for start, end in zip(cuts, cuts[1:]):
+                out_start, out_end = int(round(start * sample_rate)), int(round(end * sample_rate))
+                src_start = int(round(TimeWarpService.timeline_to_media_time(start, warps) * sample_rate))
+                src_end = int(round(TimeWarpService.timeline_to_media_time(end, warps) * sample_rate))
+                clip = audio[src_start:src_end]
+                count = out_end - out_start
+                if count > 0 and len(clip) > 0:
+                    warped_audio[out_start:out_end] = np.interp(
+                        np.linspace(0, len(clip) - 1, count), np.arange(len(clip)), clip
+                    )
+            audio = warped_audio
 
         requested_samples = int((end_ms - start_ms) * sample_rate / 1000) if end_ms > start_ms else 0
         if bool(raw.get("loop", False)) and requested_samples > len(audio) and len(audio) > 0:

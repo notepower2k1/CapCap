@@ -263,6 +263,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
 
     def _handle_translate_segments(self, payload: dict) -> dict:
         segments = list(payload.get("segments") or [])
+        status_updates = []
         result = translate_segments(
             segments,
             src_lang=str(payload.get("src_lang", "auto") or "auto"),
@@ -270,8 +271,9 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
             enable_polish=bool(payload.get("enable_polish", True)),
             optimize_subtitles=False,
             style_instruction=str(payload.get("style_instruction", "") or ""),
+            status_callback=lambda provider, message: status_updates.append((provider, message)),
         )
-        return {"ok": True, "segments": list(result or [])}
+        return {"ok": True, "segments": list(result or []), "translation_status": status_updates}
 
     def _handle_translate_srt(self, payload: dict) -> dict:
         srt_text = str(payload.get("srt_text", "") or "")
@@ -379,6 +381,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
                 speaker_diarization=bool(payload.get("speaker_diarization", False)),
                 speaker_diarization_num_speakers=int(payload.get("speaker_diarization_num_speakers", -1) or -1),
                 skip_translation=bool(payload.get("skip_translation", False)),
+                force_transcription=bool(payload.get("force_transcription", False)),
                 prefetch_voice_name=str(payload.get("prefetch_voice_name", "") or ""),
                 prefetch_voice_speed=float(payload.get("prefetch_voice_speed", 1.0) or 1.0),
                 step_callback=step_callback,

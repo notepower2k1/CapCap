@@ -1797,7 +1797,7 @@ def build_preview_panel(gui):
     )
     gui.revert_all_freezes_btn.setEnabled(False)
     if hasattr(gui, "auto_fit_all_voice_overflows"):
-        gui.batch_fit_voice_btn.clicked.connect(gui.auto_fit_all_voice_overflows)
+        gui.batch_fit_voice_btn.clicked.connect(lambda _checked=False: gui.auto_fit_all_voice_overflows())
     if hasattr(gui, "revert_all_segment_video_extensions"):
         gui.revert_all_freezes_btn.clicked.connect(gui.revert_all_segment_video_extensions)
     inspector_warp_actions_row.addWidget(gui.batch_fit_voice_btn)

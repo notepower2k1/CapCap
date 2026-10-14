@@ -29,7 +29,7 @@
   - Primary preview engine uses `libmpv` for high-framerate, hardware-accelerated playback and frame-accurate timeline seeking. Pre-initializes GPU context before window display to eliminate main-thread freezing.
   - Requires Microsoft Visual C++ Redistributable (x64) >= 14.20 for `libmpv-2.dll` (`installer\vc_redist.x64.exe`).
 - **GPU Acceleration & Memory Management**:
-  - Faster-Whisper uses CUDA when available with optional batched inference controls.
+  - Faster-Whisper uses CUDA when available with optional batched inference controls. Chunked transcription uses one reusable GPU model for all chunks, including long videos. CPU transcription remains available when CUDA is unavailable or CPU mode is selected.
   - Vocal and BGM separation links the bundled CUDA runtime to ONNX Runtime's `CUDAExecutionProvider`, batch-sliced to 1 to prevent PCIe memory thrashing on 6GB GPUs.
   - Video export leverages NVIDIA NVENC (`h264_nvenc` with p2–p5 presets) with automatic fallback to CPU `libx264` if NVENC is unavailable.
 - **Audio Pipeline & In-Place TTS**:

@@ -19,12 +19,6 @@ def _init_asr_worker(model_path: str) -> None:
     _ASR_WORKER_MODEL = load_whisper_model(model_path)
 
 
-def _init_asr_cpu_worker(model_path: str) -> None:
-    """Load an isolated CPU Whisper model in a process-pool worker."""
-    os.environ["CAPCAP_WHISPER_DEVICE"] = "cpu"
-    _init_asr_worker(model_path)
-
-
 def _transcribe_chunk_job(audio_path: str, language: str) -> list[dict]:
     global _ASR_WORKER_MODEL
     if _ASR_WORKER_MODEL is None:
@@ -182,74 +176,6 @@ class AsrMergeService:
             if on_item_done is not None:
                 on_item_done(item)
 
-    def _transcribe_chunks_hybrid(
-        self,
-        pending_items: list[dict],
-        *,
-        whisper_adapter,
-        model_path: str,
-        language: str,
-        cache_dir: str,
-        on_item_done=None,
-    ) -> None:
-        """Use one GPU model and one isolated CPU worker for long queues.
-
-        GPU inference remains single-worker to protect VRAM. The CPU worker
-        takes overflow items from the same queue; results still flow through
-        the existing ordered callback/merge path.
-        """
-        queue = list(pending_items)
-        try:
-            reusable_model = whisper_adapter.load_model(model_path)
-        except Exception:
-            reusable_model = None
-
-        def _complete(item: dict, segments) -> None:
-            item["segments"] = list(segments or [])
-            if cache_dir:
-                self._save_cached_segments(cache_dir, item["cache_key"], item["segments"])
-            if on_item_done is not None:
-                on_item_done(item)
-
-        print(f"[ASR] Hybrid long-video mode: 1 GPU worker + 1 CPU worker, pending={len(queue)}")
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=1,
-            initializer=_init_asr_cpu_worker,
-            initargs=(model_path,),
-        ) as cpu_executor:
-            cpu_futures = {}
-
-            def _submit_cpu() -> None:
-                if queue and not cpu_futures:
-                    item = queue.pop(0)
-                    future = cpu_executor.submit(_transcribe_chunk_job, item["chunk"].audio_path, language)
-                    cpu_futures[future] = item
-
-            _submit_cpu()
-            while queue:
-                # The GPU is the primary worker and processes one item at a
-                # time. Harvest any completed CPU work between GPU chunks so
-                # both workers draw dynamically from the same queue.
-                gpu_item = queue.pop(0)
-                chunk = gpu_item["chunk"]
-                if reusable_model is not None and hasattr(whisper_adapter, "transcribe_with_model"):
-                    gpu_segments = whisper_adapter.transcribe_with_model(
-                        reusable_model, chunk.audio_path, language=language, use_batched=False, vad_filter=True
-                    )
-                else:
-                    gpu_segments = whisper_adapter.transcribe(chunk.audio_path, model_path, language=language)
-                _complete(gpu_item, gpu_segments)
-
-                for future in list(cpu_futures):
-                    if future.done():
-                        item = cpu_futures.pop(future)
-                        _complete(item, future.result())
-                _submit_cpu()
-
-            for future in concurrent.futures.as_completed(cpu_futures):
-                item = cpu_futures[future]
-                _complete(item, future.result())
-
     def transcribe_chunks(
         self,
         chunks: list[AudioChunk],
@@ -346,27 +272,14 @@ class AsrMergeService:
                 from whisper_processor import _detect_faster_whisper_runtime
                 runtime = _detect_faster_whisper_runtime()
                 if runtime.get("device") == "cuda" and len(pending_items) > 1:
-                    total_duration = max(float(item["chunk"].end_seconds) for item in pending_items)
-                    hybrid_enabled = str(os.getenv("CAPCAP_HYBRID_ASR", "1")).strip().lower() not in {"0", "false", "no", "off"}
-                    hybrid_min_seconds = max(60.0, float(os.getenv("CAPCAP_HYBRID_ASR_MIN_SECONDS", "1200") or 1200))
-                    if hybrid_enabled and total_duration >= hybrid_min_seconds and len(pending_items) >= 4:
-                        self._transcribe_chunks_hybrid(
-                            pending_items,
-                            whisper_adapter=whisper_adapter,
-                            model_path=model_path,
-                            language=language,
-                            cache_dir=cache_dir,
-                            on_item_done=_on_item_done,
-                        )
-                    else:
-                        self._transcribe_chunks_sequential(
-                            pending_items,
-                            whisper_adapter=whisper_adapter,
-                            model_path=model_path,
-                            language=language,
-                            cache_dir=cache_dir,
-                            on_item_done=_on_item_done,
-                        )
+                    self._transcribe_chunks_sequential(
+                        pending_items,
+                        whisper_adapter=whisper_adapter,
+                        model_path=model_path,
+                        language=language,
+                        cache_dir=cache_dir,
+                        on_item_done=_on_item_done,
+                    )
                     used_parallel = True
                 elif len(pending_items) > 1:
                     self._transcribe_chunks_parallel(

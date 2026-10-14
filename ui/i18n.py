@@ -190,6 +190,7 @@ VI_TRANSLATIONS: dict[str, str] = {
     "GPU (Recommended)": "GPU (Khuyến nghị)",
     "GPU Acceleration Pack": "Gói tăng tốc GPU",
     "GPU Mode": "Chế độ GPU",
+    "GPU encoding failed; retrying on CPU...": "Mã hóa GPU thất bại; đang thử lại bằng CPU...",
     "GPU mode needs:": "Chế độ GPU cần:",
     "Hide details": "Ẩn chi tiết",
     "Highlight": "Tô sáng",
@@ -345,6 +346,11 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Generate": "Tạo",
     "Step-by-Step": "Từng bước",
     "Run to Transcript": "Chạy đến bước Chép lời",
+    "Auto Transcript": "Chép lời tự động",
+    "Re-transcript": "Chép lời lại",
+    "Import Transcript File…": "Nhập tệp chép lời…",
+    "Imported SRT": "SRT đã nhập",
+    "Imported transcript is unavailable. Import the SRT again or choose Re-transcript.": "Không tìm thấy dữ liệu chép lời đã nhập. Hãy nhập lại SRT hoặc chọn Chép lời lại.",
     "Run to Translate": "Chạy đến bước Dịch",
     "Import Translated File…": "Nhập tệp đã dịch…",
     "Generate Voice / TTS": "Tạo giọng đọc / TTS",
@@ -520,13 +526,9 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Review Export Details": "Kiểm tra chi tiết xuất video",
     "Video Quality / Compression:": "Chất lượng / nén video:",
     "Low (Fastest - Smallest File Size)": "Thấp (Nhanh nhất - Tệp nhỏ nhất)",
-    "Medium (Recommended - Balanced)": "Trung bình (Khuyến nghị - Cân bằng)",
-    "High (High Quality)": "Cao (Chất lượng cao)",
-    "Very High (Maximum Quality)": "Rất cao (Chất lượng tối đa)",
-    "Balanced (Recommended): Standard sharpness for social media, fast export (p3/fast, CRF 22 / CQ 25).": "Cân bằng (Khuyến nghị): Độ nét tiêu chuẩn cho mạng xã hội, xuất nhanh (p3/fast, CRF 22 / CQ 25).",
-    "High Quality: Maximum detail retention, standard export speed (p4/medium, CRF 18 / CQ 22).": "Chất lượng cao: Giữ chi tiết tối đa, tốc độ xuất tiêu chuẩn (p4/medium, CRF 18 / CQ 22).",
-    "Master / Ultra Quality: Near-lossless, thorough frame analysis (p5/slow, CRF 15 / CQ 18).": "Master / Ultra: Gần như không mất dữ liệu, phân tích khung hình kỹ (p5/slow, CRF 15 / CQ 18).",
-    "Compact / Economic: Maximum compression, smallest file size, fastest export (p2/veryfast, CRF 26 / CQ 28).": "Gọn / Tiết kiệm: Nén tối đa, tệp nhỏ nhất, xuất nhanh nhất (p2/veryfast, CRF 26 / CQ 28).",
+    "Balanced (Recommended)": "Cân bằng (Khuyến nghị)",
+    "Balanced (Recommended): Good detail retention with reasonable export speed.": "Cân bằng (Khuyến nghị): Giữ chi tiết tốt với thời gian xuất hợp lý.",
+    "Low: Faster export and smaller files, with some loss of fine detail.": "Thấp: Xuất nhanh hơn, tệp nhỏ hơn, có thể mất một phần chi tiết nhỏ.",
     "Please choose a video first.": "Vui lòng chọn video trước.",
     "Please select a video file first.": "Vui lòng chọn tệp video trước.",
     "Video file not found. Please select a video first.": "Không tìm thấy tệp video. Vui lòng chọn video trước.",
@@ -603,6 +605,20 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Translation completed using Bing Translator (AI Provider unavailable).": "Đã dịch bằng Bing Translator (nhà cung cấp AI không khả dụng).",
     "AI Provider is unavailable. Translation completed using Google Translate instead.": "Nhà cung cấp AI không khả dụng. Bản dịch đã dùng Google Translate.",
     "AI Provider unavailable. Falling back to Google Translate...": "Nhà cung cấp AI không khả dụng. Đang chuyển sang Google Translate...",
+    "AI Provider is unavailable. Falling back to Google Translate...": "Nhà cung cấp AI không khả dụng. Đang chuyển sang Google Translate...",
+    "AI batch translation failed. Falling back to Google Translate.": "Dịch bằng AI không thành công. Đang chuyển sang Google Translate.",
+    "AI API key or model is not configured.": "Chưa cấu hình API key hoặc model AI.",
+    "AI API authentication failed (HTTP 401).": "Xác thực API AI thất bại (HTTP 401).",
+    "AI API access was denied (HTTP 403).": "API AI từ chối quyền truy cập (HTTP 403).",
+    "AI API request or quota limit reached (HTTP 429).": "API AI đã chạm giới hạn lượt gọi hoặc hạn mức sử dụng (HTTP 429).",
+    "AI service is temporarily overloaded or unavailable (HTTP 503).": "Dịch vụ AI đang quá tải hoặc tạm thời không khả dụng (HTTP 503).",
+    "AI service did not respond in time (HTTP 504).": "Dịch vụ AI không phản hồi kịp thời (HTTP 504).",
+    "AI service returned a server error.": "Máy chủ dịch vụ AI gặp lỗi.",
+    "AI service did not respond within the time limit.": "Dịch vụ AI không phản hồi trong thời gian chờ cho phép.",
+    "Could not connect to the AI service.": "Không thể kết nối tới dịch vụ AI.",
+    "AI returned incomplete or invalid subtitles.": "AI trả về phụ đề thiếu câu hoặc sai định dạng.",
+    "AI returned an empty response.": "AI trả về phản hồi rỗng.",
+    "AI translation failed for an unknown reason.": "Dịch bằng AI thất bại, chưa xác định được nguyên nhân. Xem log để biết thêm chi tiết.",
     "Google web translate error. Auto-falling back to Bing Translator...": "Lỗi Google dịch. Tự động chuyển sang Bing Translator...",
     "Auto-falling back to Bing Translator...": "Tự động chuyển sang Bing Translator...",
     "AI Provider is configured in Settings. Open Settings to change provider or API keys.": "Nhà cung cấp AI đã được cấu hình trong Cài đặt. Mở Cài đặt để đổi nhà cung cấp hoặc API key.",
@@ -1534,6 +1550,8 @@ def _translate_text(source: str, language: str) -> str:
     translated = VI_TRANSLATIONS.get(source, source)
     if translated != source:
         return translated
+    if "\n" in source:
+        return "\n".join(_translate_text(line, language) for line in source.split("\n"))
     match = re.fullmatch(r"(\d+) speakers", source)
     if match:
         return f"{match.group(1)} người nói"

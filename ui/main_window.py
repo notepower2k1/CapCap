@@ -3132,7 +3132,14 @@ class VideoTranslatorGUI(QMainWindow):
             duration = int(getattr(self.media_player, "duration", lambda: 0)() or 0)
         except Exception:
             duration = 0
-        if duration <= 0:
+        if duration > 0:
+            from ui.utils.media_utils import _is_warped_preview
+            if not _is_warped_preview(self):
+                duration += int(round(sum(
+                    float(w.get("duration", 0.0))
+                    for w in (getattr(self, "video_time_warps", []) or [])
+                ) * 1000.0))
+        else:
             try:
                 tl = getattr(self, "timeline", None)
                 tl_dur = getattr(tl, "duration", 0)
@@ -6423,6 +6430,8 @@ class VideoTranslatorGUI(QMainWindow):
     def _completed_transcript_engine_label(self) -> str:
         state = getattr(self, "current_project_state", None)
         settings = getattr(state, "settings", {}) if state else {}
+        if settings.get("transcript_imported", False):
+            return "Imported SRT"
         engine = str(settings.get("transcription_engine", "") or "").strip().lower()
         if not engine and hasattr(self, "get_transcription_engine"):
             engine = self.get_transcription_engine()
@@ -6541,12 +6550,11 @@ class VideoTranslatorGUI(QMainWindow):
             badge.setToolTip(text)
             badge.setStyleSheet(f"color: {color}; font-weight: 700;")
 
-        # Step-by-Step is deliberately linear until translation is complete.
-        # Translation remains repeatable, like TTS: users often adjust the
-        # provider, prompt, or source subtitles and need to run it again
-        # without transcribing the video a second time.
         if hasattr(self, "_generate_transcript_action"):
-            self._generate_transcript_action.setEnabled(has_video and not transcript and not self._pipeline_active)
+            self._generate_transcript_action.setEnabled(has_video and not self._pipeline_active)
+            self._generate_transcript_action.setText(t("Re-transcript") if transcript else t("Auto Transcript"))
+        if hasattr(self, "_generate_import_original_srt_action"):
+            self._generate_import_original_srt_action.setEnabled(has_video and not self._pipeline_active)
         if hasattr(self, "_generate_translate_action"):
             self._generate_translate_action.setEnabled(transcript and not self._pipeline_active)
             self._generate_translate_action.setText(t("Re-translate") if translated else t("Auto Translate"))
@@ -14222,6 +14230,8 @@ class VideoTranslatorGUI(QMainWindow):
         state = self.ensure_current_project()
         if state:
             state.set_setting("transcription_signature", "")
+            state.set_setting("ocr_transcription_signature", "")
+            state.set_setting("transcript_imported", True)
             self.project_service.save_project(state)
         self._sync_segment_models_from_current_segments()
         if hasattr(self, "timeline"):
@@ -15379,8 +15389,14 @@ class VideoTranslatorGUI(QMainWindow):
             step_menu = menu.addMenu(t("Step-by-Step"))
             step_menu.setObjectName("generateStepMenu")
             step_menu.setMinimumWidth(220)
-            transcript_action = QAction(t("Run to Transcript"), step_menu)
+            transcript_menu = step_menu.addMenu(t("Run to Transcript"))
+            transcript_menu.setObjectName("generateStepMenu")
+            transcript_menu.setMinimumWidth(220)
+            transcript_action = QAction(t("Auto Transcript"), transcript_menu)
             transcript_action.triggered.connect(lambda: self.run_pipeline_to_stage("transcript"))
+            import_transcript_action = QAction(t("Import Transcript File…"), transcript_menu)
+            import_transcript_action.triggered.connect(self.import_original_srt)
+            transcript_menu.addActions([transcript_action, import_transcript_action])
             translate_menu = step_menu.addMenu(t("Run to Translate"))
             translate_menu.setObjectName("generateStepMenu")
             translate_menu.setMinimumWidth(220)
@@ -15397,7 +15413,6 @@ class VideoTranslatorGUI(QMainWindow):
             tts_skip_action = QAction(t("Skip"), tts_menu)
             tts_skip_action.triggered.connect(self.skip_tts_stage)
             tts_menu.addActions([tts_action, tts_skip_action])
-            step_menu.insertAction(translate_menu.menuAction(), transcript_action)
             step_menu.addAction(tts_menu.menuAction())
             full_menu = menu.addMenu(t("Full Pipeline"))
             full_menu.setObjectName("generateStepMenu")
@@ -15409,6 +15424,7 @@ class VideoTranslatorGUI(QMainWindow):
             btn.setPopupMode(QToolButton.InstantPopup)
             btn.setText(t("Generate"))
             self._generate_transcript_action = transcript_action
+            self._generate_import_original_srt_action = import_transcript_action
             self._generate_translate_action = translate_action
             self._generate_import_translated_srt_action = import_translation_action
             self._generate_tts_action = tts_action
@@ -17554,11 +17570,13 @@ class VideoTranslatorGUI(QMainWindow):
         mode = self.get_output_mode_key()
         include_voice = mode in ("voice", "both")
         is_ocr = self.get_transcription_engine() == "ocr"
+        state = getattr(self, "current_project_state", None)
+        imported = bool(state and state.settings.get("transcript_imported", False))
         if not self.ensure_required_resources(
             "Generate",
-            include_whisper=not is_ocr,
+            include_whisper=not is_ocr and not imported,
             include_voice=include_voice,
-            include_ocr=is_ocr,
+            include_ocr=is_ocr and not imported,
             validate_pipeline_runtime=True,
         ):
             return
@@ -18032,6 +18050,10 @@ class VideoTranslatorGUI(QMainWindow):
         QTimer.singleShot(50, lambda: _relaunch_launcher(existing_window=self))
 
     def _terminate_workers(self, close_media: bool = True):
+        controller = getattr(self, "pipeline_controller", None)
+        if controller is not None:
+            controller._stop_prepare_status_polling()
+            controller._stop_local_worker_server()
         try:
             from views.launcher import stop_all_launcher_workers
             stop_all_launcher_workers()
@@ -18096,13 +18118,6 @@ class VideoTranslatorGUI(QMainWindow):
                         worker.requestInterruption()
                     worker.quit()
                     worker.wait(1000)
-                    if close_media and worker.isRunning():
-                        print(f"[Cleanup] Force terminating worker: {name}")
-                        try:
-                            worker.terminate()
-                            worker.wait(500)
-                        except Exception:
-                            pass
                     if worker.isRunning():
                         print(f"[Cleanup] Worker {name} still finishing, keeping safe reference...")
                         self._retiring_workers.append(worker)
@@ -18123,12 +18138,6 @@ class VideoTranslatorGUI(QMainWindow):
                             worker.requestInterruption()
                         worker.quit()
                         worker.wait(500)
-                        if close_media and worker.isRunning():
-                            try:
-                                worker.terminate()
-                                worker.wait(300)
-                            except Exception:
-                                pass
                         if worker.isRunning():
                             self._retiring_workers.append(worker)
                             worker.finished.connect(

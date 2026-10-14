@@ -2,6 +2,7 @@ import concurrent.futures
 import math
 import os
 import re
+import threading
 import time
 
 try:
@@ -16,7 +17,7 @@ from .context_analyzer import (
     learn_dialogue_context,
     update_ledger_from_batch,
 )
-from .errors import TranslationConfigError, TranslationValidationError
+from .errors import TranslationConfigError, TranslationValidationError, translation_failure_reason
 from .models import TranslationResult
 from .prompt_loader import render_prompt
 from .providers import (
@@ -117,7 +118,7 @@ class TranslationOrchestrator:
                         auto_context_enabled = str(os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1")).strip().lower() not in ("0", "false", "no")
 
                         print("=" * 60)
-                        print(f"[AI Translation] Starting translation...")
+                        print(f"[AI Translation] Starting translation: cues={len(segments)}, language={normalized_src}->{target_lang}")
                         print(f"[AI Translation] Provider: {mode_label}")
                         print(f"[AI Translation] Prompt: {preset_info}")
                         if has_speakers:
@@ -200,7 +201,8 @@ class TranslationOrchestrator:
                             msg = "AI batch translation failed. Falling back to Google Translate."
                         else:
                             msg = "AI Provider is unavailable. Falling back to Google Translate..."
-                        print(f"[AI Translation] WARNING: {msg} ({exc})")
+                        msg = f"{translation_failure_reason(exc)}\n{msg}"
+                        print(f"[AI Translation] WARNING: {msg} (error_type={type(exc).__name__}, {exc}); fallback_scope=all {len(segments)} cues", flush=True)
                         warnings.append(msg)
                         if status_callback:
                             try:
@@ -210,7 +212,7 @@ class TranslationOrchestrator:
                 else:
                     selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
                     if selected_provider not in ("google", "bing"):
-                        msg = "AI Provider is unavailable. Falling back to Google Translate..."
+                        msg = "AI API key or model is not configured.\nAI Provider is unavailable. Falling back to Google Translate..."
                         print(f"[AI Translation] WARNING: {msg}")
                         warnings.append(msg)
                         if status_callback:
@@ -623,6 +625,12 @@ class TranslationOrchestrator:
                 f"max_segments={max((len(source) for source, *_ in batches), default=0)}"
             )
         use_parallel = os.getenv("CAPCAP_TRANSLATION_PARALLEL_BATCHES", "0").strip().lower() in ("1", "true", "yes")
+        mode = "full_context" if full_context_request else ("parallel" if use_parallel else "sequential")
+        print(
+            f"[AI Translation] Batch plan: mode={mode}, "
+            f"batch_sizes={[len(batch[0]) for batch in batches]}, "
+            f"max_tokens_per_batch={[batch[2] for batch in batches]}", flush=True,
+        )
 
         try:
             if full_context_request or (len(batches) > 1 and use_parallel):
@@ -709,7 +717,7 @@ class TranslationOrchestrator:
                 raise
             except Exception as batch_exc:
                 print(f"[AI Translation] AI batch translation failed. Falling back to Google Translate. ({batch_exc})")
-                raise AIBatchTranslationError(str(batch_exc)) from exc
+                raise AIBatchTranslationError(str(batch_exc)) from batch_exc
 
     def _run_ai_batches_sequential(
         self,
@@ -753,7 +761,11 @@ class TranslationOrchestrator:
 
             current_guidance = build_rolling_context_guidance(ledger)
 
-            batch_result, batch_warnings, provider_name = polisher.polish_batch(
+            batch_result, batch_warnings, provider_name = self._translate_ai_batch(
+                polisher=polisher,
+                batch_number=idx + 1,
+                total_batches=total_batches,
+                start_offset=offset,
                 source_texts=source_batch,
                 translated_texts=draft_batch,
                 source_speakers=speaker_batch,
@@ -797,6 +809,31 @@ class TranslationOrchestrator:
 
         return translated_texts, sorted(providers_used), warnings
 
+    @staticmethod
+    def _translate_ai_batch(*, polisher, batch_number, total_batches, start_offset, **kwargs):
+        trace = f"{os.getpid()}:{threading.get_ident()}"
+        label = f"batch={batch_number}/{total_batches} cues={start_offset + 1}-{start_offset + len(kwargs['source_texts'])}"
+        started = time.monotonic()
+        print(
+            f"[AI Translation] Batch START trace={trace} {label} "
+            f"context_chars={len(kwargs.get('context_guidance') or '')}\n", end="", flush=True,
+        )
+        try:
+            result = polisher.polish_batch(**kwargs)
+        except Exception as exc:
+            print(
+                f"[AI Translation] Batch ERROR trace={trace} {label} "
+                f"elapsed={time.monotonic() - started:.2f}s error_type={type(exc).__name__}\n",
+                end="", flush=True,
+            )
+            raise
+        print(
+            f"[AI Translation] Batch DONE trace={trace} {label} "
+            f"elapsed={time.monotonic() - started:.2f}s returned_cues={len(result[0])}\n",
+            end="", flush=True,
+        )
+        return result
+
     def _run_ai_batch_requests(
         self,
         *,
@@ -831,7 +868,11 @@ class TranslationOrchestrator:
                 max_tokens = batch_item[2]
                 speaker_batch = batch_item[3] if len(batch_item) > 3 else None
                 future = executor.submit(
-                    polisher.polish_batch,
+                    self._translate_ai_batch,
+                    polisher=polisher,
+                    batch_number=idx + 1,
+                    total_batches=len(batches),
+                    start_offset=sum(len(batches[i][0]) for i in range(idx)),
                     source_texts=source_batch,
                     translated_texts=translated_batch,
                     source_speakers=speaker_batch,
@@ -879,6 +920,8 @@ class TranslationOrchestrator:
                             )
                     except Exception as exc:
                         if isinstance(exc, (TranslationValidationError, InterruptedError)):
+                            raise
+                        if batches[idx][1] is None:
                             raise
                         warnings.append(f"Batch {idx + 1} AI polishing failed ({exc}); kept draft.")
                         translated_texts_map[idx] = batches[idx][1]
@@ -949,6 +992,10 @@ class TranslationOrchestrator:
             default_output_limit = 8192
         context_limit = max(4096, _env_int("CAPCAP_AI_TRANSLATION_CONTEXT_TOKENS", default_context_limit))
         output_limit = max(2048, _env_int("CAPCAP_AI_TRANSLATION_MAX_OUTPUT_TOKENS", default_output_limit))
+        print(
+            f"[AI Translation] Token budget: context_limit={context_limit}, output_limit={output_limit}, "
+            f"estimated_input={input_tokens}, estimated_response={response_tokens}", flush=True,
+        )
 
         # Smart full-context heuristic (for any language):
         # If estimated response fits safely in single request (<= 6000 tokens and <= 400 cues)

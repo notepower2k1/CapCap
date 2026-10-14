@@ -8,7 +8,7 @@ from preview_processor import (
 
 
 class PreviewAdapter:
-    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_scale_mode="fit", focus_x=0.5, focus_y=0.5, output_fps=None, video_filter_state=None, video_quality="medium") -> str:
+    def mux_audio_for_preview(self, video_path: str, audio_path: str, output_video_path: str, *, target_width=None, target_height=None, output_scale_mode="fit", focus_x=0.5, focus_y=0.5, output_fps=None, video_filter_state=None, video_quality="medium", on_progress=None) -> str:
         return mux_audio_into_video_for_preview(
             video_path,
             audio_path,
@@ -21,6 +21,7 @@ class PreviewAdapter:
             output_fps=output_fps,
             video_filter_state=video_filter_state,
             video_quality=video_quality,
+            on_progress=on_progress,
         )
 
     def trim_video_clip(self, video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:

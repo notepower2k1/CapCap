@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt, QTimer, QEvent, QObject
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 from ui.main_window import VideoTranslatorGUI
 from ui.i18n import t
 
@@ -107,6 +107,15 @@ class TestPortraitWorkspace(unittest.TestCase):
         self.assertEqual(action.text(), t("Switch to landscape layout (16:9)"))
         self.gui.set_workspace_layout_mode("landscape")
         self.assertEqual(action.text(), t("Switch to portrait layout (9:16)"))
+
+    def test_auto_fit_button_keeps_the_default_breathing_buffer(self):
+        self.gui.current_segments = [{"start": 0.0, "end": 1.0, "_audio_end": 2.0}]
+        self.gui.current_translated_segments = []
+        self.gui.batch_fit_voice_btn.setEnabled(True)
+        with patch("ui.main_window.QMessageBox.question", return_value=QMessageBox.No) as confirm:
+            self.gui.batch_fit_voice_btn.click()
+        confirm.assert_called_once()
+        self.assertIn("0.15", confirm.call_args.args[2])
 
     def test_default_inspector_height_leaves_timeline_space_on_short_windows(self):
         self.gui.resize(1920, 720)

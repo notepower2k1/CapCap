@@ -181,6 +181,8 @@ def learn_dialogue_context(
     else:
         sample_segs = source_segments[:200]
 
+    print(f"[AI Translation] Context analysis: sampled_cues={len(sample_segs)}/{len(source_segments)}", flush=True)
+
     lines = []
     has_speaker = False
     for idx, seg in enumerate(sample_segs, 1):

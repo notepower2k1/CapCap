@@ -167,6 +167,9 @@ class AudioReader:
         if not os.path.exists(self.path):
             raise FileNotFoundError(f"Audio file not found: {self.path}")
 
+        file_stat = os.stat(self.path)
+        self.file_signature = (file_stat.st_mtime_ns, file_stat.st_size)
+
         self.sample_rate = sample_rate
         self._is_closed = False
         self._backend: str = "soundfile"

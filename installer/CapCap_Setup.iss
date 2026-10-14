@@ -2,15 +2,17 @@
 ; Ho tro: Chon thu muc cai dat, tao Desktop icon, tu dong cai Microsoft Visual C++ Redistributable x64 (kiem tra phien ban >= 14.20)
 
 #define MyAppName "CapCap"
-#define MyAppVersion "8.0.5"
+#define MyAppVersion "8.0.6"
 #define MyAppPublisher "CapCap"
 #define MyAppURL "https://github.com/notepower2k1/CapCap"
 #define MyAppExeName "CapCap.exe"
+#define MyAppMutexName "Local\CapCap.SingleInstance"
 
 [Setup]
 AppId={{8B1B6D24-4B44-48FE-9D07-1F4F9A7B6E21}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppMutex={#MyAppMutexName}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
@@ -59,6 +61,46 @@ Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; F
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+const
+  CapCapRunningError = 'CapCap is still running. Close CapCap and its background processes before installing this update.';
+
+function CheckCapCapProcesses: String;
+var
+  Locator, Service, Processes: Variant;
+begin
+  Result := '';
+  if CheckForMutexes('{#MyAppMutexName}') then
+  begin
+    Result := CapCapRunningError;
+    Exit;
+  end;
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Service := Locator.ConnectServer('.', 'root\CIMV2');
+    Processes := Service.ExecQuery('SELECT ProcessId FROM Win32_Process WHERE Name = ''{#MyAppExeName}''');
+    if Processes.Count > 0 then
+      Result := CapCapRunningError;
+  except
+    Result := 'Unable to check whether CapCap is running. Please retry the installer after closing CapCap.';
+    Log('CapCap process check failed: ' + GetExceptionMessage);
+  end;
+end;
+
+function InitializeSetup: Boolean;
+var
+  ErrorMessage: String;
+begin
+  ErrorMessage := CheckCapCapProcesses;
+  Result := ErrorMessage = '';
+  if not Result then
+    SuppressibleMsgBox(ErrorMessage, mbError, MB_OK, IDOK);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := CheckCapCapProcesses;
+end;
+
 // Check VC++ 2015-2022 Redistributable x64 is installed AND at minimum version 14.20
 // libmpv-2.dll requires VC++ runtime >= 14.20 (VS 2019+)
 function IsVCRedistSufficient: Boolean;

@@ -46,12 +46,7 @@ def _resolve_quality_levels(video_quality: str = "medium") -> dict[str, str]:
     key = str(video_quality or "medium").strip().lower().replace(" ", "_").replace("-", "_")
     if key in ("low", "fast", "economic"):
         return {"crf": "26", "cq": "28", "nvenc_preset": "p2", "x264_preset": "veryfast"}
-    elif key in ("high",):
-        return {"crf": "18", "cq": "22", "nvenc_preset": "p4", "x264_preset": "medium"}
-    elif key in ("very_high", "veryhigh", "ultra", "max"):
-        return {"crf": "15", "cq": "18", "nvenc_preset": "p5", "x264_preset": "slow"}
-    else:  # default medium
-        return {"crf": "22", "cq": "25", "nvenc_preset": "p3", "x264_preset": "fast"}
+    return {"crf": "22", "cq": "25", "nvenc_preset": "p3", "x264_preset": "fast"}
 
 
 def _preferred_h264_encoder_args(ffmpeg_path: str, *, fast: bool = False, video_quality: str = "medium") -> list[str]:
@@ -87,16 +82,23 @@ def _run_ffmpeg_with_h264_fallback(
     fast: bool = False,
     video_quality: str = "medium",
     error_message: str = "FFmpeg command failed.",
+    total_duration: float = None,
+    on_progress=None,
 ) -> None:
+    from video_processor import _run_ffmpeg_command_with_progress
+
     levels = _resolve_quality_levels(video_quality)
     encoder_args = _preferred_h264_encoder_args(ffmpeg, fast=fast, video_quality=video_quality)
     cmd = [*base_cmd, *encoder_args, output_path]
-    proc = subprocess.run(cmd, capture_output=True, **subprocess_text_kwargs())
-    if proc.returncode == 0:
-        return
-
-    encoder_name = encoder_args[1] if len(encoder_args) > 1 else ""
-    if encoder_name != "libx264":
+    try:
+        _run_ffmpeg_command_with_progress(cmd, total_duration=total_duration, on_progress=on_progress)
+    except subprocess.CalledProcessError as exc:
+        encoder_name = encoder_args[1] if len(encoder_args) > 1 else ""
+        if encoder_name == "libx264":
+            raise RuntimeError(exc.stderr or exc.output or error_message) from exc
+        print(f"[FFmpeg] NVENC failed; retrying on CPU: {exc.stderr or exc.output or error_message}")
+        if callable(on_progress):
+            on_progress(0, "GPU encoding failed; retrying on CPU...")
         fallback_cmd = [
             *base_cmd,
             "-c:v",
@@ -109,12 +111,10 @@ def _run_ffmpeg_with_h264_fallback(
             "yuv420p",
             output_path,
         ]
-        fallback_proc = subprocess.run(fallback_cmd, capture_output=True, **subprocess_text_kwargs())
-        if fallback_proc.returncode == 0:
-            return
-        raise RuntimeError(fallback_proc.stderr or fallback_proc.stdout or error_message)
-
-    raise RuntimeError(proc.stderr or proc.stdout or error_message)
+        try:
+            _run_ffmpeg_command_with_progress(fallback_cmd, total_duration=total_duration, on_progress=on_progress)
+        except subprocess.CalledProcessError as fallback_exc:
+            raise RuntimeError(fallback_exc.stderr or fallback_exc.output or error_message) from fallback_exc
 
 
 def _build_canvas_vf(target_width=None, target_height=None, scale_mode: str = "fit", focus_x: float = 0.5, focus_y: float = 0.5) -> str:
@@ -267,6 +267,7 @@ def mux_audio_into_video_for_preview(
     output_fps=None,
     video_filter_state=None,
     video_quality: str = "medium",
+    on_progress=None,
 ) -> str:
     """Create a video by replacing audio.
 
@@ -282,6 +283,9 @@ def mux_audio_into_video_for_preview(
         raise FileNotFoundError(f"Video not found: {video_path}")
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio not found: {audio_path}")
+
+    from video_processor import _run_ffmpeg_command_with_progress, get_video_duration
+    total_duration = get_video_duration(video_path) if callable(on_progress) else None
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
 
@@ -338,6 +342,8 @@ def mux_audio_into_video_for_preview(
             fast=True,
             video_quality=video_quality,
             error_message="FFmpeg mux failed.",
+            total_duration=total_duration,
+            on_progress=on_progress,
         )
     else:
         cmd += [
@@ -352,9 +358,10 @@ def mux_audio_into_video_for_preview(
             "+faststart",
             output_video_path,
         ]
-        proc = subprocess.run(cmd, capture_output=True, **subprocess_text_kwargs())
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stderr or proc.stdout or "FFmpeg mux failed.")
+        try:
+            _run_ffmpeg_command_with_progress(cmd, total_duration=total_duration, on_progress=on_progress)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(exc.stderr or exc.output or "FFmpeg mux failed.") from exc
     return output_video_path
 
 def mux_audio_into_video_clip_for_preview(

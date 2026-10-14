@@ -331,6 +331,7 @@ class PrepareWorkflow:
         prefetch_voice_name: str = "",
         prefetch_voice_speed: float = 1.0,
         step_callback=None,
+        force_transcription: bool = False,
     ) -> str:
         optimize_subtitles = False
 
@@ -362,6 +363,21 @@ class PrepareWorkflow:
             speaker_diarization_num_speakers = -1
         is_sensevoice = transcription_engine == "sensevoice"
         is_capcut = transcription_engine == "capcut"
+
+        project_state = self.project_service.ensure_project(
+            video_path,
+            mode=mode,
+            translator_ai=translator_ai,
+            translator_style=translator_style,
+            input_language=source_language,
+            target_language=target_language,
+        )
+        use_imported_transcript = bool(project_state.settings.get("transcript_imported", False) and not force_transcription)
+        if use_imported_transcript:
+            if not self.project_service.load_segment_artifact(project_state, "transcript_segments"):
+                raise RuntimeError("Imported transcript is unavailable. Import the SRT again or choose Re-transcript.")
+            is_ocr = is_sensevoice = is_capcut = False
+            speaker_diarization = False
 
         # The GUI runs the same checks before launching the worker.  Repeat
         # them here because a frozen worker can have a different import or
@@ -402,14 +418,17 @@ class PrepareWorkflow:
         streamed_translation_executor = None
         streamed_translation_futures = []
         streamed_translation_enabled = False
-        project_state = self.project_service.ensure_project(
-            video_path,
-            mode=mode,
-            translator_ai=translator_ai,
-            translator_style=translator_style,
-            input_language=source_language,
-            target_language=target_language,
-        )
+        translation_fallback_notice = ""
+        translation_active = False
+
+        def _on_translate_status(provider, message):
+            nonlocal translation_fallback_notice
+            if message:
+                translation_fallback_notice = str(message)
+                project_state.set_setting("translation_fallback_notice", translation_fallback_notice)
+                if translation_active:
+                    _report_step("translation", translation_fallback_notice)
+
         if is_sensevoice:
             project_state.set_setting("sensevoice_model", sensevoice_model_dir)
         else:
@@ -452,7 +471,8 @@ class PrepareWorkflow:
             cached_raw_path = project_state.artifacts.get("transcript_raw", "")
             cached_segment_path = project_state.artifacts.get("transcript_segments", "")
             reused_ocr = (
-                cached_ocr_signature == ocr_signature
+                not force_transcription
+                and cached_ocr_signature == ocr_signature
                 and cached_raw_path and cached_segment_path
                 and os.path.exists(cached_raw_path)
                 and os.path.exists(cached_segment_path)
@@ -482,6 +502,7 @@ class PrepareWorkflow:
                     raise RuntimeError(message)
                 segment_models = self.segment_service.transcript_dicts_to_models(raw_segments)
                 project_state.set_setting("ocr_transcription_signature", ocr_signature)
+                project_state.set_setting("transcript_imported", False)
             transcribe_elapsed = time.perf_counter() - transcribe_started
             print(f"Success: Generated {len(segment_models)} segments via OCR.")
             print(f"[Timing] OCR step: {transcribe_elapsed:.2f}s")
@@ -733,12 +754,14 @@ class PrepareWorkflow:
             cached_transcription_signature = str(project_state.settings.get("transcription_signature", "") or "").strip()
             cached_transcript_path = project_state.artifacts.get("transcript_segments", "")
             reused_transcript = (
-                cached_transcription_signature == transcription_signature
+                not force_transcription
+                and cached_transcription_signature == transcription_signature
                 and cached_transcript_path
                 and os.path.exists(cached_transcript_path)
             )
             has_imported_transcript = (
-                not cached_transcription_signature
+                not force_transcription
+                and (use_imported_transcript or not cached_transcription_signature)
                 and cached_transcript_path
                 and os.path.exists(cached_transcript_path)
             )
@@ -793,6 +816,7 @@ class PrepareWorkflow:
                         and self._should_enable_asr_translate_streaming(translator_ai=translator_ai)
                     ):
                         streamed_translation_enabled = True
+                        project_state.set_setting("translation_fallback_notice", "")
                         print(
                             "[Prepare Workflow] ASR->Translate overlap enabled for chunked Whisper "
                             f"(translator_ai={bool(translator_ai)}, provider={str(os.getenv('OPENAI_PROVIDER') or 'google').strip().lower()})."
@@ -818,6 +842,7 @@ class PrepareWorkflow:
                                 enable_polish=translator_ai,
                                 optimize_subtitles=optimize_subtitles,
                                 style_instruction=project_state.translator_style,
+                                status_callback=_on_translate_status,
                             )
                             streamed_translation_futures.append((int(batch_start), future))
 
@@ -885,6 +910,7 @@ class PrepareWorkflow:
                     raise RuntimeError("Transcription failed.")
                 segment_models = self.segment_service.transcript_dicts_to_models(raw_segments)
                 project_state.set_setting("transcription_signature", transcription_signature)
+                project_state.set_setting("transcript_imported", False)
             if diarization_future is not None:
                 try:
                     print("[Diarization] Waiting for parallel speaker detection to finish...")
@@ -964,7 +990,8 @@ class PrepareWorkflow:
         else:
             print(f"\n--- Step 4: Translating to {target_language} ---")
 
-            _report_step("translation", "Translating subtitles...", percent=0)
+            translation_active = True
+            _report_step("translation", translation_fallback_notice or "Translating subtitles...", percent=0)
             translate_started = time.perf_counter()
             project_state.set_step_status("translate_raw", "running")
             self.project_service.save_project(project_state)
@@ -1066,6 +1093,8 @@ class PrepareWorkflow:
                     completed_cues = min(total_trans_cues, int(start_idx) + len(batch_segments or []))
                     pct = min(100, max(0, int((completed_cues / total_trans_cues) * 100)))
                     msg = f"Translating subtitles: {completed_cues}/{total_trans_cues} cues ({pct}%)"
+                    if translation_fallback_notice:
+                        msg = f"{translation_fallback_notice}\n{msg}"
                     _report_step("translation", msg, pct)
 
                 if cached_translation_signature == translation_signature and cached_translation_path and os.path.exists(cached_translation_path):
@@ -1083,6 +1112,9 @@ class PrepareWorkflow:
                         segment_models = cached_models
                         print("[Prepare Workflow] Reusing cached Vietnamese subtitles. Generate did not call AI again.")
                     else:
+                        if streamed_translated_segments is None:
+                            translation_fallback_notice = ""
+                            project_state.set_setting("translation_fallback_notice", "")
                         translated_segments = streamed_translated_segments or self.engine_runtime.translate_segments(
                             raw_segments,
                             src_lang=source_language,
@@ -1091,6 +1123,7 @@ class PrepareWorkflow:
                             optimize_subtitles=optimize_subtitles,
                             style_instruction=project_state.translator_style,
                             batch_callback=_on_translate_batch,
+                            status_callback=_on_translate_status,
                         )
                         segment_models = self.segment_service.apply_translations(segment_models, translated_segments)
                         self.project_service.save_segment_artifact(
@@ -1100,6 +1133,9 @@ class PrepareWorkflow:
                             segment_models,
                         )
                 else:
+                    if streamed_translated_segments is None:
+                        translation_fallback_notice = ""
+                        project_state.set_setting("translation_fallback_notice", "")
                     translated_segments = streamed_translated_segments or self.engine_runtime.translate_segments(
                         raw_segments,
                         src_lang=source_language,
@@ -1108,6 +1144,7 @@ class PrepareWorkflow:
                         optimize_subtitles=optimize_subtitles,
                         style_instruction=project_state.translator_style,
                         batch_callback=_on_translate_batch,
+                        status_callback=_on_translate_status,
                     )
                     segment_models = self.segment_service.apply_translations(segment_models, translated_segments)
                     self.project_service.save_segment_artifact(
@@ -1116,7 +1153,8 @@ class PrepareWorkflow:
                         os.path.join("translation", "translation_final.json"),
                         segment_models,
                     )
-                _report_step("translation", "Translation complete", 100)
+                completed_message = f"{translation_fallback_notice}\nTranslation complete" if translation_fallback_notice else "Translation complete"
+                _report_step("translation", completed_message, 100)
                 project_state.set_setting("translation_signature", translation_signature)
                 provider_counts = {}
                 for sm in segment_models:

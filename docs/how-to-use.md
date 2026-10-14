@@ -23,6 +23,7 @@ CapCap automatically optimizes its workspace layout based on the video's aspect 
 5. Use **Generate**:
    - **Full Pipeline**: Runs Transcript → Translate → TTS end-to-end automatically.
    - **Step-by-Step**: Runs each stage individually so you can inspect and adjust results between stages.
+   - **Step-by-Step → Run to Transcript**: Choose **Auto Transcript** or **Import Transcript File…** to load an external original `.srt`. Imported cues and timestamps remain the transcript source until you explicitly choose **Re-transcript**.
 6. Review subtitles, speaker assignments, typography, and timed visual layers in the editor.
 7. Use **Fast Preview** to check a five-second rendered sample, or playback smoothly in real-time.
 8. Click **Export** to render the final localized video or export to **CapCut Draft**.
@@ -133,10 +134,10 @@ OCR Translator is independent of subtitle transcription. Open it from the previe
 
 When clicking **Export**, the **Export Summary** dialog displays output parameters (resolution, frame rate, audio configuration, subtitle styling, and visual layers) and lets you choose a **Video Quality / Compression** profile:
 
-- **Medium (Recommended - Balanced)**: Balanced sharpness and encoding speed (CRF 22 / CQ 25, fast/p3 preset). Ideal for web and social media.
-- **High (High Quality)**: High detail retention (CRF 18 / CQ 22, medium/p4 preset).
-- **Very High (Maximum Quality)**: Near-lossless master quality with deep motion estimation (CRF 15 / CQ 18, slow/p5 preset).
-- **Low (Fastest - Smallest File Size)**: Maximum compression and fastest render speed (CRF 26 / CQ 28, veryfast/p2 preset). Ideal for quick draft review.
+- **Balanced (Recommended)**: The default profile, balancing detail retention and encoding speed (CRF 22 / CQ 25, fast/p3 preset).
+- **Low (Fastest - Smallest File Size)**: Faster export and smaller files, with some loss of fine detail (CRF 26 / CQ 28, veryfast/p2 preset).
+
+Existing High or Very High settings use Balanced. These compression profiles do not change the separately selected output resolution or restore detail missing from the source video.
 
 **Hardware Acceleration & Automatic CPU Fallback**:
 Export automatically leverages NVIDIA NVENC GPU acceleration when available. On systems without an NVIDIA GPU or missing CUDA drivers, CapCap automatically falls back to multithreaded CPU encoding (`libx264`) seamlessly.

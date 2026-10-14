@@ -504,6 +504,7 @@ class PipelineController:
             remote_api_url=self.local_worker_api_url,
             remote_api_token=self.local_worker_api_token,
             force_remote_api=True,
+            force_transcription=self.target_stage == "transcript",
         )
         
         # Connect signals
@@ -664,6 +665,10 @@ class PipelineController:
         else:
             self.gui._last_translation_provider = "bing"
             notice = t("AI Provider is unavailable. Translation completed using Bing Translator instead.")
+        state = getattr(self.gui, "current_project_state", None)
+        reason = str((getattr(state, "settings", {}) or {}).get("translation_fallback_notice", "") or "").strip()
+        if reason:
+            notice = f"{notice}\n{t(reason)}"
         signature = f"{getattr(self, 'prepare_run_id', 0)}:{selected_provider}"
         if getattr(self, "_fallback_notification_signature", "") == signature:
             return

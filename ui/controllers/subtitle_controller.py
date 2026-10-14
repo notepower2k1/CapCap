@@ -706,6 +706,9 @@ class SubtitleController:
         dialog.setAutoReset(False)
         dialog.setMinimumDuration(0)
         dialog.setMinimumWidth(430)
+        label = dialog.findChild(QLabel)
+        if label is not None:
+            label.setWordWrap(True)
         dialog.setValue(0)
         dialog.setStyleSheet(
             "QProgressDialog { background-color: #101826; color: #e6eef9; }"
@@ -1317,7 +1320,12 @@ class SubtitleController:
                 actual_provider = "google"
                 self.gui._last_translation_provider = "google"
                 fallback_text = t("Translation completed using Google Translate (AI Provider unavailable).")
+            notice = fallback_notice.removeprefix("BING_FALLBACK\n")
+            fallback_text = f"{fallback_text}\n{t(notice)}"
 
+        state = getattr(self.gui, "current_project_state", None)
+        if state is not None:
+            state.set_setting("translation_fallback_notice", fallback_notice.removeprefix("BING_FALLBACK\n"))
         self.gui.apply_edited_translation(show_message=False, force_apply=True, provider=actual_provider)
 
         video_path = self.gui.video_path_edit.text()

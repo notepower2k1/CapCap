@@ -267,12 +267,19 @@ class _PreviewAudioWorker(QObject):
 
         # Ensure all active tracks have open readers
         for p in needed_paths:
-            if p not in self._readers:
-                try:
+            try:
+                file_stat = os.stat(p)
+                signature = (file_stat.st_mtime_ns, file_stat.st_size)
+                reader = self._readers.get(p)
+                # Rebuilt voice WAVs keep their path but have a new length/header.
+                if reader is not None and reader.file_signature != signature:
+                    reader.close()
+                    del self._readers[p]
+                if p not in self._readers:
                     self._readers[p] = AudioReader(p, sample_rate=self.internal_sr)
-                except Exception as exc:
-                    print(f"[AudioReader] ERROR opening {p}: {exc}", file=__import__('sys').stderr, flush=True)
-                    self.errorOccurred.emit(f"Failed to open AudioReader for {p}: {exc}")
+            except Exception as exc:
+                print(f"[AudioReader] ERROR opening {p}: {exc}", file=__import__('sys').stderr, flush=True)
+                self.errorOccurred.emit(f"Failed to open AudioReader for {p}: {exc}")
 
         self._tracks = new_tracks
         self._generation_id += 1

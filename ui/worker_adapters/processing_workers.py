@@ -325,8 +325,8 @@ class TranslationWorker(QThread):
                 if not result.success:
                     raise RuntimeError("; ".join(result.errors) or "Translation failed.")
                 translated_srt = orch.result_to_srt(result)
-                if result.used_fallback:
-                    prov_str = str(result.primary_provider or "").lower()
+                prov_str = str(result.primary_provider or "").lower()
+                if result.used_fallback and prov_str in ("google-web", "bing-web"):
                     if "bing" in prov_str:
                         fallback_notice = "BING_FALLBACK\n" + "\n".join(result.warnings or [])
                     else:
@@ -980,6 +980,7 @@ class PrepareWorkflowWorker(QThread):
         remote_api_url="",
         remote_api_token="",
         force_remote_api=False,
+        force_transcription=False,
     ):
         super().__init__()
         self.workspace_root = workspace_root
@@ -1001,6 +1002,7 @@ class PrepareWorkflowWorker(QThread):
         self.remote_api_url = str(remote_api_url or "").strip()
         self.remote_api_token = str(remote_api_token or "").strip()
         self.force_remote_api = bool(force_remote_api)
+        self.force_transcription = bool(force_transcription)
 
     def run(self):
         try:
@@ -1031,6 +1033,7 @@ class PrepareWorkflowWorker(QThread):
                             "speaker_diarization": self.speaker_diarization,
                             "speaker_diarization_num_speakers": self.speaker_diarization_num_speakers,
                             "skip_translation": self.skip_translation,
+                            "force_transcription": self.force_transcription,
                             "prefetch_voice_name": self.prefetch_voice_name,
                             "prefetch_voice_speed": self.prefetch_voice_speed,
                         },
@@ -1064,6 +1067,7 @@ class PrepareWorkflowWorker(QThread):
                     speaker_diarization=self.speaker_diarization,
                     speaker_diarization_num_speakers=self.speaker_diarization_num_speakers,
                     skip_translation=self.skip_translation,
+                    force_transcription=self.force_transcription,
                     prefetch_voice_name=self.prefetch_voice_name,
                     prefetch_voice_speed=self.prefetch_voice_speed,
                     step_callback=lambda s, m="", p=None: (

@@ -36,6 +36,7 @@ class WorkflowRuntime:
         prefetch_voice_name: str = "",
         prefetch_voice_speed: float = 1.0,
         step_callback=None,
+        force_transcription: bool = False,
     ) -> str:
         if step_callback: step_callback("prepare")
         return self.prepare_workflow.run(
@@ -55,6 +56,7 @@ class WorkflowRuntime:
             prefetch_voice_name=prefetch_voice_name,
             prefetch_voice_speed=prefetch_voice_speed,
             step_callback=step_callback,
+            force_transcription=force_transcription,
         )
 
     def run_voice(

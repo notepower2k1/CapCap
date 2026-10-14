@@ -1,3 +1,4 @@
+import multiprocessing
 import os
 import shutil
 import sys
@@ -14,8 +15,68 @@ _APP_PATH = os.path.join(_PROJECT_ROOT, "app")
 if _APP_PATH not in sys.path:
     sys.path.append(_APP_PATH)
 
+if __name__ == "__main__":
+    # Spawned ASR workers must run their task before the server/GUI entrypoint.
+    multiprocessing.freeze_support()
+
 
 _SINGLE_INSTANCE_HANDLE = None
+_PROCESS_JOB_HANDLE = None
+
+
+def _manage_child_processes() -> bool:
+    """Keep workers and FFmpeg processes tied to the Windows GUI process lifetime."""
+    global _PROCESS_JOB_HANDLE
+    if os.name != "nt" or _PROCESS_JOB_HANDLE is not None:
+        return True
+
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BasicLimits),
+            ("IoInfo", ctypes.c_ulonglong * 6),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.CreateJobObjectW(None, None)
+    if not handle:
+        return False
+    limits = ExtendedLimits()
+    limits.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not kernel32.SetInformationJobObject(handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)) or not kernel32.AssignProcessToJobObject(handle, kernel32.GetCurrentProcess()):
+        kernel32.CloseHandle(handle)
+        return False
+    # Do not pass the handle to children; Windows closes this last handle on GUI exit.
+    _PROCESS_JOB_HANDLE = handle
+    return True
 
 
 def _acquire_single_instance() -> bool:
@@ -70,6 +131,8 @@ if __name__ == "__main__":
     _set_windows_app_user_model_id()
     if not _acquire_single_instance():
         raise SystemExit(0)
+    if not _manage_child_processes():
+        print("[Cleanup] Windows could not enable automatic child-process cleanup.", file=sys.stderr)
 
 from main_window import VideoTranslatorGUI
 from utils.display_utils import apply_application_dark_theme

@@ -39,6 +39,7 @@ class RemoteTranslatorAdapter:
         optimize_subtitles: bool = False,
         style_instruction: str = "",
         batch_callback=None,
+        status_callback=None,
     ):
         response = remote_api_post(
             "/v1/translate-segments",
@@ -51,6 +52,17 @@ class RemoteTranslatorAdapter:
                 "style_instruction": style_instruction,
             },
         )
+        if status_callback:
+            for update in response.get("translation_status", []) or []:
+                if not isinstance(update, (list, tuple)) or len(update) != 2:
+                    continue
+                provider, message = update
+                if not isinstance(provider, str) or not isinstance(message, str):
+                    continue
+                try:
+                    status_callback(provider, message)
+                except Exception:
+                    pass
         return list(response.get("segments") or [])
 
     def rewrite_segments(self, source_segments, translated_segments, *, model_path=None, src_lang: str = "auto", style_instruction: str = ""):

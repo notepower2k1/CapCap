@@ -17,6 +17,30 @@ app = QApplication.instance() or QApplication([])
 
 
 class TestProjectSwitch(unittest.TestCase):
+    def test_terminate_workers_stops_local_worker_server_and_polling(self):
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        gui.pipeline_controller = MagicMock()
+        gui._segment_preview_threads = {}
+
+        VideoTranslatorGUI._terminate_workers(gui, close_media=True)
+
+        gui.pipeline_controller._stop_prepare_status_polling.assert_called_once()
+        gui.pipeline_controller._stop_local_worker_server.assert_called_once()
+
+    def test_close_keeps_running_native_threads_alive_until_process_exit(self):
+        gui = MagicMock(spec=VideoTranslatorGUI)
+        worker = MagicMock()
+        worker.isRunning.return_value = True
+        gui.export_thread = worker
+        gui._retiring_workers = []
+        gui._segment_preview_threads = {}
+
+        VideoTranslatorGUI._terminate_workers(gui, close_media=True)
+
+        worker.requestInterruption.assert_called_once()
+        worker.terminate.assert_not_called()
+        self.assertIn(worker, gui._retiring_workers)
+
     def test_terminate_workers_graceful_interruption(self):
         """Verify _terminate_workers requests interruption instead of force-killing."""
         gui = MagicMock(spec=VideoTranslatorGUI)

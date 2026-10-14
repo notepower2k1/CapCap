@@ -715,6 +715,9 @@ class ExportWorkflow:
                 if text_image_layers or mask_regions or logo_layers or blur_regions:
                     tmp_mux_path = self._build_temp_mux_path(project_temp_dir)
                     voice_output = tmp_mux_path
+                def _mux_prog_v(pct, msg):
+                    mux_end = 49 if voice_output != output_path else 94
+                    self._emit_progress(on_progress, int(25 + (pct / 100.0) * (mux_end - 25)), msg)
                 self.engine_runtime.mux_audio_for_preview(
                     video_for_mux,
                     audio_path,
@@ -727,6 +730,7 @@ class ExportWorkflow:
                     output_fps=None if voice_output != output_path else target_fps,
                     video_filter_state={} if voice_output != output_path else video_filter_state,
                     video_quality=video_quality,
+                    on_progress=_mux_prog_v if callable(on_progress) else None,
                 )
                 if voice_output != output_path:
                     def _sub_prog_v(pct, msg):
@@ -772,7 +776,9 @@ class ExportWorkflow:
 
                 tmp_mux_path = self._build_temp_mux_path(project_temp_dir)
                 self._emit_progress(on_progress, 20, "Muxing Vietnamese audio with the source video...")
-                # Keep this mux fast (no scaling). Scaling happens in the subtitle-burn step.
+                def _mux_prog_b(pct, msg):
+                    self._emit_progress(on_progress, int(20 + (pct / 100.0) * 29), msg)
+                # Scaling and FPS conversion belong to the final subtitle render.
                 self.engine_runtime.mux_audio_for_preview(
                     video_for_mux,
                     audio_path,
@@ -780,8 +786,8 @@ class ExportWorkflow:
                     output_scale_mode=output_scale_mode,
                     focus_x=output_fill_focus_x,
                     focus_y=output_fill_focus_y,
-                    output_fps=target_fps,
                     video_quality=video_quality,
+                    on_progress=_mux_prog_b if callable(on_progress) else None,
                 )
                 self._emit_progress(on_progress, 50, "Burning styled subtitles into the final video...")
                 def _sub_prog_b(pct, msg):

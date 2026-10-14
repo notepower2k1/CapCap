@@ -116,6 +116,8 @@ def _run_ffmpeg_command_with_progress(command: list, total_duration: float = Non
 
     proc.wait()
     t_err.join(timeout=2.0)
+    proc.stdout.close()
+    proc.stderr.close()
     stderr_text = "".join(stderr_chunks)
 
     if proc.returncode != 0:
@@ -202,12 +204,7 @@ def _resolve_quality_levels(video_quality: str = "medium") -> dict[str, str]:
     key = str(video_quality or "medium").strip().lower().replace(" ", "_").replace("-", "_")
     if key in ("low", "fast", "economic"):
         return {"crf": "26", "cq": "28", "nvenc_preset": "p2", "x264_preset": "veryfast"}
-    elif key in ("high",):
-        return {"crf": "18", "cq": "22", "nvenc_preset": "p4", "x264_preset": "medium"}
-    elif key in ("very_high", "veryhigh", "ultra", "max"):
-        return {"crf": "15", "cq": "18", "nvenc_preset": "p5", "x264_preset": "slow"}
-    else:  # default medium
-        return {"crf": "22", "cq": "25", "nvenc_preset": "p3", "x264_preset": "fast"}
+    return {"crf": "22", "cq": "25", "nvenc_preset": "p3", "x264_preset": "fast"}
 
 
 def _preferred_h264_encoder_args(ffmpeg_path: str, fast: bool = False, video_quality: str = "medium") -> list[str]:

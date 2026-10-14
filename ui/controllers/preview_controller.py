@@ -32,10 +32,8 @@ except ImportError:
 
 class ExportSummaryDialog(QDialog):
     QUALITY_DESCRIPTIONS = {
-        "medium": "Balanced (Recommended): Standard sharpness for social media, fast export (p3/fast, CRF 22 / CQ 25).",
-        "high": "High Quality: Maximum detail retention, standard export speed (p4/medium, CRF 18 / CQ 22).",
-        "very_high": "Master / Ultra Quality: Near-lossless, thorough frame analysis (p5/slow, CRF 15 / CQ 18).",
-        "low": "Compact / Economic: Maximum compression, smallest file size, fastest export (p2/veryfast, CRF 26 / CQ 28).",
+        "medium": "Balanced (Recommended): Good detail retention with reasonable export speed.",
+        "low": "Low: Faster export and smaller files, with some loss of fine detail.",
     }
 
     def __init__(self, parent, summary_text: str):
@@ -74,9 +72,7 @@ class ExportSummaryDialog(QDialog):
         layout.addWidget(quality_label)
 
         self.quality_combo = QComboBox()
-        self.quality_combo.addItem("Medium (Recommended - Balanced)", "medium")
-        self.quality_combo.addItem("High (High Quality)", "high")
-        self.quality_combo.addItem("Very High (Maximum Quality)", "very_high")
+        self.quality_combo.addItem("Balanced (Recommended)", "medium")
         self.quality_combo.addItem("Low (Fastest - Smallest File Size)", "low")
 
         settings = QSettings("CapCap", "CapCap")
@@ -86,6 +82,7 @@ class ExportSummaryDialog(QDialog):
             self.quality_combo.setCurrentIndex(idx)
         else:
             self.quality_combo.setCurrentIndex(0)
+            settings.setValue("export_video_quality", "medium")
 
         layout.addWidget(self.quality_combo)
 
@@ -899,6 +896,7 @@ class PreviewController:
                 return existing
 
         tracks = []
+        warps = list(getattr(self.gui, "video_time_warps", []) or [])
         original_volume = float(self.gui._get_audio_track_volume("A1 Audio"))
         original_muted = bool(self.gui._is_audio_track_muted("A1 Audio"))
         original_path = self.gui._resolve_preview_original_audio_path()
@@ -909,6 +907,7 @@ class PreviewController:
                 "end": self.gui._audio_total_duration_ms() / 1000.0,
                 "volume": original_volume,
                 "muted": original_muted,
+                "time_warps": warps,
             })
 
         tts_state = self.gui._tts_audio_track_state()
@@ -929,7 +928,7 @@ class PreviewController:
 
         # Avoid a needless re-encode when a single source is already at unity
         # gain. Otherwise generate one deterministic mixed WAV from all tracks.
-        if len(active_tracks) == 1:
+        if len(active_tracks) == 1 and not warps:
             item = active_tracks[0]
             if abs(float(item.get("volume", 100.0)) - 100.0) < 0.001 and not item.get("loop"):
                 print(f"[Export] Single active audio track: {item.get('path')}")
@@ -947,6 +946,7 @@ class PreviewController:
                             "muted": bool(item.get("muted", False)),
                             "start": round(float(item.get("start", 0.0)), 3),
                             "end": round(float(item.get("end", 0.0)), 3),
+                            "time_warps": item.get("time_warps", []),
                         }
                         for item in tracks
                     ],
