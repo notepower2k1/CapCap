@@ -6,6 +6,15 @@
 | :---: | :---: |
 | ![CapCap Landscape 16:9](assets/preview_1.png) | ![CapCap Portrait 9:16](assets/preview_2.png) |
 
+<p align="center">
+  <a href="https://github.com/notepower2k1/CapCap/releases"><img src="https://img.shields.io/github/v/release/notepower2k1/CapCap?style=flat-square&color=blue" alt="Latest Release"></a>
+  <a href="https://github.com/notepower2k1/CapCap/releases"><img src="https://img.shields.io/github/downloads/notepower2k1/CapCap/total?style=flat-square&logo=github&color=2ea44f" alt="Downloads"></a>
+  <a href="https://github.com/notepower2k1/CapCap/stargazers"><img src="https://img.shields.io/github/stars/notepower2k1/CapCap?style=flat-square&color=gold" alt="Stars"></a>
+  <a href="https://github.com/notepower2k1/CapCap/issues"><img src="https://img.shields.io/github/issues/notepower2k1/CapCap?style=flat-square&color=orange" alt="Open Issues"></a>
+  <a href="https://github.com/notepower2k1/CapCap/issues?q=is%3Aissue+is%3Aclosed"><img src="https://img.shields.io/github/issues-closed/notepower2k1/CapCap?style=flat-square&color=purple" alt="Closed Issues"></a>
+  <a href="https://github.com/notepower2k1/CapCap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/notepower2k1/CapCap?style=flat-square" alt="License"></a>
+</p>
+
 ### [🎬 Demo & Tutorial](https://www.tiktok.com/@nguyenthach617/video/7674305087023369493)
 
 **CapCap** is an all-in-one Windows desktop application for video localization and editing. It automates speech recognition, AI translation, voice-over generation, timed visual layer editing, and final video rendering.
@@ -33,21 +42,6 @@
 
 ---
 
-## 🛠️ Run from Source
-
-```bash
-git clone https://github.com/notepower2k1/CapCap.git
-cd CapCap
-
-python -m venv venv
-venv\Scripts\activate
-
-pip install -r requirements-local.txt
-python ui/gui.py
-```
-
-* Copy `.env_example` to `.env` only if you need custom API keys or remote server endpoints. Most settings can be configured directly in the UI.
-
 ### 💡 MPV Preview Player Troubleshooting
 
 CapCap uses **libmpv** by default for smooth, frame-accurate preview:
@@ -65,6 +59,10 @@ If CapCap is useful to you, consider supporting its continued development:
 
 ### 🌍 International Donations
 [![Buy Me a Coffee](assets/buymeacoffee.png)](https://buymeacoffee.com/hcaht)
+
+## 📈 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=notepower2k1/CapCap&type=Date)](https://star-history.com/#notepower2k1/CapCap&Date)
 
 ---
 
