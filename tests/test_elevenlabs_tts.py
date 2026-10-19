@@ -73,20 +73,27 @@ class TestElevenLabsTTS(unittest.TestCase):
 
         voices = fetch_elevenlabs_voices("test_api_key_123")
 
-        mock_get.assert_called_once_with(
+        mock_get.assert_any_call(
             "https://api.elevenlabs.io/v1/voices",
             headers={"xi-api-key": "test_api_key_123"},
             timeout=30,
         )
+        mock_get.assert_any_call(
+            "https://api.elevenlabs.io/v1/user/subscription",
+            headers={"xi-api-key": "test_api_key_123"},
+            timeout=15,
+        )
         self.assertEqual(len(voices), 2)
         expected_v1 = {
             "id": "elevenlabs:21m00Tcm4TlvDq8ikWAM",
-            "name": "Rachel",
+            "name": "Rachel [Default]",
             "provider": "elevenlabs",
             "provider_voice": "21m00Tcm4TlvDq8ikWAM",
             "language": "multilingual",
             "gender": "female",
-            "tier": "premium",
+            "tier": "free",
+            "category": "premade",
+            "is_usable_for_api": True,
             "enabled": True,
             "tags": ["elevenlabs", "online"],
             "preview_video_url": "",
@@ -96,12 +103,14 @@ class TestElevenLabsTTS(unittest.TestCase):
         }
         expected_v2 = {
             "id": "elevenlabs:AZnzlk1XvdvUeBnXmlld",
-            "name": "Domi",
+            "name": "Domi [Default]",
             "provider": "elevenlabs",
             "provider_voice": "AZnzlk1XvdvUeBnXmlld",
             "language": "multilingual",
             "gender": "male",
-            "tier": "premium",
+            "tier": "free",
+            "category": "premade",
+            "is_usable_for_api": True,
             "enabled": True,
             "tags": ["elevenlabs", "online"],
             "preview_video_url": "",
@@ -169,7 +178,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         mock_get.return_value = mock_resp
 
         voices = fetch_elevenlabs_voices("test_api_key")
-        mock_get.assert_called_once()
+        self.assertEqual(mock_get.call_count, 2)
         self.assertEqual(len(voices), 1)
         self.assertEqual(voices[0]["id"], "elevenlabs:new_voice_1")
 

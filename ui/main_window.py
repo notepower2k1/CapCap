@@ -1647,7 +1647,9 @@ class VideoTranslatorGUI(QMainWindow):
     def _voice_entry_sort_key(self, entry: dict) -> tuple:
         provider = str(entry.get("provider", "")).strip().lower()
         name = str(entry.get("name", entry.get("id", ""))).strip().lower()
+        is_locked = 1 if (provider == "elevenlabs" and not entry.get("is_usable_for_api", True)) else 0
         return (
+            is_locked,
             self._voice_gender_sort_rank(str(entry.get("gender", ""))),
             0 if provider == "edge" else 1,
             name,
@@ -16070,6 +16072,27 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_model_layout.addWidget(elevenlabs_model_combo)
         elevenlabs_settings_layout.addLayout(elevenlabs_model_layout)
 
+        elevenlabs_sub_label = QLabel(dialog)
+        elevenlabs_sub_label.setObjectName("helperLabel")
+        saved_key = os.getenv("ELEVENLABS_API_KEY", self.settings.value("elevenlabs_api_key", "")).strip()
+        init_sub_text = "Gói: Chưa kết nối"
+        if saved_key:
+            try:
+                import json
+                from runtime_paths import temp_path
+                cache_path = temp_path("elevenlabs_voices_cache.json")
+                if os.path.exists(cache_path):
+                    with open(cache_path, "r", encoding="utf-8") as f:
+                        c_sub = json.load(f).get("user_subscription", {})
+                        if isinstance(c_sub, dict) and c_sub.get("tier"):
+                            tier_str = str(c_sub.get("tier", "")).capitalize()
+                            c_count = c_sub.get("character_count", 0)
+                            c_limit = c_sub.get("character_limit", 0)
+                            init_sub_text = f"Gói: {tier_str} | Đã dùng: {c_count} / {c_limit} ký tự"
+            except Exception:
+                pass
+        elevenlabs_sub_label.setText(init_sub_text)
+
         elevenlabs_sync_btn = QPushButton("🔄 Đồng bộ danh sách giọng từ ElevenLabs")
         def _sync_elevenlabs_voices():
             key = elevenlabs_key_edit.text().strip()
@@ -16078,22 +16101,45 @@ class VideoTranslatorGUI(QMainWindow):
                 return
             try:
                 try:
-                    from app.engines.elevenlabs_tts import fetch_elevenlabs_voices
+                    from app.engines.elevenlabs_tts import fetch_elevenlabs_voices, fetch_elevenlabs_user_subscription
                 except ImportError:
-                    from engines.elevenlabs_tts import fetch_elevenlabs_voices
+                    from engines.elevenlabs_tts import fetch_elevenlabs_voices, fetch_elevenlabs_user_subscription
                 import json
                 from runtime_paths import temp_path
                 cache_path = temp_path("elevenlabs_voices_cache.json")
                 if os.path.exists(cache_path):
                     os.remove(cache_path)
-                voices = fetch_elevenlabs_voices(key)
+                voices = fetch_elevenlabs_voices(key, force_refresh=True)
                 os.environ["ELEVENLABS_API_KEY"] = key
+
+                sub_info = {}
+                if os.path.exists(cache_path):
+                    try:
+                        with open(cache_path, "r", encoding="utf-8") as f:
+                            sub_info = json.load(f).get("user_subscription", {})
+                    except Exception:
+                        pass
+                if not sub_info:
+                    try:
+                        sub_info = fetch_elevenlabs_user_subscription(key)
+                    except Exception:
+                        sub_info = {}
+
+                if isinstance(sub_info, dict) and sub_info.get("tier"):
+                    tier_str = str(sub_info.get("tier", "")).capitalize()
+                    c_count = sub_info.get("character_count", 0)
+                    c_limit = sub_info.get("character_limit", 0)
+                    elevenlabs_sub_label.setText(f"Gói: {tier_str} | Đã dùng: {c_count} / {c_limit} ký tự")
+                else:
+                    elevenlabs_sub_label.setText("Gói: Free | Đã dùng: 0 / 0 ký tự" if key else "Gói: Chưa kết nối")
+
                 self.load_voice_preview_catalog()
                 QMessageBox.information(dialog, "ElevenLabs", f"Đồng bộ thành công: {len(voices)} giọng.")
             except Exception as exc:
                 QMessageBox.critical(dialog, "ElevenLabs", str(exc))
         elevenlabs_sync_btn.clicked.connect(_sync_elevenlabs_voices)
         elevenlabs_settings_layout.addWidget(elevenlabs_sync_btn)
+        elevenlabs_settings_layout.addWidget(elevenlabs_sub_label)
 
         elevenlabs_hint = QLabel("Nhập API Key từ https://elevenlabs.io/app/speech-synthesis. Giọng đọc sẽ được tải tự động khi có key hợp lệ.")
         elevenlabs_hint.setObjectName("helperLabel")
@@ -17177,6 +17223,24 @@ class VideoTranslatorGUI(QMainWindow):
                 self._pipeline_fail("Missing voice")
             QMessageBox.warning(self, t("Missing Voice"), t("Choose a voice first."))
             return
+
+        active_voice = self.get_active_voice_name() or voice_name
+        if active_voice.startswith("elevenlabs:"):
+            voice_entry = self.voice_catalog_map.get(active_voice) if hasattr(self, "voice_catalog_map") else None
+            if isinstance(voice_entry, dict) and not voice_entry.get("is_usable_for_api", True):
+                if getattr(self, "_pipeline_active", False):
+                    self._pipeline_fail("Voice restricted")
+                QMessageBox.warning(
+                    self,
+                    t("ElevenLabs Voice Restricted"),
+                    t(
+                        "Giọng '{voice_name}' được lấy từ Voice Library (cộng đồng) và yêu cầu tài khoản trả phí trên ElevenLabs.\n\n"
+                        "Tài khoản Free chỉ có thể sử dụng các giọng có nhãn [Default] hoặc giọng tự clone [Clone]. "
+                        "Vui lòng chọn một giọng khả dụng trước khi tạo giọng lồng tiếng.",
+                        voice_name=voice_entry.get("name", active_voice),
+                    ),
+                )
+                return
         if state is not None and state.settings.get("tts_skipped", False):
             # Starting TTS explicitly re-enables the generated voice path.
             state.set_setting("tts_skipped", False)

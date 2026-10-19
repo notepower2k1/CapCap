@@ -30,6 +30,7 @@ except ImportError:
 
 __all__ = [
     "fetch_elevenlabs_voices",
+    "fetch_elevenlabs_user_subscription",
     "synthesize_elevenlabs_tts_wav_16k_mono",
 ]
 
@@ -58,14 +59,43 @@ def _convert_audio_wav(source: bytes, wav_path: str, tmp_dir: str | None = None)
     return convert_audio_data_to_wav_16k_mono(source, wav_path, tmp_dir=tmp_dir)
 
 
-def fetch_elevenlabs_voices(api_key: str) -> list[dict]:
+def fetch_elevenlabs_user_subscription(api_key: str) -> dict:
+    """Fetch user subscription info from ElevenLabs API.
+    Calls GET https://api.elevenlabs.io/v1/user/subscription with header xi-api-key: <api_key>.
+    Returns dict with keys: tier, character_count, character_limit, status.
+    Returns {} on failure.
+    """
+    clean_key = str(api_key or "").strip()
+    if not clean_key:
+        return {}
+    url = "https://api.elevenlabs.io/v1/user/subscription"
+    headers = {"xi-api-key": clean_key}
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return {}
+        data = response.json()
+        if not isinstance(data, dict):
+            return {}
+        return {
+            "tier": str(data.get("tier", "") or "").strip().lower(),
+            "character_count": int(data.get("character_count", 0) or 0),
+            "character_limit": int(data.get("character_limit", 0) or 0),
+            "status": str(data.get("status", "") or "").strip().lower(),
+        }
+    except Exception as e:
+        print(f"[ElevenLabs] Lỗi khi lấy thông tin subscription: {e}")
+        return {}
+
+
+def fetch_elevenlabs_voices(api_key: str, force_refresh: bool = False) -> list[dict]:
     """Fetch voices from ElevenLabs API. Returns list of CapCap catalog-compatible voice dicts.
     Uses requests. Caches to temp/elevenlabs_voices_cache.json (max age 1 hour).
     Raises RuntimeError with clear message on auth failure (401) or rate limit (429).
     Returns [] on any other network error (with print warning).
     """
     cache_path = _resolve_temp_path(CACHE_FILE_NAME)
-    if os.path.isfile(cache_path):
+    if not force_refresh and os.path.isfile(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
                 cache_data = json.load(f)
@@ -77,8 +107,9 @@ def fetch_elevenlabs_voices(api_key: str) -> list[dict]:
         except Exception:
             pass
 
+    clean_key = str(api_key or "").strip()
     url = "https://api.elevenlabs.io/v1/voices"
-    headers = {"xi-api-key": str(api_key or "").strip()}
+    headers = {"xi-api-key": clean_key}
     print("[ElevenLabs] Đang tải danh sách giọng nói từ API...")
 
     try:
@@ -101,6 +132,9 @@ def fetch_elevenlabs_voices(api_key: str) -> list[dict]:
         print(f"[ElevenLabs] Lỗi phân tích JSON danh sách giọng nói: {e}")
         return []
 
+    sub_info = fetch_elevenlabs_user_subscription(clean_key)
+    user_tier = str(sub_info.get("tier", "free") or "free").strip().lower()
+
     raw_voices = data.get("voices", []) if isinstance(data, dict) else []
     voices: list[dict] = []
     for item in raw_voices:
@@ -109,7 +143,7 @@ def fetch_elevenlabs_voices(api_key: str) -> list[dict]:
         voice_id = str(item.get("voice_id", "") or "").strip()
         if not voice_id:
             continue
-        name = str(item.get("name", "") or "").strip()
+        base_name = str(item.get("name", "") or "").strip()
         labels = item.get("labels") or {}
         gender = "any"
         if isinstance(labels, dict):
@@ -118,14 +152,46 @@ def fetch_elevenlabs_voices(api_key: str) -> list[dict]:
                 gender = raw_gender
         preview_url = str(item.get("preview_url") or "").strip()
 
+        category = str(item.get("category") or "").strip().lower()
+        sharing = item.get("sharing")
+        is_library_voice = category in ("community", "professional", "library") or (
+            isinstance(sharing, dict) and bool(sharing.get("public_owner_id"))
+        )
+
+        if user_tier in ("free", ""):
+            if is_library_voice:
+                is_usable_for_api = False
+            else:
+                is_usable_for_api = True
+        else:
+            is_usable_for_api = True
+
+        if is_library_voice and not is_usable_for_api:
+            display_name = f"{base_name} 🔒 (Cần gói trả phí)"
+            tier_label = "paid_only"
+        elif is_library_voice:
+            display_name = f"{base_name} [Library]"
+            tier_label = "premium"
+        elif category == "cloned":
+            display_name = f"{base_name} [Clone]"
+            tier_label = "cloned"
+        elif category == "generated":
+            display_name = f"{base_name} [Design]"
+            tier_label = "generated"
+        else:
+            display_name = f"{base_name} [Default]"
+            tier_label = "free"
+
         voices.append({
             "id": f"elevenlabs:{voice_id}",
-            "name": name,
+            "name": display_name,
             "provider": "elevenlabs",
             "provider_voice": voice_id,
             "language": "multilingual",
             "gender": gender,
-            "tier": "premium",
+            "tier": tier_label,
+            "category": category,
+            "is_usable_for_api": is_usable_for_api,
             "enabled": True,
             "tags": ["elevenlabs", "online"],
             "preview_video_url": "",
@@ -137,7 +203,16 @@ def fetch_elevenlabs_voices(api_key: str) -> list[dict]:
     try:
         os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
         with open(cache_path, "w", encoding="utf-8") as f:
-            json.dump({"fetched_at": time.time(), "voices": voices}, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {
+                    "fetched_at": time.time(),
+                    "user_subscription": sub_info,
+                    "voices": voices,
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
     except Exception as e:
         print(f"[ElevenLabs] Cảnh báo: Không thể ghi cache giọng nói: {e}")
 
@@ -160,7 +235,7 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
     with output_format=mp3_44100_128.
     Converts MP3 bytes to 16kHz mono WAV using convert_audio_data_to_wav_16k_mono
     (import from tts_processor).
-    Raises RuntimeError with clear message on 401, 429.
+    Raises RuntimeError with clear message on 401, 402, 429.
     Raises RuntimeError on empty audio response.
     Returns wav_path on success.
     """
@@ -204,6 +279,16 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
 
     if response.status_code == 401:
         raise RuntimeError("ElevenLabs API Key không hợp lệ hoặc đã hết hạn.")
+    if response.status_code == 402:
+        err_text = response.text
+        err_lower = err_text.lower()
+        if "library_voice" in err_lower or "paid_plan_required" in err_lower or "voice library" in err_lower:
+            raise RuntimeError(
+                "ElevenLabs API (Lỗi 402): Tài khoản Free không thể sử dụng giọng từ Voice Library (cộng đồng) qua API. "
+                "Vui lòng đổi sang các giọng có nhãn [Default] hoặc giọng tự Clone [Clone] trong tài khoản, "
+                "hoặc nâng cấp gói trả phí trên ElevenLabs."
+            )
+        raise RuntimeError(f"ElevenLabs API error 402 (Payment Required): {err_text}")
     if response.status_code == 429:
         raise RuntimeError("ElevenLabs API: Đã đạt giới hạn quota hoặc rate limit. Vui lòng thử lại sau.")
     if response.status_code != 200:
