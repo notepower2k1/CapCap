@@ -116,6 +116,7 @@ def fetch_elevenlabs_voices(api_key: str) -> list[dict]:
             raw_gender = str(labels.get("gender") or "").strip().lower()
             if raw_gender in ("male", "female"):
                 gender = raw_gender
+        preview_url = str(item.get("preview_url") or "").strip()
 
         voices.append({
             "id": f"elevenlabs:{voice_id}",
@@ -129,7 +130,7 @@ def fetch_elevenlabs_voices(api_key: str) -> list[dict]:
             "tags": ["elevenlabs", "online"],
             "preview_video_url": "",
             "preview_video_path": "",
-            "preview_audio_url": "",
+            "preview_audio_url": preview_url,
             "preview_audio_path": "",
         })
 

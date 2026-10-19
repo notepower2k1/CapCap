@@ -1480,6 +1480,15 @@ class VideoTranslatorGUI(QMainWindow):
                 if fallback_entry_id:
                     return fallback_entry_id
             return "capcut:BV421_vivn_streaming"
+        if current_engine == "elevenlabs":
+            if hasattr(self, "free_voice_combo") and self.free_voice_combo.count() > 0:
+                fallback_value = str(self.free_voice_combo.itemData(0) or "").strip()
+                if fallback_value:
+                    return fallback_value
+                fallback_entry_id = str(self.free_voice_combo.itemData(0, self.VOICE_ENTRY_ID_ROLE) or "").strip()
+                if fallback_entry_id:
+                    return fallback_entry_id
+            return ""
         if (
             combo_has_items
             and target_language == "vi"
@@ -1898,7 +1907,7 @@ class VideoTranslatorGUI(QMainWindow):
                 if provider not in {"piper", "edge"}:
                     continue
             entry_language = str(entry.get("language", "")).strip().lower().split("-", 1)[0]
-            if entry_language and entry_language != target_language:
+            if entry_language and entry_language not in (target_language, "multilingual", "multi", "any", "all"):
                 continue
             self.voice_catalog_entries.append(entry)
         self.voice_catalog_entries.sort(key=self._voice_entry_sort_key)
@@ -1938,6 +1947,9 @@ class VideoTranslatorGUI(QMainWindow):
             if self.free_voice_combo.findData("capcut:BV421_vivn_streaming") >= 0:
                 self.set_voice_combo_value(self.free_voice_combo, "capcut:BV421_vivn_streaming")
             elif self.free_voice_combo.count() > 0:
+                self.free_voice_combo.setCurrentIndex(0)
+        elif current_engine == "elevenlabs":
+            if self.free_voice_combo.count() > 0:
                 self.free_voice_combo.setCurrentIndex(0)
         elif target_language == "vi" and "ngochuyen" in self.voice_catalog_map:
             self.set_voice_combo_value(self.free_voice_combo, "ngochuyen")
@@ -2161,10 +2173,13 @@ class VideoTranslatorGUI(QMainWindow):
                 elif wanted_engine == "edge":
                     if provider != "edge" and value != assigned:
                         continue
+                elif wanted_engine == "elevenlabs":
+                    if provider != "elevenlabs" and value != assigned:
+                        continue
 
             # Language filter
             entry_lang = str(entry.get("language", "")).strip().lower().split("-", 1)[0]
-            if entry_lang and target_language and entry_lang != target_language and value != assigned:
+            if entry_lang and target_language and entry_lang not in (target_language, "multilingual", "multi", "any", "all") and value != assigned:
                 continue
 
             # Gender filter

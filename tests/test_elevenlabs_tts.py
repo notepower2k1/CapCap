@@ -65,6 +65,7 @@ class TestElevenLabsTTS(unittest.TestCase):
                     "name": "Domi",
                     "labels": {"gender": "male"},
                     "category": "premade",
+                    "preview_url": "https://elevenlabs.io/sample.mp3",
                 },
             ]
         }
@@ -105,7 +106,7 @@ class TestElevenLabsTTS(unittest.TestCase):
             "tags": ["elevenlabs", "online"],
             "preview_video_url": "",
             "preview_video_path": "",
-            "preview_audio_url": "",
+            "preview_audio_url": "https://elevenlabs.io/sample.mp3",
             "preview_audio_path": "",
         }
         self.assertEqual(voices[0], expected_v1)
