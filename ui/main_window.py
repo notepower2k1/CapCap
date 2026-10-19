@@ -16158,12 +16158,19 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_model_layout = QVBoxLayout()
         elevenlabs_model_label = QLabel("Model:")
         elevenlabs_model_combo = QComboBox(dialog)
-        elevenlabs_model_combo.addItem(t("eleven_turbo_v2_5 (Recommended - Supports VI, EN, ...)"), "eleven_turbo_v2_5")
-        elevenlabs_model_combo.addItem(t("eleven_flash_v2_5 (Fastest - Supports VI, EN, ...)"), "eleven_flash_v2_5")
-        elevenlabs_model_combo.addItem(t("eleven_multilingual_v2 (Legacy 29 langs - No Vietnamese)"), "eleven_multilingual_v2")
+        try:
+            from app.engines.elevenlabs_tts import DEFAULT_ELEVENLABS_MODELS, fetch_elevenlabs_models
+        except ImportError:
+            from engines.elevenlabs_tts import DEFAULT_ELEVENLABS_MODELS, fetch_elevenlabs_models
+
+        for m in DEFAULT_ELEVENLABS_MODELS:
+            elevenlabs_model_combo.addItem(t(m["name"]), m["model_id"])
+
         current_el_model = os.getenv("ELEVENLABS_MODEL", self.settings.value("elevenlabs_model", "eleven_turbo_v2_5"))
+        if current_el_model == "eleven_multilingual_v2":
+            current_el_model = "eleven_turbo_v2_5"
         el_model_idx = elevenlabs_model_combo.findData(current_el_model)
-        elevenlabs_model_combo.setCurrentIndex(el_model_idx if el_model_idx >= 0 else 0)
+        elevenlabs_model_combo.setCurrentIndex(el_model_idx if el_model_idx >= 0 else 2) # eleven_turbo_v2_5
         elevenlabs_model_layout.addWidget(elevenlabs_model_label)
         elevenlabs_model_layout.addWidget(elevenlabs_model_combo)
         elevenlabs_settings_layout.addLayout(elevenlabs_model_layout)
@@ -16225,9 +16232,17 @@ class VideoTranslatorGUI(QMainWindow):
                 return
             try:
                 try:
-                    from app.engines.elevenlabs_tts import fetch_elevenlabs_voices, fetch_elevenlabs_user_subscription
+                    from app.engines.elevenlabs_tts import (
+                        fetch_elevenlabs_voices,
+                        fetch_elevenlabs_user_subscription,
+                        fetch_elevenlabs_models,
+                    )
                 except ImportError:
-                    from engines.elevenlabs_tts import fetch_elevenlabs_voices, fetch_elevenlabs_user_subscription
+                    from engines.elevenlabs_tts import (
+                        fetch_elevenlabs_voices,
+                        fetch_elevenlabs_user_subscription,
+                        fetch_elevenlabs_models,
+                    )
                 import json
                 from runtime_paths import temp_path
                 cache_path = temp_path("elevenlabs_voices_cache.json")
@@ -16235,6 +16250,22 @@ class VideoTranslatorGUI(QMainWindow):
                     os.remove(cache_path)
                 voices = fetch_elevenlabs_voices(key, force_refresh=True)
                 os.environ["ELEVENLABS_API_KEY"] = key
+
+                try:
+                    fetched_models = fetch_elevenlabs_models(key)
+                    if fetched_models:
+                        saved_selected = elevenlabs_model_combo.currentData()
+                        elevenlabs_model_combo.clear()
+                        for m in fetched_models:
+                            elevenlabs_model_combo.addItem(t(m["name"]), m["model_id"])
+                        idx = elevenlabs_model_combo.findData(saved_selected)
+                        if idx >= 0:
+                            elevenlabs_model_combo.setCurrentIndex(idx)
+                        else:
+                            def_idx = elevenlabs_model_combo.findData("eleven_turbo_v2_5")
+                            elevenlabs_model_combo.setCurrentIndex(def_idx if def_idx >= 0 else 0)
+                except Exception as model_err:
+                    print(f"[ElevenLabs] Warning: could not refresh models: {model_err}")
 
                 sub_info = {}
                 if os.path.exists(cache_path):

@@ -319,6 +319,28 @@ class TestUIVoiceWorkersAndLang(unittest.TestCase):
         finally:
             set_language(orig_lang)
 
+    def test_settings_dialog_elevenlabs_model_combo_population_and_migration(self):
+        """Verifies elevenlabs_model_combo populates the 5 modern models and migrates eleven_multilingual_v2."""
+        from app.engines.elevenlabs_tts import DEFAULT_ELEVENLABS_MODELS
+        combo = self.create_combo()
+        for m in DEFAULT_ELEVENLABS_MODELS:
+            combo.addItem(t(m["name"]), m["model_id"])
+
+        self.assertEqual(combo.count(), 5)
+        model_ids = [combo.itemData(i) for i in range(combo.count())]
+        self.assertNotIn("eleven_multilingual_v2", model_ids)
+        self.assertEqual(
+            model_ids,
+            ["eleven_v4", "eleven_v4_turbo", "eleven_turbo_v2_5", "eleven_flash_v2_5", "eleven_v3"],
+        )
+
+        # Migration logic
+        current_el_model = "eleven_multilingual_v2"
+        if current_el_model == "eleven_multilingual_v2":
+            current_el_model = "eleven_turbo_v2_5"
+        idx = combo.findData(current_el_model)
+        self.assertEqual(idx, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

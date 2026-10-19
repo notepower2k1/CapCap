@@ -25,6 +25,8 @@ for p in (PROJECT_ROOT, APP_DIR):
         sys.path.insert(0, p)
 
 from app.engines.elevenlabs_tts import (
+    DEFAULT_ELEVENLABS_MODELS,
+    fetch_elevenlabs_models,
     fetch_elevenlabs_voices,
     synthesize_elevenlabs_tts_wav_16k_mono,
 )
@@ -470,6 +472,80 @@ class TestElevenLabsTTS(unittest.TestCase):
         self.assertIn("Lỗi 400 - Model không hỗ trợ ngôn ngữ", err_msg)
         self.assertIn("eleven_turbo_v2_5", err_msg)
         self.assertIn("eleven_flash_v2_5", err_msg)
+
+    @patch("requests.get")
+    def test_fetch_elevenlabs_models_filters_multilingual_v2_and_non_tts(self, mock_get):
+        """fetch_elevenlabs_models excludes eleven_multilingual_v2 and non-TTS models."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = [
+            {
+                "model_id": "eleven_multilingual_v2",
+                "name": "Eleven Multilingual v2",
+                "can_do_text_to_speech": True,
+            },
+            {
+                "model_id": "non_tts_model",
+                "name": "Non TTS Model",
+                "can_do_text_to_speech": False,
+            },
+            {
+                "model_id": "eleven_v4",
+                "name": "Eleven v4",
+                "can_do_text_to_speech": True,
+            },
+            {
+                "model_id": "eleven_turbo_v2_5",
+                "name": "Turbo v2.5",
+                "can_do_text_to_speech": True,
+            },
+        ]
+        mock_get.return_value = mock_resp
+
+        models = fetch_elevenlabs_models(api_key="test_key_123")
+        mock_get.assert_called_once_with(
+            "https://api.elevenlabs.io/v1/models",
+            headers={"xi-api-key": "test_key_123"},
+            timeout=15,
+        )
+        model_ids = [m["model_id"] for m in models]
+        self.assertNotIn("eleven_multilingual_v2", model_ids)
+        self.assertNotIn("non_tts_model", model_ids)
+        self.assertIn("eleven_v4", model_ids)
+        self.assertIn("eleven_turbo_v2_5", model_ids)
+
+    @patch("requests.get")
+    def test_fetch_elevenlabs_models_network_error_fallback(self, mock_get):
+        """fetch_elevenlabs_models falls back to DEFAULT_ELEVENLABS_MODELS on network error or HTTP failure."""
+        mock_get.side_effect = Exception("Connection error")
+        models = fetch_elevenlabs_models(api_key="test_key")
+        self.assertEqual(models, DEFAULT_ELEVENLABS_MODELS)
+
+        mock_get.side_effect = None
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mock_get.return_value = mock_resp
+        models_500 = fetch_elevenlabs_models(api_key="test_key")
+        self.assertEqual(models_500, DEFAULT_ELEVENLABS_MODELS)
+
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("requests.post")
+    def test_synthesize_auto_switches_multilingual_v2_unconditionally(self, mock_post, mock_convert):
+        """eleven_multilingual_v2 auto-switches to eleven_turbo_v2_5 even for non-Vietnamese text."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"fake_mp3_audio_bytes"
+        mock_post.return_value = mock_resp
+
+        synthesize_elevenlabs_tts_wav_16k_mono(
+            text="Hello world",
+            wav_path="out.wav",
+            voice_id="21m00Tcm4TlvDq8ikWAM",
+            api_key="valid_key",
+            model_id="eleven_multilingual_v2",
+        )
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["model_id"], "eleven_turbo_v2_5")
 
 
 if __name__ == "__main__":

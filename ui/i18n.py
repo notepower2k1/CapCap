@@ -1400,6 +1400,11 @@ VI_TRANSLATIONS: dict[str, str] = {
     "eleven_turbo_v2_5 (Recommended - Supports VI, EN, ...)": "eleven_turbo_v2_5 (Khuyên dùng - Hỗ trợ Tiếng Việt, Anh...)",
     "eleven_flash_v2_5 (Fastest - Supports VI, EN, ...)": "eleven_flash_v2_5 (Nhanh nhất - Hỗ trợ Tiếng Việt, Anh...)",
     "eleven_multilingual_v2 (Legacy 29 langs - No Vietnamese)": "eleven_multilingual_v2 (29 ngôn ngữ cũ - Không hỗ trợ Tiếng Việt)",
+    "eleven_v4 (Eleven v4 Flagship - 90+ Languages, Hyper-realistic)": "eleven_v4 (Eleven v4 Flagship - 90+ ngôn ngữ, Siêu thực)",
+    "eleven_v4_turbo (Eleven v4 Turbo - High-speed, Low-latency)": "eleven_v4_turbo (Eleven v4 Turbo - Tốc độ cao, Độ trễ thấp)",
+    "eleven_turbo_v2_5 (Turbo v2.5 - Recommended Stable)": "eleven_turbo_v2_5 (Turbo v2.5 - Khuyên dùng ổn định)",
+    "eleven_flash_v2_5 (Flash v2.5 - Ultra-fast & Economical)": "eleven_flash_v2_5 (Flash v2.5 - Siêu tốc & Tiết kiệm)",
+    "eleven_v3 (Eleven v3 - Expressive Audio Tags)": "eleven_v3 (Eleven v3 - Biểu cảm kịch bản)",
 }
 
 

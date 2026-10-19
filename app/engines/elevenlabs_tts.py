@@ -29,9 +29,19 @@ except ImportError:
     from app.tts_processor import convert_audio_data_to_wav_16k_mono
 
 __all__ = [
+    "DEFAULT_ELEVENLABS_MODELS",
+    "fetch_elevenlabs_models",
     "fetch_elevenlabs_voices",
     "fetch_elevenlabs_user_subscription",
     "synthesize_elevenlabs_tts_wav_16k_mono",
+]
+
+DEFAULT_ELEVENLABS_MODELS = [
+    {"model_id": "eleven_v4", "name": "eleven_v4 (Eleven v4 Flagship - 90+ Languages, Hyper-realistic)"},
+    {"model_id": "eleven_v4_turbo", "name": "eleven_v4_turbo (Eleven v4 Turbo - High-speed, Low-latency)"},
+    {"model_id": "eleven_turbo_v2_5", "name": "eleven_turbo_v2_5 (Turbo v2.5 - Recommended Stable)"},
+    {"model_id": "eleven_flash_v2_5", "name": "eleven_flash_v2_5 (Flash v2.5 - Ultra-fast & Economical)"},
+    {"model_id": "eleven_v3", "name": "eleven_v3 (Eleven v3 - Expressive Audio Tags)"},
 ]
 
 CACHE_FILE_NAME = "elevenlabs_voices_cache.json"
@@ -86,6 +96,50 @@ def fetch_elevenlabs_user_subscription(api_key: str) -> dict:
     except Exception as e:
         print(f"[ElevenLabs] Lỗi khi lấy thông tin subscription: {e}")
         return {}
+
+
+def fetch_elevenlabs_models(api_key: str = "") -> list[dict]:
+    """Fetch available TTS models from ElevenLabs API.
+    Calls GET https://api.elevenlabs.io/v1/models with header xi-api-key if provided.
+    Filters out models where can_do_text_to_speech is False.
+    Excludes eleven_multilingual_v2 as it lacks Vietnamese support.
+    Returns list of dicts [{"model_id": ..., "name": ...}].
+    Returns DEFAULT_ELEVENLABS_MODELS on failure or empty response.
+    """
+    clean_key = str(api_key or "").strip()
+    url = "https://api.elevenlabs.io/v1/models"
+    headers = {"xi-api-key": clean_key} if clean_key else {}
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return [dict(m) for m in DEFAULT_ELEVENLABS_MODELS]
+        data = response.json()
+        if isinstance(data, list):
+            raw_models = data
+        elif isinstance(data, dict) and isinstance(data.get("models"), list):
+            raw_models = data["models"]
+        else:
+            return [dict(m) for m in DEFAULT_ELEVENLABS_MODELS]
+
+        default_names = {m["model_id"]: m["name"] for m in DEFAULT_ELEVENLABS_MODELS}
+        results = []
+        for item in raw_models:
+            if not isinstance(item, dict):
+                continue
+            if item.get("can_do_text_to_speech") is False:
+                continue
+            mid = str(item.get("model_id") or "").strip()
+            if not mid or mid == "eleven_multilingual_v2":
+                continue
+            name = default_names.get(mid) or str(item.get("name") or mid).strip()
+            results.append({"model_id": mid, "name": name})
+
+        if not results:
+            return [dict(m) for m in DEFAULT_ELEVENLABS_MODELS]
+        return results
+    except Exception as e:
+        print(f"[ElevenLabs] Lỗi khi lấy danh sách models: {e}")
+        return [dict(m) for m in DEFAULT_ELEVENLABS_MODELS]
 
 
 def fetch_elevenlabs_voices(api_key: str, force_refresh: bool = False) -> list[dict]:
@@ -258,6 +312,9 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
     clamped_speed = max(0.7, min(1.2, float(speed)))
 
     resolved_model_id = str(model_id or os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5") or "eleven_turbo_v2_5").strip()
+    if resolved_model_id == "eleven_multilingual_v2":
+        print("[ElevenLabs] Model 'eleven_multilingual_v2' is excluded. Auto-switching to 'eleven_turbo_v2_5'.")
+        resolved_model_id = "eleven_turbo_v2_5"
 
     clean_lang = None
     if language_code:
@@ -279,10 +336,6 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
         )
         if any(c in vietnamese_chars for c in text):
             clean_lang = "vi"
-
-    if clean_lang == "vi" and resolved_model_id == "eleven_multilingual_v2":
-        print("[ElevenLabs] Model 'eleven_multilingual_v2' does not support Vietnamese ('vi'). Auto-switching to 'eleven_turbo_v2_5'.")
-        resolved_model_id = "eleven_turbo_v2_5"
 
     if on_progress:
         on_progress(f"[ElevenLabs] Đang tạo giọng nói ({clean_voice_id})...")
