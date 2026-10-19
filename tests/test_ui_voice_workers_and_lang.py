@@ -341,6 +341,76 @@ class TestUIVoiceWorkersAndLang(unittest.TestCase):
         idx = combo.findData(current_el_model)
         self.assertEqual(idx, 2)
 
+    def test_settings_dialog_tabbed_structure(self):
+        """Verifies open_model_settings_dialog constructs a QTabWidget with 4 tabs and expected child widgets."""
+        from PySide6.QtWidgets import QDialog, QTabWidget, QLineEdit, QLabel
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            gui = QWidget()
+            gui.settings = QSettings(str(Path(tmp_dir) / "settings.ini"), QSettings.IniFormat)
+            gui.get_transcription_engine = lambda: "whisper"
+            gui.get_whisper_model_name = lambda: "base"
+            gui.selected_voice_engine = "piper"
+            gui.selected_whisper_model_name = "base"
+            gui.open_resource_manager_dialog = MagicMock()
+            gui.log = MagicMock()
+
+            captured_dialog = None
+
+            def mock_exec(d):
+                nonlocal captured_dialog
+                captured_dialog = d
+                return QDialog.Rejected
+
+            try:
+                with patch.object(QDialog, "exec", mock_exec), \
+                     patch("ui.main_window.is_remote_profile", return_value=False):
+                    VideoTranslatorGUI.open_model_settings_dialog(gui)
+
+                self.assertIsNotNone(captured_dialog)
+                tabs = captured_dialog.findChild(QTabWidget)
+                self.assertIsNotNone(tabs, "QTabWidget must be present in settings dialog")
+                self.assertEqual(tabs.count(), 4)
+
+                # Tab titles
+                tab_titles = [tabs.tabText(i) for i in range(tabs.count())]
+                self.assertEqual(
+                    tab_titles,
+                    [t("Transcription"), t("AI Translation"), t("Voice & TTS"), t("System & Remote")]
+                )
+
+                # Verify child widgets
+                combos = captured_dialog.findChildren(QComboBox)
+                edits = captured_dialog.findChildren(QLineEdit)
+                labels = captured_dialog.findChildren(QLabel)
+
+                # Verify ElevenLabs API Key field is password mode
+                self.assertTrue(any(e.echoMode() == QLineEdit.Password for e in edits))
+
+                # Verify ElevenLabs guide card exists
+                self.assertTrue(
+                    any(
+                        "How to get an ElevenLabs API Key" in l.text() or "Hướng dẫn tạo API Key ElevenLabs" in l.text()
+                        for l in labels
+                    )
+                )
+
+                # Also test in remote profile mode
+                captured_dialog = None
+                with patch.object(QDialog, "exec", mock_exec), \
+                     patch("ui.main_window.is_remote_profile", return_value=True):
+                    VideoTranslatorGUI.open_model_settings_dialog(gui)
+
+                self.assertIsNotNone(captured_dialog)
+                tabs_remote = captured_dialog.findChild(QTabWidget)
+                self.assertEqual(tabs_remote.count(), 4)
+                self.assertEqual(tabs_remote.currentIndex(), 3)
+            finally:
+                gui.close()
+                gui.deleteLater()
+
 
 if __name__ == "__main__":
     unittest.main()

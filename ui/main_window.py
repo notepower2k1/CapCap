@@ -15878,11 +15878,9 @@ class VideoTranslatorGUI(QMainWindow):
             dialog.setWindowIcon(self.light_window_icon)
         dialog.setWindowTitle(t("Settings"))
         dialog.setModal(True)
-        dialog.setMinimumWidth(560)
-        parent_height = self.height() if (hasattr(self, "height") and self.height() > 200) else 850
-        max_dialog_height = max(420, int(parent_height * 0.85))
-        dialog.setMaximumHeight(max_dialog_height)
-        dialog.setMinimumHeight(220)
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(460)
+        dialog.resize(650, 560)
         dialog.setStyleSheet(
             """
             QDialog {
@@ -15941,43 +15939,76 @@ class VideoTranslatorGUI(QMainWindow):
         main_dialog_layout.setContentsMargins(14, 16, 14, 12)
         main_dialog_layout.setSpacing(10)
 
-        scroll_area = QScrollArea(dialog)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.NoFrame)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet(
-            "QScrollArea { background: transparent; border: none; }"
-            "QScrollBar:vertical { background: #0b1220; width: 8px; border-radius: 4px; }"
-            "QScrollBar::handle:vertical { background: #2f4868; border-radius: 4px; min-height: 20px; }"
-            "QScrollBar::handle:vertical:hover { background: #456894; }"
-            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
+        tabs = QTabWidget(dialog)
+        tabs.setStyleSheet(
+            """
+            QTabWidget::pane {
+                border: 1px solid #2f4868;
+                background-color: #0f1724;
+                border-radius: 8px;
+            }
+            QTabBar::tab {
+                background-color: #1a2c44;
+                color: #9fb3ca;
+                padding: 8px 18px;
+                border: 1px solid #2f4868;
+                border-bottom: none;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                margin-right: 3px;
+                font-weight: 500;
+            }
+            QTabBar::tab:selected {
+                background-color: #132033;
+                color: #8ad7ff;
+                font-weight: 600;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #223755;
+                color: #e0edff;
+            }
+            """
         )
+        main_dialog_layout.addWidget(tabs, 1)
 
-        content_widget = QWidget()
-        content_widget.setStyleSheet("background: transparent;")
-        layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(4, 2, 8, 2)
-        layout.setSpacing(14)
-        scroll_area.setWidget(content_widget)
-        main_dialog_layout.addWidget(scroll_area, 1)
+        def _make_tab_scroll_widget():
+            scroll = QScrollArea(tabs)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            scroll.setStyleSheet(
+                "QScrollArea { background: transparent; border: none; }"
+                "QScrollBar:vertical { background: #0b1220; width: 8px; border-radius: 4px; }"
+                "QScrollBar::handle:vertical { background: #2f4868; border-radius: 4px; min-height: 20px; }"
+                "QScrollBar::handle:vertical:hover { background: #456894; }"
+                "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
+            )
+            content = QWidget(scroll)
+            content.setStyleSheet("background: transparent;")
+            tab_layout = QVBoxLayout(content)
+            tab_layout.setContentsMargins(12, 12, 12, 12)
+            tab_layout.setSpacing(12)
+            scroll.setWidget(content)
+            return scroll, content, tab_layout
 
         def adjust_dialog_size():
-            content_widget.layout().invalidate()
-            content_widget.adjustSize()
-            content_h = content_widget.sizeHint().height()
-            margins = main_dialog_layout.contentsMargins()
-            btn_h = button_row.sizeHint().height() if 'button_row' in locals() else 45
-            extra_h = margins.top() + margins.bottom() + main_dialog_layout.spacing() + btn_h + 20
-            target_h = max(240, min(content_h + extra_h, max_dialog_height))
-            dialog.resize(dialog.width(), target_h)
+            pass
+
+        def _toggle_visible(widget, visible):
+            widget.setVisible(visible)
 
         remote_mode = is_remote_profile()
-        # Transcription Engine Section
-        engine_title = QLabel("Audio source")
-        engine_title.setObjectName("statusHeadline")
-        layout.addWidget(engine_title)
 
-        engine_combo = QComboBox(dialog)
+        # =========================================================================
+        # Tab 1: Transcription (Audio source, Whisper, OCR, CapCut STT)
+        # =========================================================================
+        trans_scroll, trans_content, trans_layout = _make_tab_scroll_widget()
+
+        engine_title = QLabel(t("Audio source"), trans_content)
+        engine_title.setObjectName("statusHeadline")
+        trans_layout.addWidget(engine_title)
+
+        engine_combo = QComboBox(trans_content)
         engine_combo.addItem("Audio (SenseVoice) - Speed", "sensevoice")
         engine_combo.addItem("Audio (Whisper) - Quality", "whisper")
         engine_combo.addItem("CapCut API (Beta)", "capcut")
@@ -15986,12 +16017,34 @@ class VideoTranslatorGUI(QMainWindow):
         idx = engine_combo.findData(current_engine)
         if idx >= 0:
             engine_combo.setCurrentIndex(idx)
-        layout.addWidget(engine_combo)
+        trans_layout.addWidget(engine_combo)
+
+        # Whisper Section
+        is_whisper = current_engine == "whisper"
+        whisper_title = QLabel(t("Whisper model"), trans_content)
+        whisper_title.setObjectName("statusHeadline")
+        whisper_title.setVisible(is_whisper)
+        trans_layout.addWidget(whisper_title)
+
+        whisper_combo = QComboBox(trans_content)
+        whisper_combo.addItem("Base (~1GB VRAM)", "base")
+        whisper_combo.addItem("Small - Nhanh (~2GB VRAM)", "small")
+        if os.environ.get("CAPCAP_DEVICE", "cuda").strip().lower() == "cuda":
+            whisper_combo.addItem("Medium - Cân bằng (~5GB VRAM)", "medium")
+            whisper_combo.addItem("Turbo - Tốt + Nhanh (~6GB VRAM)", "turbo")
+            whisper_combo.addItem("Large-v3 - Tốt nhất (~10GB VRAM)", "large-v3")
+        current_whisper = str(getattr(self, "selected_whisper_model_name", "auto") or "auto").strip().lower()
+        if current_whisper == "auto":
+            current_whisper = self.get_whisper_model_name()
+        whisper_index = whisper_combo.findData(current_whisper)
+        whisper_combo.setCurrentIndex(whisper_index if whisper_index >= 0 else 0)
+        whisper_combo.setVisible(is_whisper)
+        trans_layout.addWidget(whisper_combo)
 
         # OCR Backend combo (RapidOCR vs Windows Media OCR)
-        ocr_backend_label = QLabel(t("OCR Engine:"), content_widget)
+        ocr_backend_label = QLabel(t("OCR Engine:"), trans_content)
         ocr_backend_label.setVisible(current_engine == "ocr")
-        ocr_backend_combo = QComboBox(dialog)
+        ocr_backend_combo = QComboBox(trans_content)
         ocr_backend_combo.addItem("RapidOCR (Default)", "rapidocr")
         ocr_backend_combo.addItem("Windows Media OCR (Native)", "winocr")
         current_ocr_backend = str(os.getenv("OCR_BACKEND", self.settings.value("ocr_backend", "rapidocr")) or "rapidocr").strip().lower()
@@ -15999,11 +16052,11 @@ class VideoTranslatorGUI(QMainWindow):
         if idx >= 0:
             ocr_backend_combo.setCurrentIndex(idx)
         ocr_backend_combo.setVisible(current_engine == "ocr")
-        layout.addWidget(ocr_backend_label)
-        layout.addWidget(ocr_backend_combo)
+        trans_layout.addWidget(ocr_backend_label)
+        trans_layout.addWidget(ocr_backend_combo)
 
         # OCR note for Windows OCR
-        ocr_backend_note = QLabel(content_widget)
+        ocr_backend_note = QLabel(trans_content)
         ocr_backend_note.setWordWrap(True)
         ocr_backend_note.setStyleSheet("color: #888888; font-size: 11px; margin-top: 2px; margin-bottom: 6px;")
 
@@ -16027,14 +16080,13 @@ class VideoTranslatorGUI(QMainWindow):
                 ocr_backend_note.setVisible(False)
 
         ocr_backend_combo.currentIndexChanged.connect(update_ocr_backend_note)
-        ocr_backend_combo.currentIndexChanged.connect(adjust_dialog_size)
         update_ocr_backend_note()
-        layout.addWidget(ocr_backend_note)
+        trans_layout.addWidget(ocr_backend_note)
 
         # OCR Region combo (only visible when OCR selected)
-        region_label = QLabel("Subtitle position:", content_widget)
+        region_label = QLabel(t("Subtitle position:"), trans_content)
         region_label.setVisible(current_engine == "ocr")
-        region_combo = QComboBox(dialog)
+        region_combo = QComboBox(trans_content)
         region_combo.addItem("Bottom (default)", "bottom")
         region_combo.addItem("Top", "top")
         region_combo.addItem("Full frame", "full")
@@ -16043,13 +16095,13 @@ class VideoTranslatorGUI(QMainWindow):
         if idx >= 0:
             region_combo.setCurrentIndex(idx)
         region_combo.setVisible(current_engine == "ocr")
-        layout.addWidget(region_label)
-        layout.addWidget(region_combo)
+        trans_layout.addWidget(region_label)
+        trans_layout.addWidget(region_combo)
 
-        sampling_label = QLabel("OCR sampling rate:", content_widget)
+        sampling_label = QLabel(t("OCR sampling rate:"), trans_content)
         sampling_label.setToolTip("Higher rates catch shorter subtitle flashes but process more video frames.")
         sampling_label.setVisible(current_engine == "ocr")
-        sampling_combo = QComboBox(dialog)
+        sampling_combo = QComboBox(trans_content)
         sampling_combo.addItem("Auto (recommended)", "auto")
         sampling_combo.addItem("1 FPS (lighter)", "1")
         sampling_combo.addItem("1.5 FPS", "1.5")
@@ -16060,45 +16112,23 @@ class VideoTranslatorGUI(QMainWindow):
         idx = sampling_combo.findData(current_sampling_fps)
         sampling_combo.setCurrentIndex(idx if idx >= 0 else 0)
         sampling_combo.setVisible(current_engine == "ocr")
-        layout.addWidget(sampling_label)
-        layout.addWidget(sampling_combo)
+        trans_layout.addWidget(sampling_label)
+        trans_layout.addWidget(sampling_combo)
 
-        # Whisper Section
-        is_whisper = current_engine == "whisper"
-        whisper_title = QLabel("Whisper model", content_widget)
-        whisper_title.setObjectName("statusHeadline")
-        whisper_title.setVisible(is_whisper)
-        layout.addWidget(whisper_title)
-        
-        whisper_combo = QComboBox(dialog)
-        whisper_combo.addItem("Base (~1GB VRAM)", "base")
-        whisper_combo.addItem("Small - Nhanh (~2GB VRAM)", "small")
-        if os.environ.get("CAPCAP_DEVICE", "cuda").strip().lower() == "cuda":
-            whisper_combo.addItem("Medium - Cân bằng (~5GB VRAM)", "medium")
-            whisper_combo.addItem("Turbo - Tốt + Nhanh (~6GB VRAM)", "turbo")
-            whisper_combo.addItem("Large-v3 - Tốt nhất (~10GB VRAM)", "large-v3")
-        current_whisper = str(getattr(self, "selected_whisper_model_name", "auto") or "auto").strip().lower()
-        if current_whisper == "auto":
-            current_whisper = self.get_whisper_model_name()
-        whisper_index = whisper_combo.findData(current_whisper)
-        whisper_combo.setCurrentIndex(whisper_index if whisper_index >= 0 else 0)
-        whisper_combo.setVisible(is_whisper)
-        layout.addWidget(whisper_combo)
+        # CapCut STT Settings Section
+        is_capcut_stt = current_engine == "capcut"
+        capcut_stt_widget = QWidget(trans_content)
+        capcut_stt_layout = QVBoxLayout(capcut_stt_widget)
+        capcut_stt_layout.setContentsMargins(0, 0, 0, 0)
+        capcut_stt_layout.setSpacing(10)
 
-        # CapCut API Settings Section
-        is_capcut = (current_engine == "capcut") or (str(getattr(self, "selected_voice_engine", "") or (self.voice_engine_combo.currentData() if hasattr(self, "voice_engine_combo") else "")).strip().lower() == "capcut")
-        capcut_settings_widget = QWidget(dialog)
-        capcut_settings_layout = QVBoxLayout(capcut_settings_widget)
-        capcut_settings_layout.setContentsMargins(0, 0, 0, 0)
-        capcut_settings_layout.setSpacing(10)
-
-        capcut_title = QLabel("CapCut API Settings")
-        capcut_title.setObjectName("statusHeadline")
-        capcut_settings_layout.addWidget(capcut_title)
+        capcut_stt_title = QLabel(t("CapCut STT Settings"), capcut_stt_widget)
+        capcut_stt_title.setObjectName("statusHeadline")
+        capcut_stt_layout.addWidget(capcut_stt_title)
 
         capcut_chunk_row = QHBoxLayout()
-        capcut_chunk_label = QLabel("STT Chunk duration:")
-        capcut_chunk_combo = QComboBox(dialog)
+        capcut_chunk_label = QLabel(t("STT Chunk duration:"), capcut_stt_widget)
+        capcut_chunk_combo = QComboBox(capcut_stt_widget)
         capcut_chunk_combo.addItem("5 minutes (default)", "300")
         capcut_chunk_combo.addItem("10 minutes", "600")
         capcut_chunk_combo.addItem("15 minutes", "900")
@@ -16109,11 +16139,11 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_chunk_combo.setCurrentIndex(idx if idx >= 0 else 0)
         capcut_chunk_row.addWidget(capcut_chunk_label)
         capcut_chunk_row.addWidget(capcut_chunk_combo, 1)
-        capcut_settings_layout.addLayout(capcut_chunk_row)
+        capcut_stt_layout.addLayout(capcut_chunk_row)
 
         capcut_stt_workers_row = QHBoxLayout()
-        capcut_stt_workers_label = QLabel("STT Workers:")
-        capcut_stt_workers_combo = QComboBox(dialog)
+        capcut_stt_workers_label = QLabel(t("STT Workers:"), capcut_stt_widget)
+        capcut_stt_workers_combo = QComboBox(capcut_stt_widget)
         for w in ("1", "2", "3", "4", "5", "8", "10"):
             capcut_stt_workers_combo.addItem(f"{w} workers" + (" (default)" if w == "5" else "") if w != "1" else "1 worker", w)
         current_stt_workers = str(os.getenv("CAPCUT_STT_WORKERS", self.settings.value("capcut_stt_workers", "5"))).strip()
@@ -16121,53 +16151,297 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_stt_workers_combo.setCurrentIndex(idx if idx >= 0 else 4)
         capcut_stt_workers_row.addWidget(capcut_stt_workers_label)
         capcut_stt_workers_row.addWidget(capcut_stt_workers_combo, 1)
-        capcut_settings_layout.addLayout(capcut_stt_workers_row)
+        capcut_stt_layout.addLayout(capcut_stt_workers_row)
 
-        capcut_tts_batch_row = QHBoxLayout()
-        capcut_tts_batch_label = QLabel("TTS Batch size:")
-        capcut_tts_batch_combo = QComboBox(dialog)
-        for b in ("1", "4", "8", "16", "30", "32", "60"):
-            capcut_tts_batch_combo.addItem(f"{b} line / req" if b == "1" else (f"{b} lines / req" + (" (default)" if b == "60" else "")), b)
-        current_tts_batch = str(os.getenv("CAPCUT_TTS_BATCH_SIZE", self.settings.value("capcut_tts_batch_size", "60"))).strip()
-        idx = capcut_tts_batch_combo.findData(current_tts_batch)
-        capcut_tts_batch_combo.setCurrentIndex(idx if idx >= 0 else 6)
-        capcut_tts_batch_row.addWidget(capcut_tts_batch_label)
-        capcut_tts_batch_row.addWidget(capcut_tts_batch_combo, 1)
-        capcut_settings_layout.addLayout(capcut_tts_batch_row)
+        capcut_stt_hint = QLabel(t("Chunking audio and running concurrent workers speeds up STT processing."), capcut_stt_widget)
+        capcut_stt_hint.setObjectName("helperLabel")
+        capcut_stt_hint.setWordWrap(True)
+        capcut_stt_layout.addWidget(capcut_stt_hint)
 
-        capcut_tts_workers_row = QHBoxLayout()
-        capcut_tts_workers_label = QLabel("TTS Workers:")
-        capcut_tts_workers_combo = QComboBox(dialog)
-        for w in ("1", "5", "10", "15", "20", "30", "45", "60"):
-            capcut_tts_workers_combo.addItem(f"{w} workers" + (" (default)" if w == "30" else "") if w != "1" else "1 worker", w)
-        current_tts_workers = str(os.getenv("CAPCUT_TTS_WORKERS", self.settings.value("capcut_tts_workers", "30"))).strip()
-        idx = capcut_tts_workers_combo.findData(current_tts_workers)
-        capcut_tts_workers_combo.setCurrentIndex(idx if idx >= 0 else 5)
-        capcut_tts_workers_row.addWidget(capcut_tts_workers_label)
-        capcut_tts_workers_row.addWidget(capcut_tts_workers_combo, 1)
-        capcut_settings_layout.addLayout(capcut_tts_workers_row)
+        capcut_stt_widget.setVisible(is_capcut_stt)
+        trans_layout.addWidget(capcut_stt_widget)
 
-        capcut_hint = QLabel("Batching subtitle lines and running concurrent workers speeds up dubbing by 5-10x and reduces HTTP requests.")
-        capcut_hint.setObjectName("helperLabel")
-        capcut_hint.setWordWrap(True)
-        capcut_settings_layout.addWidget(capcut_hint)
+        def update_engine_fields():
+            engine_val = engine_combo.currentData()
+            is_ocr = engine_val == "ocr"
+            is_whisper = engine_val == "whisper"
+            is_capcut_engine = engine_val == "capcut"
+            _toggle_visible(whisper_title, is_whisper)
+            _toggle_visible(whisper_combo, is_whisper)
+            _toggle_visible(ocr_backend_label, is_ocr)
+            _toggle_visible(ocr_backend_combo, is_ocr)
+            update_ocr_backend_note()
+            _toggle_visible(region_label, is_ocr)
+            _toggle_visible(region_combo, is_ocr)
+            _toggle_visible(sampling_label, is_ocr)
+            _toggle_visible(sampling_combo, is_ocr)
+            _toggle_visible(capcut_stt_widget, is_capcut_engine)
 
-        capcut_settings_widget.setVisible(is_capcut)
-        layout.addWidget(capcut_settings_widget)
+        engine_combo.currentIndexChanged.connect(update_engine_fields)
+        update_engine_fields()
+
+        trans_layout.addStretch(1)
+        tabs.addTab(trans_scroll, t("Transcription"))
+
+        # =========================================================================
+        # Tab 2: AI Translation
+        # =========================================================================
+        trans2_scroll, trans2_content, trans2_layout = _make_tab_scroll_widget()
+
+        provider_layout = QHBoxLayout()
+        provider_label = QLabel(t("Translator Provider:"), trans2_content)
+        provider_layout.addWidget(provider_label)
+        provider_combo = QComboBox(trans2_content)
+        provider_combo.addItem("Google Translate (free, no key)", "google")
+        provider_combo.addItem("Bing Translator (free, no key)", "bing")
+        provider_combo.addItem("Google AI Studio", "google_ai_studio")
+        provider_combo.addItem("OpenAI", "openai")
+        provider_combo.addItem("Ollama (Local)", "ollama")
+        current_provider = (os.getenv("OPENAI_PROVIDER") or os.getenv("AI_POLISHER_PROVIDER") or self.settings.value("translation_provider", "google")).strip().lower()
+        if current_provider == "gemini":
+            current_provider = "google_ai_studio"
+        if current_provider not in {"google", "bing", "google_ai_studio", "openai", "ollama"}:
+            current_provider = "google"
+        idx = provider_combo.findData(current_provider)
+        if idx >= 0:
+            provider_combo.setCurrentIndex(idx)
+        provider_layout.addWidget(provider_combo, 1)
+        trans2_layout.addLayout(provider_layout)
+
+        def _provider_values(provider):
+            if provider == "google_ai_studio":
+                legacy = str(os.getenv("OPENAI_PROVIDER") or "").strip().lower() == "gemini"
+                return (
+                    os.getenv("GOOGLE_AI_STUDIO_API_KEY", "") or (os.getenv("OPENAI_API_KEY", "") if legacy else "") or str(self.settings.value("google_ai_studio_api_key", "") or ""),
+                    os.getenv("GOOGLE_AI_STUDIO_MODEL", "") or (os.getenv("OPENAI_MODEL", "") if legacy else "") or str(self.settings.value("google_ai_studio_model", "") or ""),
+                    os.getenv("GOOGLE_AI_STUDIO_BASE_URL", "") or (os.getenv("OPENAI_BASE_URL", "") if legacy else "") or str(self.settings.value("google_ai_studio_base_url", "") or ""),
+                )
+            elif provider == "ollama":
+                return (
+                    "",
+                    os.getenv("OLLAMA_MODEL", "") or os.getenv("OPENAI_MODEL", "") or str(self.settings.value("ollama_model", "") or "gemma4:31b-cloud"),
+                    os.getenv("OLLAMA_BASE_URL", "") or os.getenv("OPENAI_BASE_URL", "") or str(self.settings.value("ollama_base_url", "") or "http://localhost:11434/v1"),
+                )
+            return (
+                os.getenv("OPENAI_API_KEY", "") or str(self.settings.value("openai_api_key", "") or ""),
+                os.getenv("OPENAI_MODEL", "") or str(self.settings.value("openai_model", "") or ""),
+                os.getenv("OPENAI_BASE_URL", "") or str(self.settings.value("openai_base_url", "") or ""),
+            )
+
+        initial_key, initial_model, initial_base_url = _provider_values(current_provider)
+
+        key_section_widget = QWidget(trans2_content)
+        key_layout = QVBoxLayout(key_section_widget)
+        key_layout.setContentsMargins(0, 0, 0, 0)
+        key_label = QLabel(t("API Key:"), key_section_widget)
+        key_edit = QLineEdit(key_section_widget)
+        key_edit.setEchoMode(QLineEdit.Password)
+        key_edit.setText(initial_key)
+        key_layout.addWidget(key_label)
+        key_layout.addWidget(key_edit)
+        trans2_layout.addWidget(key_section_widget)
+
+        model_layout = QVBoxLayout()
+        model_label = QLabel(t("AI Model:"), trans2_content)
+        model_edit = QLineEdit(trans2_content)
+        model_edit.setText(initial_model)
+        model_layout.addWidget(model_label)
+        model_layout.addWidget(model_edit)
+        trans2_layout.addLayout(model_layout)
+
+        base_url_layout = QVBoxLayout()
+        base_url_label = QLabel("API URL:", trans2_content)
+        base_url_edit = QLineEdit(trans2_content)
+        base_url_edit.setText(initial_base_url)
+        base_url_layout.addWidget(base_url_label)
+        base_url_layout.addWidget(base_url_edit)
+        trans2_layout.addLayout(base_url_layout)
+
+        # Translation Prompt Preset Selector
+        preset_layout = QVBoxLayout()
+        preset_layout.setSpacing(4)
+        preset_label = QLabel(t("Default Prompt Preset:"), trans2_content)
+        translation_preset_combo = QComboBox(trans2_content)
+
+        try:
+            from translation import load_translation_presets
+            available_presets = load_translation_presets()
+        except Exception:
+            available_presets = []
+
+        for p in available_presets:
+            p_id = p.get("id", "")
+            p_name = p.get("name", p_id)
+            translation_preset_combo.addItem(p_name, p_id)
+
+        initial_preset_id = str(
+            self.settings.value("translation_preset_id", os.getenv("CAPCAP_TRANSLATION_PRESET_ID", "general_default"))
+            or os.getenv("CAPCAP_TRANSLATION_PRESET_ID", "general_default")
+        ).strip()
+        idx_preset = translation_preset_combo.findData(initial_preset_id)
+        if idx_preset >= 0:
+            translation_preset_combo.setCurrentIndex(idx_preset)
+        elif translation_preset_combo.count() > 0:
+            translation_preset_combo.setCurrentIndex(0)
+
+        preset_desc_label = QLabel("", trans2_content)
+        preset_desc_label.setObjectName("helperLabel")
+        preset_desc_label.setWordWrap(True)
+
+        def _update_preset_desc():
+            curr_id = translation_preset_combo.currentData()
+            for p in available_presets:
+                if p.get("id") == curr_id:
+                    preset_desc_label.setText(t(p.get("description", "")))
+                    break
+            else:
+                preset_desc_label.setText("")
+
+        translation_preset_combo.currentIndexChanged.connect(_update_preset_desc)
+        _update_preset_desc()
+
+        preset_layout.addWidget(preset_label)
+        preset_layout.addWidget(translation_preset_combo)
+        preset_layout.addWidget(preset_desc_label)
+        trans2_layout.addLayout(preset_layout)
+
+        auto_context_cb = QCheckBox(t("Auto-detect dialogue context & character pronouns"), trans2_content)
+        initial_auto_context = str(
+            self.settings.value("auto_translation_context", os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1"))
+            or os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1")
+        ).strip().lower() not in ("0", "false", "no")
+        auto_context_cb.setChecked(initial_auto_context)
+        auto_context_cb.setToolTip(
+            "Analyzes dialogue context and speaker relationships across segments to build character profiles "
+            "and bidirectional pronoun addressing rules (address_rules) for consistent translation."
+        )
+        trans2_layout.addWidget(auto_context_cb)
+
+        provider_hint = QLabel("Get an API key at https://aistudio.google.com/apikey", trans2_content)
+        provider_hint.setObjectName("helperLabel")
+        provider_hint.setWordWrap(True)
+        trans2_layout.addWidget(provider_hint)
+
+        test_btn = QPushButton(t("Test Connection"), trans2_content)
+        test_status = QLabel("", trans2_content)
+        test_status.setObjectName("helperLabel")
+        test_row = QHBoxLayout()
+        test_row.addWidget(test_btn)
+        test_row.addWidget(test_status, 1)
+        trans2_layout.addLayout(test_row)
+
+        def test_ai_connection():
+            url = base_url_edit.text().strip()
+            provider = provider_combo.currentData()
+            key = key_edit.text().strip() or ("ollama" if provider == "ollama" else "")
+            model = model_edit.text().strip()
+            if not url:
+                test_status.setText(t("Enter a server URL first."))
+                return
+            if not key:
+                test_status.setText(t("Enter an API key first."))
+                return
+            if not model:
+                test_status.setText(t("Enter a model name first."))
+                return
+            test_status.setText(t("Testing..."))
+            test_status.repaint()
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=key, base_url=url, timeout=15.0)
+                client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": "Reply with OK."}],
+                    max_tokens=8,
+                )
+                test_status.setText(t("Connected: {model}", model=model))
+            except Exception as e:
+                if provider == "ollama":
+                    self.log(f"[Ollama] Connection test failed: {e}")
+                    test_status.setText(t("Unable to connect to Ollama. Please check your connection and settings."))
+                else:
+                    test_status.setText(t("Failed: {error}", error=e))
+
+        test_btn.clicked.connect(test_ai_connection)
+
+        def update_provider_fields():
+            p = provider_combo.currentData()
+            model_edit.setPlaceholderText("")
+            is_ai = p not in ("google", "bing")
+            is_google_ai_studio = p == "google_ai_studio"
+            is_openai = p == "openai"
+            _toggle_visible(key_section_widget, is_google_ai_studio or is_openai)
+            _toggle_visible(base_url_label, is_ai)
+            _toggle_visible(base_url_edit, is_ai)
+            _toggle_visible(preset_label, is_ai)
+            _toggle_visible(translation_preset_combo, is_ai)
+            _toggle_visible(preset_desc_label, is_ai)
+            _toggle_visible(auto_context_cb, is_ai)
+            _toggle_visible(test_btn, is_ai)
+            _toggle_visible(test_status, is_ai)
+            _toggle_visible(model_label, is_ai)
+            _toggle_visible(model_edit, is_ai)
+            if p == "google":
+                provider_hint.setText(t("Free Google web translate, no API key needed. Lower quality than AI translation."))
+                key_edit.clear()
+                model_edit.clear()
+                base_url_edit.clear()
+            elif p == "bing":
+                provider_hint.setText(t("Free Bing web translate, no API key needed. Lower quality than AI translation."))
+                key_edit.clear()
+                model_edit.clear()
+                base_url_edit.clear()
+            elif is_google_ai_studio:
+                model_label.setText(t("AI Model:"))
+                key, model, base_url = _provider_values(p)
+                key_edit.setText(key)
+                model_edit.setText(model)
+                base_url_edit.setText(base_url or "https://generativelanguage.googleapis.com/v1beta/openai/")
+                if not model_edit.text().strip():
+                    model_edit.setText("gemini-3.7-flash")
+                provider_hint.setText(t("Use a Google AI Studio Gemini API key: https://aistudio.google.com/apikey"))
+            elif is_openai:
+                model_label.setText(t("AI Model:"))
+                key, model, base_url = _provider_values(p)
+                key_edit.setText(key)
+                model_edit.setText(model)
+                base_url_edit.setText(base_url or "https://api.openai.com/v1/")
+                if not model_edit.text().strip():
+                    model_edit.setText("gpt-4o-mini")
+                provider_hint.setText(t("Get an API key at https://platform.openai.com/api-keys"))
+            elif p == "ollama":
+                model_label.setText(t("AI Model:"))
+                key, model, base_url = _provider_values(p)
+                base_url_edit.setText(base_url or "http://localhost:11434/v1")
+                key_edit.clear()
+                model_edit.setText(model or "gemma4:31b-cloud")
+                provider_hint.setText(t("Requires a running Ollama server. Speed depends on your hardware; tasks will fail/fallback if timeout expires."))
+            model_edit.setReadOnly(False)
+
+        provider_combo.currentIndexChanged.connect(update_provider_fields)
+        update_provider_fields()
+
+        trans2_layout.addStretch(1)
+        tabs.addTab(trans2_scroll, t("AI Translation"))
+
+        # =========================================================================
+        # Tab 3: Voice & TTS (ElevenLabs, CapCut TTS, Local Piper)
+        # =========================================================================
+        voice_scroll, voice_content, voice_layout = _make_tab_scroll_widget()
 
         # ElevenLabs API Settings Section
-        elevenlabs_settings_widget = QWidget(dialog)
+        elevenlabs_settings_widget = QWidget(voice_content)
         elevenlabs_settings_layout = QVBoxLayout(elevenlabs_settings_widget)
         elevenlabs_settings_layout.setContentsMargins(0, 0, 0, 0)
         elevenlabs_settings_layout.setSpacing(10)
 
-        elevenlabs_title = QLabel("ElevenLabs API Settings")
+        elevenlabs_title = QLabel(t("ElevenLabs API Settings"), elevenlabs_settings_widget)
         elevenlabs_title.setObjectName("statusHeadline")
         elevenlabs_settings_layout.addWidget(elevenlabs_title)
 
         elevenlabs_key_layout = QVBoxLayout()
-        elevenlabs_key_label = QLabel("API Key:")
-        elevenlabs_key_edit = QLineEdit(dialog)
+        elevenlabs_key_label = QLabel(t("API Key:"), elevenlabs_settings_widget)
+        elevenlabs_key_edit = QLineEdit(elevenlabs_settings_widget)
         elevenlabs_key_edit.setEchoMode(QLineEdit.Password)
         elevenlabs_key_edit.setPlaceholderText("sk-...")
         elevenlabs_key_edit.setText(os.getenv("ELEVENLABS_API_KEY", self.settings.value("elevenlabs_api_key", "")))
@@ -16176,8 +16450,8 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_settings_layout.addLayout(elevenlabs_key_layout)
 
         elevenlabs_model_layout = QVBoxLayout()
-        elevenlabs_model_label = QLabel("Model:")
-        elevenlabs_model_combo = QComboBox(dialog)
+        elevenlabs_model_label = QLabel(t("Model:"), elevenlabs_settings_widget)
+        elevenlabs_model_combo = QComboBox(elevenlabs_settings_widget)
         try:
             from app.engines.elevenlabs_tts import DEFAULT_ELEVENLABS_MODELS, fetch_elevenlabs_models
         except ImportError:
@@ -16196,8 +16470,8 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_settings_layout.addLayout(elevenlabs_model_layout)
 
         elevenlabs_workers_layout = QVBoxLayout()
-        elevenlabs_workers_label = QLabel(t("Parallel Workers:"))
-        elevenlabs_workers_combo = QComboBox(dialog)
+        elevenlabs_workers_label = QLabel(t("Parallel Workers:"), elevenlabs_settings_widget)
+        elevenlabs_workers_combo = QComboBox(elevenlabs_settings_widget)
         elevenlabs_workers_combo.addItem(t("1 worker (Safe / Slow network)"), "1")
         elevenlabs_workers_combo.addItem(t("2 workers (Recommended for Free tier)"), "2")
         elevenlabs_workers_combo.addItem(t("3 workers 🔒 (Paid Plan Required)"), "3")
@@ -16214,7 +16488,7 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_workers_layout.addWidget(elevenlabs_workers_combo)
         elevenlabs_settings_layout.addLayout(elevenlabs_workers_layout)
 
-        elevenlabs_sub_label = QLabel(dialog)
+        elevenlabs_sub_label = QLabel(elevenlabs_settings_widget)
         elevenlabs_sub_label.setObjectName("helperLabel")
         saved_key = os.getenv("ELEVENLABS_API_KEY", self.settings.value("elevenlabs_api_key", "")).strip()
 
@@ -16248,7 +16522,7 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_sub_label.setText(_format_sub_label(c_sub, saved_key))
         _update_workers_combo_state(c_tier)
 
-        elevenlabs_sync_btn = QPushButton(t("🔄 Sync voices from ElevenLabs"))
+        elevenlabs_sync_btn = QPushButton(t("🔄 Sync voices from ElevenLabs"), elevenlabs_settings_widget)
         def _sync_elevenlabs_voices():
             key = elevenlabs_key_edit.text().strip()
             if not key:
@@ -16310,354 +16584,112 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_settings_layout.addWidget(elevenlabs_sync_btn)
         elevenlabs_settings_layout.addWidget(elevenlabs_sub_label)
 
-        elevenlabs_hint = QLabel(t("Enter your API Key from https://elevenlabs.io/app/speech-synthesis. Voices will be loaded automatically when a valid key is provided."))
+        # ElevenLabs Guide Card
+        guide_card = QFrame(elevenlabs_settings_widget)
+        guide_card.setStyleSheet(
+            """
+            QFrame {
+                background-color: #132033;
+                border: 1px solid #2f4868;
+                border-radius: 8px;
+            }
+            """
+        )
+        guide_card_layout = QVBoxLayout(guide_card)
+        guide_card_layout.setContentsMargins(12, 10, 12, 10)
+        guide_card_layout.setSpacing(6)
+
+        guide_title = QLabel(t("🔑 How to get an ElevenLabs API Key:"), guide_card)
+        guide_title.setStyleSheet("font-weight: 700; color: #8ad7ff; font-size: 13px; background: transparent;")
+        guide_card_layout.addWidget(guide_title)
+
+        guide_text = QLabel(guide_card)
+        guide_text.setStyleSheet("color: #d7e3f4; font-size: 12px; background: transparent;")
+        guide_text.setWordWrap(True)
+        guide_text.setOpenExternalLinks(True)
+        guide_text.setText(
+            t(
+                "1. Visit <a href='https://elevenlabs.io/app/settings/api-keys' style='color: #4da3ff;'>https://elevenlabs.io/app/settings/api-keys</a> and click <b>Create API Key</b>.<br>"
+                "2. When creating a <b>Restricted Key</b>, grant these 4 permissions (or choose <b>Full Access</b>):<br>"
+                "&nbsp;&nbsp;• <b>Text to Speech:</b> <code>Access</code> (generate voice audio)<br>"
+                "&nbsp;&nbsp;• <b>Voices:</b> <code>Read</code> (fetch personal & cloned voices)<br>"
+                "&nbsp;&nbsp;• <b>Voice collection:</b> <code>Read</code> (read Voice Library catalog)<br>"
+                "&nbsp;&nbsp;• <b>User:</b> <code>Access</code> (sync character count & subscription plan)<br>"
+                "3. Paste the API Key above and click <b>🔄 Sync voices from ElevenLabs</b>."
+            )
+        )
+        guide_card_layout.addWidget(guide_text)
+        elevenlabs_settings_layout.addWidget(guide_card)
+
+        elevenlabs_hint = QLabel(t("Enter your API Key from https://elevenlabs.io/app/speech-synthesis. Voices will be loaded automatically when a valid key is provided."), elevenlabs_settings_widget)
         elevenlabs_hint.setObjectName("helperLabel")
         elevenlabs_hint.setWordWrap(True)
         elevenlabs_settings_layout.addWidget(elevenlabs_hint)
 
-        elevenlabs_settings_widget.setVisible(not remote_mode)
-        layout.addWidget(elevenlabs_settings_widget)
+        voice_layout.addWidget(elevenlabs_settings_widget)
 
-        divider = QFrame()
-        divider.setFrameShape(QFrame.HLine)
-        divider.setStyleSheet("color: #2f4868;")
-        layout.addWidget(divider)
+        # CapCut TTS Settings Section
+        divider1 = QFrame(voice_content)
+        divider1.setFrameShape(QFrame.HLine)
+        divider1.setStyleSheet("color: #2f4868;")
+        voice_layout.addWidget(divider1)
 
-        remote_title = QLabel("Remote API", content_widget)
-        remote_title.setObjectName("statusHeadline")
-        remote_title.setVisible(remote_mode)
-        layout.addWidget(remote_title)
+        capcut_tts_widget = QWidget(voice_content)
+        capcut_tts_layout = QVBoxLayout(capcut_tts_widget)
+        capcut_tts_layout.setContentsMargins(0, 0, 0, 0)
+        capcut_tts_layout.setSpacing(10)
 
-        remote_url_layout = QVBoxLayout()
-        remote_url_label = QLabel("PC API URL:", content_widget)
-        remote_url_edit = QLineEdit(dialog)
-        remote_url_edit.setText(os.getenv("CAPCAP_REMOTE_API_URL", "http://127.0.0.1:8765"))
-        remote_url_layout.addWidget(remote_url_label)
-        remote_url_layout.addWidget(remote_url_edit)
-        remote_url_label.setVisible(remote_mode)
-        remote_url_edit.setVisible(remote_mode)
-        layout.addLayout(remote_url_layout)
+        capcut_tts_title = QLabel(t("CapCut TTS Settings"), capcut_tts_widget)
+        capcut_tts_title.setObjectName("statusHeadline")
+        capcut_tts_layout.addWidget(capcut_tts_title)
 
-        remote_token_layout = QVBoxLayout()
-        remote_token_label = QLabel("API Token (optional):", content_widget)
-        remote_token_edit = QLineEdit(dialog)
-        remote_token_edit.setEchoMode(QLineEdit.Password)
-        remote_token_edit.setText(os.getenv("CAPCAP_REMOTE_API_TOKEN", ""))
-        remote_token_layout.addWidget(remote_token_label)
-        remote_token_layout.addWidget(remote_token_edit)
-        remote_token_label.setVisible(remote_mode)
-        remote_token_edit.setVisible(remote_mode)
-        layout.addLayout(remote_token_layout)
+        capcut_tts_batch_row = QHBoxLayout()
+        capcut_tts_batch_label = QLabel(t("TTS Batch size:"), capcut_tts_widget)
+        capcut_tts_batch_combo = QComboBox(capcut_tts_widget)
+        for b in ("1", "4", "8", "16", "30", "32", "60"):
+            capcut_tts_batch_combo.addItem(f"{b} line / req" if b == "1" else (f"{b} lines / req" + (" (default)" if b == "60" else "")), b)
+        current_tts_batch = str(os.getenv("CAPCUT_TTS_BATCH_SIZE", self.settings.value("capcut_tts_batch_size", "60"))).strip()
+        idx = capcut_tts_batch_combo.findData(current_tts_batch)
+        capcut_tts_batch_combo.setCurrentIndex(idx if idx >= 0 else 6)
+        capcut_tts_batch_row.addWidget(capcut_tts_batch_label)
+        capcut_tts_batch_row.addWidget(capcut_tts_batch_combo, 1)
+        capcut_tts_layout.addLayout(capcut_tts_batch_row)
 
-        remote_actions_layout = QHBoxLayout()
-        test_remote_btn = QPushButton("Test Connection", dialog)
-        test_remote_btn.setVisible(remote_mode)
-        remote_actions_layout.addWidget(test_remote_btn)
-        remote_actions_layout.addStretch()
-        layout.addLayout(remote_actions_layout)
+        capcut_tts_workers_row = QHBoxLayout()
+        capcut_tts_workers_label = QLabel(t("TTS Workers:"), capcut_tts_widget)
+        capcut_tts_workers_combo = QComboBox(capcut_tts_widget)
+        for w in ("1", "5", "10", "15", "20", "30", "45", "60"):
+            capcut_tts_workers_combo.addItem(f"{w} workers" + (" (default)" if w == "30" else "") if w != "1" else "1 worker", w)
+        current_tts_workers = str(os.getenv("CAPCUT_TTS_WORKERS", self.settings.value("capcut_tts_workers", "30"))).strip()
+        idx = capcut_tts_workers_combo.findData(current_tts_workers)
+        capcut_tts_workers_combo.setCurrentIndex(idx if idx >= 0 else 5)
+        capcut_tts_workers_row.addWidget(capcut_tts_workers_label)
+        capcut_tts_workers_row.addWidget(capcut_tts_workers_combo, 1)
+        capcut_tts_layout.addLayout(capcut_tts_workers_row)
 
-        remote_hint_label = QLabel(
-            "Remote mode keeps Whisper and AI translation on your PC server. "
-            "This laptop build only sends extracted audio and subtitle segments over HTTP.", content_widget
-        )
-        remote_hint_label.setObjectName("helperLabel")
-        remote_hint_label.setWordWrap(True)
-        remote_hint_label.setVisible(remote_mode)
-        layout.addWidget(remote_hint_label)
+        capcut_hint = QLabel(t("Batching subtitle lines and running concurrent workers speeds up dubbing by 5-10x and reduces HTTP requests."), capcut_tts_widget)
+        capcut_hint.setObjectName("helperLabel")
+        capcut_hint.setWordWrap(True)
+        capcut_tts_layout.addWidget(capcut_hint)
 
-        remote_divider = QFrame(content_widget)
-        remote_divider.setFrameShape(QFrame.HLine)
-        remote_divider.setStyleSheet("color: #2f4868;")
-        remote_divider.setVisible(remote_mode)
-        layout.addWidget(remote_divider)
+        voice_layout.addWidget(capcut_tts_widget)
 
-        # AI Translation Section
-        ai_title = QLabel("AI Translation", content_widget)
-        ai_title.setObjectName("statusHeadline")
-        ai_title.setVisible(not remote_mode)
-        layout.addWidget(ai_title)
+        # Local Voice Resources (Piper) Section
+        divider2 = QFrame(voice_content)
+        divider2.setFrameShape(QFrame.HLine)
+        divider2.setStyleSheet("color: #2f4868;")
+        voice_layout.addWidget(divider2)
 
-        provider_layout = QHBoxLayout()
-        provider_label = QLabel("Translator Provider:", content_widget)
-        provider_label.setVisible(not remote_mode)
-        provider_layout.addWidget(provider_label)
-        provider_combo = QComboBox(dialog)
-        provider_combo.addItem("Google Translate (free, no key)", "google")
-        provider_combo.addItem("Bing Translator (free, no key)", "bing")
-        provider_combo.addItem("Google AI Studio", "google_ai_studio")
-        provider_combo.addItem("OpenAI", "openai")
-        provider_combo.addItem("Ollama (Local)", "ollama")
-        current_provider = (os.getenv("OPENAI_PROVIDER") or os.getenv("AI_POLISHER_PROVIDER") or self.settings.value("translation_provider", "google")).strip().lower()
-        if current_provider == "gemini":
-            current_provider = "google_ai_studio"
-        if current_provider not in {"google", "bing", "google_ai_studio", "openai", "ollama"}:
-            current_provider = "google"
-        idx = provider_combo.findData(current_provider)
-        if idx >= 0:
-            provider_combo.setCurrentIndex(idx)
-        provider_combo.setVisible(not remote_mode)
-        provider_layout.addWidget(provider_combo, 1)
-        layout.addLayout(provider_layout)
-
-        def _provider_values(provider):
-            if provider == "google_ai_studio":
-                legacy = str(os.getenv("OPENAI_PROVIDER") or "").strip().lower() == "gemini"
-                return (
-                    os.getenv("GOOGLE_AI_STUDIO_API_KEY", "") or (os.getenv("OPENAI_API_KEY", "") if legacy else "") or str(self.settings.value("google_ai_studio_api_key", "") or ""),
-                    os.getenv("GOOGLE_AI_STUDIO_MODEL", "") or (os.getenv("OPENAI_MODEL", "") if legacy else "") or str(self.settings.value("google_ai_studio_model", "") or ""),
-                    os.getenv("GOOGLE_AI_STUDIO_BASE_URL", "") or (os.getenv("OPENAI_BASE_URL", "") if legacy else "") or str(self.settings.value("google_ai_studio_base_url", "") or ""),
-                )
-            elif provider == "ollama":
-                return (
-                    "",
-                    os.getenv("OLLAMA_MODEL", "") or os.getenv("OPENAI_MODEL", "") or str(self.settings.value("ollama_model", "") or "gemma4:31b-cloud"),
-                    os.getenv("OLLAMA_BASE_URL", "") or os.getenv("OPENAI_BASE_URL", "") or str(self.settings.value("ollama_base_url", "") or "http://localhost:11434/v1"),
-                )
-            return (
-                os.getenv("OPENAI_API_KEY", "") or str(self.settings.value("openai_api_key", "") or ""),
-                os.getenv("OPENAI_MODEL", "") or str(self.settings.value("openai_model", "") or ""),
-                os.getenv("OPENAI_BASE_URL", "") or str(self.settings.value("openai_base_url", "") or ""),
-            )
-
-        initial_key, initial_model, initial_base_url = _provider_values(current_provider)
-
-        key_section_widget = QWidget(dialog)
-        key_layout = QVBoxLayout(key_section_widget)
-        key_layout.setContentsMargins(0, 0, 0, 0)
-        key_label = QLabel("API Key:")
-        key_edit = QLineEdit(dialog)
-        key_edit.setEchoMode(QLineEdit.Password)
-        key_edit.setText(initial_key)
-        key_layout.addWidget(key_label)
-        key_layout.addWidget(key_edit)
-        key_section_widget.setVisible(not remote_mode)
-        layout.addWidget(key_section_widget)
-
-        model_layout = QVBoxLayout()
-        model_label = QLabel("AI Model:", content_widget)
-        model_edit = QLineEdit(dialog)
-        model_edit.setText(initial_model)
-        model_layout.addWidget(model_label)
-        model_layout.addWidget(model_edit)
-        model_label.setVisible(not remote_mode)
-        model_edit.setVisible(not remote_mode)
-        layout.addLayout(model_layout)
-
-        base_url_layout = QVBoxLayout()
-        base_url_label = QLabel("API URL:", content_widget)
-        base_url_edit = QLineEdit(dialog)
-        base_url_edit.setText(initial_base_url)
-        base_url_layout.addWidget(base_url_label)
-        base_url_layout.addWidget(base_url_edit)
-        base_url_label.setVisible(not remote_mode)
-        base_url_edit.setVisible(not remote_mode)
-        layout.addLayout(base_url_layout)
-
-        # Translation Prompt Preset Selector
-        preset_layout = QVBoxLayout()
-        preset_layout.setSpacing(4)
-        preset_label = QLabel("Default Prompt Preset:")
-        translation_preset_combo = QComboBox(dialog)
-
-        try:
-            from translation import load_translation_presets
-            available_presets = load_translation_presets()
-        except Exception:
-            available_presets = []
-
-        for p in available_presets:
-            p_id = p.get("id", "")
-            p_name = p.get("name", p_id)
-            translation_preset_combo.addItem(p_name, p_id)
-
-        initial_preset_id = str(
-            self.settings.value("translation_preset_id", os.getenv("CAPCAP_TRANSLATION_PRESET_ID", "general_default"))
-            or os.getenv("CAPCAP_TRANSLATION_PRESET_ID", "general_default")
-        ).strip()
-        idx_preset = translation_preset_combo.findData(initial_preset_id)
-        if idx_preset >= 0:
-            translation_preset_combo.setCurrentIndex(idx_preset)
-        elif translation_preset_combo.count() > 0:
-            translation_preset_combo.setCurrentIndex(0)
-
-        preset_desc_label = QLabel("")
-        preset_desc_label.setObjectName("helperLabel")
-        preset_desc_label.setWordWrap(True)
-
-        def _update_preset_desc():
-            curr_id = translation_preset_combo.currentData()
-            for p in available_presets:
-                if p.get("id") == curr_id:
-                    preset_desc_label.setText(t(p.get("description", "")))
-                    break
-            else:
-                preset_desc_label.setText("")
-
-        translation_preset_combo.currentIndexChanged.connect(_update_preset_desc)
-        _update_preset_desc()
-
-        preset_layout.addWidget(preset_label)
-        preset_layout.addWidget(translation_preset_combo)
-        preset_layout.addWidget(preset_desc_label)
-        layout.addLayout(preset_layout)
-
-        auto_context_cb = QCheckBox("Auto-detect dialogue context & character pronouns", dialog)
-        initial_auto_context = str(
-            self.settings.value("auto_translation_context", os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1"))
-            or os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1")
-        ).strip().lower() not in ("0", "false", "no")
-        auto_context_cb.setChecked(initial_auto_context)
-        auto_context_cb.setToolTip(
-            "Analyzes dialogue context and speaker relationships across segments to build character profiles "
-            "and bidirectional pronoun addressing rules (address_rules) for consistent translation."
-        )
-        layout.addWidget(auto_context_cb)
-
-        provider_hint = QLabel("Get an API key at https://aistudio.google.com/apikey", content_widget)
-        provider_hint.setObjectName("helperLabel")
-        provider_hint.setWordWrap(True)
-        provider_hint.setVisible(not remote_mode)
-        layout.addWidget(provider_hint)
-
-        def _toggle_visible(widget, visible):
-            widget.setVisible(visible)
-
-        def update_provider_fields():
-            p = provider_combo.currentData()
-            model_edit.setPlaceholderText("")
-            is_ai = p not in ("google", "bing")
-            is_google_ai_studio = p == "google_ai_studio"
-            is_openai = p == "openai"
-            is_ollama = p == "ollama"
-            is_google = p == "google"
-            is_bing = p == "bing"
-            _toggle_visible(key_section_widget, is_google_ai_studio or is_openai)
-            _toggle_visible(base_url_label, not remote_mode and is_ai)
-            _toggle_visible(base_url_edit, not remote_mode and is_ai)
-            _toggle_visible(preset_label, not remote_mode and is_ai)
-            _toggle_visible(translation_preset_combo, not remote_mode and is_ai)
-            _toggle_visible(preset_desc_label, not remote_mode and is_ai)
-            _toggle_visible(auto_context_cb, not remote_mode and is_ai)
-            _toggle_visible(test_btn, not remote_mode and is_ai)
-            _toggle_visible(test_status, not remote_mode and is_ai)
-            _toggle_visible(model_label, not remote_mode and is_ai)
-            _toggle_visible(model_edit, not remote_mode and is_ai)
-            if is_google:
-                provider_hint.setText(t("Free Google web translate, no API key needed. Lower quality than AI translation."))
-                key_edit.clear()
-                model_edit.clear()
-                base_url_edit.clear()
-            elif is_bing:
-                provider_hint.setText(t("Free Bing web translate, no API key needed. Lower quality than AI translation."))
-                key_edit.clear()
-                model_edit.clear()
-                base_url_edit.clear()
-            elif is_google_ai_studio:
-                model_label.setText(t("AI Model:"))
-                key, model, base_url = _provider_values(p)
-                key_edit.setText(key)
-                model_edit.setText(model)
-                base_url_edit.setText(base_url or "https://generativelanguage.googleapis.com/v1beta/openai/")
-                if not model_edit.text().strip():
-                    model_edit.setText("gemini-3.7-flash")
-                provider_hint.setText(t("Use a Google AI Studio Gemini API key: https://aistudio.google.com/apikey"))
-            elif is_openai:
-                model_label.setText(t("AI Model:"))
-                key, model, base_url = _provider_values(p)
-                key_edit.setText(key)
-                model_edit.setText(model)
-                base_url_edit.setText(base_url or "https://api.openai.com/v1/")
-                if not model_edit.text().strip():
-                    model_edit.setText("gpt-4o-mini")
-                provider_hint.setText(t("Get an API key at https://platform.openai.com/api-keys"))
-            elif p == "ollama":
-                model_label.setText(t("AI Model:"))
-                key, model, base_url = _provider_values(p)
-                base_url_edit.setText(base_url or "http://localhost:11434/v1")
-                key_edit.clear()
-                model_edit.setText(model or "gemma4:31b-cloud")
-                provider_hint.setText(t("Requires a running Ollama server. Speed depends on your hardware; tasks will fail/fallback if timeout expires."))
-            model_edit.setReadOnly(False)
-            adjust_dialog_size()
-
-        test_btn = QPushButton(t("Test Connection"), dialog)
-        test_btn.setVisible(not remote_mode)
-        test_status = QLabel("", content_widget)
-        test_status.setObjectName("helperLabel")
-        test_status.setVisible(not remote_mode)
-        test_row = QHBoxLayout()
-        test_row.addWidget(test_btn)
-        test_row.addWidget(test_status, 1)
-        layout.addLayout(test_row)
-
-        def test_ai_connection():
-            url = base_url_edit.text().strip()
-            provider = provider_combo.currentData()
-            key = key_edit.text().strip() or ("ollama" if provider == "ollama" else "")
-            model = model_edit.text().strip()
-            if not url:
-                test_status.setText(t("Enter a server URL first."))
-                return
-            if not key:
-                test_status.setText(t("Enter an API key first."))
-                return
-            if not model:
-                test_status.setText(t("Enter a model name first."))
-                return
-            test_status.setText(t("Testing..."))
-            test_status.repaint()
-            try:
-                from openai import OpenAI
-                client = OpenAI(api_key=key, base_url=url, timeout=15.0)
-                # A tiny completion validates the endpoint, credential, and the
-                # selected model.  Some compatible APIs do not expose /models.
-                client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": "Reply with OK."}],
-                    max_tokens=8,
-                )
-                test_status.setText(t("Connected: {model}", model=model))
-            except Exception as e:
-                if provider == "ollama":
-                    self.log(f"[Ollama] Connection test failed: {e}")
-                    test_status.setText(t("Unable to connect to Ollama. Please check your connection and settings."))
-                else:
-                    test_status.setText(t("Failed: {error}", error=e))
-
-        test_btn.clicked.connect(test_ai_connection)
-
-        provider_combo.currentIndexChanged.connect(update_provider_fields)
-        update_provider_fields()
-
-        def update_engine_fields():
-            engine_val = engine_combo.currentData()
-            is_ocr = engine_val == "ocr"
-            is_whisper = engine_val == "whisper"
-            is_capcut_engine = engine_val == "capcut"
-            is_capcut_voice = str(getattr(self, "selected_voice_engine", "") or (self.voice_engine_combo.currentData() if hasattr(self, "voice_engine_combo") else "")).strip().lower() == "capcut"
-            _toggle_visible(whisper_title, is_whisper)
-            _toggle_visible(whisper_combo, is_whisper)
-            _toggle_visible(ocr_backend_label, is_ocr)
-            _toggle_visible(ocr_backend_combo, is_ocr)
-            update_ocr_backend_note()
-            _toggle_visible(region_label, is_ocr)
-            _toggle_visible(region_combo, is_ocr)
-            _toggle_visible(sampling_label, is_ocr)
-            _toggle_visible(sampling_combo, is_ocr)
-            _toggle_visible(capcut_settings_widget, is_capcut_engine or is_capcut_voice)
-            adjust_dialog_size()
-
-        engine_combo.currentIndexChanged.connect(update_engine_fields)
-        update_engine_fields()
+        local_voice_title = QLabel(t("Local Voice Resources (Piper)"), voice_content)
+        local_voice_title.setObjectName("statusHeadline")
+        voice_layout.addWidget(local_voice_title)
 
         local_download_layout = QHBoxLayout()
-        manage_resources_btn = QPushButton(t("Manage Resources"), dialog)
-        open_voices_folder_btn = QPushButton(t("Open Voices Folder"), dialog)
+        manage_resources_btn = QPushButton(t("Manage Resources"), voice_content)
+        open_voices_folder_btn = QPushButton(t("Open Voices Folder"), voice_content)
         local_download_layout.addWidget(manage_resources_btn)
         local_download_layout.addWidget(open_voices_folder_btn)
-        manage_resources_btn.setVisible(not remote_mode)
-        open_voices_folder_btn.setVisible(not remote_mode)
-        layout.addLayout(local_download_layout)
+        voice_layout.addLayout(local_download_layout)
 
         def _piper_models_dir() -> str:
             return models_path("piper")
@@ -16669,6 +16701,50 @@ class VideoTranslatorGUI(QMainWindow):
 
         open_voices_folder_btn.clicked.connect(open_voices_folder)
         manage_resources_btn.clicked.connect(self.open_resource_manager_dialog)
+
+        voice_layout.addStretch(1)
+        tabs.addTab(voice_scroll, t("Voice & TTS"))
+
+        # =========================================================================
+        # Tab 4: System & Remote
+        # =========================================================================
+        sys_scroll, sys_content, sys_layout = _make_tab_scroll_widget()
+
+        remote_title = QLabel(t("Remote API"), sys_content)
+        remote_title.setObjectName("statusHeadline")
+        sys_layout.addWidget(remote_title)
+
+        remote_url_layout = QVBoxLayout()
+        remote_url_label = QLabel(t("PC API URL:"), sys_content)
+        remote_url_edit = QLineEdit(sys_content)
+        remote_url_edit.setText(os.getenv("CAPCAP_REMOTE_API_URL", "http://127.0.0.1:8765"))
+        remote_url_layout.addWidget(remote_url_label)
+        remote_url_layout.addWidget(remote_url_edit)
+        sys_layout.addLayout(remote_url_layout)
+
+        remote_token_layout = QVBoxLayout()
+        remote_token_label = QLabel(t("API Token (optional):"), sys_content)
+        remote_token_edit = QLineEdit(sys_content)
+        remote_token_edit.setEchoMode(QLineEdit.Password)
+        remote_token_edit.setText(os.getenv("CAPCAP_REMOTE_API_TOKEN", ""))
+        remote_token_layout.addWidget(remote_token_label)
+        remote_token_layout.addWidget(remote_token_edit)
+        sys_layout.addLayout(remote_token_layout)
+
+        remote_actions_layout = QHBoxLayout()
+        test_remote_btn = QPushButton(t("Test Connection"), sys_content)
+        remote_actions_layout.addWidget(test_remote_btn)
+        remote_actions_layout.addStretch()
+        sys_layout.addLayout(remote_actions_layout)
+
+        remote_hint_label = QLabel(
+            t("Remote mode keeps Whisper and AI translation on your PC server. This laptop build only sends extracted audio and subtitle segments over HTTP."),
+            sys_content,
+        )
+        remote_hint_label.setObjectName("helperLabel")
+        remote_hint_label.setWordWrap(True)
+        sys_layout.addWidget(remote_hint_label)
+
         def _test_remote_connection():
             try:
                 payload = self._test_remote_api_connection(
@@ -16690,6 +16766,12 @@ class VideoTranslatorGUI(QMainWindow):
                 )
 
         test_remote_btn.clicked.connect(_test_remote_connection)
+
+        sys_layout.addStretch(1)
+        tabs.addTab(sys_scroll, t("System & Remote"))
+
+        if remote_mode:
+            tabs.setCurrentIndex(3)
 
         # Buttons
         button_row = QHBoxLayout()

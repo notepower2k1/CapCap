@@ -1405,6 +1405,15 @@ VI_TRANSLATIONS: dict[str, str] = {
     "eleven_turbo_v2_5 (Turbo v2.5 - Recommended Stable)": "eleven_turbo_v2_5 (Turbo v2.5 - Khuyên dùng ổn định)",
     "eleven_flash_v2_5 (Flash v2.5 - Ultra-fast & Economical)": "eleven_flash_v2_5 (Flash v2.5 - Siêu tốc & Tiết kiệm)",
     "eleven_v3 (Eleven v3 - Expressive Audio Tags)": "eleven_v3 (Eleven v3 - Biểu cảm kịch bản)",
+    "Transcription": "Nhận dạng & Phụ đề",
+    "Voice & TTS": "Giọng đọc & TTS",
+    "System & Remote": "Hệ thống & Remote",
+    "🔑 How to get an ElevenLabs API Key:": "🔑 Hướng dẫn tạo API Key ElevenLabs:",
+    "1. Visit <a href='https://elevenlabs.io/app/settings/api-keys' style='color: #4da3ff;'>https://elevenlabs.io/app/settings/api-keys</a> and click <b>Create API Key</b>.<br>2. When creating a <b>Restricted Key</b>, grant these 4 permissions (or choose <b>Full Access</b>):<br>&nbsp;&nbsp;• <b>Text to Speech:</b> <code>Access</code> (generate voice audio)<br>&nbsp;&nbsp;• <b>Voices:</b> <code>Read</code> (fetch personal & cloned voices)<br>&nbsp;&nbsp;• <b>Voice collection:</b> <code>Read</code> (read Voice Library catalog)<br>&nbsp;&nbsp;• <b>User:</b> <code>Access</code> (sync character count & subscription plan)<br>3. Paste the API Key above and click <b>🔄 Sync voices from ElevenLabs</b>.": "1. Truy cập <a href='https://elevenlabs.io/app/settings/api-keys' style='color: #4da3ff;'>https://elevenlabs.io/app/settings/api-keys</a> và nhấn <b>Create API Key</b>.<br>2. Khi tạo <b>Restricted Key</b>, cần cấp 4 quyền sau (hoặc chọn <b>Full Access</b>):<br>&nbsp;&nbsp;• <b>Text to Speech:</b> <code>Access</code> (tạo âm thanh giọng đọc)<br>&nbsp;&nbsp;• <b>Voices:</b> <code>Read</code> (lấy danh sách giọng cá nhân & clone)<br>&nbsp;&nbsp;• <b>Voice collection:</b> <code>Read</code> (đọc thư viện Voice Library)<br>&nbsp;&nbsp;• <b>User:</b> <code>Access</code> (đồng bộ số ký tự và gói tài khoản)<br>3. Dán API Key vào ô bên trên và nhấn <b>🔄 Đồng bộ danh sách giọng</b>.",
+    "CapCut STT Settings": "Cài đặt CapCut STT",
+    "CapCut TTS Settings": "Cài đặt CapCut TTS",
+    "Local Voice Resources (Piper)": "Tài nguyên giọng đọc cục bộ (Piper)",
+    "Chunking audio and running concurrent workers speeds up STT processing.": "Chia nhỏ âm thanh và chạy nhiều luồng đồng thời giúp tăng tốc xử lý STT.",
 }
 
 
