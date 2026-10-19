@@ -149,8 +149,8 @@ class TestElevenLabsTier(unittest.TestCase):
         self.assertEqual(voice_map["v_generated"]["tier"], "generated")
         self.assertTrue(voice_map["v_generated"]["is_usable_for_api"])
 
-        # Community voice on Free tier -> 🔒 (Cần gói trả phí), tier=paid_only, is_usable_for_api=False
-        self.assertIn("MC The Hao 🔒 (Cần gói trả phí)", voice_map["v_community"]["name"])
+        # Community voice on Free tier -> 🔒 (Paid Plan Required), tier=paid_only, is_usable_for_api=False
+        self.assertIn("MC The Hao 🔒 (Paid Plan Required)", voice_map["v_community"]["name"])
         self.assertEqual(voice_map["v_community"]["tier"], "paid_only")
         self.assertFalse(voice_map["v_community"]["is_usable_for_api"])
 
@@ -290,7 +290,8 @@ class TestElevenLabsTier(unittest.TestCase):
         gui.voice_catalog_map = {
             "elevenlabs:locked_voice": {
                 "id": "elevenlabs:locked_voice",
-                "name": "MC The Hao 🔒 (Cần gói trả phí)",
+                "raw_name": "MC The Hao",
+                "name": "MC The Hao 🔒 (Paid Plan Required)",
                 "is_usable_for_api": False,
             }
         }

@@ -1962,8 +1962,30 @@ class VideoTranslatorGUI(QMainWindow):
             entry_gender = str(entry.get("gender", "")).strip().lower()
             if selected_gender in ("male", "female") and entry_gender not in (selected_gender, "any", ""):
                 continue
+            item_label = str(entry.get("name", entry.get("id", "Voice")))
+            if entry.get("provider") == "elevenlabs":
+                base_name = str(entry.get("raw_name") or entry.get("name", "")).split(" 🔒")[0].split(" [")[0].strip()
+                v_type = str(entry.get("voice_type") or entry.get("category") or "").strip().lower()
+                if not v_type:
+                    orig_name = str(entry.get("name", ""))
+                    if "[Clone]" in orig_name:
+                        v_type = "cloned"
+                    elif "[Design]" in orig_name:
+                        v_type = "generated"
+                    elif "[Default]" in orig_name:
+                        v_type = "premade"
+                if not entry.get("is_usable_for_api", True):
+                    item_label = f"{base_name} 🔒 ({t('Paid Plan Required')})"
+                elif v_type == "cloned":
+                    item_label = f"{base_name} [{t('Clone')}]"
+                elif v_type == "generated":
+                    item_label = f"{base_name} [{t('Design')}]"
+                elif v_type == "premade":
+                    item_label = f"{base_name} [{t('Default')}]"
+                else:
+                    item_label = base_name
             self.free_voice_combo.addItem(
-                str(entry.get("name", entry.get("id", "Voice"))),
+                item_label,
                 self._voice_catalog_data_value(entry),
             )
             index = self.free_voice_combo.count() - 1
@@ -16147,19 +16169,19 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_settings_layout.addLayout(elevenlabs_model_layout)
 
         elevenlabs_workers_layout = QVBoxLayout()
-        elevenlabs_workers_label = QLabel("Số luồng tạo song song (Workers):")
+        elevenlabs_workers_label = QLabel(t("Parallel Workers:"))
         elevenlabs_workers_combo = QComboBox(dialog)
-        elevenlabs_workers_combo.addItem("1 luồng (Mạng chậm / An toàn)", "1")
-        elevenlabs_workers_combo.addItem("2 luồng (Khuyến nghị gói Free)", "2")
-        elevenlabs_workers_combo.addItem("3 luồng 🔒 (Gói trả phí)", "3")
-        elevenlabs_workers_combo.addItem("4 luồng 🔒 (Gói trả phí)", "4")
+        elevenlabs_workers_combo.addItem(t("1 worker (Safe / Slow network)"), "1")
+        elevenlabs_workers_combo.addItem(t("2 workers (Recommended for Free tier)"), "2")
+        elevenlabs_workers_combo.addItem(t("3 workers 🔒 (Paid Plan Required)"), "3")
+        elevenlabs_workers_combo.addItem(t("4 workers 🔒 (Paid Plan Required)"), "4")
 
         saved_workers = str(os.getenv("ELEVENLABS_TTS_WORKERS", self.settings.value("elevenlabs_tts_workers", "2"))).strip()
         worker_idx = elevenlabs_workers_combo.findData(saved_workers)
         elevenlabs_workers_combo.setCurrentIndex(worker_idx if worker_idx >= 0 else 1)
 
         def _update_workers_combo_state(tier: str):
-            _update_elevenlabs_workers_combo_state(elevenlabs_workers_combo, tier)
+            update_elevenlabs_workers_combo_state(elevenlabs_workers_combo, tier)
 
         elevenlabs_workers_layout.addWidget(elevenlabs_workers_label)
         elevenlabs_workers_layout.addWidget(elevenlabs_workers_combo)
@@ -16168,7 +16190,17 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_sub_label = QLabel(dialog)
         elevenlabs_sub_label.setObjectName("helperLabel")
         saved_key = os.getenv("ELEVENLABS_API_KEY", self.settings.value("elevenlabs_api_key", "")).strip()
-        init_sub_text = "Gói: Chưa kết nối"
+
+        def _format_sub_label(sub_info_dict, api_key_str):
+            if isinstance(sub_info_dict, dict) and sub_info_dict.get("tier"):
+                tier_str = str(sub_info_dict.get("tier", "")).capitalize()
+                c_count = sub_info_dict.get("character_count", 0)
+                c_limit = sub_info_dict.get("character_limit", 0)
+                return t("Plan: {tier} | Used: {used} / {limit} characters", tier=tier_str, used=c_count, limit=c_limit)
+            else:
+                return t("Plan: Free | Used: 0 / 0 characters") if api_key_str else t("Plan: Not connected")
+
+        c_sub = {}
         c_tier = "free"
         if saved_key:
             try:
@@ -16180,20 +16212,16 @@ class VideoTranslatorGUI(QMainWindow):
                         c_sub = json.load(f).get("user_subscription", {})
                         if isinstance(c_sub, dict) and c_sub.get("tier"):
                             c_tier = str(c_sub.get("tier", "free")).strip().lower()
-                            tier_str = str(c_sub.get("tier", "")).capitalize()
-                            c_count = c_sub.get("character_count", 0)
-                            c_limit = c_sub.get("character_limit", 0)
-                            init_sub_text = f"Gói: {tier_str} | Đã dùng: {c_count} / {c_limit} ký tự"
             except Exception:
                 pass
-        elevenlabs_sub_label.setText(init_sub_text)
+        elevenlabs_sub_label.setText(_format_sub_label(c_sub, saved_key))
         _update_workers_combo_state(c_tier)
 
-        elevenlabs_sync_btn = QPushButton("🔄 Đồng bộ danh sách giọng từ ElevenLabs")
+        elevenlabs_sync_btn = QPushButton(t("🔄 Sync voices from ElevenLabs"))
         def _sync_elevenlabs_voices():
             key = elevenlabs_key_edit.text().strip()
             if not key:
-                QMessageBox.warning(dialog, "ElevenLabs", "Vui lòng nhập API Key trước.")
+                QMessageBox.warning(dialog, "ElevenLabs", t("Please enter your API Key first."))
                 return
             try:
                 try:
@@ -16221,25 +16249,21 @@ class VideoTranslatorGUI(QMainWindow):
                     except Exception:
                         sub_info = {}
 
+                elevenlabs_sub_label.setText(_format_sub_label(sub_info, key))
                 if isinstance(sub_info, dict) and sub_info.get("tier"):
-                    tier_str = str(sub_info.get("tier", "")).capitalize()
-                    c_count = sub_info.get("character_count", 0)
-                    c_limit = sub_info.get("character_limit", 0)
-                    elevenlabs_sub_label.setText(f"Gói: {tier_str} | Đã dùng: {c_count} / {c_limit} ký tự")
                     _update_workers_combo_state(sub_info.get("tier", "free"))
                 else:
-                    elevenlabs_sub_label.setText("Gói: Free | Đã dùng: 0 / 0 ký tự" if key else "Gói: Chưa kết nối")
                     _update_workers_combo_state("free")
 
                 self.load_voice_preview_catalog()
-                QMessageBox.information(dialog, "ElevenLabs", f"Đồng bộ thành công: {len(voices)} giọng.")
+                QMessageBox.information(dialog, "ElevenLabs", t("Successfully synced {count} voices.", count=len(voices)))
             except Exception as exc:
                 QMessageBox.critical(dialog, "ElevenLabs", str(exc))
         elevenlabs_sync_btn.clicked.connect(_sync_elevenlabs_voices)
         elevenlabs_settings_layout.addWidget(elevenlabs_sync_btn)
         elevenlabs_settings_layout.addWidget(elevenlabs_sub_label)
 
-        elevenlabs_hint = QLabel("Nhập API Key từ https://elevenlabs.io/app/speech-synthesis. Giọng đọc sẽ được tải tự động khi có key hợp lệ.")
+        elevenlabs_hint = QLabel(t("Enter your API Key from https://elevenlabs.io/app/speech-synthesis. Voices will be loaded automatically when a valid key is provided."))
         elevenlabs_hint.setObjectName("helperLabel")
         elevenlabs_hint.setWordWrap(True)
         elevenlabs_settings_layout.addWidget(elevenlabs_hint)
@@ -17341,10 +17365,10 @@ class VideoTranslatorGUI(QMainWindow):
                     self,
                     t("ElevenLabs Voice Restricted"),
                     t(
-                        "Giọng '{voice_name}' được lấy từ Voice Library (cộng đồng) và yêu cầu tài khoản trả phí trên ElevenLabs.\n\n"
-                        "Tài khoản Free chỉ có thể sử dụng các giọng có nhãn [Default] hoặc giọng tự clone [Clone]. "
-                        "Vui lòng chọn một giọng khả dụng trước khi tạo giọng lồng tiếng.",
-                        voice_name=voice_entry.get("name", active_voice),
+                        "Voice '{voice_name}' is from the community Voice Library and requires a paid ElevenLabs plan.\n\n"
+                        "Free accounts can only use default voices [Default] or your own cloned voices [Clone]. "
+                        "Please select an available voice before running voiceover.",
+                        voice_name=voice_entry.get("raw_name") or voice_entry.get("name", active_voice),
                     ),
                 )
                 return

@@ -167,23 +167,33 @@ def fetch_elevenlabs_voices(api_key: str, force_refresh: bool = False) -> list[d
             is_usable_for_api = True
 
         if is_library_voice and not is_usable_for_api:
-            display_name = f"{base_name} 🔒 (Cần gói trả phí)"
+            display_name = f"{base_name} 🔒 (Paid Plan Required)"
             tier_label = "paid_only"
+            voice_type = "community"
         elif is_library_voice:
             display_name = f"{base_name} [Library]"
             tier_label = "premium"
+            voice_type = "community"
         elif category == "cloned":
             display_name = f"{base_name} [Clone]"
             tier_label = "cloned"
+            voice_type = "cloned"
         elif category == "generated":
             display_name = f"{base_name} [Design]"
             tier_label = "generated"
+            voice_type = "generated"
+        elif category == "premade":
+            display_name = f"{base_name} [Default]"
+            tier_label = "free"
+            voice_type = "premade"
         else:
             display_name = f"{base_name} [Default]"
             tier_label = "free"
+            voice_type = "premade"
 
         voices.append({
             "id": f"elevenlabs:{voice_id}",
+            "raw_name": base_name,
             "name": display_name,
             "provider": "elevenlabs",
             "provider_voice": voice_id,
@@ -191,6 +201,7 @@ def fetch_elevenlabs_voices(api_key: str, force_refresh: bool = False) -> list[d
             "gender": gender,
             "tier": tier_label,
             "category": category,
+            "voice_type": voice_type,
             "is_usable_for_api": is_usable_for_api,
             "enabled": True,
             "tags": ["elevenlabs", "online"],

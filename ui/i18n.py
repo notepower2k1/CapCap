@@ -1378,6 +1378,25 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Import Anyway": "Tiếp tục nhập",
     "Cancel & Review": "Hủy để kiểm tra",
     "Could not parse edited translated SRT:": "Không thể phân tích phụ đề dịch đã chỉnh sửa:",
+    "Paid Plan Required": "Cần gói trả phí",
+    "Default": "Mặc định",
+    "Clone": "Bản sao",
+    "Design": "Thiết kế",
+    "Parallel Workers:": "Số luồng tạo song song (Workers):",
+    "1 worker (Safe / Slow network)": "1 luồng (Mạng chậm / An toàn)",
+    "2 workers (Recommended for Free tier)": "2 luồng (Khuyến nghị gói Free)",
+    "3 workers 🔒 (Paid Plan Required)": "3 luồng 🔒 (Gói trả phí)",
+    "4 workers 🔒 (Paid Plan Required)": "4 luồng 🔒 (Gói trả phí)",
+    "Plan: Not connected": "Gói: Chưa kết nối",
+    "Plan: Free | Used: 0 / 0 characters": "Gói: Free | Đã dùng: 0 / 0 ký tự",
+    "Plan: {tier} | Used: {used} / {limit} characters": "Gói: {tier} | Đã dùng: {used} / {limit} ký tự",
+    "🔄 Sync voices from ElevenLabs": "🔄 Đồng bộ danh sách giọng từ ElevenLabs",
+    "Please enter your API Key first.": "Vui lòng nhập API Key trước.",
+    "Successfully synced {count} voices.": "Đồng bộ thành công: {count} giọng.",
+    "Enter your API Key from https://elevenlabs.io/app/speech-synthesis. Voices will be loaded automatically when a valid key is provided.": "Nhập API Key từ https://elevenlabs.io/app/speech-synthesis. Giọng đọc sẽ được tải tự động khi có key hợp lệ.",
+    "ElevenLabs API Settings": "Cài đặt ElevenLabs API",
+    "ElevenLabs Voice Restricted": "Giới hạn giọng ElevenLabs",
+    "Voice '{voice_name}' is from the community Voice Library and requires a paid ElevenLabs plan.\n\nFree accounts can only use default voices [Default] or your own cloned voices [Clone]. Please select an available voice before running voiceover.": "Giọng '{voice_name}' được lấy từ Voice Library (cộng đồng) và yêu cầu tài khoản trả phí trên ElevenLabs.\n\nTài khoản Free chỉ có thể sử dụng các giọng có nhãn [Mặc định] hoặc giọng tự clone [Bản sao]. Vui lòng chọn một giọng khả dụng trước khi tạo giọng lồng tiếng.",
 }
 
 
@@ -1414,10 +1433,20 @@ def localize_widget_tree(root) -> None:
         from PySide6.QtWidgets import QComboBox, QGroupBox, QLineEdit, QPlainTextEdit, QTabWidget, QTextEdit, QWidget
     except ImportError:
         return
+    try:
+        from shiboken6 import isValid
+    except ImportError:
+        isValid = lambda obj: True
+
+    if not isValid(root):
+        return
 
     widgets = [root]
     if isinstance(root, QWidget):
-        widgets.extend(root.findChildren(QWidget))
+        try:
+            widgets.extend([w for w in root.findChildren(QWidget) if isValid(w)])
+        except Exception:
+            pass
     for widget in widgets:
         if isinstance(widget, QComboBox):
             for index in range(widget.count()):
@@ -1521,10 +1550,23 @@ def set_language(value: Any, settings=None) -> str:
         from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()
-        if app is not None:
+        if app is not None and not getattr(app, "_capcap_test_mode", False):
             install_language_filter(app)
-            for window in app.topLevelWidgets():
-                localize_widget_tree(window)
+            try:
+                from shiboken6 import isValid
+            except ImportError:
+                isValid = lambda obj: True
+            try:
+                top_widgets = list(app.topLevelWidgets())
+            except Exception:
+                top_widgets = []
+            for window in top_widgets:
+                try:
+                    if not isValid(window):
+                        continue
+                    localize_widget_tree(window)
+                except Exception:
+                    pass
     except ImportError:
         pass
     return language

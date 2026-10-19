@@ -86,6 +86,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         self.assertEqual(len(voices), 2)
         expected_v1 = {
             "id": "elevenlabs:21m00Tcm4TlvDq8ikWAM",
+            "raw_name": "Rachel",
             "name": "Rachel [Default]",
             "provider": "elevenlabs",
             "provider_voice": "21m00Tcm4TlvDq8ikWAM",
@@ -93,6 +94,7 @@ class TestElevenLabsTTS(unittest.TestCase):
             "gender": "female",
             "tier": "free",
             "category": "premade",
+            "voice_type": "premade",
             "is_usable_for_api": True,
             "enabled": True,
             "tags": ["elevenlabs", "online"],
@@ -103,6 +105,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         }
         expected_v2 = {
             "id": "elevenlabs:AZnzlk1XvdvUeBnXmlld",
+            "raw_name": "Domi",
             "name": "Domi [Default]",
             "provider": "elevenlabs",
             "provider_voice": "AZnzlk1XvdvUeBnXmlld",
@@ -110,6 +113,7 @@ class TestElevenLabsTTS(unittest.TestCase):
             "gender": "male",
             "tier": "free",
             "category": "premade",
+            "voice_type": "premade",
             "is_usable_for_api": True,
             "enabled": True,
             "tags": ["elevenlabs", "online"],
