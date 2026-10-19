@@ -265,42 +265,51 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
         },
     }
 
-    try:
-        response = requests.post(
-            url,
-            headers=headers,
-            params=params,
-            json=payload,
-            stream=True,
-            timeout=30,
-        )
-    except requests.RequestException as e:
-        raise RuntimeError(f"ElevenLabs API network error: {e}") from e
-
-    if response.status_code == 401:
-        raise RuntimeError("ElevenLabs API Key không hợp lệ hoặc đã hết hạn.")
-    if response.status_code == 402:
-        err_text = response.text
-        err_lower = err_text.lower()
-        if "library_voice" in err_lower or "paid_plan_required" in err_lower or "voice library" in err_lower:
-            raise RuntimeError(
-                "ElevenLabs API (Lỗi 402): Tài khoản Free không thể sử dụng giọng từ Voice Library (cộng đồng) qua API. "
-                "Vui lòng đổi sang các giọng có nhãn [Default] hoặc giọng tự Clone [Clone] trong tài khoản, "
-                "hoặc nâng cấp gói trả phí trên ElevenLabs."
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                params=params,
+                json=payload,
+                stream=True,
+                timeout=30,
             )
-        raise RuntimeError(f"ElevenLabs API error 402 (Payment Required): {err_text}")
-    if response.status_code == 429:
-        raise RuntimeError("ElevenLabs API: Đã đạt giới hạn quota hoặc rate limit. Vui lòng thử lại sau.")
-    if response.status_code != 200:
-        raise RuntimeError(f"ElevenLabs API error {response.status_code}: {response.text}")
+        except requests.RequestException as e:
+            if attempt == max_retries - 1:
+                raise RuntimeError(f"ElevenLabs API network error: {e}") from e
+            time.sleep(1.0 * (attempt + 1))
+            continue
 
-    audio_bytes = response.content
-    if not audio_bytes:
-        raise RuntimeError(f"ElevenLabs trả về audio rỗng cho đoạn text: '{text[:40]}'")
+        if response.status_code == 429:
+            if attempt < max_retries - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise RuntimeError("ElevenLabs API: Đã đạt giới hạn quota hoặc rate limit. Vui lòng thử lại sau.")
 
-    _convert_audio_wav(audio_bytes, wav_path, tmp_dir=tmp_dir)
+        if response.status_code == 401:
+            raise RuntimeError("ElevenLabs API Key không hợp lệ hoặc đã hết hạn.")
+        if response.status_code == 402:
+            err_text = response.text
+            err_lower = err_text.lower()
+            if "library_voice" in err_lower or "paid_plan_required" in err_lower or "voice library" in err_lower:
+                raise RuntimeError(
+                    "ElevenLabs API (Lỗi 402): Tài khoản Free không thể sử dụng giọng từ Voice Library (cộng đồng) qua API. "
+                    "Vui lòng đổi sang các giọng có nhãn [Default] hoặc giọng tự Clone [Clone] trong tài khoản, "
+                    "hoặc nâng cấp gói trả phí trên ElevenLabs."
+                )
+            raise RuntimeError(f"ElevenLabs API error 402 (Payment Required): {err_text}")
+        if response.status_code != 200:
+            raise RuntimeError(f"ElevenLabs API error {response.status_code}: {response.text}")
 
-    if on_progress:
-        on_progress("[ElevenLabs] Hoàn tất tạo giọng nói.")
+        audio_bytes = response.content
+        if not audio_bytes:
+            raise RuntimeError(f"ElevenLabs trả về audio rỗng cho đoạn text: '{text[:40]}'")
 
-    return wav_path
+        _convert_audio_wav(audio_bytes, wav_path, tmp_dir=tmp_dir)
+
+        if on_progress:
+            on_progress("[ElevenLabs] Hoàn tất tạo giọng nói.")
+
+        return wav_path

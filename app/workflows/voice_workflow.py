@@ -1410,6 +1410,12 @@ class VoiceWorkflow:
                     pass
             elif pending_providers == {"edge"}:
                 worker_count = 1
+            elif "elevenlabs" in pending_providers:
+                try:
+                    el_workers = max(1, min(4, int(os.getenv("ELEVENLABS_TTS_WORKERS", "2"))))
+                except (TypeError, ValueError):
+                    el_workers = 2
+                worker_count = max(1, min(el_workers, len(pending_jobs)))
             elif pending_providers == {"capcut"}:
                 try:
                     capcut_workers = max(1, int(os.getenv("CAPCUT_TTS_WORKERS", "30")))
