@@ -233,7 +233,7 @@ class TestElevenLabsTTS(unittest.TestCase):
             wav_path=target_wav,
             voice_id="21m00Tcm4TlvDq8ikWAM",
             api_key="valid_key",
-            model_id="eleven_multilingual_v2",
+            model_id="eleven_turbo_v2_5",
             speed=1.0,
             tmp_dir="D:/dummy/temp",
             on_progress=lambda msg: progress_messages.append(msg),
@@ -249,7 +249,7 @@ class TestElevenLabsTTS(unittest.TestCase):
             params={"output_format": "mp3_44100_128"},
             json={
                 "text": "Xin chào các bạn",
-                "model_id": "eleven_multilingual_v2",
+                "model_id": "eleven_turbo_v2_5",
                 "voice_settings": {
                     "stability": 0.5,
                     "similarity_boost": 0.75,
@@ -428,6 +428,48 @@ class TestElevenLabsTTS(unittest.TestCase):
             )
         _, kwargs = mock_post.call_args
         self.assertNotIn("language_code", kwargs["json"])
+
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("requests.post")
+    def test_synthesize_auto_switches_multilingual_v2_for_vietnamese(self, mock_post, mock_convert):
+        """eleven_multilingual_v2 auto-switches to eleven_turbo_v2_5 when text has Vietnamese chars."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"fake_mp3_audio_bytes"
+        mock_post.return_value = mock_resp
+
+        synthesize_elevenlabs_tts_wav_16k_mono(
+            text="Xin chào các bạn",
+            wav_path="out.wav",
+            voice_id="21m00Tcm4TlvDq8ikWAM",
+            api_key="valid_key",
+            model_id="eleven_multilingual_v2",
+        )
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["model_id"], "eleven_turbo_v2_5")
+        self.assertEqual(kwargs["json"]["language_code"], "vi")
+
+    @patch("requests.post")
+    def test_synthesize_400_unsupported_language(self, mock_post):
+        """Mock POST 400 with unsupported_language, assert clear Vietnamese RuntimeError."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = '{"detail":{"status":"unsupported_language","message":"Model \'eleven_multilingual_v2\' does not support language_code \'vi\'."}}'
+        mock_post.return_value = mock_resp
+
+        with self.assertRaises(RuntimeError) as ctx:
+            synthesize_elevenlabs_tts_wav_16k_mono(
+                text="Xin chào",
+                wav_path="out.wav",
+                voice_id="21m00Tcm4TlvDq8ikWAM",
+                api_key="valid_key",
+                model_id="some_model_without_vi",
+                language_code="vi",
+            )
+        err_msg = str(ctx.exception)
+        self.assertIn("Lỗi 400 - Model không hỗ trợ ngôn ngữ", err_msg)
+        self.assertIn("eleven_turbo_v2_5", err_msg)
+        self.assertIn("eleven_flash_v2_5", err_msg)
 
 
 if __name__ == "__main__":

@@ -257,7 +257,7 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
 
     clamped_speed = max(0.7, min(1.2, float(speed)))
 
-    resolved_model_id = str(model_id or os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2") or "eleven_multilingual_v2").strip()
+    resolved_model_id = str(model_id or os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5") or "eleven_turbo_v2_5").strip()
 
     clean_lang = None
     if language_code:
@@ -279,6 +279,10 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
         )
         if any(c in vietnamese_chars for c in text):
             clean_lang = "vi"
+
+    if clean_lang == "vi" and resolved_model_id == "eleven_multilingual_v2":
+        print("[ElevenLabs] Model 'eleven_multilingual_v2' does not support Vietnamese ('vi'). Auto-switching to 'eleven_turbo_v2_5'.")
+        resolved_model_id = "eleven_turbo_v2_5"
 
     if on_progress:
         on_progress(f"[ElevenLabs] Đang tạo giọng nói ({clean_voice_id})...")
@@ -324,6 +328,16 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
                 time.sleep(1.5 * (attempt + 1))
                 continue
             raise RuntimeError("ElevenLabs API: Đã đạt giới hạn quota hoặc rate limit. Vui lòng thử lại sau.")
+
+        if response.status_code == 400:
+            err_text = response.text
+            err_lower = err_text.lower()
+            if "unsupported_language" in err_lower or "does not support language_code" in err_lower:
+                raise RuntimeError(
+                    f"ElevenLabs API (Lỗi 400 - Model không hỗ trợ ngôn ngữ): Model '{resolved_model_id}' không hỗ trợ mã ngôn ngữ '{clean_lang}'. "
+                    "Vui lòng vào Settings chọn model 'eleven_turbo_v2_5' hoặc 'eleven_flash_v2_5' để hỗ trợ tiếng Việt."
+                )
+            raise RuntimeError(f"ElevenLabs API error 400: {err_text}")
 
         if response.status_code == 401:
             raise RuntimeError("ElevenLabs API Key không hợp lệ hoặc đã hết hạn.")

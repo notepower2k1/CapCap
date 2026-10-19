@@ -668,7 +668,7 @@ def synthesize_text_to_wav_16k_mono(
     model_id: str | None = None,
 ) -> str:
     voice_to_search = str(voice).strip()
-    model_to_use = str(model_id or os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2") or "eleven_multilingual_v2").strip()
+    model_to_use = str(model_id or os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5") or "eleven_turbo_v2_5").strip()
     lang_to_use = language_code or language
 
     # Fast path for VieNeu voices

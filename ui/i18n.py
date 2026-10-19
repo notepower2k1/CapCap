@@ -1397,6 +1397,9 @@ VI_TRANSLATIONS: dict[str, str] = {
     "ElevenLabs API Settings": "Cài đặt ElevenLabs API",
     "ElevenLabs Voice Restricted": "Giới hạn giọng ElevenLabs",
     "Voice '{voice_name}' is from the community Voice Library and requires a paid ElevenLabs plan.\n\nFree accounts can only use default voices [Default] or your own cloned voices [Clone]. Please select an available voice before running voiceover.": "Giọng '{voice_name}' được lấy từ Voice Library (cộng đồng) và yêu cầu tài khoản trả phí trên ElevenLabs.\n\nTài khoản Free chỉ có thể sử dụng các giọng có nhãn [Mặc định] hoặc giọng tự clone [Bản sao]. Vui lòng chọn một giọng khả dụng trước khi tạo giọng lồng tiếng.",
+    "eleven_turbo_v2_5 (Recommended - Supports VI, EN, ...)": "eleven_turbo_v2_5 (Khuyên dùng - Hỗ trợ Tiếng Việt, Anh...)",
+    "eleven_flash_v2_5 (Fastest - Supports VI, EN, ...)": "eleven_flash_v2_5 (Nhanh nhất - Hỗ trợ Tiếng Việt, Anh...)",
+    "eleven_multilingual_v2 (Legacy 29 langs - No Vietnamese)": "eleven_multilingual_v2 (29 ngôn ngữ cũ - Không hỗ trợ Tiếng Việt)",
 }
 
 

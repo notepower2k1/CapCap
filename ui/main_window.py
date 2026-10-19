@@ -16158,10 +16158,10 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_model_layout = QVBoxLayout()
         elevenlabs_model_label = QLabel("Model:")
         elevenlabs_model_combo = QComboBox(dialog)
-        elevenlabs_model_combo.addItem("eleven_multilingual_v2 (Recommended)", "eleven_multilingual_v2")
-        elevenlabs_model_combo.addItem("eleven_turbo_v2_5 (Fast)", "eleven_turbo_v2_5")
-        elevenlabs_model_combo.addItem("eleven_flash_v2_5 (Fastest)", "eleven_flash_v2_5")
-        current_el_model = os.getenv("ELEVENLABS_MODEL", self.settings.value("elevenlabs_model", "eleven_multilingual_v2"))
+        elevenlabs_model_combo.addItem(t("eleven_turbo_v2_5 (Recommended - Supports VI, EN, ...)"), "eleven_turbo_v2_5")
+        elevenlabs_model_combo.addItem(t("eleven_flash_v2_5 (Fastest - Supports VI, EN, ...)"), "eleven_flash_v2_5")
+        elevenlabs_model_combo.addItem(t("eleven_multilingual_v2 (Legacy 29 langs - No Vietnamese)"), "eleven_multilingual_v2")
+        current_el_model = os.getenv("ELEVENLABS_MODEL", self.settings.value("elevenlabs_model", "eleven_turbo_v2_5"))
         el_model_idx = elevenlabs_model_combo.findData(current_el_model)
         elevenlabs_model_combo.setCurrentIndex(el_model_idx if el_model_idx >= 0 else 0)
         elevenlabs_model_layout.addWidget(elevenlabs_model_label)
@@ -16711,7 +16711,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         # ElevenLabs settings
         new_elevenlabs_key = elevenlabs_key_edit.text().strip()
-        new_elevenlabs_model = str(elevenlabs_model_combo.currentData() or "eleven_multilingual_v2").strip()
+        new_elevenlabs_model = str(elevenlabs_model_combo.currentData() or "eleven_turbo_v2_5").strip()
         new_elevenlabs_workers = str(elevenlabs_workers_combo.currentData() or "2").strip()
         os.environ["ELEVENLABS_API_KEY"] = new_elevenlabs_key
         os.environ["ELEVENLABS_MODEL"] = new_elevenlabs_model
