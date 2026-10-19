@@ -342,8 +342,8 @@ class TestUIVoiceWorkersAndLang(unittest.TestCase):
         self.assertEqual(idx, 2)
 
     def test_settings_dialog_tabbed_structure(self):
-        """Verifies open_model_settings_dialog constructs a QTabWidget with 4 tabs and expected child widgets."""
-        from PySide6.QtWidgets import QDialog, QTabWidget, QLineEdit, QLabel
+        """Verifies open_model_settings_dialog constructs a QTabWidget with 3 tabs and expected child widgets."""
+        from PySide6.QtWidgets import QDialog, QTabWidget, QLineEdit, QLabel, QPushButton
         import tempfile
         from pathlib import Path
 
@@ -372,19 +372,25 @@ class TestUIVoiceWorkersAndLang(unittest.TestCase):
                 self.assertIsNotNone(captured_dialog)
                 tabs = captured_dialog.findChild(QTabWidget)
                 self.assertIsNotNone(tabs, "QTabWidget must be present in settings dialog")
-                self.assertEqual(tabs.count(), 4)
+                self.assertEqual(tabs.count(), 3)
 
                 # Tab titles
                 tab_titles = [tabs.tabText(i) for i in range(tabs.count())]
                 self.assertEqual(
                     tab_titles,
-                    [t("Transcription"), t("AI Translation"), t("Voice & TTS"), t("System & Remote")]
+                    [t("Transcription"), t("AI Translation"), t("Voice & TTS")]
                 )
 
                 # Verify child widgets
                 combos = captured_dialog.findChildren(QComboBox)
                 edits = captured_dialog.findChildren(QLineEdit)
                 labels = captured_dialog.findChildren(QLabel)
+                buttons = captured_dialog.findChildren(QPushButton)
+                button_texts = [b.text() for b in buttons]
+
+                # Verify Manage Resources & Open Voices Folder buttons are on captured_dialog
+                self.assertIn(t("Manage Resources"), button_texts)
+                self.assertIn(t("Open Voices Folder"), button_texts)
 
                 # Verify ElevenLabs API Key field is password mode
                 self.assertTrue(any(e.echoMode() == QLineEdit.Password for e in edits))
@@ -405,8 +411,7 @@ class TestUIVoiceWorkersAndLang(unittest.TestCase):
 
                 self.assertIsNotNone(captured_dialog)
                 tabs_remote = captured_dialog.findChild(QTabWidget)
-                self.assertEqual(tabs_remote.count(), 4)
-                self.assertEqual(tabs_remote.currentIndex(), 3)
+                self.assertEqual(tabs_remote.count(), 3)
             finally:
                 gui.close()
                 gui.deleteLater()

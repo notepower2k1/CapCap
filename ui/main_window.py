@@ -16674,22 +16674,16 @@ class VideoTranslatorGUI(QMainWindow):
 
         voice_layout.addWidget(capcut_tts_widget)
 
-        # Local Voice Resources (Piper) Section
-        divider2 = QFrame(voice_content)
-        divider2.setFrameShape(QFrame.HLine)
-        divider2.setStyleSheet("color: #2f4868;")
-        voice_layout.addWidget(divider2)
+        voice_layout.addStretch(1)
+        tabs.addTab(voice_scroll, t("Voice & TTS"))
 
-        local_voice_title = QLabel(t("Local Voice Resources (Piper)"), voice_content)
-        local_voice_title.setObjectName("statusHeadline")
-        voice_layout.addWidget(local_voice_title)
-
-        local_download_layout = QHBoxLayout()
-        manage_resources_btn = QPushButton(t("Manage Resources"), voice_content)
-        open_voices_folder_btn = QPushButton(t("Open Voices Folder"), voice_content)
-        local_download_layout.addWidget(manage_resources_btn)
-        local_download_layout.addWidget(open_voices_folder_btn)
-        voice_layout.addLayout(local_download_layout)
+        # Hidden Remote API fields for backward-compatible save logic
+        remote_url_edit = QLineEdit(dialog)
+        remote_url_edit.setVisible(False)
+        remote_url_edit.setText(os.getenv("CAPCAP_REMOTE_API_URL", "http://127.0.0.1:8765"))
+        remote_token_edit = QLineEdit(dialog)
+        remote_token_edit.setVisible(False)
+        remote_token_edit.setText(os.getenv("CAPCAP_REMOTE_API_TOKEN", ""))
 
         def _piper_models_dir() -> str:
             return models_path("piper")
@@ -16699,90 +16693,22 @@ class VideoTranslatorGUI(QMainWindow):
             os.makedirs(voices_dir, exist_ok=True)
             open_folder_impl(self, voices_dir)
 
-        open_voices_folder_btn.clicked.connect(open_voices_folder)
-        manage_resources_btn.clicked.connect(self.open_resource_manager_dialog)
-
-        voice_layout.addStretch(1)
-        tabs.addTab(voice_scroll, t("Voice & TTS"))
-
-        # =========================================================================
-        # Tab 4: System & Remote
-        # =========================================================================
-        sys_scroll, sys_content, sys_layout = _make_tab_scroll_widget()
-
-        remote_title = QLabel(t("Remote API"), sys_content)
-        remote_title.setObjectName("statusHeadline")
-        sys_layout.addWidget(remote_title)
-
-        remote_url_layout = QVBoxLayout()
-        remote_url_label = QLabel(t("PC API URL:"), sys_content)
-        remote_url_edit = QLineEdit(sys_content)
-        remote_url_edit.setText(os.getenv("CAPCAP_REMOTE_API_URL", "http://127.0.0.1:8765"))
-        remote_url_layout.addWidget(remote_url_label)
-        remote_url_layout.addWidget(remote_url_edit)
-        sys_layout.addLayout(remote_url_layout)
-
-        remote_token_layout = QVBoxLayout()
-        remote_token_label = QLabel(t("API Token (optional):"), sys_content)
-        remote_token_edit = QLineEdit(sys_content)
-        remote_token_edit.setEchoMode(QLineEdit.Password)
-        remote_token_edit.setText(os.getenv("CAPCAP_REMOTE_API_TOKEN", ""))
-        remote_token_layout.addWidget(remote_token_label)
-        remote_token_layout.addWidget(remote_token_edit)
-        sys_layout.addLayout(remote_token_layout)
-
-        remote_actions_layout = QHBoxLayout()
-        test_remote_btn = QPushButton(t("Test Connection"), sys_content)
-        remote_actions_layout.addWidget(test_remote_btn)
-        remote_actions_layout.addStretch()
-        sys_layout.addLayout(remote_actions_layout)
-
-        remote_hint_label = QLabel(
-            t("Remote mode keeps Whisper and AI translation on your PC server. This laptop build only sends extracted audio and subtitle segments over HTTP."),
-            sys_content,
-        )
-        remote_hint_label.setObjectName("helperLabel")
-        remote_hint_label.setWordWrap(True)
-        sys_layout.addWidget(remote_hint_label)
-
-        def _test_remote_connection():
-            try:
-                payload = self._test_remote_api_connection(
-                    remote_url_edit.text().strip(),
-                    remote_token_edit.text().strip(),
-                )
-                service_name = str(payload.get("service", "capcap-remote-api") or "capcap-remote-api")
-                profile_name = str(payload.get("profile", "local") or "local")
-                QMessageBox.information(
-                    dialog,
-                    t("Remote API"),
-                    t("Connected successfully.\n\nService: {service}\nProfile: {profile}", service=service_name, profile=profile_name),
-                )
-            except Exception as exc:
-                QMessageBox.warning(
-                    dialog,
-                    t("Remote API"),
-                    t("Could not connect to the PC server.\n\n{error}", error=exc),
-                )
-
-        test_remote_btn.clicked.connect(_test_remote_connection)
-
-        sys_layout.addStretch(1)
-        tabs.addTab(sys_scroll, t("System & Remote"))
-
-        if remote_mode:
-            tabs.setCurrentIndex(3)
-
         # Buttons
         button_row = QHBoxLayout()
         button_row.setContentsMargins(8, 4, 8, 4)
-        button_row.addStretch()
+        manage_resources_btn = QPushButton(t("Manage Resources"), dialog)
+        open_voices_folder_btn = QPushButton(t("Open Voices Folder"), dialog)
+        button_row.addWidget(manage_resources_btn)
+        button_row.addWidget(open_voices_folder_btn)
+        button_row.addStretch(1)
         cancel_btn = QPushButton(t("Cancel"), dialog)
         save_btn = QPushButton(t("Save"), dialog)
         button_row.addWidget(cancel_btn)
         button_row.addWidget(save_btn)
         main_dialog_layout.addLayout(button_row)
 
+        manage_resources_btn.clicked.connect(self.open_resource_manager_dialog)
+        open_voices_folder_btn.clicked.connect(open_voices_folder)
         cancel_btn.clicked.connect(dialog.reject)
         save_btn.clicked.connect(dialog.accept)
         adjust_dialog_size()
