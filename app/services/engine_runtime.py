@@ -225,6 +225,9 @@ class EngineRuntime:
         tmp_dir: str | None = None,
         on_progress: callable = None,
         normalizer_dictionary=None,
+        language: str | None = None,
+        language_code: str | None = None,
+        model_id: str | None = None,
     ) -> str:
         return self.tts.synthesize_segment(
             text=text,
@@ -234,6 +237,9 @@ class EngineRuntime:
             tmp_dir=tmp_dir,
             on_progress=on_progress,
             normalizer_dictionary=normalizer_dictionary,
+            language=language,
+            language_code=language_code,
+            model_id=model_id,
         )
 
     def build_voice_track(self, *, segments, tts_wav_paths, output_wav_path: str, gain_db: float = 0.0) -> str:

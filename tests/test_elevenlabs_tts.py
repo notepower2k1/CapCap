@@ -255,6 +255,7 @@ class TestElevenLabsTTS(unittest.TestCase):
                     "similarity_boost": 0.75,
                     "speed": 1.0,
                 },
+                "language_code": "vi",
             },
             stream=True,
             timeout=30,
@@ -370,6 +371,63 @@ class TestElevenLabsTTS(unittest.TestCase):
         )
         args, _ = mock_post.call_args
         self.assertEqual(args[0], "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM")
+
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("requests.post")
+    def test_synthesize_with_explicit_language_code(self, mock_post, mock_convert):
+        """Explicit language_code is cleaned and included in payload."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"fake_audio_bytes"
+        mock_post.return_value = mock_resp
+
+        synthesize_elevenlabs_tts_wav_16k_mono(
+            text="Hello world",
+            wav_path="out.wav",
+            voice_id="21m00Tcm4TlvDq8ikWAM",
+            api_key="valid_key",
+            language_code="ja-JP",
+        )
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["language_code"], "ja")
+
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("requests.post")
+    def test_synthesize_with_model_id_from_env(self, mock_post, mock_convert):
+        """ELEVENLABS_MODEL in env is used when model_id is not explicitly passed."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"fake_audio_bytes"
+        mock_post.return_value = mock_resp
+
+        with patch.dict(os.environ, {"ELEVENLABS_MODEL": "eleven_flash_v2_5"}):
+            synthesize_elevenlabs_tts_wav_16k_mono(
+                text="Test env model",
+                wav_path="out.wav",
+                voice_id="21m00Tcm4TlvDq8ikWAM",
+                api_key="valid_key",
+            )
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["model_id"], "eleven_flash_v2_5")
+
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("requests.post")
+    def test_synthesize_ascii_no_language_code(self, mock_post, mock_convert):
+        """ASCII text without explicit language or TARGET_LANGUAGE env omits language_code."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"fake_audio_bytes"
+        mock_post.return_value = mock_resp
+
+        with patch.dict(os.environ, {"TARGET_LANGUAGE": ""}, clear=False):
+            synthesize_elevenlabs_tts_wav_16k_mono(
+                text="Hello world",
+                wav_path="out.wav",
+                voice_id="21m00Tcm4TlvDq8ikWAM",
+                api_key="valid_key",
+            )
+        _, kwargs = mock_post.call_args
+        self.assertNotIn("language_code", kwargs["json"])
 
 
 if __name__ == "__main__":

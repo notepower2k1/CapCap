@@ -236,7 +236,8 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
     wav_path: str,
     voice_id: str,
     api_key: str,
-    model_id: str = "eleven_multilingual_v2",
+    model_id: str | None = None,
+    language_code: str | None = None,
     speed: float = 1.0,
     tmp_dir: str | None = None,
     on_progress: callable = None,
@@ -256,6 +257,29 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
 
     clamped_speed = max(0.7, min(1.2, float(speed)))
 
+    resolved_model_id = str(model_id or os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2") or "eleven_multilingual_v2").strip()
+
+    clean_lang = None
+    if language_code:
+        cand = str(language_code).strip().lower().split("-")[0].split("_")[0]
+        if cand and cand not in ("multilingual", "multi", "any", "all", "auto"):
+            clean_lang = cand
+
+    if not clean_lang:
+        env_lang = os.getenv("TARGET_LANGUAGE", "").strip().lower()
+        if env_lang:
+            cand = env_lang.split("-")[0].split("_")[0]
+            if cand and cand not in ("multilingual", "multi", "any", "all", "auto"):
+                clean_lang = cand
+
+    if not clean_lang:
+        vietnamese_chars = set(
+            "àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ"
+            "ÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ"
+        )
+        if any(c in vietnamese_chars for c in text):
+            clean_lang = "vi"
+
     if on_progress:
         on_progress(f"[ElevenLabs] Đang tạo giọng nói ({clean_voice_id})...")
     print(f"[ElevenLabs] Synthesizing speech for voice_id='{clean_voice_id}'...")
@@ -268,13 +292,15 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
     params = {"output_format": "mp3_44100_128"}
     payload = {
         "text": text,
-        "model_id": model_id,
+        "model_id": resolved_model_id,
         "voice_settings": {
             "stability": 0.5,
             "similarity_boost": 0.75,
             "speed": clamped_speed,
         },
     }
+    if clean_lang:
+        payload["language_code"] = clean_lang
 
     max_retries = 3
     for attempt in range(max_retries):

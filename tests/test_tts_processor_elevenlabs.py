@@ -56,6 +56,8 @@ class TestTTSProcessorElevenLabs(unittest.TestCase):
             wav_path="D:/dummy/output.wav",
             voice_id="21m00Tcm4TlvDq8ikWAM",
             api_key="test_api_key_123",
+            model_id="eleven_multilingual_v2",
+            language_code=None,
             speed=1.05,
             tmp_dir="D:/dummy/tmp",
             on_progress=progress_callback,
@@ -120,6 +122,8 @@ class TestTTSProcessorElevenLabs(unittest.TestCase):
             wav_path="D:/dummy/catalog_output.wav",
             voice_id="provider_voice_999",
             api_key="test_api_key_abc",
+            model_id="eleven_multilingual_v2",
+            language_code=None,
             speed=0.9,
             tmp_dir="D:/dummy/tmp",
             on_progress=progress_callback,
@@ -231,6 +235,34 @@ class TestTTSProcessorElevenLabs(unittest.TestCase):
         )
         self.assertEqual(result, "D:/dummy/output.wav")
         mock_piper_tts.assert_called_once()
+
+    @patch("app.engines.elevenlabs_tts.synthesize_elevenlabs_tts_wav_16k_mono")
+    @patch("os.getenv")
+    def test_synthesize_forwards_model_id_and_language_code(self, mock_getenv, mock_synthesize):
+        """synthesize_text_to_wav_16k_mono forwards explicit model_id and language_code to elevenlabs engine."""
+        mock_getenv.side_effect = lambda key, default="": "test_api_key_123" if key == "ELEVENLABS_API_KEY" else default
+        mock_synthesize.return_value = "D:/dummy/output.wav"
+
+        result = tts_processor.synthesize_text_to_wav_16k_mono(
+            text="Hello world",
+            wav_path="D:/dummy/output.wav",
+            voice="elevenlabs:21m00Tcm4TlvDq8ikWAM",
+            model_id="eleven_turbo_v2_5",
+            language_code="en",
+        )
+
+        self.assertEqual(result, "D:/dummy/output.wav")
+        mock_synthesize.assert_called_once_with(
+            text="Hello world",
+            wav_path="D:/dummy/output.wav",
+            voice_id="21m00Tcm4TlvDq8ikWAM",
+            api_key="test_api_key_123",
+            model_id="eleven_turbo_v2_5",
+            language_code="en",
+            speed=1.0,
+            tmp_dir=None,
+            on_progress=None,
+        )
 
 
 if __name__ == "__main__":
