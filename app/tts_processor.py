@@ -695,7 +695,6 @@ def synthesize_text_to_wav_16k_mono(
 
     # Fast path for ElevenLabs voices
     if voice_to_search.startswith("elevenlabs:"):
-        import os
         api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
         if not api_key:
             raise RuntimeError(
@@ -795,7 +794,6 @@ def synthesize_text_to_wav_16k_mono(
             on_progress=on_progress,
         )
     elif provider == "elevenlabs":
-        import os
         api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
         if not api_key:
             raise RuntimeError(

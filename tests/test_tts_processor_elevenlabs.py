@@ -200,6 +200,39 @@ class TestTTSProcessorElevenLabs(unittest.TestCase):
         result_fast = tts_processor.preload_tts_voice("elevenlabs:some_voice")
         self.assertFalse(result_fast)
 
+    @patch("app.tts_processor.piper_tts_to_wav_16k_mono")
+    @patch("app.tts_processor._resolve_piper_model_path")
+    @patch("app.tts_processor.os.path.exists")
+    @patch("app.tts_processor.json.load")
+    @patch("builtins.open", mock_open())
+    def test_synthesize_piper_voice_does_not_raise_unbound_local_os(
+        self, mock_json_load, mock_os_exists, mock_resolve_model, mock_piper_tts
+    ):
+        """synthesize_text_to_wav_16k_mono with piper voice should not raise UnboundLocalError for os."""
+        mock_json_load.return_value = {
+            "voices": [
+                {
+                    "id": "ngochuyen",
+                    "name": "Ngọc Huyền",
+                    "provider": "piper",
+                    "provider_voice": "vi_VN-25hours-single-low.onnx",
+                    "language": "vi",
+                }
+            ]
+        }
+        mock_resolve_model.return_value = "D:/dummy/models/piper/vi_VN-25hours-single-low.onnx"
+        mock_os_exists.return_value = True
+        mock_piper_tts.return_value = "D:/dummy/output.wav"
+
+        result = tts_processor.synthesize_text_to_wav_16k_mono(
+            text="Xin chào",
+            wav_path="D:/dummy/output.wav",
+            voice="ngochuyen",
+        )
+        self.assertEqual(result, "D:/dummy/output.wav")
+        mock_piper_tts.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+
