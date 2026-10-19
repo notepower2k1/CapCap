@@ -71,31 +71,54 @@ def _convert_audio_wav(source: bytes, wav_path: str, tmp_dir: str | None = None)
 
 def fetch_elevenlabs_user_subscription(api_key: str) -> dict:
     """Fetch user subscription info from ElevenLabs API.
-    Calls GET https://api.elevenlabs.io/v1/user/subscription with header xi-api-key: <api_key>.
+    Tries GET https://api.elevenlabs.io/v1/user/subscription first.
+    If response status != 200 or missing tier, falls back to GET https://api.elevenlabs.io/v1/user
+    (extracting data.get("subscription")).
     Returns dict with keys: tier, character_count, character_limit, status.
     Returns {} on failure.
     """
     clean_key = str(api_key or "").strip()
     if not clean_key:
         return {}
-    url = "https://api.elevenlabs.io/v1/user/subscription"
     headers = {"xi-api-key": clean_key}
+
+    sub_data = None
+
+    # 1. Try dedicated subscription endpoint
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code != 200:
-            return {}
-        data = response.json()
-        if not isinstance(data, dict):
-            return {}
-        return {
-            "tier": str(data.get("tier", "") or "").strip().lower(),
-            "character_count": int(data.get("character_count", 0) or 0),
-            "character_limit": int(data.get("character_limit", 0) or 0),
-            "status": str(data.get("status", "") or "").strip().lower(),
-        }
+        url_sub = "https://api.elevenlabs.io/v1/user/subscription"
+        response = requests.get(url_sub, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict) and data.get("tier"):
+                sub_data = data
     except Exception as e:
-        print(f"[ElevenLabs] Lỗi khi lấy thông tin subscription: {e}")
+        print(f"[ElevenLabs] Lỗi khi lấy thông tin subscription (v1/user/subscription): {e}")
+
+    # 2. Fallback to /v1/user endpoint if not found or failed
+    if not sub_data:
+        try:
+            url_user = "https://api.elevenlabs.io/v1/user"
+            response = requests.get(url_user, headers=headers, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, dict):
+                    nested_sub = data.get("subscription")
+                    if isinstance(nested_sub, dict) and nested_sub.get("tier"):
+                        sub_data = nested_sub
+        except Exception as e:
+            print(f"[ElevenLabs] Lỗi khi lấy thông tin subscription (v1/user fallback): {e}")
+
+    if not sub_data:
         return {}
+
+    return {
+        "tier": str(sub_data.get("tier", "") or "").strip().lower(),
+        "character_count": int(sub_data.get("character_count", 0) or 0),
+        "character_limit": int(sub_data.get("character_limit", 0) or 0),
+        "status": str(sub_data.get("status", "") or "").strip().lower(),
+    }
+
 
 
 def fetch_elevenlabs_models(api_key: str = "") -> list[dict]:

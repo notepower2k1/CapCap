@@ -235,8 +235,28 @@ def update_elevenlabs_workers_combo_state(combo, tier: str = "free") -> None:
     return _update_workers_combo_state(combo, tier)
 
 
+def format_elevenlabs_sub_label(sub_info_dict, api_key_str: str = "") -> str:
+    """Format ElevenLabs user subscription information with thousand separators."""
+    if isinstance(sub_info_dict, dict) and sub_info_dict.get("tier"):
+        tier_str = str(sub_info_dict.get("tier", "")).capitalize()
+        raw_count = sub_info_dict.get("character_count", 0) or 0
+        raw_limit = sub_info_dict.get("character_limit", 0) or 0
+        try:
+            c_count = f"{int(raw_count):,}"
+        except (ValueError, TypeError):
+            c_count = str(raw_count)
+        try:
+            c_limit = f"{int(raw_limit):,}"
+        except (ValueError, TypeError):
+            c_limit = str(raw_limit)
+        return t("Plan: {tier} | Used: {used} / {limit} characters", tier=tier_str, used=c_count, limit=c_limit)
+    else:
+        return t("Plan: Free | Used: 0 / 0 characters") if api_key_str else t("Plan: Not connected")
+
+
 class VideoTranslatorGUI(QMainWindow):
     _update_workers_combo_state = staticmethod(_update_workers_combo_state)
+    _format_sub_label = staticmethod(format_elevenlabs_sub_label)
     VOICE_ENTRY_ID_ROLE = Qt.UserRole + 1
     runtime_log_received = Signal(str)
     subtitle_ass_ready = Signal(int, str, str, object)
@@ -16198,14 +16218,7 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_sub_label.setObjectName("helperLabel")
         saved_key = os.getenv("ELEVENLABS_API_KEY", self.settings.value("elevenlabs_api_key", "")).strip()
 
-        def _format_sub_label(sub_info_dict, api_key_str):
-            if isinstance(sub_info_dict, dict) and sub_info_dict.get("tier"):
-                tier_str = str(sub_info_dict.get("tier", "")).capitalize()
-                c_count = sub_info_dict.get("character_count", 0)
-                c_limit = sub_info_dict.get("character_limit", 0)
-                return t("Plan: {tier} | Used: {used} / {limit} characters", tier=tier_str, used=c_count, limit=c_limit)
-            else:
-                return t("Plan: Free | Used: 0 / 0 characters") if api_key_str else t("Plan: Not connected")
+        _format_sub_label = format_elevenlabs_sub_label
 
         c_sub = {}
         c_tier = "free"
@@ -16217,10 +16230,21 @@ class VideoTranslatorGUI(QMainWindow):
                 if os.path.exists(cache_path):
                     with open(cache_path, "r", encoding="utf-8") as f:
                         c_sub = json.load(f).get("user_subscription", {})
-                        if isinstance(c_sub, dict) and c_sub.get("tier"):
-                            c_tier = str(c_sub.get("tier", "free")).strip().lower()
             except Exception:
                 pass
+
+            if not isinstance(c_sub, dict) or not c_sub.get("tier"):
+                try:
+                    try:
+                        from app.engines.elevenlabs_tts import fetch_elevenlabs_user_subscription
+                    except ImportError:
+                        from engines.elevenlabs_tts import fetch_elevenlabs_user_subscription
+                    c_sub = fetch_elevenlabs_user_subscription(saved_key)
+                except Exception:
+                    c_sub = {}
+
+            if isinstance(c_sub, dict) and c_sub.get("tier"):
+                c_tier = str(c_sub.get("tier", "free")).strip().lower()
         elevenlabs_sub_label.setText(_format_sub_label(c_sub, saved_key))
         _update_workers_combo_state(c_tier)
 
@@ -16267,18 +16291,10 @@ class VideoTranslatorGUI(QMainWindow):
                 except Exception as model_err:
                     print(f"[ElevenLabs] Warning: could not refresh models: {model_err}")
 
-                sub_info = {}
-                if os.path.exists(cache_path):
-                    try:
-                        with open(cache_path, "r", encoding="utf-8") as f:
-                            sub_info = json.load(f).get("user_subscription", {})
-                    except Exception:
-                        pass
-                if not sub_info:
-                    try:
-                        sub_info = fetch_elevenlabs_user_subscription(key)
-                    except Exception:
-                        sub_info = {}
+                try:
+                    sub_info = fetch_elevenlabs_user_subscription(key)
+                except Exception:
+                    sub_info = {}
 
                 elevenlabs_sub_label.setText(_format_sub_label(sub_info, key))
                 if isinstance(sub_info, dict) and sub_info.get("tier"):

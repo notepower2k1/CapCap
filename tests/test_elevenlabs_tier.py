@@ -23,6 +23,17 @@ for p in (PROJECT_ROOT, APP_DIR, UI_DIR):
         sys.path.insert(0, p)
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 from app.engines.elevenlabs_tts import (
     fetch_elevenlabs_user_subscription,
@@ -303,6 +314,67 @@ class TestElevenLabsTier(unittest.TestCase):
         self.assertIn("ElevenLabs Voice Restricted", str(warning_args[1]))
         self.assertIn("MC The Hao", str(warning_args[2]))
         gui._pipeline_fail.assert_called_once_with("Voice restricted")
+
+    @patch("requests.get")
+    def test_fetch_subscription_fallback_to_user_endpoint(self, mock_get):
+        """Verifies that when /v1/user/subscription returns 404 or 401, it calls /v1/user and parses the subscription dict."""
+        for error_code in (404, 401):
+            with self.subTest(error_code=error_code):
+                calls = []
+
+                def fake_get(url, *args, **kwargs):
+                    calls.append(url)
+                    resp = MagicMock()
+                    if "subscription" in url:
+                        resp.status_code = error_code
+                        resp.json.return_value = {"detail": f"Error {error_code}"}
+                    elif url.endswith("/v1/user"):
+                        resp.status_code = 200
+                        resp.json.return_value = {
+                            "subscription": {
+                                "tier": "starter",
+                                "character_count": 3520,
+                                "character_limit": 30000,
+                                "status": "active",
+                            }
+                        }
+                    else:
+                        resp.status_code = 404
+                    return resp
+
+                mock_get.side_effect = fake_get
+                sub = fetch_elevenlabs_user_subscription("test_key")
+
+                self.assertEqual(sub.get("tier"), "starter")
+                self.assertEqual(sub.get("character_count"), 3520)
+                self.assertEqual(sub.get("character_limit"), 30000)
+                self.assertEqual(sub.get("status"), "active")
+                self.assertEqual(
+                    calls,
+                    [
+                        "https://api.elevenlabs.io/v1/user/subscription",
+                        "https://api.elevenlabs.io/v1/user",
+                    ],
+                )
+
+    def test_format_elevenlabs_sub_label(self):
+        """Verifies thousand separators and formatting in format_elevenlabs_sub_label."""
+        from ui.main_window import format_elevenlabs_sub_label
+
+        sub_info = {
+            "tier": "starter",
+            "character_count": 3520,
+            "character_limit": 30000,
+            "status": "active",
+        }
+        text = format_elevenlabs_sub_label(sub_info, "test_key")
+        self.assertIn("3,520", text)
+        self.assertIn("30,000", text)
+        self.assertIn("Starter", text)
+
+        self.assertEqual(format_elevenlabs_sub_label({}, ""), "Plan: Not connected")
+        self.assertEqual(format_elevenlabs_sub_label({}, "test_key"), "Plan: Free | Used: 0 / 0 characters")
+
 
 
 if __name__ == "__main__":

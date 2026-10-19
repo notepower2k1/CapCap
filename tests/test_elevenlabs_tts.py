@@ -173,13 +173,14 @@ class TestElevenLabsTTS(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
+            "tier": "free",
             "voices": [
                 {
                     "voice_id": "new_voice_1",
                     "name": "New Voice",
                     "labels": {"gender": "female"},
                 }
-            ]
+            ],
         }
         mock_get.return_value = mock_resp
 
