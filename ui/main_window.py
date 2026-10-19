@@ -215,7 +215,28 @@ class _BootstrapMediaBackend:
     def playback_rate(self):
         return 1.0
 
+
+def _update_workers_combo_state(combo, tier: str = "free") -> None:
+    """Enable or disable worker options based on ElevenLabs subscription tier.
+    Options 3 and 4 (indices 2 and 3) are restricted to paid tiers.
+    """
+    is_free = str(tier or "free").strip().lower() in ("free", "")
+    w_model = combo.model() if hasattr(combo, "model") else None
+    if w_model is not None and hasattr(w_model, "item"):
+        for idx in (2, 3):  # 3 and 4 workers
+            it = w_model.item(idx)
+            if it is not None:
+                it.setEnabled(not is_free)
+    if is_free and hasattr(combo, "currentIndex") and combo.currentIndex() > 1:
+        combo.setCurrentIndex(1)
+
+
+def update_elevenlabs_workers_combo_state(combo, tier: str = "free") -> None:
+    return _update_workers_combo_state(combo, tier)
+
+
 class VideoTranslatorGUI(QMainWindow):
+    _update_workers_combo_state = staticmethod(_update_workers_combo_state)
     VOICE_ENTRY_ID_ROLE = Qt.UserRole + 1
     runtime_log_received = Signal(str)
     subtitle_ass_ready = Signal(int, str, str, object)
@@ -1446,6 +1467,22 @@ class VideoTranslatorGUI(QMainWindow):
         button.setToolTip(t("Transcribe the Selection Range with custom Whisper or OCR settings"))
 
     def _resolve_active_voice_name(self, *, persist_new_clone: bool = False) -> str:
+        target_language = self.get_target_language_code()
+        if target_language == "en":
+            if hasattr(self, "free_voice_combo") and self.free_voice_combo.count() > 0:
+                current_val = str(self.free_voice_combo.currentData() or "").strip()
+                if not current_val:
+                    current_val = str(self.free_voice_combo.currentData(self.VOICE_ENTRY_ID_ROLE) or "").strip()
+                if current_val and current_val != "ngochuyen":
+                    return current_val
+                for i in range(self.free_voice_combo.count()):
+                    val = str(self.free_voice_combo.itemData(i) or "").strip()
+                    if not val:
+                        val = str(self.free_voice_combo.itemData(i, self.VOICE_ENTRY_ID_ROLE) or "").strip()
+                    if val and val != "ngochuyen":
+                        return val
+            return ""
+
         free_value = str(self.free_voice_combo.currentData() or "").strip() if hasattr(self, "free_voice_combo") else ""
         if free_value and free_value.startswith("edge:"):
             return free_value
@@ -1931,28 +1968,61 @@ class VideoTranslatorGUI(QMainWindow):
             )
             index = self.free_voice_combo.count() - 1
             self.free_voice_combo.setItemData(index, entry.get("id", ""), self.VOICE_ENTRY_ID_ROLE)
+            # Disable restricted voices in the combobox dropdown model
+            if entry.get("provider") == "elevenlabs" and not entry.get("is_usable_for_api", True):
+                cb_model = self.free_voice_combo.model()
+                if cb_model is not None and hasattr(cb_model, "item"):
+                    q_item = cb_model.item(index)
+                    if q_item is not None:
+                        q_item.setEnabled(False)
 
-        if self.free_voice_combo.count() > 0:
-            self.free_voice_combo.setCurrentIndex(0)
+        def _is_item_enabled(idx: int) -> bool:
+            if idx < 0 or idx >= self.free_voice_combo.count():
+                return False
+            cb_model = self.free_voice_combo.model()
+            if cb_model is not None and hasattr(cb_model, "item"):
+                item = cb_model.item(idx)
+                return item is None or item.isEnabled()
+            return True
+
+        # Select first enabled voice by default
+        for i in range(self.free_voice_combo.count()):
+            if _is_item_enabled(i):
+                self.free_voice_combo.setCurrentIndex(i)
+                break
+
         settings_obj = getattr(self, "settings", None)
         saved_free = str(settings_obj.value("free_voice_value", "") or "").strip() if settings_obj is not None else ""
-        if previous_free and self.free_voice_combo.findData(previous_free) >= 0:
+        if previous_free and (target_language != "en" or previous_free != "ngochuyen") and self.free_voice_combo.findData(previous_free) >= 0 and _is_item_enabled(self.free_voice_combo.findData(previous_free)):
             self.set_voice_combo_value(self.free_voice_combo, previous_free)
-        elif saved_free and self.free_voice_combo.findData(saved_free) >= 0:
+        elif saved_free and (target_language != "en" or saved_free != "ngochuyen") and self.free_voice_combo.findData(saved_free) >= 0 and _is_item_enabled(self.free_voice_combo.findData(saved_free)):
             self.set_voice_combo_value(self.free_voice_combo, saved_free)
         elif current_engine == "vieneu":
-            if self.free_voice_combo.findData("vieneu:Minh Đức") >= 0:
+            if self.free_voice_combo.findData("vieneu:Minh Đức") >= 0 and _is_item_enabled(self.free_voice_combo.findData("vieneu:Minh Đức")):
                 self.set_voice_combo_value(self.free_voice_combo, "vieneu:Minh Đức")
             elif self.free_voice_combo.count() > 0:
-                self.free_voice_combo.setCurrentIndex(0)
+                for i in range(self.free_voice_combo.count()):
+                    if _is_item_enabled(i):
+                        self.free_voice_combo.setCurrentIndex(i)
+                        break
         elif current_engine == "capcut":
-            if self.free_voice_combo.findData("capcut:BV421_vivn_streaming") >= 0:
+            if self.free_voice_combo.findData("capcut:BV421_vivn_streaming") >= 0 and _is_item_enabled(self.free_voice_combo.findData("capcut:BV421_vivn_streaming")):
                 self.set_voice_combo_value(self.free_voice_combo, "capcut:BV421_vivn_streaming")
             elif self.free_voice_combo.count() > 0:
-                self.free_voice_combo.setCurrentIndex(0)
+                for i in range(self.free_voice_combo.count()):
+                    if _is_item_enabled(i):
+                        self.free_voice_combo.setCurrentIndex(i)
+                        break
         elif current_engine == "elevenlabs":
             if self.free_voice_combo.count() > 0:
-                self.free_voice_combo.setCurrentIndex(0)
+                for i in range(self.free_voice_combo.count()):
+                    if _is_item_enabled(i):
+                        self.free_voice_combo.setCurrentIndex(i)
+                        break
+        elif target_language == "en":
+            # For English, select first available English/multilingual enabled voice
+            # Do NOT select ngochuyen!
+            pass
         elif target_language == "vi" and "ngochuyen" in self.voice_catalog_map:
             self.set_voice_combo_value(self.free_voice_combo, "ngochuyen")
         elif target_language == "vi" and "vi_VN-vais1000-medium" in self.voice_catalog_map:
@@ -1968,6 +2038,10 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_target_language_changed(self, _index: int = -1):
         """Show and select only local voices that match the output language."""
+        target_lang = self.get_target_language_code()
+        settings_obj = getattr(self, "settings", None)
+        if settings_obj is not None:
+            settings_obj.setValue("target_language", target_lang)
         self._voiceover_force_refresh = True
         if getattr(self, "voice_catalog_entries_all", None):
             self.refresh_voice_catalog_combos()
@@ -16072,10 +16146,30 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_model_layout.addWidget(elevenlabs_model_combo)
         elevenlabs_settings_layout.addLayout(elevenlabs_model_layout)
 
+        elevenlabs_workers_layout = QVBoxLayout()
+        elevenlabs_workers_label = QLabel("Số luồng tạo song song (Workers):")
+        elevenlabs_workers_combo = QComboBox(dialog)
+        elevenlabs_workers_combo.addItem("1 luồng (Mạng chậm / An toàn)", "1")
+        elevenlabs_workers_combo.addItem("2 luồng (Khuyến nghị gói Free)", "2")
+        elevenlabs_workers_combo.addItem("3 luồng 🔒 (Gói trả phí)", "3")
+        elevenlabs_workers_combo.addItem("4 luồng 🔒 (Gói trả phí)", "4")
+
+        saved_workers = str(os.getenv("ELEVENLABS_TTS_WORKERS", self.settings.value("elevenlabs_tts_workers", "2"))).strip()
+        worker_idx = elevenlabs_workers_combo.findData(saved_workers)
+        elevenlabs_workers_combo.setCurrentIndex(worker_idx if worker_idx >= 0 else 1)
+
+        def _update_workers_combo_state(tier: str):
+            _update_elevenlabs_workers_combo_state(elevenlabs_workers_combo, tier)
+
+        elevenlabs_workers_layout.addWidget(elevenlabs_workers_label)
+        elevenlabs_workers_layout.addWidget(elevenlabs_workers_combo)
+        elevenlabs_settings_layout.addLayout(elevenlabs_workers_layout)
+
         elevenlabs_sub_label = QLabel(dialog)
         elevenlabs_sub_label.setObjectName("helperLabel")
         saved_key = os.getenv("ELEVENLABS_API_KEY", self.settings.value("elevenlabs_api_key", "")).strip()
         init_sub_text = "Gói: Chưa kết nối"
+        c_tier = "free"
         if saved_key:
             try:
                 import json
@@ -16085,6 +16179,7 @@ class VideoTranslatorGUI(QMainWindow):
                     with open(cache_path, "r", encoding="utf-8") as f:
                         c_sub = json.load(f).get("user_subscription", {})
                         if isinstance(c_sub, dict) and c_sub.get("tier"):
+                            c_tier = str(c_sub.get("tier", "free")).strip().lower()
                             tier_str = str(c_sub.get("tier", "")).capitalize()
                             c_count = c_sub.get("character_count", 0)
                             c_limit = c_sub.get("character_limit", 0)
@@ -16092,6 +16187,7 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception:
                 pass
         elevenlabs_sub_label.setText(init_sub_text)
+        _update_workers_combo_state(c_tier)
 
         elevenlabs_sync_btn = QPushButton("🔄 Đồng bộ danh sách giọng từ ElevenLabs")
         def _sync_elevenlabs_voices():
@@ -16130,8 +16226,10 @@ class VideoTranslatorGUI(QMainWindow):
                     c_count = sub_info.get("character_count", 0)
                     c_limit = sub_info.get("character_limit", 0)
                     elevenlabs_sub_label.setText(f"Gói: {tier_str} | Đã dùng: {c_count} / {c_limit} ký tự")
+                    _update_workers_combo_state(sub_info.get("tier", "free"))
                 else:
                     elevenlabs_sub_label.setText("Gói: Free | Đã dùng: 0 / 0 ký tự" if key else "Gói: Chưa kết nối")
+                    _update_workers_combo_state("free")
 
                 self.load_voice_preview_catalog()
                 QMessageBox.information(dialog, "ElevenLabs", f"Đồng bộ thành công: {len(voices)} giọng.")
@@ -16590,10 +16688,13 @@ class VideoTranslatorGUI(QMainWindow):
         # ElevenLabs settings
         new_elevenlabs_key = elevenlabs_key_edit.text().strip()
         new_elevenlabs_model = str(elevenlabs_model_combo.currentData() or "eleven_multilingual_v2").strip()
+        new_elevenlabs_workers = str(elevenlabs_workers_combo.currentData() or "2").strip()
         os.environ["ELEVENLABS_API_KEY"] = new_elevenlabs_key
         os.environ["ELEVENLABS_MODEL"] = new_elevenlabs_model
+        os.environ["ELEVENLABS_TTS_WORKERS"] = new_elevenlabs_workers
         self.settings.setValue("elevenlabs_api_key", new_elevenlabs_key)
         self.settings.setValue("elevenlabs_model", new_elevenlabs_model)
+        self.settings.setValue("elevenlabs_tts_workers", new_elevenlabs_workers)
 
         # Transcription engine settings (apply to all modes)
         # The subtitle source is project-local.  Do not write it into .env,
@@ -16609,6 +16710,7 @@ class VideoTranslatorGUI(QMainWindow):
             "CAPCUT_TTS_WORKERS": new_capcut_tts_workers,
             "ELEVENLABS_API_KEY": new_elevenlabs_key,
             "ELEVENLABS_MODEL": new_elevenlabs_model,
+            "ELEVENLABS_TTS_WORKERS": new_elevenlabs_workers,
         }
         
         # Write back to .env

@@ -473,7 +473,9 @@ def build_start_group(gui, left_layout):
     gui.lang_target_combo = QComboBox()
     gui.lang_target_combo.addItem("Vietnamese", "vi")
     gui.lang_target_combo.addItem("English", "en")
-    gui.lang_target_combo.setCurrentIndex(0)
+    saved_target_lang = str(getattr(gui, "settings", None).value("target_language", "vi") if getattr(gui, "settings", None) else "vi" or "vi").strip().lower()
+    target_idx = gui.lang_target_combo.findData(saved_target_lang)
+    gui.lang_target_combo.setCurrentIndex(target_idx if target_idx >= 0 else 0)
     language_pair_card, language_pair_layout = _section_card()
     language_pair_title = QLabel("Language Pair")
     language_pair_title.setObjectName("sectionTitle")
@@ -1056,6 +1058,9 @@ def build_start_group(gui, left_layout):
 
 def build_workflow_group(left_layout):
     return None
+
+
+_build_start_panel = build_start_group
 
 
 
