@@ -693,6 +693,30 @@ def synthesize_text_to_wav_16k_mono(
             on_progress=on_progress,
         )
 
+    # Fast path for ElevenLabs voices
+    if voice_to_search.startswith("elevenlabs:"):
+        import os
+        api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "ElevenLabs API Key chưa được cấu hình. "
+                "Vui lòng vào Settings để nhập ELEVENLABS_API_KEY."
+            )
+        raw_voice_id = voice_to_search[len("elevenlabs:"):]
+        try:
+            from app.engines.elevenlabs_tts import synthesize_elevenlabs_tts_wav_16k_mono
+        except ImportError:
+            from engines.elevenlabs_tts import synthesize_elevenlabs_tts_wav_16k_mono
+        return synthesize_elevenlabs_tts_wav_16k_mono(
+            text=text,
+            wav_path=wav_path,
+            voice_id=raw_voice_id,
+            api_key=api_key,
+            speed=speed,
+            tmp_dir=tmp_dir,
+            on_progress=on_progress,
+        )
+
     # Load voice catalog
     catalog_path = _voice_catalog_path()
     with open(catalog_path, "r", encoding="utf-8") as f:
@@ -770,5 +794,26 @@ def synthesize_text_to_wav_16k_mono(
             tmp_dir=tmp_dir,
             on_progress=on_progress,
         )
+    elif provider == "elevenlabs":
+        import os
+        api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "ElevenLabs API Key chưa được cấu hình. "
+                "Vui lòng vào Settings để nhập ELEVENLABS_API_KEY."
+            )
+        try:
+            from app.engines.elevenlabs_tts import synthesize_elevenlabs_tts_wav_16k_mono
+        except ImportError:
+            from engines.elevenlabs_tts import synthesize_elevenlabs_tts_wav_16k_mono
+        return synthesize_elevenlabs_tts_wav_16k_mono(
+            text=text,
+            wav_path=wav_path,
+            voice_id=provider_voice,
+            api_key=api_key,
+            speed=speed,
+            tmp_dir=tmp_dir,
+            on_progress=on_progress,
+        )
     else:
-        raise ValueError(f"Unsupported TTS provider: {provider}. Only 'piper', 'edge', and 'vieneu' are supported.")
+        raise ValueError(f"Unsupported TTS provider: {provider}. Only 'piper', 'edge', 'vieneu', and 'elevenlabs' are supported.")
