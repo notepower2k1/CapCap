@@ -1042,6 +1042,8 @@ class LauncherWindow(QDialog):
                     found = True
                     break
             if not found:
+                if lines and not lines[-1].endswith("\n"):
+                    lines[-1] += "\n"
                 lines.append(f"CAPCAP_DEVICE={device}\n")
             with open(env_path, "w", encoding="utf-8") as f:
                 f.writelines(lines)

@@ -16690,12 +16690,17 @@ class VideoTranslatorGUI(QMainWindow):
                     new_env_lines.append(f"{k}={updates[k]}\n")
                     handled_keys.add(k)
                     continue
-            new_env_lines.append(line)
-        
+            clean_line = line if line.endswith("\n") else f"{line}\n"
+            new_env_lines.append(clean_line)
+
+        # Ensure the last line ends with a newline before appending new keys
+        if new_env_lines and not new_env_lines[-1].endswith("\n"):
+            new_env_lines[-1] += "\n"
+
         for k, v in updates.items():
             if k not in handled_keys:
                 new_env_lines.append(f"{k}={v}\n")
-        
+
         with open(".env", "w", encoding="utf-8") as f:
             f.writelines(new_env_lines)
             
