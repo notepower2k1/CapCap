@@ -27,6 +27,7 @@ models/**
 # Test/cache noise
 .pytest_cache/
 MagicMock/
+.superpowers/
 
 # OS/editor noise
 .DS_Store
