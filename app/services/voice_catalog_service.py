@@ -106,6 +106,19 @@ class VoiceCatalogService:
             except Exception as e:
                 print(f"[VoiceCatalog] Failed to load CapCut voices: {e}")
 
+            # Include ElevenLabs voices (if API key is configured)
+            try:
+                elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+                if elevenlabs_key:
+                    try:
+                        from app.engines.elevenlabs_tts import fetch_elevenlabs_voices
+                    except ImportError:
+                        from engines.elevenlabs_tts import fetch_elevenlabs_voices
+                    for ev in fetch_elevenlabs_voices(elevenlabs_key):
+                        normalized_voices.append(self._normalize_loaded_voice(ev))
+            except Exception as e:
+                print(f"[VoiceCatalog] Failed to load ElevenLabs voices: {e}")
+
             return normalized_voices
         except Exception as exc:
             print(f"[VoiceCatalog] ERROR loading catalog: {exc}")
