@@ -498,6 +498,7 @@ def build_start_group(gui, left_layout):
     gui.voice_engine_combo.addItem("Piper Voice", "piper")
     gui.voice_engine_combo.addItem("VieNeu TTS", "vieneu")
     gui.voice_engine_combo.addItem("CapCut API (Beta)", "capcut")
+    gui.voice_engine_combo.addItem("ElevenLabs API", "elevenlabs")
     gui.free_voice_combo = QComboBox()
     gui.voice_gender_combo = QComboBox()
     gui.voice_gender_combo.addItems(["Any", "Male", "Female"])

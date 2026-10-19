@@ -1303,7 +1303,7 @@ class VideoTranslatorGUI(QMainWindow):
             return entry_id
         if provider == "edge":
             return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
-        if provider in ("vieneu", "capcut"):
+        if provider in ("vieneu", "capcut", "elevenlabs"):
             return entry_id
         return ""
 
@@ -1317,6 +1317,8 @@ class VideoTranslatorGUI(QMainWindow):
             return "CapCut"
         if provider_key == "edge":
             return "Edge"
+        if provider_key == "elevenlabs":
+            return "ElevenLabs"
         return str(provider or "Other").strip().title() or "Other"
 
     def _current_voice_tier(self) -> str:
@@ -1371,6 +1373,8 @@ class VideoTranslatorGUI(QMainWindow):
             return "piper"
         key = str(combo.currentData() or "piper").strip().lower() or "piper"
         if key in ("fast", "piper"):
+            return "piper"
+        if key not in ("vieneu", "capcut", "elevenlabs"):
             return "piper"
         return key
 
@@ -1448,6 +1452,8 @@ class VideoTranslatorGUI(QMainWindow):
         if free_value and (free_value.startswith("vieneu:") or free_value.startswith("vieneu_clone:")):
             return free_value
         if free_value and free_value.startswith("capcut:"):
+            return free_value
+        if free_value and free_value.startswith("elevenlabs:"):
             return free_value
         if free_value and free_value in getattr(self, "voice_catalog_map", {}):
             return free_value
@@ -1884,6 +1890,9 @@ class VideoTranslatorGUI(QMainWindow):
                     continue
             elif current_engine == "capcut":
                 if provider != "capcut":
+                    continue
+            elif current_engine == "elevenlabs":
+                if provider != "elevenlabs":
                     continue
             else:
                 if provider not in {"piper", "edge"}:
@@ -15993,6 +16002,71 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_settings_widget.setVisible(is_capcut)
         layout.addWidget(capcut_settings_widget)
 
+        # ElevenLabs API Settings Section
+        is_elevenlabs_engine = str(getattr(self, "selected_voice_engine", "") or (self.voice_engine_combo.currentData() if hasattr(self, "voice_engine_combo") else "")).strip().lower() == "elevenlabs"
+        elevenlabs_settings_widget = QWidget(dialog)
+        elevenlabs_settings_layout = QVBoxLayout(elevenlabs_settings_widget)
+        elevenlabs_settings_layout.setContentsMargins(0, 0, 0, 0)
+        elevenlabs_settings_layout.setSpacing(10)
+
+        elevenlabs_title = QLabel("ElevenLabs API Settings")
+        elevenlabs_title.setObjectName("statusHeadline")
+        elevenlabs_settings_layout.addWidget(elevenlabs_title)
+
+        elevenlabs_key_layout = QVBoxLayout()
+        elevenlabs_key_label = QLabel("API Key:")
+        elevenlabs_key_edit = QLineEdit(dialog)
+        elevenlabs_key_edit.setEchoMode(QLineEdit.Password)
+        elevenlabs_key_edit.setPlaceholderText("sk-...")
+        elevenlabs_key_edit.setText(os.getenv("ELEVENLABS_API_KEY", self.settings.value("elevenlabs_api_key", "")))
+        elevenlabs_key_layout.addWidget(elevenlabs_key_label)
+        elevenlabs_key_layout.addWidget(elevenlabs_key_edit)
+        elevenlabs_settings_layout.addLayout(elevenlabs_key_layout)
+
+        elevenlabs_model_layout = QVBoxLayout()
+        elevenlabs_model_label = QLabel("Model:")
+        elevenlabs_model_combo = QComboBox(dialog)
+        elevenlabs_model_combo.addItem("eleven_multilingual_v2 (Recommended)", "eleven_multilingual_v2")
+        elevenlabs_model_combo.addItem("eleven_turbo_v2_5 (Fast)", "eleven_turbo_v2_5")
+        elevenlabs_model_combo.addItem("eleven_flash_v2_5 (Fastest)", "eleven_flash_v2_5")
+        current_el_model = os.getenv("ELEVENLABS_MODEL", self.settings.value("elevenlabs_model", "eleven_multilingual_v2"))
+        el_model_idx = elevenlabs_model_combo.findData(current_el_model)
+        elevenlabs_model_combo.setCurrentIndex(el_model_idx if el_model_idx >= 0 else 0)
+        elevenlabs_model_layout.addWidget(elevenlabs_model_label)
+        elevenlabs_model_layout.addWidget(elevenlabs_model_combo)
+        elevenlabs_settings_layout.addLayout(elevenlabs_model_layout)
+
+        elevenlabs_sync_btn = QPushButton("🔄 Đồng bộ danh sách giọng từ ElevenLabs")
+        def _sync_elevenlabs_voices():
+            key = elevenlabs_key_edit.text().strip()
+            if not key:
+                QMessageBox.warning(dialog, "ElevenLabs", "Vui lòng nhập API Key trước.")
+                return
+            try:
+                try:
+                    from app.engines.elevenlabs_tts import fetch_elevenlabs_voices
+                except ImportError:
+                    from engines.elevenlabs_tts import fetch_elevenlabs_voices
+                import json
+                from runtime_paths import temp_path
+                cache_path = temp_path("elevenlabs_voices_cache.json")
+                if os.path.exists(cache_path):
+                    os.remove(cache_path)
+                voices = fetch_elevenlabs_voices(key)
+                QMessageBox.information(dialog, "ElevenLabs", f"Đồng bộ thành công: {len(voices)} giọng.")
+            except Exception as exc:
+                QMessageBox.critical(dialog, "ElevenLabs", str(exc))
+        elevenlabs_sync_btn.clicked.connect(_sync_elevenlabs_voices)
+        elevenlabs_settings_layout.addWidget(elevenlabs_sync_btn)
+
+        elevenlabs_hint = QLabel("Nhập API Key từ https://elevenlabs.io/app/speech-synthesis. Giọng đọc sẽ được tải tự động khi có key hợp lệ.")
+        elevenlabs_hint.setObjectName("helperLabel")
+        elevenlabs_hint.setWordWrap(True)
+        elevenlabs_settings_layout.addWidget(elevenlabs_hint)
+
+        elevenlabs_settings_widget.setVisible(is_elevenlabs_engine)
+        layout.addWidget(elevenlabs_settings_widget)
+
         divider = QFrame()
         divider.setFrameShape(QFrame.HLine)
         divider.setStyleSheet("color: #2f4868;")
@@ -16431,6 +16505,14 @@ class VideoTranslatorGUI(QMainWindow):
         self.settings.setValue("capcut_tts_batch_size", new_capcut_tts_batch)
         self.settings.setValue("capcut_tts_workers", new_capcut_tts_workers)
 
+        # ElevenLabs settings
+        new_elevenlabs_key = elevenlabs_key_edit.text().strip()
+        new_elevenlabs_model = str(elevenlabs_model_combo.currentData() or "eleven_multilingual_v2").strip()
+        os.environ["ELEVENLABS_API_KEY"] = new_elevenlabs_key
+        os.environ["ELEVENLABS_MODEL"] = new_elevenlabs_model
+        self.settings.setValue("elevenlabs_api_key", new_elevenlabs_key)
+        self.settings.setValue("elevenlabs_model", new_elevenlabs_model)
+
         # Transcription engine settings (apply to all modes)
         # The subtitle source is project-local.  Do not write it into .env,
         # otherwise opening another project can inherit a stale OCR/Audio
@@ -16443,6 +16525,8 @@ class VideoTranslatorGUI(QMainWindow):
             "CAPCUT_STT_WORKERS": new_capcut_stt_workers,
             "CAPCUT_TTS_BATCH_SIZE": new_capcut_tts_batch,
             "CAPCUT_TTS_WORKERS": new_capcut_tts_workers,
+            "ELEVENLABS_API_KEY": new_elevenlabs_key,
+            "ELEVENLABS_MODEL": new_elevenlabs_model,
         }
         
         # Write back to .env
