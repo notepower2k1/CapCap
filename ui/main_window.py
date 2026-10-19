@@ -2899,6 +2899,7 @@ class VideoTranslatorGUI(QMainWindow):
                     and not str(v).startswith("vieneu:")
                     and not str(v).startswith("vieneu_clone:")
                     and not str(v).startswith("capcut:")
+                    and not str(v).startswith("elevenlabs:")
                 ):
                     resource_id = f"voice:{v}"
                     if not service.is_resource_installed(resource_id):
@@ -13731,6 +13732,9 @@ class VideoTranslatorGUI(QMainWindow):
             pass
         for button in self._voice_preview_row_buttons.values():
             button.setText(t("Preview"))
+        if hasattr(self, "preview_voice_btn") and self.preview_voice_btn is not None:
+            self.preview_voice_btn.setText(t("Preview Selected Voice"))
+            self.preview_voice_btn.setEnabled(True)
 
     def _play_voice_preview_entry(self, entry: dict, button: QPushButton | None = None):
         try:
@@ -13888,17 +13892,33 @@ class VideoTranslatorGUI(QMainWindow):
             QMessageBox.information(self, t("Preview voice"), t("No local voices are available yet. Please add Piper models to models/piper first."))
             return
 
-        if not self.ensure_required_resources("Voice preview", include_voice=True):
-            return
-
-        if self._voice_sample_preview_thread is not None:
-            QMessageBox.information(self, t("Preview voice"), t("A preview is already being generated. Please wait a moment."))
+        # Toggle stop if already playing preview audio
+        if (
+            hasattr(self, "voice_preview_library_player")
+            and self.voice_preview_library_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        ):
+            self._stop_voice_library_preview()
             return
 
         voice_name = self.get_active_voice_name()
         if not voice_name:
             QMessageBox.warning(self, t("Preview voice"), t("Choose a voice first."))
             return
+
+        # Fast path: If the voice has preview media (such as ElevenLabs CDN audio),
+        # play it directly without consuming user ElevenLabs character quota
+        voice_entry = self.voice_catalog_map.get(voice_name) if hasattr(self, "voice_catalog_map") else None
+        if isinstance(voice_entry, dict) and self._entry_has_preview_media(voice_entry):
+            self._play_voice_preview_entry(voice_entry, getattr(self, "preview_voice_btn", None))
+            return
+
+        if not self.ensure_required_resources("Voice preview", include_voice=True, voice_name=voice_name):
+            return
+
+        if self._voice_sample_preview_thread is not None:
+            QMessageBox.information(self, t("Preview voice"), t("A preview is already being generated. Please wait a moment."))
+            return
+
         voice_speed = self._parse_voice_speed_value()
         text = "Chào bạn, đây là bản xem trước giọng nói của mẫu được chọn."  # "Hello, this is a preview of the selected voice sample." in Vietnamese
 

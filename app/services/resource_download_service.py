@@ -612,7 +612,7 @@ class ResourceDownloadService:
     def validate_piper_voice_runtime(self, voice_id: str) -> list[tuple[str, str]]:
         """Check the chosen local Piper voice before a default Both run."""
         voice_id = str(voice_id or "").strip()
-        if not voice_id or voice_id.startswith(("edge:", "f5:", "vieneu:", "vieneu_clone:", "capcut:")):
+        if not voice_id or voice_id.startswith(("edge:", "f5:", "vieneu:", "vieneu_clone:", "capcut:", "elevenlabs:")):
             return []
         issues: list[tuple[str, str]] = []
         entry = self._find_voice_entry(voice_id)
@@ -937,7 +937,7 @@ class ResourceDownloadService:
         return resources
 
     def is_resource_installed(self, resource_id: str) -> bool:
-        if resource_id == "voice:capcut" or resource_id.startswith("voice:capcut:"):
+        if resource_id in ("voice:capcut", "voice:elevenlabs") or resource_id.startswith(("voice:capcut:", "voice:elevenlabs:")):
             return True
         if resource_id == "voice:vieneu":
             return self._is_vieneu_installed()
