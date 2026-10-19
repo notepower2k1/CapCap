@@ -16003,7 +16003,6 @@ class VideoTranslatorGUI(QMainWindow):
         layout.addWidget(capcut_settings_widget)
 
         # ElevenLabs API Settings Section
-        is_elevenlabs_engine = str(getattr(self, "selected_voice_engine", "") or (self.voice_engine_combo.currentData() if hasattr(self, "voice_engine_combo") else "")).strip().lower() == "elevenlabs"
         elevenlabs_settings_widget = QWidget(dialog)
         elevenlabs_settings_layout = QVBoxLayout(elevenlabs_settings_widget)
         elevenlabs_settings_layout.setContentsMargins(0, 0, 0, 0)
@@ -16053,6 +16052,8 @@ class VideoTranslatorGUI(QMainWindow):
                 if os.path.exists(cache_path):
                     os.remove(cache_path)
                 voices = fetch_elevenlabs_voices(key)
+                os.environ["ELEVENLABS_API_KEY"] = key
+                self.load_voice_preview_catalog()
                 QMessageBox.information(dialog, "ElevenLabs", f"Đồng bộ thành công: {len(voices)} giọng.")
             except Exception as exc:
                 QMessageBox.critical(dialog, "ElevenLabs", str(exc))
@@ -16064,7 +16065,7 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_hint.setWordWrap(True)
         elevenlabs_settings_layout.addWidget(elevenlabs_hint)
 
-        elevenlabs_settings_widget.setVisible(is_elevenlabs_engine)
+        elevenlabs_settings_widget.setVisible(not remote_mode)
         layout.addWidget(elevenlabs_settings_widget)
 
         divider = QFrame()
