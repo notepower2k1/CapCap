@@ -124,9 +124,28 @@ OCR Translator is independent of subtitle transcription. Open it from the previe
 
 ## Text-to-Speech and Voice Cloning
 
-- CapCap supports multiple TTS engines: **Piper TTS** (local offline), **Edge TTS** (online Microsoft voices), **CapCut TTS** (expressive online voices), and **VieNeu TTS** (Vietnamese voice cloning).
+- CapCap supports multiple TTS engines: **ElevenLabs TTS** (high-fidelity studio quality), **Piper TTS** (local offline), **Edge TTS** (online Microsoft voices), **CapCut TTS** (expressive online voices), and **VieNeu TTS** (Vietnamese voice cloning).
 - Open the **Voice Clone** dialog to clone voices from custom reference audio files or pick from bundled sample voices.
 - Voice pitch, rate, and volume can be adjusted per speaker or per individual subtitle segment in the Subtitle Inspector.
+
+### ElevenLabs TTS Setup & Permissions
+
+To use ElevenLabs high-quality voices in CapCap:
+
+1. **Obtain an API Key**: Sign up or log in at [ElevenLabs](https://elevenlabs.io) and create an API key from your profile settings.
+2. **Required Permissions**: Ensure the API key has the following 4 permissions enabled:
+   - `Text to Speech: Access` — Allows CapCap to synthesize speech from subtitles.
+   - `Voices: Read` — Allows CapCap to list your available default, cloned, and generated voices.
+   - `Voice collection: Read` — Allows CapCap to browse shared voices and voice library catalogs.
+   - `User: Access` — Allows CapCap to inspect your account tier (Free / Starter / Creator / Pro) and remaining character quota.
+3. **Configure in CapCap**:
+   - Open **Settings → ElevenLabs** tab.
+   - Enter your API Key and click **Save Key**. CapCap will validate the key, retrieve your account tier and quota, and populate your voice catalog asynchronously in the background.
+   - Select your preferred model: `eleven_turbo_v2_5` (recommended default for optimal stability and natural quality), `eleven_flash_v2_5` (ultra-fast, economical), `eleven_v4`, `eleven_v4_turbo`, or `eleven_v3`.
+4. **Smart Tier & Quota Safeguards**:
+   - Free accounts are automatically capped at 2 parallel worker threads, while paid subscriptions unlock 3–4 workers for faster batch generation.
+   - Community Voice Library voices requiring paid subscriptions are badged with `🔒 (Cần gói trả phí)` and disabled on Free tier to prevent unintended HTTP 402 errors and quota loss.
+   - Built-in preview allows testing voice samples directly from ElevenLabs without downloading offline models.
 
 ---
 

@@ -17,7 +17,7 @@
 * 🔄 **Guided 5-Step Pipeline:** Prepare → Transcribe (STT / OCR) → Translate → Voice-over (TTS) → Export.
 * 📱 **Adaptive Workspace (16:9 & 9:16):** Automatically switches layout between landscape videos (YouTube/Cinema) and portrait videos (TikTok, Shorts, Reels).
 * 🧠 **Context-Aware AI Translation & Pronoun Consistency:** Integrates Gemini 2.5, GPT-4o, DeepSeek, Ollama (offline), and Google/Bing Web Translate. Automatically infers character relationships and supports interactive natural-language feedback.
-* 🎙️ **Multi-Voice TTS & BGM Separation:** Supports Piper (offline), Edge TTS, CapCut TTS, and VieNeu TTS (voice cloning). Separates speech from background music (BGM) to preserve original soundtracks.
+* 🎙️ **Multi-Voice TTS & BGM Separation:** Supports ElevenLabs TTS (studio-grade quality), Piper (offline), Edge TTS, CapCut TTS, and VieNeu TTS (voice cloning). Separates speech from background music (BGM) to preserve original soundtracks.
 * 🎬 **Multi-Track Timeline Editor:** Visual subtitle editing, Logo, Blur, Mask, and Text overlays. Supports instant in-place voice regeneration for edited subtitle lines.
 * ⚡ **High-Speed Hardware Rendering:** Accelerated by NVIDIA NVENC, supports standalone audio track export (Voice, BGM, Mix), and direct export to **CapCut Draft** projects.
 

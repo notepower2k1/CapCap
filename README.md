@@ -17,7 +17,7 @@
 * 🔄 **Quy trình 5 bước trực quan:** Chuẩn bị → Chép lời (STT / OCR) → Dịch AI → Lồng tiếng (TTS) → Xuất video.
 * 📱 **Giao diện tự thích ứng (16:9 & 9:16):** Tự động nhận diện và tối ưu bố cục chuyên biệt cho video ngang (YouTube, Phim) hoặc video dọc (TikTok, Shorts, Reels).
 * 🧠 **Dịch thuật AI chuẩn ngữ cảnh & xưng hô:** Tích hợp Gemini 2.5, GPT-4o, DeepSeek, Ollama (offline) cùng Google/Bing Dịch. Tự động phân tích quan hệ nhân vật và cho phép góp ý xưng hô bằng lời.
-* 🎙️ **Lồng tiếng & Tách nhạc nền thông minh:** Hỗ trợ Piper (offline), Edge TTS, CapCut TTS và VieNeu TTS (nhân bản giọng). Tự động tách giọng gốc và giữ trọn nhạc nền (BGM).
+* 🎙️ **Lồng tiếng & Tách nhạc nền thông minh:** Hỗ trợ ElevenLabs TTS (chất lượng phòng thu), Piper (offline), Edge TTS, CapCut TTS và VieNeu TTS (nhân bản giọng). Tự động tách giọng gốc và giữ trọn nhạc nền (BGM).
 * 🎬 **Biên tập Timeline đa tầng chuyên nghiệp:** Chỉnh sửa phụ đề trực quan, thêm Logo, Làm mờ (Blur), Mặt nạ (Mask), Văn bản (Text). Cho phép tạo lại giọng đọc tức thì cho từng câu vừa sửa.
 * ⚡ **Xuất video siêu tốc:** Tăng tốc phần cứng GPU (NVIDIA NVENC), hỗ trợ xuất riêng file âm thanh (Voice, BGM, Mix) hoặc xuất sang dự án **CapCut Draft** để dựng tiếp.
 
