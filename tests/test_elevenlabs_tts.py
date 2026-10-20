@@ -10,9 +10,11 @@ Unit tests for ElevenLabs TTS engine module:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
+import tempfile
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -24,30 +26,41 @@ for p in (PROJECT_ROOT, APP_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from app.engines.elevenlabs_tts import (
     DEFAULT_ELEVENLABS_MODELS,
+    fetch_elevenlabs_voice_catalog,
     fetch_elevenlabs_models,
     fetch_elevenlabs_voices,
+    read_elevenlabs_voice_cache,
     synthesize_elevenlabs_tts_wav_16k_mono,
+    write_elevenlabs_voice_cache,
 )
-from runtime_paths import temp_path
 
 
 class TestElevenLabsTTS(unittest.TestCase):
     def setUp(self):
-        self.cache_file = temp_path("elevenlabs_voices_cache.json")
-        if os.path.exists(self.cache_file):
-            try:
-                os.remove(self.cache_file)
-            except OSError:
-                pass
+        self.cache_dir = tempfile.TemporaryDirectory()
+        self.cache_file = os.path.join(self.cache_dir.name, "elevenlabs_voices_cache.json")
+        self.cache_path_patcher = patch(
+            "app.engines.elevenlabs_tts._resolve_temp_path",
+            side_effect=lambda *parts: os.path.join(self.cache_dir.name, *parts),
+        )
+        self.cache_path_patcher.start()
 
     def tearDown(self):
-        if os.path.exists(self.cache_file):
-            try:
-                os.remove(self.cache_file)
-            except OSError:
-                pass
+        self.cache_path_patcher.stop()
+        self.cache_dir.cleanup()
 
     @patch("requests.get")
     def test_fetch_voices_success(self, mock_get):
@@ -133,6 +146,9 @@ class TestElevenLabsTTS(unittest.TestCase):
             cache_content = json.load(f)
         self.assertIn("fetched_at", cache_content)
         self.assertEqual(cache_content["voices"], voices)
+        self.assertEqual(cache_content["key_fingerprint"], hashlib.sha256(b"test_api_key_123").hexdigest())
+        self.assertNotIn("test_api_key_123", json.dumps(cache_content))
+        self.assertEqual(read_elevenlabs_voice_cache(" test_api_key_123 ")["voices"], voices)
 
     @patch("requests.get")
     def test_fetch_voices_cache_hit(self, mock_get):
@@ -156,7 +172,12 @@ class TestElevenLabsTTS(unittest.TestCase):
         ]
         os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
         with open(self.cache_file, "w", encoding="utf-8") as f:
-            json.dump({"fetched_at": time.time() - 60, "voices": cached_voices}, f)
+            json.dump({
+                "fetched_at": time.time() - 60,
+                "user_subscription": {"tier": "creator"},
+                "voices": cached_voices,
+                "key_fingerprint": hashlib.sha256(b"test_api_key").hexdigest(),
+            }, f)
 
         voices = fetch_elevenlabs_voices("test_api_key")
         mock_get.assert_not_called()
@@ -168,7 +189,12 @@ class TestElevenLabsTTS(unittest.TestCase):
         old_voices = [{"id": "elevenlabs:old", "name": "Old Voice"}]
         os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
         with open(self.cache_file, "w", encoding="utf-8") as f:
-            json.dump({"fetched_at": time.time() - 3601, "voices": old_voices}, f)
+            json.dump({
+                "fetched_at": time.time() - 3601,
+                "user_subscription": {"tier": "creator"},
+                "voices": old_voices,
+                "key_fingerprint": hashlib.sha256(b"test_api_key").hexdigest(),
+            }, f)
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -547,6 +573,134 @@ class TestElevenLabsTTS(unittest.TestCase):
         )
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["json"]["model_id"], "eleven_turbo_v2_5")
+
+    @patch("requests.get")
+    def test_cache_is_bound_to_api_key_and_legacy_cache_is_rejected(self, mock_get):
+        """Only a fresh cache with a matching key fingerprint may supply account voices."""
+        old_cache = {
+            "fetched_at": time.time(),
+            "user_subscription": {"tier": "creator"},
+            "voices": [{"id": "elevenlabs:private_old_account"}],
+            "key_fingerprint": hashlib.sha256(b"old_account_key").hexdigest(),
+        }
+        with open(self.cache_file, "w", encoding="utf-8") as cache_file:
+            json.dump(old_cache, cache_file)
+
+        self.assertEqual(read_elevenlabs_voice_cache("new_account_key"), {})
+
+        def fake_get(url, *args, **kwargs):
+            response = MagicMock()
+            response.status_code = 200
+            if url.endswith("/v1/voices"):
+                response.json.return_value = {
+                    "voices": [{"voice_id": "new_account_voice", "name": "New Account Voice"}]
+                }
+            else:
+                response.json.return_value = {"tier": "free", "character_count": 0, "character_limit": 10000}
+            return response
+
+        mock_get.side_effect = fake_get
+        voices = fetch_elevenlabs_voices("new_account_key")
+        self.assertEqual([voice["provider_voice"] for voice in voices], ["new_account_voice"])
+        self.assertEqual(mock_get.call_count, 2)
+        with open(self.cache_file, "r", encoding="utf-8") as cache_file:
+            updated_cache_text = cache_file.read()
+        self.assertNotIn("new_account_key", updated_cache_text)
+        self.assertNotIn("old_account_key", updated_cache_text)
+
+        # A legacy timestamp-only cache is also a miss and cannot be returned.
+        with open(self.cache_file, "w", encoding="utf-8") as cache_file:
+            json.dump({"fetched_at": time.time(), "voices": [{"id": "legacy_private_voice"}]}, cache_file)
+        self.assertEqual(read_elevenlabs_voice_cache("new_account_key"), {})
+
+    @patch("requests.get")
+    def test_staged_catalog_does_not_replace_active_cache_until_committed(self, mock_get):
+        """Settings can validate a draft key, then commit its exact result after Save."""
+        active_payload = {
+            "fetched_at": time.time(),
+            "user_subscription": {"tier": "creator"},
+            "voices": [{"id": "elevenlabs:active_voice"}],
+            "key_fingerprint": hashlib.sha256(b"active_key").hexdigest(),
+        }
+        self.assertTrue(write_elevenlabs_voice_cache("active_key", active_payload))
+
+        def fake_get(url, *args, **kwargs):
+            response = MagicMock()
+            response.status_code = 200
+            if url.endswith("/v1/voices"):
+                response.json.return_value = {
+                    "voices": [{"voice_id": "draft_voice", "name": "Draft Voice"}]
+                }
+            else:
+                response.json.return_value = {
+                    "tier": "starter",
+                    "character_count": 23,
+                    "character_limit": 30000,
+                    "status": "active",
+                }
+            return response
+
+        mock_get.side_effect = fake_get
+        draft_payload = fetch_elevenlabs_voice_catalog(
+            "draft_key", force_refresh=True, write_cache=False
+        )
+
+        self.assertEqual(len(draft_payload["voices"]), 1)
+        self.assertEqual(draft_payload["user_subscription"]["tier"], "starter")
+        self.assertEqual(read_elevenlabs_voice_cache("active_key")["voices"], active_payload["voices"])
+        self.assertEqual(read_elevenlabs_voice_cache("draft_key"), {})
+        self.assertEqual(mock_get.call_count, 2)
+
+        self.assertTrue(write_elevenlabs_voice_cache("draft_key", draft_payload))
+        self.assertEqual(read_elevenlabs_voice_cache("active_key"), {})
+        self.assertEqual(read_elevenlabs_voice_cache("draft_key"), draft_payload)
+
+    @patch("requests.get")
+    def test_catalog_fetch_errors_are_distinct_from_an_empty_catalog(self, mock_get):
+        """Malformed, failed, and offline requests raise; an explicit empty catalog succeeds."""
+        import requests
+
+        response = MagicMock()
+        response.status_code = 500
+        response.text = "server unavailable"
+        cases = [
+            (requests.RequestException("offline"), "network error"),
+            (response, "HTTP error 500"),
+        ]
+        for result, expected_message in cases:
+            with self.subTest(expected_message=expected_message):
+                mock_get.side_effect = result if isinstance(result, Exception) else None
+                mock_get.return_value = result if not isinstance(result, Exception) else None
+                with self.assertRaisesRegex(RuntimeError, expected_message):
+                    fetch_elevenlabs_voice_catalog("draft_key", force_refresh=True, write_cache=False)
+
+        bad_json = MagicMock()
+        bad_json.status_code = 200
+        bad_json.json.side_effect = ValueError("invalid JSON")
+        mock_get.side_effect = None
+        mock_get.return_value = bad_json
+        with self.assertRaisesRegex(RuntimeError, "invalid JSON"):
+            fetch_elevenlabs_voice_catalog("draft_key", force_refresh=True, write_cache=False)
+
+        malformed = MagicMock()
+        malformed.status_code = 200
+        malformed.json.return_value = {"unexpected": []}
+        mock_get.return_value = malformed
+        with self.assertRaisesRegex(RuntimeError, "missing a voices list"):
+            fetch_elevenlabs_voice_catalog("draft_key", force_refresh=True, write_cache=False)
+
+        empty_catalog = MagicMock()
+        empty_catalog.status_code = 200
+        empty_catalog.json.return_value = {"voices": []}
+        subscription = MagicMock()
+        subscription.status_code = 200
+        subscription.json.return_value = {"tier": "free"}
+        mock_get.side_effect = lambda url, *args, **kwargs: (
+            empty_catalog if url.endswith("/v1/voices") else subscription
+        )
+        payload = fetch_elevenlabs_voice_catalog("draft_key", force_refresh=True, write_cache=False)
+        self.assertEqual(payload["voices"], [])
+        self.assertEqual(payload["user_subscription"]["tier"], "free")
 
 
 if __name__ == "__main__":

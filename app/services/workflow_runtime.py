@@ -37,10 +37,10 @@ class WorkflowRuntime:
         prefetch_voice_speed: float = 1.0,
         step_callback=None,
         force_transcription: bool = False,
+        elevenlabs_model_id: str | None = None,
     ) -> str:
         if step_callback: step_callback("prepare")
-        return self.prepare_workflow.run(
-            video_path,
+        prepare_kwargs = dict(
             source_language=source_language,
             target_language=target_language,
             mode=mode,
@@ -58,6 +58,9 @@ class WorkflowRuntime:
             step_callback=step_callback,
             force_transcription=force_transcription,
         )
+        if elevenlabs_model_id:
+            prepare_kwargs["elevenlabs_model_id"] = elevenlabs_model_id
+        return self.prepare_workflow.run(video_path, **prepare_kwargs)
 
     def run_voice(
         self,
@@ -77,8 +80,28 @@ class WorkflowRuntime:
         dubbing_style_instruction: str = "",
         source_language: str = "auto",
         on_progress: callable = None,
+        elevenlabs_model_id: str | None = None,
+        target_language: str | None = None,
     ):
-        return self.voice_workflow.run(
+        segments = list(segments or [])
+        voice_names = [str(voice_name or "").strip()]
+        voice_names.extend(
+            str((segment or {}).get("voice_name") or "").strip()
+            for segment in segments
+            if isinstance(segment, dict)
+        )
+        try:
+            from utils.voice_preview_utils import voice_provider
+        except (ImportError, ModuleNotFoundError):
+            try:
+                from app.utils.voice_preview_utils import voice_provider
+            except (ImportError, ModuleNotFoundError):
+                voice_provider = lambda name: "elevenlabs" if name.lower().startswith("elevenlabs:") else ""
+        uses_elevenlabs = any(
+            voice_provider(name) == "elevenlabs"
+            for name in dict.fromkeys(name for name in voice_names if name)
+        )
+        run_kwargs = dict(
             segments=segments,
             output_dir=output_dir,
             background_path=background_path,
@@ -95,6 +118,10 @@ class WorkflowRuntime:
             source_language=source_language,
             on_progress=on_progress,
         )
+        if uses_elevenlabs:
+            run_kwargs["elevenlabs_model_id"] = elevenlabs_model_id
+            run_kwargs["target_language"] = target_language
+        return self.voice_workflow.run(**run_kwargs)
 
     def run_export(
         self,

@@ -101,6 +101,10 @@ from worker_adapters import (
     TimelineWaveformWorker,
     AlternateRangeTranscriptionWorker,
 )
+from worker_adapters.elevenlabs_workers import (
+    ElevenLabsCatalogRefreshWorker,
+    ElevenLabsSettingsSyncWorker,
+)
 
 try:
     from ui.i18n import current_source_text, localize_widget_tree, set_current_source_text, t
@@ -753,6 +757,10 @@ class VideoTranslatorGUI(QMainWindow):
         self._timeline_thumbnail_worker = None
         self._desired_timeline_thumbnail_request = None
         self._retiring_workers = []
+        self._elevenlabs_sync_worker = None
+        self._elevenlabs_catalog_refresh_workers = {}
+        self._elevenlabs_catalog_refresh_attempted_key = ""
+        self._voice_catalog_elevenlabs_key = ""
         self._pending_timeline_waveform_refresh = False
         self._pending_timeline_thumbnail_refresh = False
         self._allow_post_pipeline_preview_assets = False
@@ -1586,7 +1594,41 @@ class VideoTranslatorGUI(QMainWindow):
 
     def load_voice_preview_catalog(self):
         self._auto_sync_piper_voices_to_catalog()
-        self.voice_catalog_entries_all = self.voice_catalog_service.load_catalog()
+        elevenlabs_key = str(os.getenv("ELEVENLABS_API_KEY", "") or "").strip()
+        try:
+            try:
+                from app.engines.elevenlabs_tts import read_elevenlabs_voice_cache
+            except ImportError:
+                from engines.elevenlabs_tts import read_elevenlabs_voice_cache
+            cached_elevenlabs = read_elevenlabs_voice_cache(elevenlabs_key) if elevenlabs_key else {}
+        except Exception:
+            cached_elevenlabs = {}
+
+        previous_key = str(getattr(self, "_voice_catalog_elevenlabs_key", "") or "").strip()
+        previous_elevenlabs = [
+            dict(entry)
+            for entry in (getattr(self, "voice_catalog_entries_all", []) or [])
+            if isinstance(entry, dict) and str(entry.get("provider", "")).strip().lower() == "elevenlabs"
+        ]
+        # Catalog loading is a GUI operation. Read ElevenLabs from its
+        # validated key-bound cache and refresh missing data in a QThread.
+        catalog_entries = self.voice_catalog_service.load_catalog(allow_elevenlabs_network=False)
+        if elevenlabs_key and not cached_elevenlabs and previous_key == elevenlabs_key and previous_elevenlabs:
+            # An expired cache or a transient refresh failure must not make
+            # currently usable voices disappear while the replacement loads.
+            known_ids = {
+                str(entry.get("id", "")).strip()
+                for entry in catalog_entries
+                if isinstance(entry, dict)
+            }
+            catalog_entries.extend(
+                entry for entry in previous_elevenlabs
+                if str(entry.get("id", "")).strip() not in known_ids
+            )
+        self.voice_catalog_entries_all = catalog_entries
+        self._voice_catalog_elevenlabs_key = elevenlabs_key
+        if elevenlabs_key and not cached_elevenlabs:
+            self._start_elevenlabs_catalog_refresh(elevenlabs_key)
         # A packaged build keeps its catalog under _internal (read-only), so
         # newly downloaded piper-new voices may not be persisted there. Merge
         # the local manifest in memory as well, ensuring their names/genders
@@ -1597,6 +1639,69 @@ class VideoTranslatorGUI(QMainWindow):
             self.voice_preview_dialog.close()
             self.voice_preview_dialog = None
         self.refresh_voice_catalog_combos()
+
+    def _start_elevenlabs_catalog_refresh(self, api_key: str):
+        key = str(api_key or "").strip()
+        if not key or key != str(os.getenv("ELEVENLABS_API_KEY", "") or "").strip():
+            return
+        if not hasattr(self, "_elevenlabs_catalog_refresh_workers"):
+            self._elevenlabs_catalog_refresh_workers = {}
+        if key in self._elevenlabs_catalog_refresh_workers:
+            worker = self._elevenlabs_catalog_refresh_workers.get(key)
+            if worker is not None and worker.isRunning():
+                return
+        if str(getattr(self, "_elevenlabs_catalog_refresh_attempted_key", "") or "") == key:
+            return
+
+        self._elevenlabs_catalog_refresh_attempted_key = key
+        worker = ElevenLabsCatalogRefreshWorker(key, self)
+        self._elevenlabs_catalog_refresh_workers[key] = worker
+        worker.completed.connect(lambda result, w=worker: self._on_elevenlabs_catalog_refresh_completed(w, result))
+        worker.finished.connect(lambda w=worker, k=key: self._retire_elevenlabs_catalog_refresh_worker(k, w))
+        worker.start()
+
+    def _on_elevenlabs_catalog_refresh_completed(self, worker, result):
+        result = result if isinstance(result, dict) else {}
+        key = str(result.get("api_key", "") or "").strip()
+        if key != str(os.getenv("ELEVENLABS_API_KEY", "") or "").strip():
+            return
+        if str(getattr(self, "_voice_catalog_elevenlabs_key", "") or "").strip() != key:
+            return
+        error = str(result.get("error", "") or "").strip()
+        payload = result.get("payload")
+        if error:
+            self.log(f"[ElevenLabs] Catalog refresh failed; keeping the current catalog: {error}")
+            return
+        if not isinstance(payload, dict) or not isinstance(payload.get("voices"), list):
+            self.log("[ElevenLabs] Catalog refresh returned an invalid payload; keeping the current catalog.")
+            return
+        try:
+            try:
+                from app.engines.elevenlabs_tts import write_elevenlabs_voice_cache
+            except ImportError:
+                from engines.elevenlabs_tts import write_elevenlabs_voice_cache
+            cache_written = write_elevenlabs_voice_cache(key, payload)
+        except Exception as exc:
+            self.log(f"[ElevenLabs] Could not save refreshed voice cache: {exc}")
+            return
+        if not cache_written:
+            self._elevenlabs_catalog_refresh_attempted_key = ""
+            self.log("[ElevenLabs] Refreshed voice cache was rejected; keeping the current catalog.")
+            return
+        # Once the cache expires, a later load may start another refresh for
+        # this same key. The just-completed load sees the fresh cache and will
+        # not immediately launch a duplicate request.
+        self._elevenlabs_catalog_refresh_attempted_key = ""
+        self.load_voice_preview_catalog()
+
+    def _retire_elevenlabs_catalog_refresh_worker(self, key: str, worker):
+        workers = getattr(self, "_elevenlabs_catalog_refresh_workers", {})
+        if workers.get(key) is worker:
+            workers.pop(key, None)
+        try:
+            worker.deleteLater()
+        except RuntimeError:
+            pass
 
     def _load_piper_voice_meta(self) -> dict:
         meta_path = models_path("piper", "voices_meta.json")
@@ -5008,7 +5113,7 @@ class VideoTranslatorGUI(QMainWindow):
             style_instruction=self.get_ai_style_instruction(),
         )
 
-    def build_current_voice_signature(self, segments=None, background_path=""):
+    def build_current_voice_signature(self, segments=None, background_path="", *, model_id=None, language_code=None):
         voice_segments = list(segments or [])
         if not voice_segments:
             voice_segments = self._get_voiceover_segments()
@@ -5026,16 +5131,25 @@ class VideoTranslatorGUI(QMainWindow):
             # the TTS cache still remains usable when the optional normalizer
             # package is unavailable.
             normalizer_signature = ""
+        voice_name = self.get_active_voice_name()
+        effective_model_id = model_id
+        if effective_model_id is None:
+            effective_model_id = str(os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5") or "eleven_turbo_v2_5").strip()
+        effective_language_code = language_code
+        if effective_language_code is None:
+            effective_language_code = self.get_target_language_code()
         return self.project_service.build_voice_signature(
             voice_segments,
             audio_handling_mode=self.get_audio_handling_mode(),
-            voice_name=self.get_active_voice_name(),
+            voice_name=voice_name,
             voice_speed=self._parse_voice_speed_value(),
             timing_sync_mode=current_source_text(self.voice_timing_sync_combo).strip(),
             background_path=background_path,
             original_volume=int(self.audio_a1_volume_slider.value()) if hasattr(self, "audio_a1_volume_slider") else 50,
             dub_volume=int(self.audio_a2_volume_slider.value()) if hasattr(self, "audio_a2_volume_slider") else 100,
             normalizer_signature=normalizer_signature,
+            model_id=effective_model_id,
+            language_code=effective_language_code,
         )
 
     def persist_current_timeline_project_data(self):
@@ -5060,14 +5174,6 @@ class VideoTranslatorGUI(QMainWindow):
             signature = self.build_current_translation_signature()
             if signature:
                 state.set_setting("translation_signature", signature)
-        if self.current_project_state:
-            voice_signature = self.build_current_voice_signature(
-                segments=self._get_voiceover_segments(),
-                background_path=self.resolve_background_audio_path(),
-            )
-            if voice_signature:
-                state.set_setting("voice_signature", voice_signature)
-
         # These states belong to the project editor view.  The track-label
         # widget itself is rebuilt on startup, so it cannot be their source
         # of truth.
@@ -14038,7 +14144,12 @@ class VideoTranslatorGUI(QMainWindow):
             return
 
         voice_speed = self._parse_voice_speed_value()
-        text = "Chào bạn, đây là bản xem trước giọng nói của mẫu được chọn."  # "Hello, this is a preview of the selected voice sample." in Vietnamese
+        target_language = str(self.get_target_language_code() or "vi").strip().lower()
+        text = (
+            "Hello, this is a preview of the selected voice sample."
+            if target_language.startswith("en")
+            else "Chào bạn, đây là bản xem trước giọng nói của mẫu được chọn."
+        )
 
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setEnabled(False)
@@ -14054,6 +14165,7 @@ class VideoTranslatorGUI(QMainWindow):
             voice_speed,
             temp_dir=self.get_project_temp_dir("voice_sample_preview"),
             normalizer_dictionary=normalizer_dictionary,
+            target_language=target_language,
         )
         worker.progress.connect(self.log)
         worker.finished.connect(self.on_voice_sample_preview_ready)
@@ -14142,6 +14254,7 @@ class VideoTranslatorGUI(QMainWindow):
             temp_dir=self.get_project_temp_dir("segment_audio_preview"),
             cache_temp_dir=self.get_project_temp_dir("tts"),
             normalizer_dictionary=normalizer_dictionary,
+            target_language=self.get_target_language_code(),
         )
         worker.finished.connect(self.on_segment_audio_preview_ready)
         self._segment_preview_threads[index] = worker
@@ -16442,6 +16555,7 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_key_layout = QVBoxLayout()
         elevenlabs_key_label = QLabel(t("API Key:"), elevenlabs_settings_widget)
         elevenlabs_key_edit = QLineEdit(elevenlabs_settings_widget)
+        elevenlabs_key_edit.setObjectName("elevenlabs_api_key")
         elevenlabs_key_edit.setEchoMode(QLineEdit.Password)
         elevenlabs_key_edit.setPlaceholderText("sk-...")
         elevenlabs_key_edit.setText(os.getenv("ELEVENLABS_API_KEY", self.settings.value("elevenlabs_api_key", "")))
@@ -16493,95 +16607,107 @@ class VideoTranslatorGUI(QMainWindow):
         saved_key = os.getenv("ELEVENLABS_API_KEY", self.settings.value("elevenlabs_api_key", "")).strip()
 
         _format_sub_label = format_elevenlabs_sub_label
-
-        c_sub = {}
-        c_tier = "free"
-        if saved_key:
+        try:
             try:
-                import json
-                from runtime_paths import temp_path
-                cache_path = temp_path("elevenlabs_voices_cache.json")
-                if os.path.exists(cache_path):
-                    with open(cache_path, "r", encoding="utf-8") as f:
-                        c_sub = json.load(f).get("user_subscription", {})
-            except Exception:
-                pass
-
-            if not isinstance(c_sub, dict) or not c_sub.get("tier"):
-                try:
-                    try:
-                        from app.engines.elevenlabs_tts import fetch_elevenlabs_user_subscription
-                    except ImportError:
-                        from engines.elevenlabs_tts import fetch_elevenlabs_user_subscription
-                    c_sub = fetch_elevenlabs_user_subscription(saved_key)
-                except Exception:
-                    c_sub = {}
-
-            if isinstance(c_sub, dict) and c_sub.get("tier"):
-                c_tier = str(c_sub.get("tier", "free")).strip().lower()
+                from app.engines.elevenlabs_tts import read_elevenlabs_voice_cache
+            except ImportError:
+                from engines.elevenlabs_tts import read_elevenlabs_voice_cache
+            cached_account = read_elevenlabs_voice_cache(saved_key) if saved_key else {}
+            c_sub = cached_account.get("user_subscription", {}) if isinstance(cached_account, dict) else {}
+        except Exception:
+            c_sub = {}
+        c_tier = str(c_sub.get("tier", "free") or "free").strip().lower() if isinstance(c_sub, dict) else "free"
         elevenlabs_sub_label.setText(_format_sub_label(c_sub, saved_key))
         _update_workers_combo_state(c_tier)
 
-        elevenlabs_sync_btn = QPushButton(t("🔄 Sync voices from ElevenLabs"), elevenlabs_settings_widget)
+        elevenlabs_sync_btn = QPushButton(t("\U0001f504 Sync voices from ElevenLabs"), elevenlabs_settings_widget)
+        elevenlabs_sync_status = QLabel("", elevenlabs_settings_widget)
+        elevenlabs_sync_status.setObjectName("helperLabel")
+        sync_session = {"open": True, "result": None}
+        save_button_ref = []
+        dialog.finished.connect(lambda *_args: sync_session.update(open=False))
+
+        def _finish_sync_worker(worker):
+            if getattr(self, "_elevenlabs_sync_worker", None) is worker:
+                self._elevenlabs_sync_worker = None
+            try:
+                worker.deleteLater()
+            except RuntimeError:
+                pass
+
+        def _sync_result_ready(result):
+            # QDialog.finished flips this flag before its child widgets are
+            # deleted. Late network completions after Cancel are discarded.
+            if not sync_session["open"]:
+                return
+            result = result if isinstance(result, dict) else {}
+            snapshot_key = str(result.get("api_key", "") or "").strip()
+            current_field_key = elevenlabs_key_edit.text().strip()
+            if snapshot_key != current_field_key:
+                elevenlabs_sync_status.setText(t("API Key changed during sync; the result was discarded."))
+            elif result.get("error"):
+                elevenlabs_sync_status.setText(t("Sync failed."))
+                QMessageBox.critical(dialog, "ElevenLabs", str(result.get("error")))
+            else:
+                payload = result.get("payload")
+                voices = payload.get("voices", []) if isinstance(payload, dict) else None
+                models = result.get("models", [])
+                if not isinstance(voices, list):
+                    elevenlabs_sync_status.setText(t("Sync failed."))
+                    QMessageBox.critical(dialog, "ElevenLabs", t("ElevenLabs returned an invalid voice catalog."))
+                else:
+                    sync_session["result"] = {"api_key": snapshot_key, "payload": payload}
+                    valid_models = [
+                        (str(item.get("model_id", "") or "").strip(), str(item.get("name", "") or "").strip())
+                        for item in models if isinstance(item, dict)
+                    ] if isinstance(models, list) else []
+                    valid_models = [(model_id, name or model_id) for model_id, name in valid_models if model_id]
+                    if valid_models:
+                        saved_selected = elevenlabs_model_combo.currentData()
+                        elevenlabs_model_combo.clear()
+                        for model_id, model_name in valid_models:
+                            elevenlabs_model_combo.addItem(t(model_name), model_id)
+                        selected_idx = elevenlabs_model_combo.findData(saved_selected)
+                        if selected_idx < 0:
+                            selected_idx = elevenlabs_model_combo.findData("eleven_turbo_v2_5")
+                        elevenlabs_model_combo.setCurrentIndex(max(0, selected_idx))
+
+                    sub_info = payload.get("user_subscription", {}) if isinstance(payload, dict) else {}
+                    elevenlabs_sub_label.setText(_format_sub_label(sub_info, snapshot_key))
+                    tier = str(sub_info.get("tier", "free") or "free") if isinstance(sub_info, dict) else "free"
+                    _update_workers_combo_state(tier)
+                    elevenlabs_sync_status.setText(
+                        t("Successfully synced {count} voices. Save to apply.", count=len(voices))
+                    )
+
+            elevenlabs_sync_btn.setEnabled(True)
+            elevenlabs_sync_btn.setText(t("\U0001f504 Sync voices from ElevenLabs"))
+            for button in save_button_ref:
+                button.setEnabled(True)
+
         def _sync_elevenlabs_voices():
             key = elevenlabs_key_edit.text().strip()
             if not key:
                 QMessageBox.warning(dialog, "ElevenLabs", t("Please enter your API Key first."))
                 return
-            try:
-                try:
-                    from app.engines.elevenlabs_tts import (
-                        fetch_elevenlabs_voices,
-                        fetch_elevenlabs_user_subscription,
-                        fetch_elevenlabs_models,
-                    )
-                except ImportError:
-                    from engines.elevenlabs_tts import (
-                        fetch_elevenlabs_voices,
-                        fetch_elevenlabs_user_subscription,
-                        fetch_elevenlabs_models,
-                    )
-                import json
-                from runtime_paths import temp_path
-                cache_path = temp_path("elevenlabs_voices_cache.json")
-                if os.path.exists(cache_path):
-                    os.remove(cache_path)
-                voices = fetch_elevenlabs_voices(key, force_refresh=True)
-                os.environ["ELEVENLABS_API_KEY"] = key
+            active_worker = getattr(self, "_elevenlabs_sync_worker", None)
+            if active_worker is not None and active_worker.isRunning():
+                elevenlabs_sync_status.setText(t("A voice sync is already running."))
+                return
+            worker = ElevenLabsSettingsSyncWorker(key, self)
+            self._elevenlabs_sync_worker = worker
+            worker.completed.connect(_sync_result_ready)
+            worker.finished.connect(lambda w=worker: _finish_sync_worker(w))
+            elevenlabs_sync_btn.setEnabled(False)
+            elevenlabs_sync_btn.setText(t("Syncing..."))
+            elevenlabs_sync_status.setText(t("Fetching voices, models, and account plan..."))
+            for button in save_button_ref:
+                button.setEnabled(False)
+            worker.start()
 
-                try:
-                    fetched_models = fetch_elevenlabs_models(key)
-                    if fetched_models:
-                        saved_selected = elevenlabs_model_combo.currentData()
-                        elevenlabs_model_combo.clear()
-                        for m in fetched_models:
-                            elevenlabs_model_combo.addItem(t(m["name"]), m["model_id"])
-                        idx = elevenlabs_model_combo.findData(saved_selected)
-                        if idx >= 0:
-                            elevenlabs_model_combo.setCurrentIndex(idx)
-                        else:
-                            def_idx = elevenlabs_model_combo.findData("eleven_turbo_v2_5")
-                            elevenlabs_model_combo.setCurrentIndex(def_idx if def_idx >= 0 else 0)
-                except Exception as model_err:
-                    print(f"[ElevenLabs] Warning: could not refresh models: {model_err}")
-
-                try:
-                    sub_info = fetch_elevenlabs_user_subscription(key)
-                except Exception:
-                    sub_info = {}
-
-                elevenlabs_sub_label.setText(_format_sub_label(sub_info, key))
-                if isinstance(sub_info, dict) and sub_info.get("tier"):
-                    _update_workers_combo_state(sub_info.get("tier", "free"))
-                else:
-                    _update_workers_combo_state("free")
-
-                self.load_voice_preview_catalog()
-                QMessageBox.information(dialog, "ElevenLabs", t("Successfully synced {count} voices.", count=len(voices)))
-            except Exception as exc:
-                QMessageBox.critical(dialog, "ElevenLabs", str(exc))
         elevenlabs_sync_btn.clicked.connect(_sync_elevenlabs_voices)
         elevenlabs_settings_layout.addWidget(elevenlabs_sync_btn)
+        elevenlabs_settings_layout.addWidget(elevenlabs_sync_status)
         elevenlabs_settings_layout.addWidget(elevenlabs_sub_label)
 
         # ElevenLabs Guide Card
@@ -16703,6 +16829,7 @@ class VideoTranslatorGUI(QMainWindow):
         button_row.addStretch(1)
         cancel_btn = QPushButton(t("Cancel"), dialog)
         save_btn = QPushButton(t("Save"), dialog)
+        save_button_ref.append(save_btn)
         button_row.addWidget(cancel_btn)
         button_row.addWidget(save_btn)
         main_dialog_layout.addLayout(button_row)
@@ -16768,6 +16895,24 @@ class VideoTranslatorGUI(QMainWindow):
         new_elevenlabs_key = elevenlabs_key_edit.text().strip()
         new_elevenlabs_model = str(elevenlabs_model_combo.currentData() or "eleven_turbo_v2_5").strip()
         new_elevenlabs_workers = str(elevenlabs_workers_combo.currentData() or "2").strip()
+        previous_elevenlabs_key = str(os.getenv("ELEVENLABS_API_KEY", "") or "").strip()
+        previous_elevenlabs_model = str(os.getenv("ELEVENLABS_MODEL", "") or "").strip()
+        staged_sync = sync_session.get("result") if isinstance(sync_session, dict) else None
+        if (
+            isinstance(staged_sync, dict)
+            and str(staged_sync.get("api_key", "") or "").strip() == new_elevenlabs_key
+            and isinstance(staged_sync.get("payload"), dict)
+        ):
+            try:
+                try:
+                    from app.engines.elevenlabs_tts import write_elevenlabs_voice_cache
+                except ImportError:
+                    from engines.elevenlabs_tts import write_elevenlabs_voice_cache
+                cache_written = write_elevenlabs_voice_cache(new_elevenlabs_key, staged_sync["payload"])
+                if not cache_written:
+                    self.log("[ElevenLabs] Synced voice cache was rejected; a background refresh will retry after Save.")
+            except Exception as exc:
+                self.log(f"[ElevenLabs] Could not commit the synced voice cache: {exc}")
         os.environ["ELEVENLABS_API_KEY"] = new_elevenlabs_key
         os.environ["ELEVENLABS_MODEL"] = new_elevenlabs_model
         os.environ["ELEVENLABS_TTS_WORKERS"] = new_elevenlabs_workers
@@ -16888,6 +17033,10 @@ class VideoTranslatorGUI(QMainWindow):
         # Update os.environ so it takes effect immediately in this session
         for k, v in updates.items():
             os.environ[k] = v
+
+        if previous_elevenlabs_key != new_elevenlabs_key or previous_elevenlabs_model != new_elevenlabs_model:
+            self._voiceover_force_refresh = True
+        self.load_voice_preview_catalog()
 
         self.set_project_transcription_engine(new_engine)
         self.save_user_settings()
@@ -17539,6 +17688,7 @@ class VideoTranslatorGUI(QMainWindow):
             self.is_ai_dubbing_rewrite_enabled() and self.get_output_mode_key() in ("voice", "both"),
             self.get_ai_dubbing_style_instruction(),
             self.get_source_language_code(),
+            target_language=self.get_target_language_code(),
         )
         self.voice_thread.progress.connect(self._on_voiceover_progress)
         self.voice_thread.finished.connect(self.on_voiceover_finished)
@@ -17781,9 +17931,12 @@ class VideoTranslatorGUI(QMainWindow):
             self.schedule_live_subtitle_preview_refresh()
             self.sync_segment_editor_rows()
         if self.current_project_state:
+            completed_worker = getattr(self, "voice_thread", None)
             voice_signature = self.build_current_voice_signature(
                 segments=self._get_voiceover_segments(),
                 background_path=self.resolve_background_audio_path(),
+                model_id=getattr(completed_worker, "elevenlabs_model_id", None),
+                language_code=getattr(completed_worker, "target_language", None),
             )
             if voice_signature:
                 self.current_project_state.set_setting("voice_signature", voice_signature)
@@ -18457,6 +18610,7 @@ class VideoTranslatorGUI(QMainWindow):
             "vocal_thread",
             "voice_thread",
             "_voice_sample_preview_thread",
+            "_elevenlabs_sync_worker",
             "transcription_thread",
             "_alternate_range_transcription_worker",
             "translation_thread",
@@ -18499,6 +18653,28 @@ class VideoTranslatorGUI(QMainWindow):
                 except Exception as e:
                     print(f"[Cleanup] Failed to stop {name}: {e}")
             setattr(self, name, None)
+        catalog_refresh_workers = getattr(self, "_elevenlabs_catalog_refresh_workers", {})
+        for worker in list(catalog_refresh_workers.values()):
+            if worker is None or not getattr(worker, "isRunning", lambda: False)():
+                continue
+            try:
+                if hasattr(worker, "completed"):
+                    worker.completed.disconnect()
+                worker.finished.disconnect()
+            except Exception:
+                pass
+            try:
+                worker.requestInterruption()
+                worker.quit()
+                worker.wait(1000)
+                if worker.isRunning():
+                    self._retiring_workers.append(worker)
+                    worker.finished.connect(
+                        lambda w=worker: self._retiring_workers.remove(w) if w in self._retiring_workers else None
+                    )
+            except Exception as exc:
+                print(f"[Cleanup] Failed to stop ElevenLabs catalog refresh worker: {exc}")
+        catalog_refresh_workers.clear()
         threads_dict = getattr(self, "_segment_preview_threads", None)
         if threads_dict:
             for idx, worker in list(threads_dict.items()):

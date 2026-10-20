@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import wave
 
 from runtime_paths import app_path
 
@@ -37,12 +38,38 @@ def segment_cache_key(
     voice_name: str,
     provider_speed: float,
     normalizer_signature: str = "",
+    model_id: str | None = None,
+    language_code: str | None = None,
 ) -> str:
     # A pronunciation dictionary changes the generated waveform even when
     # subtitle text, voice, and speed remain identical. Include its stable
     # fingerprint so stale TTS cache entries cannot survive a dictionary edit.
     payload = f"{voice_name}|{provider_speed:.3f}|{normalizer_signature}|{text.strip()}"
+    if model_id or language_code:
+        payload += f"|model={str(model_id or '').strip()}|language={str(language_code or '').strip().lower()}"
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def is_valid_non_silent_wav(wav_path: str) -> bool:
+    """Check whether a generated cache candidate contains decodable audio."""
+    if not wav_path or not os.path.exists(wav_path):
+        return False
+    try:
+        if os.path.getsize(wav_path) <= 44:
+            return False
+        with wave.open(wav_path, "rb") as handle:
+            sample_width = int(handle.getsampwidth())
+            if handle.getnframes() <= 0 or sample_width <= 0:
+                return False
+            silence_byte = 128 if sample_width == 1 else 0
+            while True:
+                chunk = handle.readframes(8192)
+                if not chunk:
+                    return False
+                if any(value != silence_byte for value in chunk):
+                    return True
+    except Exception:
+        return False
 
 
 def voice_provider(voice_name: str) -> str:

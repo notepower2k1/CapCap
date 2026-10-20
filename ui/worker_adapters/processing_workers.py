@@ -1007,6 +1007,16 @@ class PrepareWorkflowWorker(QThread):
     def run(self):
         try:
             from runtime_profile import is_remote_profile
+            prefetch_voice_provider = _get_voice_preview_utils().voice_provider
+            prefetch_is_elevenlabs = bool(
+                self.prefetch_voice_name
+                and prefetch_voice_provider(self.prefetch_voice_name) == "elevenlabs"
+            )
+            self.elevenlabs_model_id = (
+                str(os.getenv("ELEVENLABS_MODEL") or "eleven_turbo_v2_5").strip()
+                if prefetch_is_elevenlabs
+                else None
+            )
             if self.force_remote_api or is_remote_profile():
                 from remote_api import remote_api_post
                 old_url = os.environ.get("CAPCAP_REMOTE_API_URL")
@@ -1016,27 +1026,30 @@ class PrepareWorkflowWorker(QThread):
                         os.environ["CAPCAP_REMOTE_API_URL"] = self.remote_api_url
                     if self.remote_api_token:
                         os.environ["CAPCAP_REMOTE_API_TOKEN"] = self.remote_api_token
+                    prepare_payload = {
+                        "workspace_root": self.workspace_root,
+                        "video_path": self.video_path,
+                        "source_language": self.source_language,
+                        "target_language": self.target_language,
+                        "mode": self.mode,
+                        "audio_handling_mode": self.audio_handling_mode,
+                        "translator_ai": self.translator_ai,
+                        "optimize_subtitles": self.optimize_subtitles,
+                        "translator_style": self.translator_style,
+                        "whisper_model_name": self.whisper_model_name,
+                        "transcription_engine": self.transcription_engine,
+                        "speaker_diarization": self.speaker_diarization,
+                        "speaker_diarization_num_speakers": self.speaker_diarization_num_speakers,
+                        "skip_translation": self.skip_translation,
+                        "force_transcription": self.force_transcription,
+                        "prefetch_voice_name": self.prefetch_voice_name,
+                        "prefetch_voice_speed": self.prefetch_voice_speed,
+                    }
+                    if self.elevenlabs_model_id:
+                        prepare_payload["elevenlabs_model_id"] = self.elevenlabs_model_id
                     response = remote_api_post(
                         "/v1/prepare",
-                        {
-                            "workspace_root": self.workspace_root,
-                            "video_path": self.video_path,
-                            "source_language": self.source_language,
-                            "target_language": self.target_language,
-                            "mode": self.mode,
-                            "audio_handling_mode": self.audio_handling_mode,
-                            "translator_ai": self.translator_ai,
-                            "optimize_subtitles": self.optimize_subtitles,
-                            "translator_style": self.translator_style,
-                            "whisper_model_name": self.whisper_model_name,
-                            "transcription_engine": self.transcription_engine,
-                            "speaker_diarization": self.speaker_diarization,
-                            "speaker_diarization_num_speakers": self.speaker_diarization_num_speakers,
-                            "skip_translation": self.skip_translation,
-                            "force_transcription": self.force_transcription,
-                            "prefetch_voice_name": self.prefetch_voice_name,
-                            "prefetch_voice_speed": self.prefetch_voice_speed,
-                        },
+                        prepare_payload,
                         timeout=3600,
                         retries=1 if self.force_remote_api else 3,
                     )
@@ -1053,8 +1066,7 @@ class PrepareWorkflowWorker(QThread):
             else:
                 from workflows.prepare_workflow import PrepareWorkflow
                 workflow = PrepareWorkflow(self.workspace_root)
-                project_state = workflow.run(
-                    video_path=self.video_path,
+                workflow_kwargs = dict(
                     source_language=self.source_language,
                     target_language=self.target_language,
                     mode=self.mode,
@@ -1075,6 +1087,9 @@ class PrepareWorkflowWorker(QThread):
                         self.progress.emit(int(p), str(m)) if p is not None else None
                     ),
                 )
+                if self.elevenlabs_model_id:
+                    workflow_kwargs["elevenlabs_model_id"] = self.elevenlabs_model_id
+                project_state = workflow.run(self.video_path, **workflow_kwargs)
                 state_path = os.path.join(project_state.project_root, "project.json")
                 self.finished.emit(state_path, "")
         except Exception as exc:
@@ -1085,7 +1100,7 @@ class VoiceOverWorker(QThread):
     finished = Signal(str, str, object, str)
     progress = Signal(str)  # New signal for progress messages
 
-    def __init__(self, workspace_root, segments, output_dir, background_path, audio_handling_mode, voice_name, voice_speed, timing_sync_mode, original_volume, dub_volume, project_state_path="", project_temp_dir="", ai_rewrite_dubbing=False, dubbing_style_instruction="", source_language="auto"):
+    def __init__(self, workspace_root, segments, output_dir, background_path, audio_handling_mode, voice_name, voice_speed, timing_sync_mode, original_volume, dub_volume, project_state_path="", project_temp_dir="", ai_rewrite_dubbing=False, dubbing_style_instruction="", source_language="auto", elevenlabs_model_id=None, target_language=None):
         super().__init__()
         self.workspace_root = workspace_root
         self.segments = segments
@@ -1102,6 +1117,8 @@ class VoiceOverWorker(QThread):
         self.ai_rewrite_dubbing = ai_rewrite_dubbing
         self.dubbing_style_instruction = dubbing_style_instruction
         self.source_language = source_language
+        self.target_language = target_language
+        self.elevenlabs_model_id = elevenlabs_model_id
         self._is_cancelled = False
         self.workflow = None
 
@@ -1114,30 +1131,51 @@ class VoiceOverWorker(QThread):
     def run(self):
         try:
             from runtime_profile import is_remote_profile
+            voice_provider = _get_voice_preview_utils().voice_provider
+            selected_voice_names = [str(self.voice_name or "").strip()]
+            selected_voice_names.extend(
+                str((segment or {}).get("voice_name") or "").strip()
+                for segment in list(self.segments or [])
+                if isinstance(segment, dict)
+            )
+            uses_elevenlabs = any(
+                voice_provider(name) == "elevenlabs"
+                for name in dict.fromkeys(name for name in selected_voice_names if name)
+            )
+            if uses_elevenlabs:
+                self.elevenlabs_model_id = str(
+                    self.elevenlabs_model_id or os.getenv("ELEVENLABS_MODEL") or "eleven_turbo_v2_5"
+                ).strip()
+            else:
+                self.elevenlabs_model_id = None
             print(f"[VoiceOverWorker DEBUG] Starting with voice_name='{self.voice_name}'")
             self.progress.emit(f"[VoiceOverWorker DEBUG] voice_name='{self.voice_name}'")
 
             if is_remote_profile():
                 from remote_api import remote_api_post
+                voice_payload = {
+                    "workspace_root": self.workspace_root,
+                    "segments": self.segments,
+                    "output_dir": self.output_dir,
+                    "background_path": self.background_path,
+                    "audio_handling_mode": self.audio_handling_mode,
+                    "voice_name": self.voice_name,
+                    "voice_speed": self.voice_speed,
+                    "timing_sync_mode": self.timing_sync_mode,
+                    "original_volume": self.original_volume,
+                    "dub_volume": self.dub_volume,
+                    "project_state_path": self.project_state_path,
+                    "project_temp_dir": self.project_temp_dir,
+                    "ai_rewrite_dubbing": self.ai_rewrite_dubbing,
+                    "dubbing_style_instruction": self.dubbing_style_instruction,
+                    "source_language": self.source_language,
+                }
+                if uses_elevenlabs:
+                    voice_payload["elevenlabs_model_id"] = self.elevenlabs_model_id
+                    voice_payload["target_language"] = self.target_language
                 response = remote_api_post(
                     "/v1/voice",
-                    {
-                        "workspace_root": self.workspace_root,
-                        "segments": self.segments,
-                        "output_dir": self.output_dir,
-                        "background_path": self.background_path,
-                        "audio_handling_mode": self.audio_handling_mode,
-                        "voice_name": self.voice_name,
-                        "voice_speed": self.voice_speed,
-                        "timing_sync_mode": self.timing_sync_mode,
-                        "original_volume": self.original_volume,
-                        "dub_volume": self.dub_volume,
-                        "project_state_path": self.project_state_path,
-                        "project_temp_dir": self.project_temp_dir,
-                        "ai_rewrite_dubbing": self.ai_rewrite_dubbing,
-                        "dubbing_style_instruction": self.dubbing_style_instruction,
-                        "source_language": self.source_language,
-                    },
+                    voice_payload,
                     timeout=3600,
                 )
                 if self._is_cancelled:
@@ -1153,7 +1191,7 @@ class VoiceOverWorker(QThread):
                 from workflows.voice_workflow import VoiceWorkflow
                 workflow = VoiceWorkflow(self.workspace_root)
                 self.workflow = workflow
-                result = workflow.run(
+                workflow_kwargs = dict(
                     segments=self.segments,
                     output_dir=self.output_dir,
                     background_path=self.background_path,
@@ -1171,6 +1209,10 @@ class VoiceOverWorker(QThread):
                     on_progress=self.progress.emit,
                     is_cancelled=lambda: getattr(self, "_is_cancelled", False),
                 )
+                if uses_elevenlabs:
+                    workflow_kwargs["elevenlabs_model_id"] = self.elevenlabs_model_id
+                    workflow_kwargs["target_language"] = self.target_language
+                result = workflow.run(**workflow_kwargs)
                 if self._is_cancelled:
                     return
                 self.finished.emit(
@@ -1277,7 +1319,7 @@ class FinalExportWorker(QThread):
 class SegmentAudioPreviewWorker(QThread):
     finished = Signal(int, str, str)
 
-    def __init__(self, workspace_root, index, text, voice_name, voice_speed, temp_dir="", cache_temp_dir="", normalizer_dictionary=None):
+    def __init__(self, workspace_root, index, text, voice_name, voice_speed, temp_dir="", cache_temp_dir="", normalizer_dictionary=None, target_language=None):
         super().__init__()
         self.workspace_root = workspace_root
         self.index = index
@@ -1287,6 +1329,7 @@ class SegmentAudioPreviewWorker(QThread):
         self.temp_dir = temp_dir
         self.cache_temp_dir = cache_temp_dir
         self.normalizer_dictionary = dict(normalizer_dictionary or {})
+        self.target_language = target_language
 
     def run(self):
         try:
@@ -1303,34 +1346,61 @@ class SegmentAudioPreviewWorker(QThread):
             save_manifest = _vpu.save_manifest
             segment_cache_key = _vpu.segment_cache_key
             voice_provider = _vpu.voice_provider
+            is_valid_non_silent_wav = _vpu.is_valid_non_silent_wav
 
             requested_speed = clamp_requested_speed(float(self.voice_speed))
             v_provider = voice_provider(self.voice_name)
+            is_elevenlabs = v_provider == "elevenlabs"
+            language_code = str(self.target_language or "").strip().lower().split("-", 1)[0].split("_", 1)[0] or None
+            model_id = (
+                str(os.getenv("ELEVENLABS_MODEL") or "eleven_turbo_v2_5").strip()
+                if is_elevenlabs
+                else None
+            )
             provider_speed = provider_native_speed(
                 provider=v_provider,
                 requested_speed=requested_speed,
             )
             residual_speed = (requested_speed / provider_speed) if provider_speed > 0.0 else requested_speed
-
-            base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_base.wav")
-            engine.synthesize_segment(
-                text=self.text,
-                wav_path=base_wav_path,
-                voice=self.voice_name,
-                speed=provider_speed,
-                tmp_dir=cache_temp_dir,
-                normalizer_dictionary=self.normalizer_dictionary,
-            )
-
-            manifest = load_manifest(cache_temp_dir)
-            manifest_segments = dict(manifest.get("segments", {}) or {})
-            manifest_by_cache_key = dict(manifest.get("by_cache_key", {}) or {})
             cache_key = segment_cache_key(
                 text=self.text,
                 voice_name=self.voice_name,
                 provider_speed=provider_speed,
                 normalizer_signature=_normalizer_signature(self.normalizer_dictionary),
+                model_id=model_id,
+                language_code=language_code if is_elevenlabs else None,
             )
+            if is_elevenlabs:
+                base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_{cache_key[:16]}_base.wav")
+                staging_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_{cache_key[:16]}_work.wav")
+                try:
+                    if os.path.exists(staging_wav_path):
+                        os.remove(staging_wav_path)
+                except OSError:
+                    pass
+            else:
+                base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_base.wav")
+                staging_wav_path = base_wav_path
+            synthesize_kwargs = dict(
+                text=self.text,
+                wav_path=staging_wav_path,
+                voice=self.voice_name,
+                speed=provider_speed,
+                tmp_dir=cache_temp_dir,
+                normalizer_dictionary=self.normalizer_dictionary,
+            )
+            if is_elevenlabs:
+                synthesize_kwargs["language_code"] = language_code
+                synthesize_kwargs["model_id"] = model_id
+            engine.synthesize_segment(**synthesize_kwargs)
+            if is_elevenlabs:
+                if not is_valid_non_silent_wav(staging_wav_path):
+                    raise RuntimeError("ElevenLabs returned empty or silent segment audio.")
+                os.replace(staging_wav_path, base_wav_path)
+
+            manifest = load_manifest(cache_temp_dir)
+            manifest_segments = dict(manifest.get("segments", {}) or {})
+            manifest_by_cache_key = dict(manifest.get("by_cache_key", {}) or {})
             manifest_entry = {
                 "cache_key": cache_key,
                 "wav_path": base_wav_path,
@@ -1338,6 +1408,10 @@ class SegmentAudioPreviewWorker(QThread):
                 "voice_name": self.voice_name,
                 "provider_speed": provider_speed,
             }
+            if is_elevenlabs:
+                manifest_entry["synthesis_succeeded"] = True
+                manifest_entry["model_id"] = model_id
+                manifest_entry["language_code"] = language_code
             manifest_segments[str(self.index)] = manifest_entry
             manifest_by_cache_key[cache_key] = dict(manifest_entry)
             manifest["segments"] = manifest_segments
@@ -1363,7 +1437,7 @@ class VoiceSamplePreviewWorker(QThread):
     finished = Signal(str, str)
     progress = Signal(str)
 
-    def __init__(self, workspace_root, text, voice_name, voice_speed, temp_dir="", normalizer_dictionary=None):
+    def __init__(self, workspace_root, text, voice_name, voice_speed, temp_dir="", normalizer_dictionary=None, target_language=None):
         super().__init__()
         self.workspace_root = workspace_root
         self.text = text
@@ -1371,31 +1445,43 @@ class VoiceSamplePreviewWorker(QThread):
         self.voice_speed = voice_speed
         self.temp_dir = temp_dir
         self.normalizer_dictionary = dict(normalizer_dictionary or {})
+        self.target_language = target_language
 
     def run(self):
         try:
             temp_dir = self.temp_dir or os.path.join(self.workspace_root, "temp", "voice_sample_preview")
             os.makedirs(temp_dir, exist_ok=True)
+            vpu = _get_voice_preview_utils()
+            is_elevenlabs = vpu.voice_provider(self.voice_name) == "elevenlabs"
+            language_code = str(self.target_language or "").strip().lower().split("-", 1)[0].split("_", 1)[0] or None
+            model_id = (
+                str(os.getenv("ELEVENLABS_MODEL") or "eleven_turbo_v2_5").strip()
+                if is_elevenlabs
+                else None
+            )
             cache_seed = (
                 f"{self.voice_name}|{self.voice_speed}|{_normalizer_signature(self.normalizer_dictionary)}|{self.text}"
-            ).encode("utf-8", errors="replace")
+            )
+            if is_elevenlabs:
+                cache_seed += f"|model={model_id}|language={language_code or ''}"
+            cache_seed = cache_seed.encode("utf-8", errors="replace")
             cache_key = hashlib.sha1(cache_seed).hexdigest()[:16]
             wav_path = os.path.join(temp_dir, f"voice_sample_{cache_key}.wav")
             base_wav_path = os.path.join(temp_dir, f"voice_sample_{cache_key}_base.wav")
             if abs(float(self.voice_speed) - 1.0) >= 0.02:
-                if self._is_preview_audio_usable(wav_path):
+                if self._is_preview_audio_usable(wav_path) and (not is_elevenlabs or vpu.is_valid_non_silent_wav(wav_path)):
                     self.finished.emit(self._normalize_preview_wav(wav_path, temp_dir=temp_dir), "")
                     return
                 self._remove_if_exists(wav_path)
             elif os.path.exists(base_wav_path):
-                if self._is_preview_audio_usable(base_wav_path):
+                if self._is_preview_audio_usable(base_wav_path) and (not is_elevenlabs or vpu.is_valid_non_silent_wav(base_wav_path)):
                     self.finished.emit(self._normalize_preview_wav(base_wav_path, temp_dir=temp_dir), "")
                     return
                 self._remove_if_exists(base_wav_path)
             engine = EngineRuntime()
             staging_base_wav_path = os.path.join(temp_dir, f"voice_sample_{cache_key}_base_work.wav")
             self._remove_if_exists(staging_base_wav_path)
-            engine.synthesize_segment(
+            synthesize_kwargs = dict(
                 text=self.text,
                 wav_path=staging_base_wav_path,
                 voice=self.voice_name,
@@ -1404,8 +1490,14 @@ class VoiceSamplePreviewWorker(QThread):
                 on_progress=self.progress.emit,
                 normalizer_dictionary=self.normalizer_dictionary,
             )
+            if is_elevenlabs:
+                synthesize_kwargs["language_code"] = language_code
+                synthesize_kwargs["model_id"] = model_id
+            engine.synthesize_segment(**synthesize_kwargs)
             if not self._is_preview_audio_usable(staging_base_wav_path):
                 raise RuntimeError("Generated voice preview audio is empty or invalid.")
+            if is_elevenlabs and not vpu.is_valid_non_silent_wav(staging_base_wav_path):
+                raise RuntimeError("ElevenLabs returned empty or silent voice preview audio.")
             os.replace(staging_base_wav_path, base_wav_path)
             speed_value = float(self.voice_speed)
             if abs(speed_value - 1.0) >= 0.02:
@@ -1422,6 +1514,8 @@ class VoiceSamplePreviewWorker(QThread):
             output = self._normalize_preview_wav(output, temp_dir=temp_dir)
             if not self._is_preview_audio_usable(output):
                 raise RuntimeError("Normalized voice preview audio is empty or invalid.")
+            if is_elevenlabs and not vpu.is_valid_non_silent_wav(output):
+                raise RuntimeError("Normalized ElevenLabs preview audio is empty or silent.")
             self.finished.emit(output, "")
         except Exception as exc:
             details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()

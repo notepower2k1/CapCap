@@ -121,6 +121,21 @@ class TestVoiceCatalogElevenLabs(unittest.TestCase):
         eleven_ids = [v.get("id") for v in result if str(v.get("id", "")).startswith("elevenlabs:")]
         self.assertEqual(eleven_ids, [])
 
+    @patch("app.engines.elevenlabs_tts.fetch_elevenlabs_voices")
+    @patch("app.engines.elevenlabs_tts.read_elevenlabs_voice_cache")
+    @patch("os.getenv")
+    def test_elevenlabs_offline_load_uses_cache_without_network(self, mock_getenv, mock_read_cache, mock_fetch):
+        """UI-thread catalog loading can read cached voices without making API calls."""
+        mock_getenv.side_effect = lambda key, default="": "cached_key" if key == "ELEVENLABS_API_KEY" else default
+        mock_read_cache.return_value = {"voices": self.fake_voices}
+
+        result = self.service.load_catalog(allow_elevenlabs_network=False)
+
+        mock_read_cache.assert_called_once_with("cached_key")
+        mock_fetch.assert_not_called()
+        eleven_ids = [v.get("id") for v in result if str(v.get("id", "")).startswith("elevenlabs:")]
+        self.assertEqual(eleven_ids, ["elevenlabs:voice_1", "elevenlabs:voice_2"])
+
 
 if __name__ == "__main__":
     unittest.main()

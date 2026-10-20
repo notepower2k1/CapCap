@@ -4,6 +4,7 @@ import re
 import time
 import wave
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Event, Lock
 
 from services import EngineRuntime, ProjectService
 from translation import render_prompt
@@ -45,6 +46,7 @@ manifest_path = _vpu.manifest_path
 provider_native_speed = _vpu.provider_native_speed
 save_manifest = _vpu.save_manifest
 segment_cache_key = _vpu.segment_cache_key
+is_valid_non_silent_wav = _vpu.is_valid_non_silent_wav
 voice_provider = _vpu.voice_provider
 
 
@@ -211,6 +213,22 @@ class VoiceWorkflow:
     def _save_manifest(self, tmp_dir: str, manifest: dict) -> None:
         save_manifest(tmp_dir, manifest)
 
+    @staticmethod
+    def _effective_elevenlabs_model_id(model_id: str | None = None) -> str:
+        return str(model_id or os.getenv("ELEVENLABS_MODEL") or "eleven_turbo_v2_5").strip()
+
+    @staticmethod
+    def _normalize_language_code(language_code: str | None) -> str | None:
+        value = str(language_code or "").strip().lower()
+        if not value:
+            return None
+        return value.split("-", 1)[0].split("_", 1)[0]
+
+    @staticmethod
+    def _is_valid_elevenlabs_audio(wav_path: str) -> bool:
+        """Reject missing, malformed, and all-zero WAVs from ElevenLabs caches."""
+        return is_valid_non_silent_wav(wav_path)
+
     def _update_manifest_entries(
         self,
         *,
@@ -220,6 +238,8 @@ class VoiceWorkflow:
         voice_name: str,
         provider_speed: float,
         normalizer_signature: str = "",
+        model_id: str | None = None,
+        language_code: str | None = None,
     ) -> None:
         manifest = load_manifest(tmp_dir)
         manifest_segments = dict(manifest.get("segments", {}) or {})
@@ -229,11 +249,18 @@ class VoiceWorkflow:
             if not text or not wav_path or not os.path.exists(wav_path):
                 continue
             segment_voice_name = str((seg or {}).get("voice_name") or voice_name).strip() or voice_name
+            segment_provider = self._voice_provider(segment_voice_name)
+            if segment_provider == "elevenlabs" and not self._is_valid_elevenlabs_audio(wav_path):
+                continue
+            segment_model_id = model_id if segment_provider == "elevenlabs" else None
+            segment_language_code = language_code if segment_provider == "elevenlabs" else None
             cache_key = segment_cache_key(
                 text=text,
                 voice_name=segment_voice_name,
                 provider_speed=provider_speed,
                 normalizer_signature=normalizer_signature,
+                model_id=segment_model_id,
+                language_code=segment_language_code,
             )
             entry = {
                 "cache_key": cache_key,
@@ -243,6 +270,10 @@ class VoiceWorkflow:
                 "provider_speed": float(provider_speed),
                 "normalizer_signature": normalizer_signature,
             }
+            if segment_provider == "elevenlabs":
+                entry["synthesis_succeeded"] = True
+                entry["model_id"] = segment_model_id
+                entry["language_code"] = segment_language_code
             manifest_segments[str(idx)] = entry
             manifest_by_cache_key[cache_key] = dict(entry)
         manifest["segments"] = manifest_segments
@@ -256,12 +287,16 @@ class VoiceWorkflow:
         voice_name: str,
         provider_speed: float,
         normalizer_signature: str = "",
+        model_id: str | None = None,
+        language_code: str | None = None,
     ) -> str:
         return segment_cache_key(
             text=text,
             voice_name=voice_name,
             provider_speed=provider_speed,
             normalizer_signature=normalizer_signature,
+            model_id=model_id,
+            language_code=language_code,
         )
 
     def _voice_provider(self, voice_name: str) -> str:
@@ -713,9 +748,11 @@ class VoiceWorkflow:
         target_duration: float,
         on_progress: callable = None,
         normalizer_dictionary=None,
+        language_code: str | None = None,
+        model_id: str | None = None,
     ) -> tuple[str, float]:
         base_path = os.path.join(tmp_dir, f"seg_{idx:04d}_attempt_{attempt:02d}.wav")
-        self.engine_runtime.synthesize_segment(
+        synthesize_kwargs = dict(
             text=text,
             wav_path=base_path,
             voice=voice_name,
@@ -724,6 +761,10 @@ class VoiceWorkflow:
             on_progress=on_progress,
             normalizer_dictionary=normalizer_dictionary,
         )
+        if self._voice_provider(voice_name) == "elevenlabs":
+            synthesize_kwargs["language_code"] = self._normalize_language_code(language_code)
+            synthesize_kwargs["model_id"] = self._effective_elevenlabs_model_id(model_id)
+        self.engine_runtime.synthesize_segment(**synthesize_kwargs)
         actual_duration = self._probe_wav_duration_seconds(base_path)
         ratio = (actual_duration / target_duration) if target_duration > 0 else 0.0
         return base_path, ratio
@@ -1318,8 +1359,12 @@ class VoiceWorkflow:
         normalizer_dictionary=None,
         log: bool = True,
         is_cancelled: callable = None,
+        language_code: str | None = None,
+        model_id: str | None = None,
     ):
         segments = list(segments or [])
+        effective_model_id = self._effective_elevenlabs_model_id(model_id)
+        effective_language_code = self._normalize_language_code(language_code)
         manifest = self._load_manifest(tmp_dir)
         manifest_segments = dict(manifest.get("segments", {}) or {})
         manifest_by_cache_key = dict(manifest.get("by_cache_key", {}) or {})
@@ -1335,23 +1380,41 @@ class VoiceWorkflow:
                 wavs[idx] = ""
                 continue
             segment_voice_name = str(seg.get("voice_name") or voice_name).strip() or voice_name
-            seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}_base.wav")
+            segment_provider = self._voice_provider(segment_voice_name)
+            segment_model_id = effective_model_id if segment_provider == "elevenlabs" else None
+            segment_language_code = effective_language_code if segment_provider == "elevenlabs" else None
             cache_key = self._segment_cache_key(
                 text=txt,
                 voice_name=segment_voice_name,
                 provider_speed=provider_speed,
                 normalizer_signature=normalizer_signature,
+                model_id=segment_model_id,
+                language_code=segment_language_code,
             )
+            if segment_provider == "elevenlabs":
+                seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}_{cache_key[:16]}_base.wav")
+            else:
+                seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}_base.wav")
             cache_entry = manifest_segments.get(str(global_idx), {})
             cached_wav = str(cache_entry.get("wav_path", "")).strip()
             cached_key = str(cache_entry.get("cache_key", "")).strip()
-            if not (cached_key == cache_key and cached_wav and os.path.exists(cached_wav)):
+            cached_usable = bool(cached_key == cache_key and cached_wav and os.path.exists(cached_wav))
+            if cached_usable and segment_provider == "elevenlabs":
+                cached_usable = self._is_valid_elevenlabs_audio(cached_wav)
+                if not cached_usable:
+                    manifest_segments.pop(str(global_idx), None)
+            if not cached_usable:
                 cache_entry = dict(manifest_by_cache_key.get(cache_key, {}) or {})
                 cached_wav = str(cache_entry.get("wav_path", "")).strip()
                 cached_key = str(cache_entry.get("cache_key", "")).strip()
-            if cached_key == cache_key and cached_wav and os.path.exists(cached_wav):
+                cached_usable = bool(cached_key == cache_key and cached_wav and os.path.exists(cached_wav))
+                if cached_usable and segment_provider == "elevenlabs":
+                    cached_usable = self._is_valid_elevenlabs_audio(cached_wav)
+                    if not cached_usable:
+                        manifest_by_cache_key.pop(cache_key, None)
+            if cached_usable:
                 wavs[idx] = cached_wav
-                manifest_segments[str(global_idx)] = {
+                manifest_entry = {
                     "cache_key": cache_key,
                     "wav_path": cached_wav,
                     "text": txt,
@@ -1359,6 +1422,11 @@ class VoiceWorkflow:
                     "provider_speed": provider_speed,
                     "normalizer_signature": normalizer_signature,
                 }
+                if segment_provider == "elevenlabs":
+                    manifest_entry["synthesis_succeeded"] = True
+                    manifest_entry["model_id"] = segment_model_id
+                    manifest_entry["language_code"] = segment_language_code
+                manifest_segments[str(global_idx)] = manifest_entry
                 manifest_by_cache_key[cache_key] = dict(manifest_segments[str(global_idx)])
                 cache_hits += 1
                 continue
@@ -1370,6 +1438,14 @@ class VoiceWorkflow:
                     "wav_path": seg_wav,
                     "cache_key": cache_key,
                     "voice_name": segment_voice_name,
+                    "provider": segment_provider,
+                    "model_id": segment_model_id,
+                    "language_code": segment_language_code,
+                    "work_wav_path": (
+                        os.path.join(tmp_dir, f"seg_{global_idx:04d}_{cache_key[:16]}_work.wav")
+                        if segment_provider == "elevenlabs"
+                        else ""
+                    ),
                 }
             )
 
@@ -1463,6 +1539,63 @@ class VoiceWorkflow:
             if raw:
                 return f"voice '{raw}'"
             return "voiceover"
+
+        elevenlabs_failure_event = Event()
+        elevenlabs_failure_lock = Lock()
+        elevenlabs_first_failure = {"error": None}
+
+        def _run_synthesis_job(job):
+            output_path = str(job["wav_path"])
+            if job["provider"] == "elevenlabs":
+                # ThreadPoolExecutor may start a queued job before the coordinator
+                # observes another job's exception. Stop it before it can issue a
+                # second, billable provider request.
+                if elevenlabs_failure_event.is_set():
+                    return None
+                output_path = str(job["work_wav_path"])
+                try:
+                    if os.path.exists(output_path):
+                        os.remove(output_path)
+                except OSError:
+                    pass
+            kwargs = {
+                "text": job["text"],
+                "wav_path": output_path,
+                "voice": job["voice_name"],
+                "speed": provider_speed,
+                "tmp_dir": tmp_dir,
+                "on_progress": None,
+                "normalizer_dictionary": normalizer_dictionary,
+            }
+            if job["provider"] == "elevenlabs":
+                kwargs["language_code"] = job["language_code"]
+                kwargs["model_id"] = job["model_id"]
+                try:
+                    return self.engine_runtime.synthesize_segment(**kwargs)
+                except Exception as exc:
+                    with elevenlabs_failure_lock:
+                        if elevenlabs_first_failure["error"] is None:
+                            elevenlabs_first_failure["error"] = exc
+                        elevenlabs_failure_event.set()
+                    raise
+            return self.engine_runtime.synthesize_segment(**kwargs)
+
+        def _record_successful_job(job):
+            entry = {
+                "cache_key": str(job["cache_key"]),
+                "wav_path": str(job["wav_path"]),
+                "text": str(job["text"]),
+                "voice_name": str(job["voice_name"]),
+                "provider_speed": provider_speed,
+                "normalizer_signature": normalizer_signature,
+            }
+            if job["provider"] == "elevenlabs":
+                entry["synthesis_succeeded"] = True
+                entry["model_id"] = job["model_id"]
+                entry["language_code"] = job["language_code"]
+            manifest_segments[str(job["global_idx"])] = entry
+            manifest_by_cache_key[str(job["cache_key"])] = dict(entry)
+            wavs[int(job["idx"])] = str(job["wav_path"])
 
         if pending_providers == {"capcut"} and capcut_batch_size > 1:
             from collections import defaultdict
@@ -1579,16 +1712,7 @@ class VoiceWorkflow:
         else:
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 future_map = {
-                    executor.submit(
-                        self.engine_runtime.synthesize_segment,
-                        text=job["text"],
-                        wav_path=job["wav_path"],
-                        voice=job["voice_name"],
-                        speed=provider_speed,
-                        tmp_dir=tmp_dir,
-                        on_progress=None,
-                        normalizer_dictionary=normalizer_dictionary,
-                    ): job
+                    executor.submit(_run_synthesis_job, job): job
                     for job in pending_jobs
                 }
                 completed_count = 0
@@ -1605,7 +1729,64 @@ class VoiceWorkflow:
                     seg_wav = str(job["wav_path"])
                     try:
                         future.result()
+                        if job["provider"] == "elevenlabs":
+                            work_path = str(job["work_wav_path"])
+                            if not self._is_valid_elevenlabs_audio(work_path):
+                                raise RuntimeError("ElevenLabs returned empty or silent audio.")
+                            os.replace(work_path, seg_wav)
+                            if not self._is_valid_elevenlabs_audio(seg_wav):
+                                raise RuntimeError("ElevenLabs output could not be saved as valid audio.")
                     except Exception as exc:
+                        if job["provider"] == "elevenlabs":
+                            with elevenlabs_failure_lock:
+                                exc = elevenlabs_first_failure["error"] or exc
+                                if elevenlabs_first_failure["error"] is None:
+                                    elevenlabs_first_failure["error"] = exc
+                                elevenlabs_failure_event.set()
+                            # Cancel requests that have not started. Calls already
+                            # in flight may still succeed, so wait for them and keep
+                            # only valid outputs in the manifest before surfacing
+                            # the provider error.
+                            for queued_future in future_map:
+                                if queued_future is not future:
+                                    queued_future.cancel()
+                            executor.shutdown(wait=True, cancel_futures=True)
+                            for completed_future, completed_job in future_map.items():
+                                if completed_future is future or completed_future.cancelled():
+                                    continue
+                                try:
+                                    completed_future.result()
+                                except Exception:
+                                    continue
+                                completed_path = str(completed_job["wav_path"])
+                                if completed_job["provider"] == "elevenlabs":
+                                    completed_work_path = str(completed_job["work_wav_path"])
+                                    if not self._is_valid_elevenlabs_audio(completed_work_path):
+                                        continue
+                                    try:
+                                        os.replace(completed_work_path, completed_path)
+                                    except OSError:
+                                        continue
+                                    if not self._is_valid_elevenlabs_audio(completed_path):
+                                        continue
+                                if not os.path.exists(completed_path) or os.path.getsize(completed_path) <= 44:
+                                    continue
+                                _record_successful_job(completed_job)
+                            for pending_job in pending_jobs:
+                                work_path = str(pending_job.get("work_wav_path") or "")
+                                if work_path:
+                                    try:
+                                        if os.path.exists(work_path):
+                                            os.remove(work_path)
+                                    except OSError:
+                                        pass
+                            manifest["segments"] = manifest_segments
+                            manifest["by_cache_key"] = manifest_by_cache_key
+                            self._save_manifest(tmp_dir, manifest)
+                            raise RuntimeError(
+                                f"ElevenLabs synthesis failed for subtitle segment {idx + 1}. "
+                                f"Check the API key, model, and target language: {exc}"
+                            ) from exc
                         preview = " ".join(txt.split())
                         if len(preview) > 120:
                             preview = preview[:117] + "..."
@@ -1632,16 +1813,19 @@ class VoiceWorkflow:
                     elif log:
                         print(f"[Voice Workflow] {msg}")
 
-                    manifest_segments[str(job["global_idx"])] = {
-                        "cache_key": str(job["cache_key"]),
-                        "wav_path": seg_wav,
-                        "text": txt,
-                        "voice_name": job["voice_name"],
-                        "provider_speed": provider_speed,
-                        "normalizer_signature": normalizer_signature,
-                    }
-                    manifest_by_cache_key[str(job["cache_key"])] = dict(manifest_segments[str(job["global_idx"])])
-                    wavs[idx] = seg_wav
+                    if job["provider"] == "elevenlabs":
+                        _record_successful_job(job)
+                    else:
+                        manifest_segments[str(job["global_idx"])] = {
+                            "cache_key": str(job["cache_key"]),
+                            "wav_path": seg_wav,
+                            "text": txt,
+                            "voice_name": job["voice_name"],
+                            "provider_speed": provider_speed,
+                            "normalizer_signature": normalizer_signature,
+                        }
+                        manifest_by_cache_key[str(job["cache_key"])] = dict(manifest_segments[str(job["global_idx"])])
+                        wavs[idx] = seg_wav
 
         manifest["segments"] = manifest_segments
         manifest["by_cache_key"] = manifest_by_cache_key
@@ -1659,8 +1843,12 @@ class VoiceWorkflow:
         on_progress: callable = None,
         normalizer_dictionary=None,
         quiet: bool = False,
+        elevenlabs_model_id: str | None = None,
+        target_language: str | None = None,
     ) -> list[str]:
         os.makedirs(tmp_dir, exist_ok=True)
+        effective_model_id = self._effective_elevenlabs_model_id(elevenlabs_model_id)
+        language_code = self._normalize_language_code(target_language)
         safe_voice_speed = self._clamp_requested_speed(float(voice_speed))
         voice_provider = self._voice_provider(voice_name)
         prepared_segments = self._prepare_segments_for_tts(
@@ -1692,6 +1880,8 @@ class VoiceWorkflow:
             index_offset=index_offset,
             normalizer_dictionary=normalizer_dictionary,
             log=not quiet,
+            language_code=language_code,
+            model_id=effective_model_id,
         )
 
     def run(
@@ -1713,11 +1903,19 @@ class VoiceWorkflow:
         source_language: str = "auto",
         on_progress: callable = None,
         is_cancelled: callable = None,
+        elevenlabs_model_id: str | None = None,
+        target_language: str | None = None,
     ):
         workflow_started = time.perf_counter()
+        effective_model_id = self._effective_elevenlabs_model_id(elevenlabs_model_id)
+        language_code = None
         if self._cancelled or (is_cancelled and is_cancelled()):
             return {"voice_track": "", "mixed_path": "", "segments": []}
         state = self._load_state(project_state_path)
+        effective_target_language = target_language
+        if effective_target_language is None and state is not None:
+            effective_target_language = getattr(state, "target_language", None)
+        language_code = self._normalize_language_code(effective_target_language)
         normalizer_dictionary = self._normalizer_dictionary_from_state(state)
         normalizer_signature = self._normalizer_signature(normalizer_dictionary)
         print(
@@ -1769,6 +1967,8 @@ class VoiceWorkflow:
             on_progress=on_progress,
             normalizer_dictionary=normalizer_dictionary,
             is_cancelled=is_cancelled,
+            language_code=language_code,
+            model_id=effective_model_id,
         )
         if self._cancelled or (is_cancelled and is_cancelled()):
             return {"voice_track": "", "mixed_path": "", "segments": []}
@@ -1779,6 +1979,8 @@ class VoiceWorkflow:
             voice_name=voice_name,
             provider_speed=provider_speed,
             normalizer_signature=normalizer_signature,
+            model_id=effective_model_id,
+            language_code=language_code,
         )
         self._save_pre_speed_ratios(segments=segments, wavs=wavs)
         wavs = self._apply_safe_timing_polish(

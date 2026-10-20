@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -40,25 +41,22 @@ from app.engines.elevenlabs_tts import (
     fetch_elevenlabs_voices,
     synthesize_elevenlabs_tts_wav_16k_mono,
 )
-from runtime_paths import temp_path
 from ui.main_window import VideoTranslatorGUI
 
 
 class TestElevenLabsTier(unittest.TestCase):
     def setUp(self):
-        self.cache_file = temp_path("elevenlabs_voices_cache.json")
-        if os.path.exists(self.cache_file):
-            try:
-                os.remove(self.cache_file)
-            except OSError:
-                pass
+        self.cache_dir = tempfile.TemporaryDirectory()
+        self.cache_file = os.path.join(self.cache_dir.name, "elevenlabs_voices_cache.json")
+        self.cache_path_patcher = patch(
+            "app.engines.elevenlabs_tts._resolve_temp_path",
+            side_effect=lambda *parts: os.path.join(self.cache_dir.name, *parts),
+        )
+        self.cache_path_patcher.start()
 
     def tearDown(self):
-        if os.path.exists(self.cache_file):
-            try:
-                os.remove(self.cache_file)
-            except OSError:
-                pass
+        self.cache_path_patcher.stop()
+        self.cache_dir.cleanup()
 
     @patch("requests.get")
     def test_fetch_subscription_success(self, mock_get):

@@ -7,8 +7,11 @@ high quality speech synthesis converting to 16kHz mono WAV.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
+import tempfile
 import time
 from typing import Any, Callable
 
@@ -32,6 +35,9 @@ __all__ = [
     "DEFAULT_ELEVENLABS_MODELS",
     "fetch_elevenlabs_models",
     "fetch_elevenlabs_voices",
+    "fetch_elevenlabs_voice_catalog",
+    "read_elevenlabs_voice_cache",
+    "write_elevenlabs_voice_cache",
     "fetch_elevenlabs_user_subscription",
     "synthesize_elevenlabs_tts_wav_16k_mono",
 ]
@@ -46,6 +52,10 @@ DEFAULT_ELEVENLABS_MODELS = [
 
 CACHE_FILE_NAME = "elevenlabs_voices_cache.json"
 MAX_CACHE_AGE_SECONDS = 3600  # 1 hour
+
+
+class ElevenLabsVoiceCatalogFetchError(RuntimeError):
+    """Raised when ElevenLabs does not return a usable voice catalog."""
 
 _orig_temp_path = temp_path
 _orig_convert = convert_audio_data_to_wav_16k_mono
@@ -67,6 +77,120 @@ def _convert_audio_wav(source: bytes, wav_path: str, tmp_dir: str | None = None)
     if hasattr(tts_processor, "convert_audio_data_to_wav_16k_mono") and tts_processor.convert_audio_data_to_wav_16k_mono is not _orig_convert:
         return tts_processor.convert_audio_data_to_wav_16k_mono(source, wav_path, tmp_dir=tmp_dir)
     return convert_audio_data_to_wav_16k_mono(source, wav_path, tmp_dir=tmp_dir)
+
+
+def _elevenlabs_key_fingerprint(api_key: str) -> str:
+    """Return a one-way fingerprint for binding cached account data to its key."""
+    clean_key = str(api_key or "").strip()
+    return hashlib.sha256(clean_key.encode("utf-8")).hexdigest() if clean_key else ""
+
+
+def read_elevenlabs_voice_cache(api_key: str) -> dict:
+    """Read a fresh voice cache belonging to ``api_key`` without making requests.
+
+    Cache entries from older versions, incomplete payloads, expired entries, and
+    entries written for another API key are treated as cache misses.
+    """
+    expected_fingerprint = _elevenlabs_key_fingerprint(api_key)
+    if not expected_fingerprint:
+        return {}
+
+    cache_path = _resolve_temp_path(CACHE_FILE_NAME)
+    try:
+        with open(cache_path, "r", encoding="utf-8") as cache_file:
+            cache_data = json.load(cache_file)
+
+        if not isinstance(cache_data, dict):
+            return {}
+        if cache_data.get("key_fingerprint") != expected_fingerprint:
+            return {}
+
+        fetched_at = cache_data.get("fetched_at")
+        if isinstance(fetched_at, bool) or not isinstance(fetched_at, (int, float)):
+            return {}
+        fetched_at = float(fetched_at)
+        if not math.isfinite(fetched_at):
+            return {}
+        cache_age = time.time() - fetched_at
+        if cache_age < 0 or cache_age >= MAX_CACHE_AGE_SECONDS:
+            return {}
+
+        voices = cache_data.get("voices")
+        subscription = cache_data.get("user_subscription")
+        if not isinstance(voices, list) or not all(isinstance(voice, dict) for voice in voices):
+            return {}
+        if not isinstance(subscription, dict):
+            return {}
+
+        return {
+            "voices": voices,
+            "fetched_at": fetched_at,
+            "user_subscription": subscription,
+            "key_fingerprint": expected_fingerprint,
+        }
+    except (OSError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
+        return {}
+
+
+def write_elevenlabs_voice_cache(api_key: str, cache_data: dict) -> bool:
+    """Atomically persist a fetched catalog if it belongs to ``api_key``.
+
+    This lets Settings stage a refreshed catalog without changing the active
+    account cache until the user saves the new key.
+    """
+    expected_fingerprint = _elevenlabs_key_fingerprint(api_key)
+    if not expected_fingerprint or not isinstance(cache_data, dict):
+        return False
+    if cache_data.get("key_fingerprint") != expected_fingerprint:
+        return False
+
+    fetched_at = cache_data.get("fetched_at")
+    voices = cache_data.get("voices")
+    subscription = cache_data.get("user_subscription")
+    if isinstance(fetched_at, bool) or not isinstance(fetched_at, (int, float)):
+        return False
+    fetched_at = float(fetched_at)
+    cache_age = time.time() - fetched_at
+    if not math.isfinite(fetched_at) or cache_age < 0 or cache_age >= MAX_CACHE_AGE_SECONDS:
+        return False
+    if not isinstance(voices, list) or not all(isinstance(voice, dict) for voice in voices):
+        return False
+    if not isinstance(subscription, dict):
+        return False
+
+    cache_path = _resolve_temp_path(CACHE_FILE_NAME)
+    temp_cache_path = None
+    try:
+        cache_dir = os.path.dirname(os.path.abspath(cache_path))
+        os.makedirs(cache_dir, exist_ok=True)
+        fd, temp_cache_path = tempfile.mkstemp(
+            prefix=os.path.basename(cache_path) + ".",
+            suffix=".tmp",
+            dir=cache_dir,
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as cache_file:
+            json.dump(
+                {
+                    "fetched_at": fetched_at,
+                    "user_subscription": subscription,
+                    "voices": voices,
+                    "key_fingerprint": expected_fingerprint,
+                },
+                cache_file,
+                ensure_ascii=False,
+                indent=2,
+            )
+            cache_file.flush()
+        os.replace(temp_cache_path, cache_path)
+        return True
+    except Exception as e:
+        if temp_cache_path:
+            try:
+                os.remove(temp_cache_path)
+            except OSError:
+                pass
+        print(f"[ElevenLabs] Could not write voice cache: {e}")
+        return False
 
 
 def fetch_elevenlabs_user_subscription(api_key: str) -> dict:
@@ -165,26 +289,25 @@ def fetch_elevenlabs_models(api_key: str = "") -> list[dict]:
         return [dict(m) for m in DEFAULT_ELEVENLABS_MODELS]
 
 
-def fetch_elevenlabs_voices(api_key: str, force_refresh: bool = False) -> list[dict]:
-    """Fetch voices from ElevenLabs API. Returns list of CapCap catalog-compatible voice dicts.
-    Uses requests. Caches to temp/elevenlabs_voices_cache.json (max age 1 hour).
-    Raises RuntimeError with clear message on auth failure (401) or rate limit (429).
-    Returns [] on any other network error (with print warning).
-    """
-    cache_path = _resolve_temp_path(CACHE_FILE_NAME)
-    if not force_refresh and os.path.isfile(cache_path):
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cache_data = json.load(f)
-            fetched_at = float(cache_data.get("fetched_at", 0))
-            if time.time() - fetched_at < MAX_CACHE_AGE_SECONDS:
-                cached_voices = cache_data.get("voices")
-                if isinstance(cached_voices, list):
-                    return cached_voices
-        except Exception:
-            pass
+def fetch_elevenlabs_voice_catalog(
+    api_key: str,
+    *,
+    force_refresh: bool = False,
+    write_cache: bool = True,
+) -> dict:
+    """Fetch voices and account metadata as a cache-shaped payload.
 
+    By default this uses and refreshes the one-hour local cache. ``write_cache=False``
+    lets Settings stage a refreshed catalog without changing the active cache.
+    Raises RuntimeError with clear message on auth failure (401) or rate limit (429).
+    Raises RuntimeError on other fetch failures as well.
+    """
     clean_key = str(api_key or "").strip()
+    if not force_refresh:
+        cached_payload = read_elevenlabs_voice_cache(clean_key)
+        if cached_payload:
+            return cached_payload
+
     url = "https://api.elevenlabs.io/v1/voices"
     headers = {"xi-api-key": clean_key}
     print("[ElevenLabs] Đang tải danh sách giọng nói từ API...")
@@ -192,27 +315,28 @@ def fetch_elevenlabs_voices(api_key: str, force_refresh: bool = False) -> list[d
     try:
         response = requests.get(url, headers=headers, timeout=30)
     except requests.RequestException as e:
-        print(f"[ElevenLabs] Lỗi mạng khi tải danh sách giọng nói: {e}")
-        return []
+        raise ElevenLabsVoiceCatalogFetchError(f"ElevenLabs voice catalog network error: {e}") from e
 
     if response.status_code == 401:
         raise RuntimeError("ElevenLabs API Key không hợp lệ hoặc đã hết hạn.")
     if response.status_code == 429:
         raise RuntimeError("ElevenLabs API: Đã đạt giới hạn quota hoặc rate limit. Vui lòng thử lại sau.")
     if response.status_code != 200:
-        print(f"[ElevenLabs] Lỗi HTTP khi tải danh sách giọng nói: {response.status_code} {response.text}")
-        return []
+        raise ElevenLabsVoiceCatalogFetchError(
+            f"ElevenLabs voice catalog HTTP error {response.status_code}: {response.text}"
+        )
 
     try:
         data = response.json()
     except Exception as e:
-        print(f"[ElevenLabs] Lỗi phân tích JSON danh sách giọng nói: {e}")
-        return []
+        raise ElevenLabsVoiceCatalogFetchError(f"ElevenLabs voice catalog returned invalid JSON: {e}") from e
+
+    if not isinstance(data, dict) or not isinstance(data.get("voices"), list):
+        raise ElevenLabsVoiceCatalogFetchError("ElevenLabs voice catalog response is missing a voices list.")
+    raw_voices = data["voices"]
 
     sub_info = fetch_elevenlabs_user_subscription(clean_key)
     user_tier = str(sub_info.get("tier", "free") or "free").strip().lower()
-
-    raw_voices = data.get("voices", []) if isinstance(data, dict) else []
     voices: list[dict] = []
     for item in raw_voices:
         if not isinstance(item, dict):
@@ -288,23 +412,25 @@ def fetch_elevenlabs_voices(api_key: str, force_refresh: bool = False) -> list[d
             "preview_audio_path": "",
         })
 
-    try:
-        os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
-        with open(cache_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "fetched_at": time.time(),
-                    "user_subscription": sub_info,
-                    "voices": voices,
-                },
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
-    except Exception as e:
-        print(f"[ElevenLabs] Cảnh báo: Không thể ghi cache giọng nói: {e}")
+    payload = {
+        "fetched_at": time.time(),
+        "user_subscription": sub_info,
+        "voices": voices,
+        "key_fingerprint": _elevenlabs_key_fingerprint(clean_key),
+    }
+    if write_cache:
+        write_elevenlabs_voice_cache(clean_key, payload)
+    return payload
 
-    return voices
+
+def fetch_elevenlabs_voices(api_key: str, force_refresh: bool = False) -> list[dict]:
+    """Fetch voices from ElevenLabs as CapCap catalog-compatible dictionaries."""
+    try:
+        payload = fetch_elevenlabs_voice_catalog(api_key, force_refresh=force_refresh)
+    except ElevenLabsVoiceCatalogFetchError as e:
+        print(f"[ElevenLabs] {e}")
+        return []
+    return payload.get("voices", [])
 
 
 def synthesize_elevenlabs_tts_wav_16k_mono(

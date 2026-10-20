@@ -57,6 +57,23 @@ def _log(msg: str):
     if not _QUIET:
         print(msg, flush=True)
 
+
+def _is_elevenlabs_voice(voice_name: str) -> bool:
+    raw = str(voice_name or "").strip()
+    if raw.lower().startswith("elevenlabs:"):
+        return True
+    try:
+        from utils.voice_preview_utils import voice_provider
+    except (ImportError, ModuleNotFoundError):
+        try:
+            from app.utils.voice_preview_utils import voice_provider
+        except (ImportError, ModuleNotFoundError):
+            return False
+    try:
+        return voice_provider(raw) == "elevenlabs"
+    except Exception:
+        return False
+
 from remote_api import remote_api_token
 from services import WorkflowRuntime
 from translation.srt_utils import to_srt
@@ -323,7 +340,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
             normalizer_dictionary = payload.get("normalizer_dictionary")
             if not isinstance(normalizer_dictionary, dict):
                 normalizer_dictionary = {}
-            synthesize_text_to_wav_16k_mono(
+            synthesize_kwargs = dict(
                 text=text,
                 wav_path=temp_wav_path,
                 voice=voice,
@@ -331,6 +348,11 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
                 tmp_dir=tmp_dir,
                 normalizer_dictionary=normalizer_dictionary,
             )
+            for field in ("language", "language_code", "model_id"):
+                value = str(payload.get(field) or "").strip()
+                if value:
+                    synthesize_kwargs[field] = value
+            synthesize_text_to_wav_16k_mono(**synthesize_kwargs)
             with open(temp_wav_path, "rb") as handle:
                 audio_b64 = base64.b64encode(handle.read()).decode("ascii")
             return {"ok": True, "audio_b64": audio_b64}
@@ -367,8 +389,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
                 _log(f"[Prepare] Step: {disp_msg}")
 
         try:
-            state = runtime.run_prepare(
-                video_path,
+            prepare_kwargs = dict(
                 source_language=str(payload.get("source_language", "auto") or "auto"),
                 target_language=str(payload.get("target_language", "vi") or "vi"),
                 mode=str(payload.get("mode", "subtitle") or "subtitle"),
@@ -386,6 +407,10 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
                 prefetch_voice_speed=float(payload.get("prefetch_voice_speed", 1.0) or 1.0),
                 step_callback=step_callback,
             )
+            model_id = str(payload.get("elevenlabs_model_id") or "").strip()
+            if model_id:
+                prepare_kwargs["elevenlabs_model_id"] = model_id
+            state = runtime.run_prepare(video_path, **prepare_kwargs)
             _set_status("done", "Prepare complete")
             return {"ok": True, "project_state_path": runtime.project_state_path(state)}
         except Exception:
@@ -398,12 +423,19 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
         _log(f"[Remote API] _handle_voice called. voice_name={payload.get('voice_name')}, segments_count={len(payload.get('segments', []))}")
         workspace_root = str(payload.get("workspace_root", "") or "").strip() or WORKSPACE_ROOT
         runtime = WorkflowRuntime(workspace_root)
-        result = runtime.run_voice(
+        voice_name = str(payload.get("voice_name", "ngochuyen") or "ngochuyen").strip()
+        voice_names = [voice_name]
+        voice_names.extend(
+            str((segment or {}).get("voice_name") or "").strip()
+            for segment in list(payload.get("segments") or [])
+            if isinstance(segment, dict)
+        )
+        run_kwargs = dict(
             segments=list(payload.get("segments") or []),
             output_dir=str(payload.get("output_dir", "") or ""),
             background_path=str(payload.get("background_path", "") or ""),
             audio_handling_mode=str(payload.get("audio_handling_mode", "fast") or "fast"),
-            voice_name=str(payload.get("voice_name", "ngochuyen") or "ngochuyen"),
+            voice_name=voice_name,
             voice_speed=float(payload.get("voice_speed", 1.0) or 1.0),
             timing_sync_mode=str(payload.get("timing_sync_mode", "off") or "off"),
             original_volume=int(payload.get("original_volume", 50) or 50),
@@ -414,6 +446,14 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
             dubbing_style_instruction=str(payload.get("dubbing_style_instruction", "") or ""),
             source_language=str(payload.get("source_language", "auto") or "auto"),
         )
+        if any(_is_elevenlabs_voice(name) for name in dict.fromkeys(name for name in voice_names if name)):
+            model_id = str(payload.get("elevenlabs_model_id") or "").strip()
+            if model_id:
+                run_kwargs["elevenlabs_model_id"] = model_id
+            target_language = payload.get("target_language")
+            if target_language is not None:
+                run_kwargs["target_language"] = str(target_language)
+        result = runtime.run_voice(**run_kwargs)
         _unload_whisper()
         return {"ok": True, "result": result}
 

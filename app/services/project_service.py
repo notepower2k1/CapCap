@@ -207,8 +207,11 @@ class ProjectService:
         original_volume: int = 50,
         dub_volume: int = 100,
         normalizer_signature: str = "",
+        model_id: str | None = None,
+        language_code: str | None = None,
     ) -> str:
         safe_voice_speed = max(0.5, min(2.0, float(voice_speed or 1.0)))
+        segments = list(segments or [])
         def _segment_voice_text(seg) -> str:
             current = dict(seg or {})
             subtitle_text = str(current.get("text") or "").strip()
@@ -244,10 +247,36 @@ class ProjectService:
                         float((seg or {}).get("voice_speed", 1.0) or 1.0), 3
                     ),
                 }
-                for seg in list(segments or [])
+                for seg in segments
             ],
         }
+        voice_names = list(dict.fromkeys(
+            [str(voice_name or "").strip()]
+            + [str((seg or {}).get("voice_name") or "").strip() for seg in segments]
+        ))
+        if any(self._is_elevenlabs_voice(name) for name in voice_names if name):
+            if model_id:
+                payload["elevenlabs_model_id"] = str(model_id).strip()
+            if language_code:
+                payload["elevenlabs_language_code"] = str(language_code).strip().lower()
         return self._hash_payload(payload)
+
+    @staticmethod
+    def _is_elevenlabs_voice(voice_name: str) -> bool:
+        raw = str(voice_name or "").strip()
+        if raw.lower().startswith("elevenlabs:"):
+            return True
+        try:
+            from app.utils.voice_preview_utils import voice_provider
+        except (ImportError, ModuleNotFoundError):
+            try:
+                from utils.voice_preview_utils import voice_provider
+            except (ImportError, ModuleNotFoundError):
+                return False
+        try:
+            return voice_provider(raw) == "elevenlabs"
+        except Exception:
+            return False
 
     def build_extraction_signature(self, video_path: str) -> str:
         return self._hash_payload(

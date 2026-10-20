@@ -332,6 +332,7 @@ class PrepareWorkflow:
         prefetch_voice_speed: float = 1.0,
         step_callback=None,
         force_transcription: bool = False,
+        elevenlabs_model_id: str | None = None,
     ) -> str:
         optimize_subtitles = False
 
@@ -353,6 +354,7 @@ class PrepareWorkflow:
 
         _report_step("prepare")
         workflow_started = time.perf_counter()
+        elevenlabs_model_id = str(elevenlabs_model_id or os.getenv("ELEVENLABS_MODEL") or "eleven_turbo_v2_5").strip()
         is_ocr = transcription_engine == "ocr"
         speaker_diarization = bool(speaker_diarization and not is_ocr)
         try:
@@ -1036,6 +1038,8 @@ class PrepareWorkflow:
                             ) or {}
                         ),
                         quiet=True,
+                        elevenlabs_model_id=elevenlabs_model_id,
+                        target_language=target_language,
                     )
                     tts_prefetch_futures.append(future)
 

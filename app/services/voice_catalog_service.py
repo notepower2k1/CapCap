@@ -64,7 +64,7 @@ class VoiceCatalogService:
                 continue
         return model_ids
 
-    def load_catalog(self) -> list[dict]:
+    def load_catalog(self, *, allow_elevenlabs_network: bool = True) -> list[dict]:
         try:
             payload = self._read_payload()
             voices = list(payload.get("voices", []) or [])
@@ -110,11 +110,19 @@ class VoiceCatalogService:
             try:
                 elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
                 if elevenlabs_key:
-                    try:
-                        from app.engines.elevenlabs_tts import fetch_elevenlabs_voices
-                    except ImportError:
-                        from engines.elevenlabs_tts import fetch_elevenlabs_voices
-                    for ev in fetch_elevenlabs_voices(elevenlabs_key):
+                    if allow_elevenlabs_network:
+                        try:
+                            from app.engines.elevenlabs_tts import fetch_elevenlabs_voices
+                        except ImportError:
+                            from engines.elevenlabs_tts import fetch_elevenlabs_voices
+                        elevenlabs_voices = fetch_elevenlabs_voices(elevenlabs_key)
+                    else:
+                        try:
+                            from app.engines.elevenlabs_tts import read_elevenlabs_voice_cache
+                        except ImportError:
+                            from engines.elevenlabs_tts import read_elevenlabs_voice_cache
+                        elevenlabs_voices = read_elevenlabs_voice_cache(elevenlabs_key).get("voices", [])
+                    for ev in elevenlabs_voices:
                         normalized_voices.append(self._normalize_loaded_voice(ev))
             except Exception as e:
                 print(f"[VoiceCatalog] Failed to load ElevenLabs voices: {e}")
