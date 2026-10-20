@@ -1,3 +1,7 @@
+from .elevenlabs_workers import (
+    ElevenLabsCatalogRefreshWorker,
+    ElevenLabsSettingsSyncWorker,
+)
 from .preview_workers import ExactFramePreviewWorker, PreviewMuxWorker, QuickPreviewWorker
 from .processing_workers import (
     ContextExtractionWorker,
@@ -23,6 +27,8 @@ from .processing_workers import (
 
 __all__ = [
     "ContextExtractionWorker",
+    "ElevenLabsCatalogRefreshWorker",
+    "ElevenLabsSettingsSyncWorker",
     "ExactFramePreviewWorker",
     "ExtractionWorker",
     "FinalExportWorker",

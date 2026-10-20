@@ -239,6 +239,8 @@ a = Analysis(
         "ui.widgets.voice_clone_dialog",
         "ui.widgets.loading_overlay",
         "widgets.loading_overlay",
+        "worker_adapters.elevenlabs_workers",
+        "ui.worker_adapters.elevenlabs_workers",
         "tokenizers",
         "kaldi_native_fbank",
         "soxr",
