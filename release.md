@@ -1,33 +1,15 @@
 # RELEASE NOTES — V8.0.6.1
 
-**Ngày phát hành: Tháng 10/2026**
+**Ngày phát hành: 20/10/2026**
 
-## 🌟 1. Tính năng mới nổi bật: Tích hợp ElevenLabs TTS đỉnh cao
-- **Đầy đủ model mới nhất**: Tích hợp các model ElevenLabs tiên tiến gồm `eleven_turbo_v2_5` (mặc định tối ưu, tự nhiên và ổn định nhất), `eleven_flash_v2_5` (tốc độ siêu nhanh, tiết kiệm ký tự), `eleven_v4`, `eleven_v4_turbo`, và `eleven_v3`.
-- **Hỗ trợ tiếng Việt mượt mà & thông minh**: Tự động nhận diện và chuyển đổi model thông minh nhằm triệt tiêu hoàn toàn lỗi `400 unsupported_language` khi xử lý phụ đề tiếng Việt.
-- **Đồng bộ mã ngôn ngữ (`language_code`)**: Hỗ trợ truyền tham số `language_code` xuyên suốt từ giao diện, voice catalog, engine cho đến pipeline render TTS.
-- **Tự động nhận diện gói cước & Quota**: Tự động phát hiện bậc tài khoản (Free / Starter / Creator / Pro) và hiển thị chính xác số lượng ký tự quota đã dùng (`used / limit`).
-- **Phân loại giọng trực quan**: Gắn nhãn phân loại rõ ràng trong danh sách giọng: `[Default]` (Mặc định), `[Clone]` (Bản sao), `[Design]` (Thiết kế), và biểu tượng `🔒 (Cần gói trả phí)` cho các giọng lấy từ Voice Library cộng đồng.
-- **Chống lỗi quota cho tài khoản Free**: Tự động cảnh báo và ngăn chặn tài khoản Free gọi giọng Voice Library (vốn yêu cầu tài khoản trả phí) để tránh lỗi HTTP 402 lãng phí quota; tự động vô hiệu hóa (disable) các giọng bị khóa trong menu lựa chọn.
-- **Nghe thử giọng tức thì (Voice Preview)**: Hỗ trợ phát âm thanh mẫu trực tiếp từ ElevenLabs (`preview_audio_url`) tức thì mà không yêu cầu tải model Piper cục bộ.
-- **Kiểm soát luồng song song & Thử lại khi Rate Limit**: Tự động giới hạn luồng xử lý song song an toàn cho gói Free (tối đa 2 luồng) và mở khóa 3-4 luồng cho các gói trả phí; tích hợp cơ chế tự động thử lại (retry with backoff) khi gặp lỗi HTTP 429 rate limit.
-- **Đồng bộ danh mục bất đồng bộ mượt mà**: Toàn bộ tiến trình tải danh sách giọng, thông tin model và kiểm tra quota đều chạy ngầm qua `QThread`, hoàn toàn không gây giật lag hay đơ giao diện.
-- **Cơ chế Cache thông minh & an toàn**: Cache âm thanh với SHA-256 fingerprint, cơ chế ghi file nguyên tử (`atomic write`), tự động vô hiệu hóa cache khi đổi model hoặc language_code để không bị lẫn giọng cũ.
-- **Kiểm tra âm thanh hợp lệ**: Tích hợp bộ kiểm tra âm thanh không im lặng (`non-silent WAV check`) trước khi ghi nhận file vào cache, đảm bảo chất lượng lồng tiếng tuyệt đối.
+## 🌟 1. Tích hợp ElevenLabs TTS
+- **Hỗ trợ các model mới nhất**: Tích hợp các model tiên tiến (`eleven_turbo_v2_5`, `eleven_flash_v2_5`, `eleven_v4`, `eleven_v3`), tự động tối ưu hóa khi lồng tiếng tiếng Việt.
+- **Quản lý tài khoản & Quota**: Hiển thị số ký tự đã sử dụng và tự động phân loại giọng khả dụng theo gói tài khoản (Free / Paid).
+- **Trải nghiệm mượt mà**: Hỗ trợ nghe thử giọng trực tiếp và đồng bộ danh sách giọng chạy ngầm không gây giật lag giao diện.
 
 ## ⚙️ 2. Cải tiến giao diện Cài đặt (Settings)
-- **Tổ chức giao diện dạng Tab chuyên nghiệp**: Tách hộp thoại Cài đặt thành các tab độc lập, trực quan và dễ quản lý:
-  - 🎙️ **Nhận dạng & Phụ đề** (`Transcription`)
-  - 🌐 **Dịch thuật AI** (`AI Translation`)
-  - 🔊 **ElevenLabs** (Quản lý API Key, chọn model, giọng đọc, đồng bộ quota)
-  - ⚡ **CapCut TTS** (Cấu hình và kiểm tra kết nối dịch vụ giọng CapCut)
-- **Hướng dẫn phân quyền API Key chi tiết**: Tích hợp sẵn khung hướng dẫn cấu hình API Key ElevenLabs với đầy đủ 4 quyền hạn bắt buộc:
-  - `Text to Speech: Access`
-  - `Voices: Read`
-  - `Voice collection: Read`
-  - `User: Access`
-- **Tối ưu thanh điều khiển chung**: Đưa nút **Quản lý tài nguyên** (`Manage Resources`) và **Mở thư mục giọng** (`Open Voices Folder`) ra thanh điều khiển chung bên dưới hộp thoại để truy cập nhanh chóng từ bất kỳ tab nào.
-- **Tinh gọn**: Ẩn tab Remote API lỗi thời để đơn giản hóa trải nghiệm người dùng.
+- **Bố cục dạng Tab gọn gàng**: Chia thành 4 tab riêng biệt dễ quản lý: *Nhận dạng*, *Dịch thuật AI*, *ElevenLabs*, *CapCut TTS*.
+- **Hướng dẫn tạo API Key trực quan**: Tích hợp sẵn hướng dẫn chi tiết các quyền cần cấp khi tạo API Key ElevenLabs (`Text to Speech`, `Voices`, `Voice collection`, `User`).
 
 ---
 
