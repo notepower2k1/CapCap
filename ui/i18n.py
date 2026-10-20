@@ -1412,6 +1412,8 @@ VI_TRANSLATIONS: dict[str, str] = {
     "eleven_turbo_v2_5 (Turbo v2.5 - Recommended Stable)": "eleven_turbo_v2_5 (Turbo v2.5 - Khuyên dùng ổn định)",
     "eleven_flash_v2_5 (Flash v2.5 - Ultra-fast & Economical)": "eleven_flash_v2_5 (Flash v2.5 - Siêu tốc & Tiết kiệm)",
     "eleven_v3 (Eleven v3 - Expressive Audio Tags)": "eleven_v3 (Eleven v3 - Biểu cảm kịch bản)",
+    "ElevenLabs": "ElevenLabs",
+    "CapCut TTS": "CapCut TTS",
     "Transcription": "Nhận dạng & Phụ đề",
     "Voice & TTS": "Giọng đọc & TTS",
     "System & Remote": "Hệ thống & Remote",

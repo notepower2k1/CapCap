@@ -16538,12 +16538,12 @@ class VideoTranslatorGUI(QMainWindow):
         tabs.addTab(trans2_scroll, t("AI Translation"))
 
         # =========================================================================
-        # Tab 3: Voice & TTS (ElevenLabs, CapCut TTS, Local Piper)
+        # Tab 3: ElevenLabs
         # =========================================================================
-        voice_scroll, voice_content, voice_layout = _make_tab_scroll_widget()
+        elevenlabs_scroll, elevenlabs_content, elevenlabs_layout = _make_tab_scroll_widget()
 
         # ElevenLabs API Settings Section
-        elevenlabs_settings_widget = QWidget(voice_content)
+        elevenlabs_settings_widget = QWidget(elevenlabs_content)
         elevenlabs_settings_layout = QVBoxLayout(elevenlabs_settings_widget)
         elevenlabs_settings_layout.setContentsMargins(0, 0, 0, 0)
         elevenlabs_settings_layout.setSpacing(10)
@@ -16752,15 +16752,16 @@ class VideoTranslatorGUI(QMainWindow):
         elevenlabs_hint.setWordWrap(True)
         elevenlabs_settings_layout.addWidget(elevenlabs_hint)
 
-        voice_layout.addWidget(elevenlabs_settings_widget)
+        elevenlabs_layout.addWidget(elevenlabs_settings_widget)
+        elevenlabs_layout.addStretch(1)
+        tabs.addTab(elevenlabs_scroll, t("ElevenLabs"))
 
-        # CapCut TTS Settings Section
-        divider1 = QFrame(voice_content)
-        divider1.setFrameShape(QFrame.HLine)
-        divider1.setStyleSheet("color: #2f4868;")
-        voice_layout.addWidget(divider1)
+        # =========================================================================
+        # Tab 4: CapCut TTS Settings
+        # =========================================================================
+        capcut_scroll, capcut_content, capcut_layout = _make_tab_scroll_widget()
 
-        capcut_tts_widget = QWidget(voice_content)
+        capcut_tts_widget = QWidget(capcut_content)
         capcut_tts_layout = QVBoxLayout(capcut_tts_widget)
         capcut_tts_layout.setContentsMargins(0, 0, 0, 0)
         capcut_tts_layout.setSpacing(10)
@@ -16772,6 +16773,7 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_tts_batch_row = QHBoxLayout()
         capcut_tts_batch_label = QLabel(t("TTS Batch size:"), capcut_tts_widget)
         capcut_tts_batch_combo = QComboBox(capcut_tts_widget)
+        capcut_tts_batch_combo.setObjectName("capcut_tts_batch_combo")
         for b in ("1", "4", "8", "16", "30", "32", "60"):
             capcut_tts_batch_combo.addItem(f"{b} line / req" if b == "1" else (f"{b} lines / req" + (" (default)" if b == "60" else "")), b)
         current_tts_batch = str(os.getenv("CAPCUT_TTS_BATCH_SIZE", self.settings.value("capcut_tts_batch_size", "60"))).strip()
@@ -16784,6 +16786,7 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_tts_workers_row = QHBoxLayout()
         capcut_tts_workers_label = QLabel(t("TTS Workers:"), capcut_tts_widget)
         capcut_tts_workers_combo = QComboBox(capcut_tts_widget)
+        capcut_tts_workers_combo.setObjectName("capcut_tts_workers_combo")
         for w in ("1", "5", "10", "15", "20", "30", "45", "60"):
             capcut_tts_workers_combo.addItem(f"{w} workers" + (" (default)" if w == "30" else "") if w != "1" else "1 worker", w)
         current_tts_workers = str(os.getenv("CAPCUT_TTS_WORKERS", self.settings.value("capcut_tts_workers", "30"))).strip()
@@ -16798,10 +16801,9 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_hint.setWordWrap(True)
         capcut_tts_layout.addWidget(capcut_hint)
 
-        voice_layout.addWidget(capcut_tts_widget)
-
-        voice_layout.addStretch(1)
-        tabs.addTab(voice_scroll, t("Voice & TTS"))
+        capcut_layout.addWidget(capcut_tts_widget)
+        capcut_layout.addStretch(1)
+        tabs.addTab(capcut_scroll, t("CapCut TTS"))
 
         # Hidden Remote API fields for backward-compatible save logic
         remote_url_edit = QLineEdit(dialog)

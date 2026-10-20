@@ -372,13 +372,13 @@ class TestUIVoiceWorkersAndLang(unittest.TestCase):
                 self.assertIsNotNone(captured_dialog)
                 tabs = captured_dialog.findChild(QTabWidget)
                 self.assertIsNotNone(tabs, "QTabWidget must be present in settings dialog")
-                self.assertEqual(tabs.count(), 3)
+                self.assertEqual(tabs.count(), 4)
 
                 # Tab titles
                 tab_titles = [tabs.tabText(i) for i in range(tabs.count())]
                 self.assertEqual(
                     tab_titles,
-                    [t("Transcription"), t("AI Translation"), t("Voice & TTS")]
+                    [t("Transcription"), t("AI Translation"), t("ElevenLabs"), t("CapCut TTS")]
                 )
 
                 # Verify child widgets
@@ -391,6 +391,10 @@ class TestUIVoiceWorkersAndLang(unittest.TestCase):
                 # Verify Manage Resources & Open Voices Folder buttons are on captured_dialog
                 self.assertIn(t("Manage Resources"), button_texts)
                 self.assertIn(t("Open Voices Folder"), button_texts)
+
+                # Verify ElevenLabs API Key and CapCut TTS combo are present
+                self.assertIsNotNone(captured_dialog.findChild(QLineEdit, "elevenlabs_api_key"))
+                self.assertIsNotNone(captured_dialog.findChild(QComboBox, "capcut_tts_batch_combo"))
 
                 # Verify ElevenLabs API Key field is password mode
                 self.assertTrue(any(e.echoMode() == QLineEdit.Password for e in edits))
@@ -411,7 +415,7 @@ class TestUIVoiceWorkersAndLang(unittest.TestCase):
 
                 self.assertIsNotNone(captured_dialog)
                 tabs_remote = captured_dialog.findChild(QTabWidget)
-                self.assertEqual(tabs_remote.count(), 3)
+                self.assertEqual(tabs_remote.count(), 4)
             finally:
                 gui.close()
                 gui.deleteLater()
