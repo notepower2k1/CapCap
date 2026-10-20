@@ -8,15 +8,21 @@ import re
 from difflib import SequenceMatcher
 
 from core.models import AudioChunk
+try:
+    from asr_options import normalize_asr_options
+except ModuleNotFoundError:
+    from app.asr_options import normalize_asr_options
 
 
 _ASR_WORKER_MODEL = None
+_ASR_WORKER_OPTIONS = None
 
 
-def _init_asr_worker(model_path: str) -> None:
-    global _ASR_WORKER_MODEL
+def _init_asr_worker(model_path: str, asr_options: dict | None = None) -> None:
+    global _ASR_WORKER_MODEL, _ASR_WORKER_OPTIONS
     from whisper_processor import load_whisper_model
     _ASR_WORKER_MODEL = load_whisper_model(model_path)
+    _ASR_WORKER_OPTIONS = normalize_asr_options(asr_options)
 
 
 def _transcribe_chunk_job(audio_path: str, language: str) -> list[dict]:
@@ -24,7 +30,12 @@ def _transcribe_chunk_job(audio_path: str, language: str) -> list[dict]:
     if _ASR_WORKER_MODEL is None:
         raise RuntimeError("ASR worker model is not initialized.")
     from whisper_processor import transcribe_audio_with_model
-    return transcribe_audio_with_model(_ASR_WORKER_MODEL, audio_path, language=language)
+    return transcribe_audio_with_model(
+        _ASR_WORKER_MODEL,
+        audio_path,
+        language=language,
+        asr_options=_ASR_WORKER_OPTIONS,
+    )
 
 
 def _format_time_hms(seconds: float) -> str:
@@ -38,7 +49,46 @@ def _format_time_hms(seconds: float) -> str:
 class AsrMergeService:
     DEFAULT_MAX_WORKERS = 3
 
-    def _cache_key(self, *, chunk: AudioChunk, model_path: str, language: str, transcription_config: dict) -> str:
+    def _cache_key(
+        self,
+        *,
+        chunk: AudioChunk,
+        model_path: str,
+        language: str,
+        transcription_config: dict,
+        asr_options: dict | None = None,
+    ) -> str:
+        options = normalize_asr_options(asr_options)
+        return self._cache_key_from_options(
+            chunk=chunk,
+            model_path=model_path,
+            language=language,
+            transcription_config=transcription_config,
+            options=options,
+        )
+
+    def _cache_key_from_options(
+        self,
+        *,
+        chunk: AudioChunk,
+        model_path: str,
+        language: str,
+        transcription_config: dict,
+        options: dict,
+    ) -> str:
+        # Dedup controls only affect how raw chunk results are merged. Keep
+        # those settings out of recognition keys so cached audio can be
+        # remerged without rerunning Whisper.
+        non_asr_config = {
+            key: value
+            for key, value in dict(transcription_config or {}).items()
+            if key not in {
+                "dedup_enabled",
+                "dedup_similarity",
+                "hallucination_filter_enabled",
+                "hallucination_silence_threshold",
+            }
+        }
         payload = {
             "audio_path": os.path.abspath(chunk.audio_path),
             "chunk_start": round(float(chunk.start_seconds), 3),
@@ -47,7 +97,9 @@ class AsrMergeService:
             "speech_end": round(float(chunk.speech_end_seconds), 3),
             "model_path": str(model_path or ""),
             "language": str(language or "auto"),
-            "config": dict(transcription_config or {}),
+            "config": non_asr_config,
+            "hallucination_filter_enabled": options["hallucination_filter_enabled"],
+            "hallucination_silence_threshold": options["hallucination_silence_threshold"],
         }
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -96,6 +148,11 @@ class AsrMergeService:
         end = min(float(left.get("end", 0.0)), float(right.get("end", 0.0)))
         return max(0.0, end - start)
 
+    def _chunk_time_overlap(self, left: AudioChunk, right: AudioChunk) -> float:
+        start = max(float(left.start_seconds), float(right.start_seconds))
+        end = min(float(left.end_seconds), float(right.end_seconds))
+        return max(0.0, end - start)
+
     def _recommended_worker_count(self, pending_count: int) -> int:
         if pending_count <= 1:
             return 1
@@ -109,6 +166,7 @@ class AsrMergeService:
         cache_dir: str,
         model_path: str,
         language: str,
+        asr_options: dict,
         on_item_done=None,
     ) -> None:
         worker_count = self._recommended_worker_count(len(pending_items))
@@ -119,7 +177,7 @@ class AsrMergeService:
         with concurrent.futures.ProcessPoolExecutor(
             max_workers=worker_count,
             initializer=_init_asr_worker,
-            initargs=(model_path,),
+            initargs=(model_path, asr_options),
         ) as executor:
             future_map = {
                 executor.submit(_transcribe_chunk_job, item["chunk"].audio_path, language): item
@@ -141,6 +199,7 @@ class AsrMergeService:
         whisper_adapter,
         model_path: str,
         language: str,
+        asr_options: dict,
         cache_dir: str,
         on_item_done=None,
     ) -> None:
@@ -163,12 +222,14 @@ class AsrMergeService:
                     # vad_filter=True is required for within-chunk sentence segmentation.
                     # Disabling it causes Whisper to merge all speech into one long segment.
                     vad_filter=True,
+                    asr_options=asr_options,
                 )
             else:
                 segments = whisper_adapter.transcribe(
                     chunk.audio_path,
                     model_path,
                     language=language,
+                    asr_options=asr_options,
                 )
             item["segments"] = list(segments or [])
             if cache_dir:
@@ -185,18 +246,21 @@ class AsrMergeService:
         language: str,
         cache_dir: str = "",
         transcription_config: dict | None = None,
+        asr_options: dict | None = None,
         ordered_callback=None,
         on_progress=None,
     ) -> list[dict]:
         results = []
         config_payload = dict(transcription_config or {})
+        options_snapshot = normalize_asr_options(asr_options)
         pending_items: list[dict] = []
         for index, chunk in enumerate(chunks):
-            cache_key = self._cache_key(
+            cache_key = self._cache_key_from_options(
                 chunk=chunk,
                 model_path=model_path,
                 language=language,
                 transcription_config=config_payload,
+                options=options_snapshot,
             )
             cached_segments = self._load_cached_segments(cache_dir, cache_key) if cache_dir else None
             from_cache = cached_segments is not None
@@ -277,6 +341,7 @@ class AsrMergeService:
                         whisper_adapter=whisper_adapter,
                         model_path=model_path,
                         language=language,
+                        asr_options=options_snapshot,
                         cache_dir=cache_dir,
                         on_item_done=_on_item_done,
                     )
@@ -287,6 +352,7 @@ class AsrMergeService:
                         cache_dir=cache_dir,
                         model_path=model_path,
                         language=language,
+                        asr_options=options_snapshot,
                         on_item_done=_on_item_done,
                     )
                     used_parallel = True
@@ -298,6 +364,7 @@ class AsrMergeService:
                     whisper_adapter=whisper_adapter,
                     model_path=model_path,
                     language=language,
+                    asr_options=options_snapshot,
                     cache_dir=cache_dir,
                     on_item_done=_on_item_done,
                 )
@@ -313,7 +380,13 @@ class AsrMergeService:
                 pass
         return results
 
-    def merge_chunk_results(self, chunk_results: list[dict]) -> list[dict]:
+    def merge_chunk_results(
+        self,
+        chunk_results: list[dict],
+        *,
+        asr_options: dict | None = None,
+    ) -> list[dict]:
+        options_snapshot = normalize_asr_options(asr_options)
         merged_segments: list[dict] = []
         for chunk_result in chunk_results:
             chunk: AudioChunk = chunk_result["chunk"]
@@ -343,11 +416,78 @@ class AsrMergeService:
                     "segment": global_segment,
                     "chunk": chunk,
                 }
-                self._append_with_dedup(merged_segments, candidate)
+                if options_snapshot["dedup_enabled"]:
+                    self._append_with_dedup(merged_segments, candidate, asr_options=options_snapshot)
+                elif global_segment["text"]:
+                    merged_segments.append(candidate)
         return self.normalize_segment_timeline([entry["segment"] for entry in merged_segments])
 
-    def _append_with_dedup(self, merged_entries: list[dict], candidate: dict) -> None:
+    def _word_overlap_ratio(self, left: dict, right: dict) -> float | None:
+        left_words = left.get("words") or []
+        right_words = right.get("words") or []
+        if not left_words or not right_words:
+            return None
+        shorter, longer = (left_words, right_words) if len(left_words) <= len(right_words) else (right_words, left_words)
+        total_duration = 0.0
+        covered_duration = 0.0
+        for word in shorter:
+            try:
+                start = float(word.get("start", 0.0))
+                end = float(word.get("end", 0.0))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            duration = max(0.0, end - start)
+            if duration <= 0.0:
+                continue
+            total_duration += duration
+            best_overlap = 0.0
+            for other in longer:
+                try:
+                    other_start = float(other.get("start", 0.0))
+                    other_end = float(other.get("end", 0.0))
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                best_overlap = max(best_overlap, max(0.0, min(end, other_end) - max(start, other_start)))
+            covered_duration += min(duration, best_overlap)
+        if total_duration <= 0.0:
+            return None
+        return covered_duration / total_duration
+
+    def _is_informative_containment(self, left_text: str, right_text: str) -> bool:
+        if not left_text or not right_text or left_text == right_text:
+            return False
+        short_text, long_text = sorted((left_text, right_text), key=len)
+        short_words = short_text.split()
+        long_words = long_text.split()
+        informative_chars = sum(1 for char in short_text if char.isalnum())
+        if informative_chars >= 10 and len(short_words) >= 3:
+            width = len(short_words)
+            if any(long_words[index:index + width] == short_words for index in range(len(long_words) - width + 1)):
+                return True
+
+        def _is_han(character: str) -> bool:
+            codepoint = ord(character)
+            return (
+                0x3400 <= codepoint <= 0x4DBF
+                or 0x4E00 <= codepoint <= 0x9FFF
+                or 0x20000 <= codepoint <= 0x2FA1F
+            )
+
+        han_count = sum(1 for char in short_text if _is_han(char))
+        return han_count >= 8 and short_text in long_text
+
+    def _append_with_dedup(
+        self,
+        merged_entries: list[dict],
+        candidate: dict,
+        *,
+        asr_options: dict | None = None,
+    ) -> None:
+        options = normalize_asr_options(asr_options)
         if not candidate["segment"]["text"]:
+            return
+        if not options["dedup_enabled"]:
+            merged_entries.append(candidate)
             return
         if not merged_entries:
             merged_entries.append(candidate)
@@ -356,6 +496,19 @@ class AsrMergeService:
         previous = merged_entries[-1]
         previous_segment = previous["segment"]
         candidate_segment = candidate["segment"]
+        previous_chunk_id = previous_segment.get("chunk_id")
+        candidate_chunk_id = candidate_segment.get("chunk_id")
+        if previous_chunk_id is not None and candidate_chunk_id is not None:
+            same_chunk = previous_chunk_id == candidate_chunk_id
+        else:
+            same_chunk = previous.get("chunk") is candidate.get("chunk")
+        if same_chunk:
+            merged_entries.append(candidate)
+            return
+        if self._chunk_time_overlap(previous["chunk"], candidate["chunk"]) <= 0.0:
+            merged_entries.append(candidate)
+            return
+
         overlap = self._time_overlap(previous_segment, candidate_segment)
         similarity = self._similarity(previous_segment.get("text", ""), candidate_segment.get("text", ""))
         # Repeated dialogue is valid.  Only the overlapping boundary audio
@@ -378,12 +531,52 @@ class AsrMergeService:
         # identical after normalization.
         shorter_duration = min(previous_duration, candidate_duration)
         substantial_overlap = overlap >= max(0.10, shorter_duration * 0.60)
-        is_boundary_duplicate = substantial_overlap and similarity >= 0.82
+        similarity_threshold = options["dedup_similarity"]
+        previous_text = self._normalize_text(previous_segment.get("text", ""))
+        candidate_text = self._normalize_text(candidate_segment.get("text", ""))
+        is_containment = (
+            previous_text != candidate_text
+            and bool(previous_text)
+            and bool(candidate_text)
+            and (previous_text in candidate_text or candidate_text in previous_text)
+        )
+        word_overlap_ratio = self._word_overlap_ratio(previous_segment, candidate_segment)
+        if word_overlap_ratio is None:
+            containment_timing_overlap = overlap >= max(0.30, shorter_duration * 0.75)
+        else:
+            containment_timing_overlap = (
+                overlap >= max(0.30, shorter_duration * 0.60)
+                and word_overlap_ratio >= 0.50
+            )
+        informative_containment = (
+            is_containment
+            and self._is_informative_containment(previous_text, candidate_text)
+            and containment_timing_overlap
+            and similarity_threshold < 1.0
+        )
+        if is_containment:
+            # Prefix/contained cues need their stronger word-boundary and
+            # timing evidence even when their text ratio is high.
+            is_boundary_duplicate = informative_containment
+        else:
+            is_boundary_duplicate = substantial_overlap and similarity >= similarity_threshold
+        if is_boundary_duplicate and word_overlap_ratio is not None:
+            required_word_overlap = 0.50 if informative_containment else 0.30
+            if word_overlap_ratio < required_word_overlap:
+                is_boundary_duplicate = False
         if not is_boundary_duplicate:
             merged_entries.append(candidate)
             return
 
-        print(f"[ASR] Dedup boundary: '{previous_segment.get('text','')[:30]}' ~ '{candidate_segment.get('text','')[:30]}' (sim={similarity:.2f}, overlap={overlap:.2f}s)")
+        previous_log_text = str(previous_segment.get("text", "")[:30]).encode("ascii", "backslashreplace").decode("ascii")
+        candidate_log_text = str(candidate_segment.get("text", "")[:30]).encode("ascii", "backslashreplace").decode("ascii")
+        print(f"[ASR] Dedup boundary: '{previous_log_text}' ~ '{candidate_log_text}' (sim={similarity:.2f}, overlap={overlap:.2f}s)")
+
+        if is_containment:
+            # Keep the fuller cue when one side is a clipped prefix/suffix.
+            if len(candidate_text) > len(previous_text):
+                merged_entries[-1] = candidate
+            return
 
         if previous_in_core != candidate_in_core:
             if candidate_in_core:

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 from core.models import AudioChunk
+from asr_options import normalize_asr_options
 from services.asr_merge_service import AsrMergeService, _init_asr_worker
 
 
@@ -55,7 +56,12 @@ class TestAsrMergeService(unittest.TestCase):
                 self.assertEqual(len(progress), count + 1)
                 for call, chunk in zip(adapter.transcribe_with_model.call_args_list, chunks):
                     self.assertEqual(call.args, (adapter.load_model.return_value, chunk.audio_path))
-                    self.assertEqual(call.kwargs, {"language": "zh", "use_batched": False, "vad_filter": True})
+                    self.assertEqual(call.kwargs, {
+                        "language": "zh",
+                        "use_batched": False,
+                        "vad_filter": True,
+                        "asr_options": normalize_asr_options(),
+                    })
 
     def test_cuda_resumes_the_missing_first_chunk_and_reuses_completed_cache(self):
         service = AsrMergeService()
@@ -79,6 +85,7 @@ class TestAsrMergeService(unittest.TestCase):
                 adapter.transcribe_with_model.assert_called_once_with(
                     adapter.load_model.return_value, chunks[0].audio_path,
                     language="zh", use_batched=False, vad_filter=True,
+                    asr_options=normalize_asr_options(),
                 )
                 adapter.reset_mock()
                 cached_results = service.transcribe_chunks(
@@ -106,7 +113,11 @@ class TestAsrMergeService(unittest.TestCase):
             results = AsrMergeService().transcribe_chunks(
                 chunks, whisper_adapter=adapter, model_path="small", language="zh",
             )
-        pool.assert_called_once_with(max_workers=3, initializer=_init_asr_worker, initargs=("small",))
+        pool.assert_called_once_with(
+            max_workers=3,
+            initializer=_init_asr_worker,
+            initargs=("small", normalize_asr_options()),
+        )
         self.assertEqual([item["segments"] for item in results], [segments_for(c.audio_path) for c in chunks])
         adapter.transcribe_with_model.assert_not_called()
 

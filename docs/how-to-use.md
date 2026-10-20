@@ -28,6 +28,17 @@ CapCap automatically optimizes its workspace layout based on the video's aspect 
 7. Use **Fast Preview** to check a five-second rendered sample, or playback smoothly in real-time.
 8. Click **Export** to render the final localized video or export to **CapCut Draft**.
 
+### Whisper transcript cleanup
+
+Open **Settings → Transcription** while **Audio (Whisper)** is selected to adjust two cleanup options. Both are enabled by default and apply to new Whisper transcriptions:
+
+- **Reduce repeated phrases** helps remove duplicate wording where audio sections join, keeping the fuller sentence when possible. For example, “Today we are” followed by “Today we are going to school” can become the fuller sentence. Dialogue repeated at other times is kept. Turn this off to keep Whisper's recognized wording as-is; timestamps are still normalized for the timeline.
+- **Reduce made-up subtitles during silence** helps reduce subtitles that were not spoken, such as an unexpected “Thanks for watching” during silence. It can slow transcription or miss very quiet speech, and it cannot guarantee that every invented phrase is removed. This option works independently of repeated phrase removal.
+
+Open **Advanced** only if you want to adjust the filters. You can keep the defaults if you are unsure: **82%** text similarity and **3 seconds** of silence. Similarity ranges from 50% to 100%; 100% matches identical normalized text only. An informative phrase contained in a fuller cue can also match when timing supports it, unless similarity is set to 100%. The silence setting ranges from 0.5 to 10 seconds.
+
+Saving these settings does not change an imported transcript or start a new transcription.
+
 ---
 
 ## AI Translation, Presets & Pronoun Control

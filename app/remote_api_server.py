@@ -270,7 +270,12 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
             model_name = str(payload.get("model_name", "base") or "base").strip().lower()
             language = str(payload.get("language", "auto") or "auto").strip()
             task = str(payload.get("task", "transcribe") or "transcribe").strip()
-            segments = transcribe_audio(temp_audio_path, model_name, language=language, task=task)
+            transcribe_kwargs = {}
+            if payload.get("asr_options") is not None:
+                transcribe_kwargs["asr_options"] = payload["asr_options"]
+            segments = transcribe_audio(
+                temp_audio_path, model_name, language=language, task=task, **transcribe_kwargs
+            )
             return {"ok": True, "segments": list(segments or [])}
         finally:
             try:
@@ -407,6 +412,8 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
                 prefetch_voice_speed=float(payload.get("prefetch_voice_speed", 1.0) or 1.0),
                 step_callback=step_callback,
             )
+            if "asr_options" in payload:
+                prepare_kwargs["asr_options"] = payload["asr_options"]
             model_id = str(payload.get("elevenlabs_model_id") or "").strip()
             if model_id:
                 prepare_kwargs["elevenlabs_model_id"] = model_id

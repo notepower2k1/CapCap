@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
                              QFrame, QProgressBar, QMessageBox,
                              QScrollArea,
                              QColorDialog, QTabWidget, QDialog, QSizePolicy, QInputDialog, QLayout,
-                             QSpinBox)
+                             QSpinBox, QDoubleSpinBox)
 from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QEvent, Signal, QPoint, QRect
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QIcon, QImage, QKeySequence, QPixmap, QShortcut, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -81,7 +81,12 @@ from utils.media_utils import (
     update_duration_label as update_duration_label_impl,
     update_frame_preview_thumbnail as update_frame_preview_thumbnail_impl,
 )
-from utils.settings_utils import load_user_settings as load_user_settings_impl, save_user_settings as save_user_settings_impl
+from utils.settings_utils import (
+    get_asr_filter_settings,
+    load_user_settings as load_user_settings_impl,
+    persist_asr_filter_settings,
+    save_user_settings as save_user_settings_impl,
+)
 from views import build_main_window_ui
 from widgets.progress_dialog import BackgroundableProgressDialog
 from widgets.spin_boxes import ReliableDoubleSpinBox
@@ -10912,11 +10917,11 @@ class VideoTranslatorGUI(QMainWindow):
         whisper_layout.addWidget(QLabel(t("Whisper model"), whisper_box))
         whisper_model_combo = QComboBox(whisper_box)
         whisper_model_combo.addItem("Base (~1GB VRAM)", "base")
-        whisper_model_combo.addItem("Small - Nhanh (~2GB VRAM)", "small")
+        whisper_model_combo.addItem(t("Small - Fast (~2GB VRAM)"), "small")
         if os.environ.get("CAPCAP_DEVICE", "cuda").strip().lower() == "cuda":
-            whisper_model_combo.addItem("Medium - Cân bằng (~5GB VRAM)", "medium")
-            whisper_model_combo.addItem("Turbo - Tốt + Nhanh (~6GB VRAM)", "turbo")
-            whisper_model_combo.addItem("Large-v3 - Tốt nhất (~10GB VRAM)", "large-v3")
+            whisper_model_combo.addItem(t("Medium - Balanced (~5GB VRAM)"), "medium")
+            whisper_model_combo.addItem(t("Turbo - High quality + Fast (~6GB VRAM)"), "turbo")
+            whisper_model_combo.addItem(t("Large-v3 - Best quality (~10GB VRAM)"), "large-v3")
         current_model = str(self.get_whisper_model_name() or "small").strip().lower()
         model_index = whisper_model_combo.findData(current_model)
         whisper_model_combo.setCurrentIndex(model_index if model_index >= 0 else 0)
@@ -16012,7 +16017,7 @@ class VideoTranslatorGUI(QMainWindow):
                 color: #9fb3ca;
                 font-size: 12px;
             }
-            QComboBox, QLineEdit, QSpinBox {
+            QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
                 background-color: #132033;
                 color: #f8fbff;
                 border: 1px solid #2f4868;
@@ -16122,6 +16127,7 @@ class VideoTranslatorGUI(QMainWindow):
         trans_layout.addWidget(engine_title)
 
         engine_combo = QComboBox(trans_content)
+        engine_combo.setObjectName("transcription_engine_combo")
         engine_combo.addItem("Audio (SenseVoice) - Speed", "sensevoice")
         engine_combo.addItem("Audio (Whisper) - Quality", "whisper")
         engine_combo.addItem("CapCut API (Beta)", "capcut")
@@ -16141,11 +16147,11 @@ class VideoTranslatorGUI(QMainWindow):
 
         whisper_combo = QComboBox(trans_content)
         whisper_combo.addItem("Base (~1GB VRAM)", "base")
-        whisper_combo.addItem("Small - Nhanh (~2GB VRAM)", "small")
+        whisper_combo.addItem(t("Small - Fast (~2GB VRAM)"), "small")
         if os.environ.get("CAPCAP_DEVICE", "cuda").strip().lower() == "cuda":
-            whisper_combo.addItem("Medium - Cân bằng (~5GB VRAM)", "medium")
-            whisper_combo.addItem("Turbo - Tốt + Nhanh (~6GB VRAM)", "turbo")
-            whisper_combo.addItem("Large-v3 - Tốt nhất (~10GB VRAM)", "large-v3")
+            whisper_combo.addItem(t("Medium - Balanced (~5GB VRAM)"), "medium")
+            whisper_combo.addItem(t("Turbo - High quality + Fast (~6GB VRAM)"), "turbo")
+            whisper_combo.addItem(t("Large-v3 - Best quality (~10GB VRAM)"), "large-v3")
         current_whisper = str(getattr(self, "selected_whisper_model_name", "auto") or "auto").strip().lower()
         if current_whisper == "auto":
             current_whisper = self.get_whisper_model_name()
@@ -16153,6 +16159,131 @@ class VideoTranslatorGUI(QMainWindow):
         whisper_combo.setCurrentIndex(whisper_index if whisper_index >= 0 else 0)
         whisper_combo.setVisible(is_whisper)
         trans_layout.addWidget(whisper_combo)
+
+        # Whisper ASR cleanup options
+        asr_filter_options = get_asr_filter_settings(self.settings)
+        asr_filter_widget = QWidget(trans_content)
+        asr_filter_widget.setObjectName("asrFilterSettings")
+        asr_filter_layout = QVBoxLayout(asr_filter_widget)
+        asr_filter_layout.setContentsMargins(0, 0, 0, 0)
+        asr_filter_layout.setSpacing(6)
+
+        dedup_enabled_cb = QCheckBox(t("Reduce repeated phrases"), asr_filter_widget)
+        dedup_enabled_cb.setObjectName("asrDedupEnabledCheckBox")
+        dedup_enabled_cb.setChecked(asr_filter_options["dedup_enabled"])
+        asr_filter_layout.addWidget(dedup_enabled_cb)
+
+        asr_advanced_widget = QWidget(asr_filter_widget)
+        asr_advanced_widget.setObjectName("asrFilterAdvancedSettings")
+        asr_advanced_layout = QVBoxLayout(asr_advanced_widget)
+        asr_advanced_layout.setContentsMargins(12, 0, 0, 0)
+        asr_advanced_layout.setSpacing(6)
+        asr_advanced_hint = QLabel(
+            t("You can keep the defaults if you are unsure: 82% similarity and 3 seconds of silence."),
+            asr_advanced_widget,
+        )
+        asr_advanced_hint.setObjectName("asrFilterAdvancedHint")
+        asr_advanced_hint.setStyleSheet("color: #9fb3ca; font-size: 12px;")
+        asr_advanced_hint.setWordWrap(True)
+        asr_advanced_layout.addWidget(asr_advanced_hint)
+
+        dedup_threshold_row = QHBoxLayout()
+        dedup_threshold_label = QLabel(t("Minimum text similarity:"), asr_advanced_widget)
+        dedup_threshold_label.setObjectName("asrDedupThresholdLabel")
+        dedup_threshold_spin = QSpinBox(asr_advanced_widget)
+        dedup_threshold_spin.setObjectName("asrDedupThresholdSpinBox")
+        dedup_threshold_spin.setRange(50, 100)
+        dedup_threshold_spin.setSuffix("%")
+        dedup_threshold_spin.setValue(round(asr_filter_options["dedup_similarity"] * 100))
+        dedup_threshold_row.addWidget(dedup_threshold_label, 1)
+        dedup_threshold_row.addWidget(dedup_threshold_spin)
+        asr_advanced_layout.addLayout(dedup_threshold_row)
+
+        dedup_hint = QLabel(
+            t(
+                "Helps remove duplicate wording where audio sections join, keeping the fuller sentence when possible. Repeated dialogue at other times is kept."
+            ),
+            asr_filter_widget,
+        )
+        dedup_hint.setObjectName("asrDedupHint")
+        dedup_hint.setStyleSheet("color: #9fb3ca; font-size: 12px;")
+        dedup_hint.setWordWrap(True)
+        asr_filter_layout.addWidget(dedup_hint)
+
+        dedup_example = QLabel(
+            t('Example: "Today we are" + "Today we are going to school" → keep the fuller sentence.'),
+            asr_filter_widget,
+        )
+        dedup_example.setObjectName("asrDedupExample")
+        dedup_example.setStyleSheet("color: #9fb3ca; font-size: 12px;")
+        dedup_example.setWordWrap(True)
+        asr_filter_layout.addWidget(dedup_example)
+
+        hallucination_filter_cb = QCheckBox(t("Reduce made-up subtitles during silence"), asr_filter_widget)
+        hallucination_filter_cb.setObjectName("asrHallucinationFilterEnabledCheckBox")
+        hallucination_filter_cb.setChecked(asr_filter_options["hallucination_filter_enabled"])
+        asr_filter_layout.addWidget(hallucination_filter_cb)
+
+        hallucination_threshold_row = QHBoxLayout()
+        hallucination_threshold_label = QLabel(
+            t("Silence threshold (seconds):"), asr_advanced_widget
+        )
+        hallucination_threshold_label.setObjectName("asrHallucinationSilenceThresholdLabel")
+        hallucination_threshold_spin = QDoubleSpinBox(asr_advanced_widget)
+        hallucination_threshold_spin.setObjectName("asrHallucinationSilenceSecondsSpinBox")
+        hallucination_threshold_spin.setDecimals(1)
+        hallucination_threshold_spin.setRange(0.5, 10.0)
+        hallucination_threshold_spin.setSingleStep(0.5)
+        hallucination_threshold_spin.setValue(asr_filter_options["hallucination_silence_threshold"])
+        hallucination_threshold_row.addWidget(hallucination_threshold_label, 1)
+        hallucination_threshold_row.addWidget(hallucination_threshold_spin)
+        asr_advanced_layout.addLayout(hallucination_threshold_row)
+
+        hallucination_hint = QLabel(
+            t(
+                'Helps reduce subtitles that were not spoken, such as "Thanks for watching" appearing during silence. May make transcription slower or miss very quiet speech.'
+            ),
+            asr_filter_widget,
+        )
+        hallucination_hint.setObjectName("asrHallucinationHint")
+        hallucination_hint.setStyleSheet("color: #9fb3ca; font-size: 12px;")
+        hallucination_hint.setWordWrap(True)
+        asr_filter_layout.addWidget(hallucination_hint)
+
+        asr_advanced_button = QToolButton(asr_filter_widget)
+        asr_advanced_button.setObjectName("asrFilterAdvancedButton")
+        asr_advanced_button.setText(t("Advanced"))
+        asr_advanced_button.setCheckable(True)
+        asr_advanced_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        asr_advanced_button.setArrowType(Qt.RightArrow)
+        asr_advanced_button.setStyleSheet(
+            "QToolButton { color: #8ad7ff; border: none; padding: 4px 0; text-align: left; }"
+            "QToolButton:hover { color: #e0edff; }"
+        )
+        asr_advanced_button.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        asr_filter_layout.addWidget(asr_advanced_button)
+        asr_advanced_widget.setVisible(False)
+        asr_filter_layout.addWidget(asr_advanced_widget)
+
+        def update_asr_advanced_visibility(expanded):
+            asr_advanced_widget.setVisible(expanded)
+            asr_advanced_button.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+
+        asr_advanced_button.toggled.connect(update_asr_advanced_visibility)
+
+        def update_asr_filter_controls():
+            dedup_enabled = dedup_enabled_cb.isChecked()
+            dedup_threshold_label.setEnabled(dedup_enabled)
+            dedup_threshold_spin.setEnabled(dedup_enabled)
+            hallucination_enabled = hallucination_filter_cb.isChecked()
+            hallucination_threshold_label.setEnabled(hallucination_enabled)
+            hallucination_threshold_spin.setEnabled(hallucination_enabled)
+
+        dedup_enabled_cb.toggled.connect(update_asr_filter_controls)
+        hallucination_filter_cb.toggled.connect(update_asr_filter_controls)
+        update_asr_filter_controls()
+        asr_filter_widget.setVisible(is_whisper)
+        trans_layout.addWidget(asr_filter_widget)
 
         # OCR Backend combo (RapidOCR vs Windows Media OCR)
         ocr_backend_label = QLabel(t("OCR Engine:"), trans_content)
@@ -16281,6 +16412,7 @@ class VideoTranslatorGUI(QMainWindow):
             is_capcut_engine = engine_val == "capcut"
             _toggle_visible(whisper_title, is_whisper)
             _toggle_visible(whisper_combo, is_whisper)
+            _toggle_visible(asr_filter_widget, is_whisper)
             _toggle_visible(ocr_backend_label, is_ocr)
             _toggle_visible(ocr_backend_combo, is_ocr)
             update_ocr_backend_note()
@@ -16867,6 +16999,15 @@ class VideoTranslatorGUI(QMainWindow):
         new_ocr_backend = str(ocr_backend_combo.currentData() or "rapidocr").strip().lower()
         new_ocr_region = str(region_combo.currentData() or "bottom").strip().lower()
         new_ocr_sampling_fps = str(sampling_combo.currentData() or "auto").strip().lower()
+        asr_env_updates = persist_asr_filter_settings(
+            self.settings,
+            {
+                "dedup_enabled": dedup_enabled_cb.isChecked(),
+                "dedup_similarity": dedup_threshold_spin.value() / 100.0,
+                "hallucination_filter_enabled": hallucination_filter_cb.isChecked(),
+                "hallucination_silence_threshold": hallucination_threshold_spin.value(),
+            },
+        )
         new_key = key_edit.text().strip()
         new_model = model_edit.text().strip()
         new_provider = str(provider_combo.currentData()).strip()
@@ -17003,6 +17144,7 @@ class VideoTranslatorGUI(QMainWindow):
             updates["CAPCAP_AUTO_TRANSLATION_CONTEXT"] = new_auto_context
         
         updates.update(_engine_updates)
+        updates.update(asr_env_updates)
 
         new_env_lines = []
         handled_keys = set()

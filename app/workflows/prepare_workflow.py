@@ -1,6 +1,7 @@
 import os
 import concurrent.futures
 import hashlib
+import json
 import re
 import subprocess
 import time
@@ -9,6 +10,11 @@ from runtime_paths import bin_path, models_path, subprocess_hidden_kwargs, subpr
 from runtime_profile import is_remote_profile
 from services import ChunkingService, EngineRuntime, ProjectService, SegmentRegroupService, SegmentService
 from services.resource_download_service import ResourceDownloadService
+
+try:
+    from asr_options import ASR_FILTER_VERSION, normalize_asr_options
+except ImportError:
+    from app.asr_options import ASR_FILTER_VERSION, normalize_asr_options
 
 
 class PrepareWorkflow:
@@ -141,7 +147,7 @@ class PrepareWorkflow:
         self.project_service.save_project(project_state)
         return str(profile["path"] or source)
 
-    def _transcribe_long_audio_chunked(self, *, audio_path: str, project_state, model_path: str, language: str, on_chunk_ready=None, on_progress=None):
+    def _transcribe_long_audio_chunked(self, *, audio_path: str, project_state, model_path: str, language: str, asr_options=None, on_chunk_ready=None, on_progress=None):
         overall_started = time.perf_counter()
         chunk_dir = self.project_service.build_path(project_state, "audio", "chunks")
         chunk_cache_dir = self.project_service.build_path(project_state, "analysis", "chunk_results")
@@ -194,6 +200,7 @@ class PrepareWorkflow:
             language=language,
             cache_dir=chunk_cache_dir,
             transcription_config=transcription_config,
+            asr_options=asr_options,
             ordered_callback=on_chunk_ready,
             on_progress=on_progress,
         )
@@ -221,7 +228,9 @@ class PrepareWorkflow:
                 pass
         print(f"[ASR] Merging {len(chunk_results)} chunk results...", flush=True)
         merge_started = time.perf_counter()
-        merged_segments = asr_merge_service.merge_chunk_results(chunk_results)
+        merged_segments = asr_merge_service.merge_chunk_results(
+            chunk_results, asr_options=asr_options
+        )
         merge_elapsed = time.perf_counter() - merge_started
         self.project_service.save_json_artifact(
             project_state,
@@ -333,6 +342,7 @@ class PrepareWorkflow:
         step_callback=None,
         force_transcription: bool = False,
         elevenlabs_model_id: str | None = None,
+        asr_options: dict | None = None,
     ) -> str:
         optimize_subtitles = False
 
@@ -365,6 +375,13 @@ class PrepareWorkflow:
             speaker_diarization_num_speakers = -1
         is_sensevoice = transcription_engine == "sensevoice"
         is_capcut = transcription_engine == "capcut"
+        # Capture Whisper's options once for this job so configuration changes
+        # during chunked transcription cannot mix recognition and merge rules.
+        asr_options = (
+            None
+            if is_ocr or is_sensevoice or is_capcut
+            else normalize_asr_options(asr_options)
+        )
 
         project_state = self.project_service.ensure_project(
             video_path,
@@ -744,6 +761,14 @@ class PrepareWorkflow:
             transcribe_started = time.perf_counter()
             project_state.set_step_status("transcribe", "running")
             self.project_service.save_project(project_state)
+            transcription_signature_mode = f"{audio_mode_key}|asr-merge-v4"
+            if str(transcription_engine or "whisper").strip().lower() not in {
+                "sensevoice", "capcut", "ocr",
+            }:
+                transcription_signature_mode += (
+                    f"|asr-filter-v{ASR_FILTER_VERSION}|"
+                    f"{json.dumps(asr_options, sort_keys=True, separators=(',', ':'))}"
+                )
             transcription_signature = self.project_service.build_transcription_signature(
                 working_audio_path,
                 whisper_model=whisper_model,
@@ -751,7 +776,7 @@ class PrepareWorkflow:
                 # Bump the signature when the chunk merge algorithm changes
                 # so a project cannot reuse an aggressively regrouped
                 # transcript. Raw per-chunk ASR cache entries remain valid.
-                audio_handling_mode=f"{audio_mode_key}|asr-merge-v4",
+                audio_handling_mode=transcription_signature_mode,
             )
             cached_transcription_signature = str(project_state.settings.get("transcription_signature", "") or "").strip()
             cached_transcript_path = project_state.artifacts.get("transcript_segments", "")
@@ -810,6 +835,7 @@ class PrepareWorkflow:
                         working_audio_path,
                         whisper_model,
                         language=source_language,
+                        asr_options=asr_options,
                     )
                 elif audio_duration >= self.CHUNKED_ASR_MIN_DURATION_SECONDS or (audio_mode_key == "clean" and audio_duration >= 30.0):
                     print("[ASR] Using chunked transcription (VAD silence detection).")
@@ -864,7 +890,9 @@ class PrepareWorkflow:
                         def _on_chunk_ready(chunk_result: dict) -> None:
                             nonlocal emitted_stable_count, pending_stream_segments
                             seen_chunk_results.append(chunk_result)
-                            merged_partial = asr_merge_service.merge_chunk_results(seen_chunk_results)
+                            merged_partial = asr_merge_service.merge_chunk_results(
+                                seen_chunk_results, asr_options=asr_options
+                            )
                             regrouped_partial = self.segment_regroup_service.regroup(
                                 merged_partial,
                                 max_gap_seconds=0.25,
@@ -887,6 +915,7 @@ class PrepareWorkflow:
                         project_state=project_state,
                         model_path=whisper_model,
                         language=source_language,
+                        asr_options=asr_options,
                         on_chunk_ready=_on_chunk_ready if streamed_translation_enabled else None,
                         on_progress=_on_asr_chunk_progress,
                     )
@@ -904,6 +933,7 @@ class PrepareWorkflow:
                         working_audio_path,
                         whisper_model,
                         language=source_language,
+                        asr_options=asr_options,
                         on_progress=_on_single_pass_progress,
                     )
                 if not raw_segments:

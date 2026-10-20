@@ -6,6 +6,70 @@ try:
 except ImportError:
     from ui.i18n import current_source_text, set_current_source_text
 
+try:
+    from app.asr_options import DEFAULT_ASR_OPTIONS, normalize_asr_options
+except ImportError:
+    from asr_options import DEFAULT_ASR_OPTIONS, normalize_asr_options
+
+
+ASR_FILTER_SETTINGS = {
+    "dedup_enabled": ("asr_dedup_enabled", "CAPCAP_ASR_DEDUP_ENABLED"),
+    "dedup_similarity": ("asr_dedup_similarity", "CAPCAP_ASR_DEDUP_SIMILARITY"),
+    "hallucination_filter_enabled": (
+        "asr_hallucination_filter_enabled",
+        "CAPCAP_WHISPER_HALLUCINATION_FILTER",
+    ),
+    "hallucination_silence_threshold": (
+        "asr_hallucination_silence_threshold",
+        "CAPCAP_WHISPER_HALLUCINATION_SILENCE_SECONDS",
+    ),
+}
+
+
+def _asr_environment_value(value):
+    return ("1" if value else "0") if isinstance(value, bool) else str(float(value))
+
+
+def get_asr_filter_settings(settings, environ=None):
+    """Read and normalize global ASR filter preferences without changing state."""
+    environment = os.environ if environ is None else environ
+    supplied = {}
+    defaults = DEFAULT_ASR_OPTIONS
+    for option_name, (settings_key, env_name) in ASR_FILTER_SETTINGS.items():
+        raw_value = environment.get(env_name)
+        if raw_value is None:
+            raw_value = settings.value(settings_key, defaults[option_name])
+        try:
+            supplied[option_name] = normalize_asr_options({option_name: raw_value})[option_name]
+        except (TypeError, ValueError):
+            supplied[option_name] = defaults[option_name]
+    return normalize_asr_options(supplied)
+
+
+def persist_asr_filter_settings(settings, options, environ=None):
+    """Persist accepted ASR filter settings to QSettings and the process env."""
+    environment = os.environ if environ is None else environ
+    normalized = normalize_asr_options(options)
+    updates = {}
+    for option_name, (settings_key, env_name) in ASR_FILTER_SETTINGS.items():
+        value = normalized[option_name]
+        settings.setValue(settings_key, value)
+        serialized = _asr_environment_value(value)
+        environment[env_name] = serialized
+        updates[env_name] = serialized
+    return updates
+
+
+def restore_asr_filter_settings(settings, environ=None):
+    """Restore canonical ASR settings from the environment or QSettings."""
+    environment = os.environ if environ is None else environ
+    normalized = get_asr_filter_settings(settings, environment)
+    for option_name, (settings_key, env_name) in ASR_FILTER_SETTINGS.items():
+        value = normalized[option_name]
+        settings.setValue(settings_key, value)
+        environment[env_name] = _asr_environment_value(value)
+    return normalized
+
 
 def save_user_settings(gui):
     s = gui.settings
@@ -99,6 +163,10 @@ def save_user_settings(gui):
 
 def load_user_settings(gui):
     s = gui.settings
+    # Keep the worker environment in sync before any transcription workers
+    # snapshot these options. Explicit .env values take precedence over saved
+    # preferences, matching the other startup settings below.
+    restore_asr_filter_settings(s)
     # Generation is always Subtitle + Voice; ignore legacy single-output
     # preferences while preserving the hidden compatibility combo.
     set_current_source_text(gui.output_mode_combo, "Vietnamese subtitles + voice")

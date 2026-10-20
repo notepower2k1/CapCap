@@ -16,23 +16,53 @@ class RemoteWhisperAdapter:
             return "base"
         return raw or "base"
 
-    def transcribe(self, audio_path: str, model_path: str, *, language: str = "auto", task: str = "transcribe"):
+    def transcribe(
+        self,
+        audio_path: str,
+        model_path: str,
+        *,
+        language: str = "auto",
+        task: str = "transcribe",
+        on_progress=None,
+        asr_options=None,
+    ):
         with open(audio_path, "rb") as handle:
             audio_b64 = base64.b64encode(handle.read()).decode("ascii")
-        response = remote_api_post(
-            "/v1/transcribe",
-            {
-                "audio_b64": audio_b64,
-                "audio_filename": os.path.basename(audio_path),
-                "model_name": self._model_name(model_path),
-                "language": language,
-                "task": task,
-            },
-        )
+        payload = {
+            "audio_b64": audio_b64,
+            "audio_filename": os.path.basename(audio_path),
+            "model_name": self._model_name(model_path),
+            "language": language,
+            "task": task,
+        }
+        if asr_options is not None:
+            payload["asr_options"] = dict(asr_options)
+        response = remote_api_post("/v1/transcribe", payload)
         return list(response.get("segments") or [])
 
     def load_model(self, model_path: str):
         return self._model_name(model_path)
 
-    def transcribe_with_model(self, model, audio_path: str, *, language: str = "auto", task: str = "transcribe"):
-        return self.transcribe(audio_path, model, language=language, task=task)
+    def transcribe_with_model(
+        self,
+        model,
+        audio_path: str,
+        *,
+        language: str = "auto",
+        task: str = "transcribe",
+        use_batched: bool = True,
+        vad_filter: bool = True,
+        on_progress=None,
+        asr_options=None,
+    ):
+        kwargs = {}
+        if asr_options is not None:
+            kwargs["asr_options"] = asr_options
+        return self.transcribe(
+            audio_path,
+            model,
+            language=language,
+            task=task,
+            on_progress=on_progress,
+            **kwargs,
+        )

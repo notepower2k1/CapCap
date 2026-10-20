@@ -84,8 +84,11 @@ class EngineRuntime:
     def separate_vocals(self, audio_path: str, output_dir: str, on_progress=None):
         return self.demucs.separate(audio_path, output_dir, on_progress=on_progress)
 
-    def transcribe_audio(self, audio_path: str, model_path: str, *, language: str, on_progress=None):
-        return self.whisper.transcribe(audio_path, model_path, language=language, on_progress=on_progress)
+    def transcribe_audio(self, audio_path: str, model_path: str, *, language: str, on_progress=None, asr_options=None):
+        kwargs = dict(language=language, on_progress=on_progress)
+        if asr_options is not None:
+            kwargs["asr_options"] = asr_options
+        return self.whisper.transcribe(audio_path, model_path, **kwargs)
 
     def transcribe_video_ocr(self, video_path: str, *, region: str = "bottom", **kwargs):
         return self.ocr.transcribe(video_path, region=region, **kwargs)

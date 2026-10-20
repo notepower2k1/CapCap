@@ -116,12 +116,13 @@ class TranscriptionWorker(QThread):
     finished = Signal(list, str)
     progress = Signal(int, str)
 
-    def __init__(self, audio_path, model_path, language, engine_name: str = "whisper"):
+    def __init__(self, audio_path, model_path, language, engine_name: str = "whisper", *, asr_options=None):
         super().__init__()
         self.audio_path = audio_path
         self.model_path = model_path
         self.language = language
         self.engine_name = str(engine_name or "whisper").strip().lower()
+        self.asr_options = dict(asr_options) if isinstance(asr_options, dict) else asr_options
 
     def run(self):
         try:
@@ -136,7 +137,18 @@ class TranscriptionWorker(QThread):
                 sensevoice_model_dir = models_path("sensevoice")
                 segments = engine.transcribe_audio_sensevoice(self.audio_path, sensevoice_model_dir, language=self.language)
             else:
-                segments = engine.transcribe_audio(self.audio_path, self.model_path, language=self.language, on_progress=_on_progress)
+                try:
+                    from asr_options import normalize_asr_options
+                except ImportError:
+                    from app.asr_options import normalize_asr_options
+                asr_options = normalize_asr_options(self.asr_options)
+                segments = engine.transcribe_audio(
+                    self.audio_path,
+                    self.model_path,
+                    language=self.language,
+                    on_progress=_on_progress,
+                    asr_options=asr_options,
+                )
             self.finished.emit(segments if segments else [], "")
         except Exception as exc:
             details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
@@ -162,6 +174,7 @@ class AlternateRangeTranscriptionWorker(QThread):
         ocr_region="bottom",
         ocr_fps=None,
         ocr_backend="rapidocr",
+        asr_options=None,
     ):
         super().__init__()
         self.video_path, self.start_time, self.end_time = video_path, float(start), float(end)
@@ -170,6 +183,7 @@ class AlternateRangeTranscriptionWorker(QThread):
         self.ocr_region = str(ocr_region or "bottom")
         self.ocr_fps = float(ocr_fps) if ocr_fps is not None else None
         self.ocr_backend = str(ocr_backend or "rapidocr").strip().lower()
+        self.asr_options = dict(asr_options) if isinstance(asr_options, dict) else asr_options
 
     def run(self):
         temp_audio = ""
@@ -214,6 +228,11 @@ class AlternateRangeTranscriptionWorker(QThread):
                     segment["start"] = float(segment.get("start", 0.0)) + self.start_time
                     segment["end"] = float(segment.get("end", 0.0)) + self.start_time
             else:
+                try:
+                    from asr_options import normalize_asr_options
+                except ImportError:
+                    from app.asr_options import normalize_asr_options
+                asr_options = normalize_asr_options(self.asr_options)
                 import tempfile
                 temp_audio = os.path.join(tempfile.gettempdir(), f"capcap_range_{int(self.start_time * 1000)}_{int(self.end_time * 1000)}.wav")
                 ffmpeg = bin_path("ffmpeg", "ffmpeg.exe")
@@ -222,7 +241,12 @@ class AlternateRangeTranscriptionWorker(QThread):
                     "-t", str(max(0.1, self.end_time - self.start_time)), "-i", self.video_path,
                     "-vn", "-ac", "1", "-ar", "16000", temp_audio,
                 ], check=True, **subprocess_hidden_kwargs())
-                segments = engine.transcribe_audio(temp_audio, self.model_path, language=self.language)
+                segments = engine.transcribe_audio(
+                    temp_audio,
+                    self.model_path,
+                    language=self.language,
+                    asr_options=asr_options,
+                )
                 for segment in segments or []:
                     segment["start"] = float(segment.get("start", 0.0)) + self.start_time
                     segment["end"] = float(segment.get("end", 0.0)) + self.start_time
@@ -981,6 +1005,7 @@ class PrepareWorkflowWorker(QThread):
         remote_api_token="",
         force_remote_api=False,
         force_transcription=False,
+        asr_options=None,
     ):
         super().__init__()
         self.workspace_root = workspace_root
@@ -1003,10 +1028,19 @@ class PrepareWorkflowWorker(QThread):
         self.remote_api_token = str(remote_api_token or "").strip()
         self.force_remote_api = bool(force_remote_api)
         self.force_transcription = bool(force_transcription)
+        self.asr_options = dict(asr_options) if isinstance(asr_options, dict) else asr_options
 
     def run(self):
         try:
             from runtime_profile import is_remote_profile
+            if str(self.transcription_engine or "whisper").strip().lower() in {"sensevoice", "capcut", "ocr"}:
+                asr_options = None
+            else:
+                try:
+                    from asr_options import normalize_asr_options
+                except ImportError:
+                    from app.asr_options import normalize_asr_options
+                asr_options = normalize_asr_options(self.asr_options)
             prefetch_voice_provider = _get_voice_preview_utils().voice_provider
             prefetch_is_elevenlabs = bool(
                 self.prefetch_voice_name
@@ -1044,6 +1078,7 @@ class PrepareWorkflowWorker(QThread):
                         "force_transcription": self.force_transcription,
                         "prefetch_voice_name": self.prefetch_voice_name,
                         "prefetch_voice_speed": self.prefetch_voice_speed,
+                        "asr_options": asr_options,
                     }
                     if self.elevenlabs_model_id:
                         prepare_payload["elevenlabs_model_id"] = self.elevenlabs_model_id
@@ -1080,6 +1115,7 @@ class PrepareWorkflowWorker(QThread):
                     speaker_diarization_num_speakers=self.speaker_diarization_num_speakers,
                     skip_translation=self.skip_translation,
                     force_transcription=self.force_transcription,
+                    asr_options=asr_options,
                     prefetch_voice_name=self.prefetch_voice_name,
                     prefetch_voice_speed=self.prefetch_voice_speed,
                     step_callback=lambda s, m="", p=None: (

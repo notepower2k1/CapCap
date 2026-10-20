@@ -8,6 +8,10 @@ from pathlib import Path
 
 from runtime_paths import bin_path, models_path, workspace_root, subprocess_hidden_kwargs, subprocess_text_kwargs
 try:
+    from asr_options import normalize_asr_options
+except ModuleNotFoundError:
+    from app.asr_options import normalize_asr_options
+try:
     from services.model_utils import matches_whisper_model_dir
 except ModuleNotFoundError:
     from app.services.model_utils import matches_whisper_model_dir
@@ -493,11 +497,13 @@ def transcribe_audio_with_model(
     use_batched: bool = True,
     vad_filter: bool = True,
     on_progress=None,
+    asr_options: dict | None = None,
 ):
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio not found at {audio_path}")
 
     normalized_language = _normalize_language(language)
+    options = normalize_asr_options(asr_options)
     transcribe_kwargs = {
         "language": normalized_language,
         "task": task,
@@ -508,11 +514,20 @@ def transcribe_audio_with_model(
         "beam_size": 5,
         "word_timestamps": True,
     }
+    if options["hallucination_filter_enabled"]:
+        transcribe_kwargs["hallucination_silence_threshold"] = options["hallucination_silence_threshold"]
 
     with _WHISPER_TRANSCRIBE_LOCK:
+        is_cuda_model = getattr(model, "_capcap_runtime_device", "") == "cuda"
+        hallucination_requires_standard = options["hallucination_filter_enabled"] and is_cuda_model
+        if hallucination_requires_standard:
+            print(
+                "[Whisper] Hallucination filtering enabled; using standard GPU inference "
+                "because batched inference ignores the silence threshold."
+            )
         batch_size = (
             _whisper_gpu_batch_size()
-            if use_batched and getattr(model, "_capcap_runtime_device", "") == "cuda"
+            if use_batched and is_cuda_model and not options["hallucination_filter_enabled"]
             else 0
         )
         if batch_size > 1:
@@ -550,7 +565,7 @@ def transcribe_audio_with_model(
                 segments, _info = _transcribe_with_vad_fallback(model.transcribe, audio_path, transcribe_kwargs)
                 raw_segments = _collect_segments_with_progress(segments, _info, audio_path, on_progress)
         else:
-            if use_batched and getattr(model, "_capcap_runtime_device", "") == "cuda":
+            if use_batched and is_cuda_model and not hallucination_requires_standard:
                 print("[Whisper] Standard GPU inference (batched inference disabled).")
             segments, _info = _transcribe_with_vad_fallback(model.transcribe, audio_path, transcribe_kwargs)
             raw_segments = _collect_segments_with_progress(segments, _info, audio_path, on_progress)
@@ -577,7 +592,15 @@ def transcribe_audio_with_model(
     ]
 
 
-def transcribe_audio(audio_path, model_path, whisper_path=None, language="auto", task="transcribe", on_progress=None):
+def transcribe_audio(
+    audio_path,
+    model_path,
+    whisper_path=None,
+    language="auto",
+    task="transcribe",
+    on_progress=None,
+    asr_options: dict | None = None,
+):
     """
     Transcribes audio using faster-whisper while keeping the old compatibility API.
 
@@ -594,8 +617,16 @@ def transcribe_audio(audio_path, model_path, whisper_path=None, language="auto",
 
     model_name = _resolve_model_name(model_path)
     model = load_whisper_model(model_path)
+    options = normalize_asr_options(asr_options)
     try:
-        return transcribe_audio_with_model(model, audio_path, language=language, task=task, on_progress=on_progress)
+        return transcribe_audio_with_model(
+            model,
+            audio_path,
+            language=language,
+            task=task,
+            on_progress=on_progress,
+            asr_options=options,
+        )
     except RuntimeError as exc:
         message = str(exc)
         if "cublas64_12.dll" in message or "cannot be loaded" in message:
@@ -608,7 +639,14 @@ def transcribe_audio(audio_path, model_path, whisper_path=None, language="auto",
                 cpu_kwargs["download_root"] = _faster_whisper_cache_dir()
             from faster_whisper import WhisperModel
             cpu_model = WhisperModel(model_name, **cpu_kwargs)
-            return transcribe_audio_with_model(cpu_model, audio_path, language=language, task=task, on_progress=on_progress)
+            return transcribe_audio_with_model(
+                cpu_model,
+                audio_path,
+                language=language,
+                task=task,
+                on_progress=on_progress,
+                asr_options=options,
+            )
         raise
 
 if __name__ == "__main__":

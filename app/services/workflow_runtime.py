@@ -38,6 +38,7 @@ class WorkflowRuntime:
         step_callback=None,
         force_transcription: bool = False,
         elevenlabs_model_id: str | None = None,
+        asr_options: dict | None = None,
     ) -> str:
         if step_callback: step_callback("prepare")
         prepare_kwargs = dict(
@@ -57,6 +58,7 @@ class WorkflowRuntime:
             prefetch_voice_speed=prefetch_voice_speed,
             step_callback=step_callback,
             force_transcription=force_transcription,
+            asr_options=asr_options,
         )
         if elevenlabs_model_id:
             prepare_kwargs["elevenlabs_model_id"] = elevenlabs_model_id
