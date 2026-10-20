@@ -6,6 +6,17 @@
 | :---: | :---: |
 | ![Giao diện CapCap 16:9](assets/preview_1.png) | ![Giao diện CapCap 9:16](assets/preview_2.png) |
 
+<p align="center">
+  <a href="https://github.com/notepower2k1/CapCap/releases"><img src="https://img.shields.io/github/v/release/notepower2k1/CapCap?style=flat-square&color=blue" alt="Latest Release"></a>
+  <a href="https://github.com/notepower2k1/CapCap/releases">
+    <img src="https://img.shields.io/badge/downloads-3k-2ea44f?style=flat-square&logo=github" alt="Downloads">
+  </a>
+  <a href="https://github.com/notepower2k1/CapCap/stargazers"><img src="https://img.shields.io/github/stars/notepower2k1/CapCap?style=flat-square&color=gold" alt="Stars"></a>
+  <a href="https://github.com/notepower2k1/CapCap/issues"><img src="https://img.shields.io/github/issues/notepower2k1/CapCap?style=flat-square&color=orange" alt="Open Issues"></a>
+  <a href="https://github.com/notepower2k1/CapCap/issues?q=is%3Aissue+is%3Aclosed"><img src="https://img.shields.io/github/issues-closed/notepower2k1/CapCap?style=flat-square&color=purple" alt="Closed Issues"></a>
+  <a href="https://github.com/notepower2k1/CapCap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/notepower2k1/CapCap?style=flat-square" alt="License"></a>
+</p>
+
 ### [🎬 Demo & Hướng dẫn sử dụng](https://www.tiktok.com/@nguyenthach617/video/7674305087023369493)
 
 **CapCap** là ứng dụng biên tập và bản địa hóa video tất-cả-trong-một dành cho Windows. Giúp tự động hóa toàn bộ quy trình: nhận diện giọng nói, dịch thuật AI, lồng tiếng tự nhiên, chỉnh sửa lớp phủ và xuất video hoàn chỉnh.
@@ -33,21 +44,6 @@
 
 ---
 
-## 🛠️ Chạy từ mã nguồn
-
-```bash
-git clone https://github.com/notepower2k1/CapCap.git
-cd CapCap
-
-python -m venv venv
-venv\Scripts\activate
-
-pip install -r requirements-local.txt
-python ui/gui.py
-```
-
-* Bạn chỉ cần sao chép `.env_example` thành `.env` nếu muốn cấu hình thủ công các API key hoặc máy chủ dịch từ xa. Hầu hết thiết lập có thể chỉnh trực tiếp trên giao diện.
-
 ### 💡 Khắc phục sự cố trình phát xem trước video (MPV)
 
 CapCap mặc định sử dụng **libmpv** để xem trước video mượt mà và chuẩn xác từng khung hình:
@@ -60,15 +56,23 @@ CapCap mặc định sử dụng **libmpv** để xem trước video mượt mà
 
 Nếu CapCap hữu ích với công việc của bạn, hãy ủng hộ để giúp dự án tiếp tục được hoàn thiện:
 
-### 🇻🇳 Ủng hộ tại Việt Nam
-Quét mã QR bên dưới:
 
 <img src="assets/qr.png" style="width: 20%; height: auto;">
 
-### 🌍 Ủng hộ quốc tế
-[![Buy Me a Coffee](assets/buymeacoffee.png)](https://buymeacoffee.com/hcaht)
-
 ---
+
+## 💬 Hỗ trợ & Phản hồi
+
+Nếu bạn gặp lỗi hoặc có ý tưởng cải tiến tính năng mới:
+- 🐛 **Báo lỗi:** Mở một [Issue mới](https://github.com/notepower2k1/CapCap/issues/new) và kèm theo ảnh chụp màn hình/log lỗi.
+- 💡 **Đóng góp ý tưởng:** Thảo luận tại mục [Discussions](https://github.com/notepower2k1/CapCap/discussions) (nếu đã bật) hoặc tạo feature request.
+- ⭐ **Ủng hộ dự án:** Đừng quên để lại **1 Star** nếu công cụ này hữu ích với bạn!
+
+
+## 📈 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=notepower2k1/CapCap&type=Date)](https://star-history.com/#notepower2k1/CapCap&Date)
+
 
 ## 📄 Giấy phép
 
