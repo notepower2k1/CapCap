@@ -8,9 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/notepower2k1/CapCap/releases"><img src="https://img.shields.io/github/v/release/notepower2k1/CapCap?style=flat-square&color=blue" alt="Latest Release"></a>
-  <a href="https://github.com/notepower2k1/CapCap/releases">
-    <img src="https://img.shields.io/badge/downloads-3k-2ea44f?style=flat-square&logo=github" alt="Downloads">
-  </a>
+  <a href="https://github.com/notepower2k1/CapCap/releases"><img src="https://img.shields.io/github/downloads/notepower2k1/CapCap/total?style=flat-square&logo=github&color=2ea44f" alt="Downloads"></a>
   <a href="https://github.com/notepower2k1/CapCap/stargazers"><img src="https://img.shields.io/github/stars/notepower2k1/CapCap?style=flat-square&color=gold" alt="Stars"></a>
   <a href="https://github.com/notepower2k1/CapCap/issues"><img src="https://img.shields.io/github/issues/notepower2k1/CapCap?style=flat-square&color=orange" alt="Open Issues"></a>
   <a href="https://github.com/notepower2k1/CapCap/issues?q=is%3Aissue+is%3Aclosed"><img src="https://img.shields.io/github/issues-closed/notepower2k1/CapCap?style=flat-square&color=purple" alt="Closed Issues"></a>
