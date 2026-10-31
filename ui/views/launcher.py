@@ -6,6 +6,7 @@ import time
 import shutil
 import hashlib
 import re
+import subprocess
 
 import threading
 
@@ -27,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from runtime_paths import asset_path, subprocess_hidden_kwargs, workspace_root
+from runtime_paths import asset_path, subprocess_hidden_kwargs, subprocess_text_kwargs, workspace_root
 
 try:
     from i18n import get_language, language_items, localize_widget_tree, set_language, t
@@ -573,6 +574,12 @@ class LauncherWindow(QDialog):
         self._gpu_label = QLabel()
         header_text.addWidget(self._gpu_label)
         self._update_gpu_label(has_gpu, gpu_name, cuda_ready)
+
+        self._gpu_diagnostic_label = QLabel(self)
+        self._gpu_diagnostic_label.setWordWrap(True)
+        self._gpu_diagnostic_label.setStyleSheet("font-size: 11px; color: #ffa500;")
+        header_text.addWidget(self._gpu_diagnostic_label)
+        self._update_gpu_diagnostic_label()
 
         self._missing_label = QLabel("", self)
         self._missing_label.setWordWrap(True)
@@ -1469,12 +1476,12 @@ class LauncherWindow(QDialog):
         has_gpu = False
         gpu_name = ""
         cuda_ready = False
+        diagnostic = {"reason": "", "torch": "not_needed", "detail": ""}
         try:
-            import subprocess
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=10,
-                **subprocess_hidden_kwargs(),
+                capture_output=True, timeout=10,
+                **subprocess_text_kwargs(),
             )
             if result.returncode == 0 and result.stdout.strip():
                 parts = result.stdout.strip().split("\n")[0].strip().split(",")
@@ -1487,25 +1494,76 @@ class LauncherWindow(QDialog):
                     except ValueError:
                         pass
                 has_gpu = True
-        except Exception:
-            pass
+            else:
+                diagnostic["reason"] = "smi_failed"
+                diagnostic["detail"] = f"nvidia-smi exit={result.returncode}; stderr={str(getattr(result, 'stderr', '') or '')[:1000]}"
+        except FileNotFoundError as exc:
+            diagnostic.update(reason="smi_missing", detail=str(exc))
+        except subprocess.TimeoutExpired as exc:
+            diagnostic.update(reason="smi_timeout", detail=str(exc))
+        except Exception as exc:
+            diagnostic.update(reason="smi_failed", detail=f"{type(exc).__name__}: {exc}")
         if not has_gpu:
             try:
                 import torch
                 if torch.cuda.is_available():
-                    name = torch.cuda.get_device_name(0)
-                    vram = torch.cuda.get_device_properties(0).total_mem // (1024 ** 3)
-                    gpu_name = f"{name} ({vram}GB)"
                     has_gpu = True
-            except Exception:
-                pass
+                    gpu_name = "NVIDIA GPU"
+                    diagnostic["torch"] = "ready"
+                    try:
+                        gpu_name = str(torch.cuda.get_device_name(0))
+                        vram = torch.cuda.get_device_properties(0).total_memory // (1024 ** 3)
+                        gpu_name = f"{gpu_name} ({vram}GB)"
+                    except Exception as exc:
+                        # Name/VRAM are display metadata, not a CUDA availability gate.
+                        diagnostic["detail"] += f"; GPU metadata {type(exc).__name__}: {exc}"
+                else:
+                    built_cuda = getattr(getattr(torch, "version", None), "cuda", None)
+                    diagnostic["torch"] = "no_device" if built_cuda else "cpu_build"
+                    diagnostic["detail"] += f"; torch={getattr(torch, '__version__', 'unknown')}; torch CUDA={built_cuda}; cuda.is_available=False"
+            except ImportError as exc:
+                diagnostic["torch"] = "import_error"
+                diagnostic["detail"] += f"; PyTorch import failed: {exc}"
+            except Exception as exc:
+                diagnostic["torch"] = "runtime_error"
+                diagnostic["detail"] += f"; PyTorch {type(exc).__name__}: {exc}"
         if has_gpu:
             try:
                 service = self._resource_service()
                 cuda_ready = service.is_requirement_met("cuda:whisper")
-            except Exception:
-                pass
+                diagnostic["reason"] = "" if cuda_ready else "pack_missing"
+            except Exception as exc:
+                diagnostic.update(reason="pack_check_failed")
+                diagnostic["detail"] += f"; CUDA pack check {type(exc).__name__}: {exc}"
+        self._gpu_diagnostics = diagnostic
+        record = f"has_gpu={has_gpu}, gpu={gpu_name!r}, cuda_ready={cuda_ready}, reason={diagnostic['reason']}, torch={diagnostic['torch']}; {diagnostic['detail']}"
+        if record != getattr(self, "_last_gpu_diagnostic_record", None):
+            self._last_gpu_diagnostic_record = record
+            print("[Launcher GPU] " + record.encode("ascii", "backslashreplace").decode("ascii"))
         return has_gpu, gpu_name, cuda_ready
+
+    def _update_gpu_diagnostic_label(self):
+        label = getattr(self, "_gpu_diagnostic_label", None)
+        if label is None:
+            return
+        diagnostics = getattr(self, "_gpu_diagnostics", {}) or {}
+        reason = diagnostics.get("reason", "")
+        messages = {
+            "smi_missing": "The NVIDIA GPU check tool was not found. Install or repair the NVIDIA driver, restart Windows, then reopen CapCap.",
+            "smi_failed": "CapCap could not read the NVIDIA GPU information. Update or reinstall the NVIDIA driver, restart Windows, then try again.",
+            "smi_timeout": "The NVIDIA GPU check timed out. Restart Windows and try again. If it keeps happening, update the NVIDIA driver.",
+            "pack_missing": "The GPU was detected, but CapCap's GPU Acceleration Pack is missing. Download it in Manage Resources, then close that window to check again.",
+            "pack_check_failed": "CapCap could not check the GPU Acceleration Pack. Reopen the app and check Manage Resources. If it persists, send the application log for support.",
+        }
+        message = t(messages[reason]) if reason in messages else ""
+        if diagnostics.get("torch") in {"cpu_build", "import_error", "runtime_error"} and reason.startswith("smi_"):
+            message += " " + t("The app's CUDA fallback is also unavailable. If the NVIDIA driver is working, update or reinstall the GPU-enabled CapCap build.")
+        if message:
+            message += " " + t("You can still use CPU mode. Send the application log if you need help.")
+        label.setText(message)
+        label.setVisible(bool(message))
+        if hasattr(self, "gpu_btn"):
+            self.gpu_btn.setToolTip(message)
 
     def _update_gpu_label(self, has_gpu: bool, gpu_name: str, cuda_ready: bool):
         self._last_has_gpu = bool(has_gpu)
@@ -1521,6 +1579,7 @@ class LauncherWindow(QDialog):
         else:
             self._gpu_label.setText(t("CPU only"))
             self._gpu_label.setStyleSheet("font-size: 11px; color: #5a7a9a;")
+        LauncherWindow._update_gpu_diagnostic_label(self)
 
     @staticmethod
     def add_recent(settings_or_none, video_path: str):

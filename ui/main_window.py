@@ -2516,11 +2516,17 @@ class VideoTranslatorGUI(QMainWindow):
                 f"background: {self._speaker_color_hex(speaker)}; border-radius: 6px; border: 1px solid #dcecff;"
             )
             header.addWidget(indicator)
-            speaker_label = QLabel(
-                t("{name}  ·  {count} segment(s)", name=display_name, count=segment_count)
-            )
+            speaker_label = QLabel(display_name)
+            speaker_label.setObjectName("speakerNameLabel")
             speaker_label.setToolTip(t("Timeline ID: {speaker}", speaker=speaker))
-            header.addWidget(speaker_label, 1)
+            header.addWidget(speaker_label)
+            speaker_id_label = QLabel(f"· {speaker}")
+            speaker_id_label.setObjectName("speakerIdLabel")
+            speaker_id_label.setTextFormat(Qt.PlainText)
+            speaker_id_label.setStyleSheet("color: #9fb3ca; font-size: 11px;")
+            speaker_id_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            header.addWidget(speaker_id_label, 1)
+            header.addWidget(QLabel(t("{count} segment(s)", count=segment_count)))
             row_layout.addLayout(header)
             filter_row = QHBoxLayout()
             filter_row.setSpacing(6)
@@ -2608,7 +2614,7 @@ class VideoTranslatorGUI(QMainWindow):
             for target_position, target_speaker in enumerate(speakers):
                 if target_speaker != speaker:
                     reassign_combo.addItem(
-                        self._speaker_display_name(target_speaker, target_position),
+                        f"{self._speaker_display_name(target_speaker, target_position)} · {target_speaker}",
                         target_speaker,
                     )
             reassign_button = QPushButton(t("Apply"))
@@ -12154,7 +12160,7 @@ class VideoTranslatorGUI(QMainWindow):
                     speaker_speed_row.addWidget(QLabel(t("Speaker:")))
                     speaker_combo = QComboBox()
                     for position, speaker_id in enumerate(speaker_ids):
-                        speaker_combo.addItem(self._speaker_display_name(speaker_id, position), speaker_id)
+                        speaker_combo.addItem(f"{self._speaker_display_name(speaker_id, position)} · {speaker_id}", speaker_id)
                     combo_index = speaker_combo.findData(selected_speaker)
                     if combo_index >= 0:
                         speaker_combo.setCurrentIndex(combo_index)
