@@ -175,11 +175,12 @@ def _realtime_color_graph(state=None) -> str:
             values[field] = max(-100.0, min(100.0, float(source.get(field, 0.0) or 0.0)))
         except (TypeError, ValueError):
             values[field] = 0.0
-    if not any(abs(value) > 0.01 for value in values.values()):
+    mirror = isinstance(state, dict) and state.get("mirror_horizontal", False) is True
+    if not mirror and not any(abs(value) > 0.01 for value in values.values()):
         return ""
     stages = []
     current = ""
-    filters = []
+    filters = ["hflip"] if mirror else []
     eq_parts = []
     if abs(values["brightness"]) > 0.01:
         eq_parts.append(f"brightness={values['brightness'] / 100.0 * 0.35:.4f}")

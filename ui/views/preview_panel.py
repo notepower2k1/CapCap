@@ -2270,6 +2270,13 @@ def build_preview_panel(gui):
     gui.video_inspector_summary_label.setWordWrap(True)
     video_layout.addWidget(gui.video_inspector_summary_label)
 
+    gui.video_inspector_mirror_cb = QCheckBox("Mirror horizontally")
+    gui.video_inspector_mirror_cb.setObjectName("videoInspectorMirrorCheckBox")
+    gui.video_inspector_mirror_cb.setToolTip(
+        "Flip the source video left to right. Added subtitles, text and logos keep their direction."
+    )
+    video_layout.addWidget(gui.video_inspector_mirror_cb)
+
     # --- Preset ---
     preset_row = QHBoxLayout()
     preset_label = QLabel("Preset")

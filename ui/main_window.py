@@ -785,6 +785,7 @@ class VideoTranslatorGUI(QMainWindow):
         self.subtitle_ass_ready.connect(self._on_async_subtitle_ass_ready)
         self._video_filter_ui_sync = False
         self._video_filter_preset_key = "original"
+        self._video_mirror_horizontal = False
         self._video_filter_intensity = 75
         self._video_filter_adjust_overrides = {
             "brightness": 0,
@@ -5401,6 +5402,7 @@ class VideoTranslatorGUI(QMainWindow):
     def load_project_context(self, state):
         if not state:
             return
+        self._restore_video_mirror_state(state)
         # Restore the language pair before filtering this project's engines/voices.
         for combo_name, field in (("lang_whisper_combo", "source_language"), ("lang_target_combo", "target_language")):
             combo = getattr(self, combo_name, None)
@@ -6179,6 +6181,8 @@ class VideoTranslatorGUI(QMainWindow):
         self._persist_video_filter_settings()
 
     def reset_video_filters(self):
+        self._video_mirror_horizontal = False
+        self._persist_video_mirror_state()
         self.set_video_filter_state(
             "original",
             75,
@@ -6215,10 +6219,12 @@ class VideoTranslatorGUI(QMainWindow):
         lut_strength = 0.0
         if lut_path:
             lut_strength = max(0.0, min(1.0, float(self._video_filter_intensity) / 100.0))
-        active = any(abs(int(value)) > 0 for value in effective_values.values()) or bool(
+        mirror = getattr(self, "_video_mirror_horizontal", False) is True
+        active = mirror or any(abs(int(value)) > 0 for value in effective_values.values()) or bool(
             lut_path and lut_strength > 0.001
         )
         return {
+            "mirror_horizontal": mirror,
             "preset": preset_key,
             "intensity": int(self._video_filter_intensity),
             "base": base_values,
@@ -9208,11 +9214,19 @@ class VideoTranslatorGUI(QMainWindow):
         self._switch_inspector("video")
         available = self._video_filter_inspector_available()
         if hasattr(self, "video_inspector_card"):
-            self.video_inspector_card.setEnabled(available)
+            self.video_inspector_card.setEnabled(True)
+        for widget in (
+            getattr(self, "video_inspector_preset_combo", None),
+            getattr(self, "video_inspector_intensity_slider", None),
+            *(slider for slider, _label in getattr(self, "video_inspector_adjust_sliders", {}).values()),
+        ):
+            if widget is not None:
+                widget.setEnabled(available)
+        self._wire_video_inspector_controls()
         if not available:
             if hasattr(self, "video_inspector_summary_label"):
                 self.video_inspector_summary_label.setText(
-                    t("Video Filter Inspector requires the gpu-next preview backend.")
+                    t("Mirror is available. Color filters require the gpu-next preview backend.")
                 )
             return
         if track is None:
@@ -9268,6 +9282,8 @@ class VideoTranslatorGUI(QMainWindow):
                     lambda fk=field_key: self._on_video_inspector_adjust_released(fk)
                 )
         # Reset
+        if hasattr(self, "video_inspector_mirror_cb"):
+            self.video_inspector_mirror_cb.toggled.connect(self._on_video_inspector_mirror_toggled)
         if hasattr(self, "video_inspector_reset_btn"):
             self.video_inspector_reset_btn.clicked.connect(self._on_video_inspector_reset)
         self._video_inspector_wired = True
@@ -9275,6 +9291,11 @@ class VideoTranslatorGUI(QMainWindow):
         self._sync_video_inspector_ui()
 
     def _sync_video_inspector_ui(self):
+        checkbox = getattr(self, "video_inspector_mirror_cb", None)
+        if checkbox is not None:
+            blocked = checkbox.blockSignals(True)
+            checkbox.setChecked(getattr(self, "_video_mirror_horizontal", False) is True)
+            checkbox.blockSignals(blocked)
         if hasattr(self, "video_inspector_preset_combo"):
             try:
                 key = self._normalize_video_filter_preset_key(
@@ -9335,7 +9356,9 @@ class VideoTranslatorGUI(QMainWindow):
                 self.video_inspector_status_label.setText(t("No filter applied"))
                 self.video_inspector_status_label.setStyleSheet("color: #888; font-weight: normal;")
             if hasattr(self, "video_inspector_reset_btn"):
-                self.video_inspector_reset_btn.setEnabled(self._video_filter_inspector_available())
+                self.video_inspector_reset_btn.setEnabled(
+                    self._video_filter_inspector_available() or bool(getattr(self, "_video_mirror_horizontal", False))
+                )
         except Exception as e:
             if hasattr(self, "log"):
                 self.log(f"[Filter] Status refresh error: {e}")
@@ -9404,6 +9427,27 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception:
                 pass
         self._refresh_video_inspector_status()
+
+    def _restore_video_mirror_state(self, state):
+        self._video_mirror_horizontal = getattr(state, "settings", {}).get("video_mirror_horizontal", False) is True
+        self._sync_video_inspector_ui()
+        backend = getattr(self, "media_player", None)
+        if getattr(backend, "backend_name", "") == "libmpv":
+            backend.set_color_filter_state(self.get_video_filter_state())
+
+    def _persist_video_mirror_state(self):
+        state = getattr(self, "current_project_state", None)
+        if state is not None:
+            state.set_setting("video_mirror_horizontal", bool(self._video_mirror_horizontal))
+            self.project_service.save_project(state)
+
+    def _on_video_inspector_mirror_toggled(self, checked):
+        self._video_mirror_horizontal = bool(checked)
+        self._persist_video_mirror_state()
+        self._mark_video_filter_preview_dirty()
+        self.schedule_live_video_filter_preview()
+        self._refresh_video_inspector_status()
+        self.refresh_ui_state()
 
     def _on_video_inspector_reset(self):
         self.reset_video_filters()
