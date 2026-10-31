@@ -1336,6 +1336,7 @@ class TestRuntimeBugfixes(unittest.TestCase):
             gui = MagicMock(spec=VideoTranslatorGUI)
             gui.settings = settings
             settings.setValue("default_transcription_engine", "whisper")
+            gui.get_source_language_code.return_value = "zh"
 
             # Case A: gui.current_project_state = None
             gui.current_project_state = None

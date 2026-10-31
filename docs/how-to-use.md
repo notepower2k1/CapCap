@@ -28,6 +28,22 @@ CapCap automatically optimizes its workspace layout based on the video's aspect 
 7. Use **Fast Preview** to check a five-second rendered sample, or playback smoothly in real-time.
 8. Click **Export** to render the final localized video or export to **CapCut Draft**.
 
+### Languages and voices
+
+The language selectors support Korean, Japanese, Thai, Russian, French and German
+in addition to Vietnamese and English. Chinese remains available as an input.
+For Thai, Russian, French, German or Vietnamese speech input, use Whisper;
+SenseVoice is hidden for languages it does not support.
+
+Voice engines are filtered by output language and the available voice catalog.
+Piper's offered packs are Vietnamese/English; VieNeu is Vietnamese only. CapCut
+is shown only when its catalog contains a matching voice. ElevenLabs remains
+available for configuration even before an API key is entered. For Thai with
+ElevenLabs, select **Eleven v3** in Settings; Turbo/Flash v2.5 do not support Thai.
+Korean and Russian currently require ElevenLabs unless a matching local voice is
+added. Preview speech uses the selected output language. Japanese, Korean and
+Thai subtitles require a font containing those characters on the rendering PC.
+
 ### Whisper transcript cleanup
 
 Open **Settings → Transcription** while **Audio (Whisper)** is selected to adjust two cleanup options. Both are enabled by default and apply to new Whisper transcriptions:

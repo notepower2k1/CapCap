@@ -462,17 +462,16 @@ def build_start_group(gui, left_layout):
 
     language_card, language_layout = _build_collapsible_section("Language")
     gui.lang_whisper_combo = QComboBox()
-    gui.lang_whisper_combo.addItem("Auto Detect", "auto")
-    gui.lang_whisper_combo.addItem("Chinese", "zh")
-    gui.lang_whisper_combo.addItem("Japanese", "ja")
-    gui.lang_whisper_combo.addItem("Korean", "ko")
-    gui.lang_whisper_combo.addItem("English", "en")
+    from language_support import LANGUAGES, SOURCE_LANGUAGES
+    for label, code in SOURCE_LANGUAGES:
+        gui.lang_whisper_combo.addItem(t(label), code)
     idx_zh = gui.lang_whisper_combo.findData("zh")
     if idx_zh >= 0:
         gui.lang_whisper_combo.setCurrentIndex(idx_zh)
+    gui.lang_whisper_combo.currentIndexChanged.connect(gui.on_source_language_changed)
     gui.lang_target_combo = QComboBox()
-    gui.lang_target_combo.addItem("Vietnamese", "vi")
-    gui.lang_target_combo.addItem("English", "en")
+    for label, code in LANGUAGES:
+        gui.lang_target_combo.addItem(t(label), code)
     saved_target_lang = str(getattr(gui, "settings", None).value("target_language", "vi") if getattr(gui, "settings", None) else "vi" or "vi").strip().lower()
     target_idx = gui.lang_target_combo.findData(saved_target_lang)
     gui.lang_target_combo.setCurrentIndex(target_idx if target_idx >= 0 else 0)

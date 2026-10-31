@@ -1372,6 +1372,7 @@ class VoiceWorkflow:
         wavs = [""] * len(segments)
         pending_jobs = []
         cache_hits = 0
+        validated_voices = set()
 
         for idx, seg in enumerate(segments):
             global_idx = int(index_offset) + idx
@@ -1381,6 +1382,10 @@ class VoiceWorkflow:
                 continue
             segment_voice_name = str(seg.get("voice_name") or voice_name).strip() or voice_name
             segment_provider = self._voice_provider(segment_voice_name)
+            if effective_language_code and segment_voice_name not in validated_voices:
+                from tts_processor import validate_voice_language
+                validate_voice_language(segment_voice_name, effective_language_code, model_id=effective_model_id)
+                validated_voices.add(segment_voice_name)
             segment_model_id = effective_model_id if segment_provider == "elevenlabs" else None
             segment_language_code = effective_language_code if segment_provider == "elevenlabs" else None
             cache_key = self._segment_cache_key(
@@ -1498,9 +1503,9 @@ class VoiceWorkflow:
                 except (TypeError, ValueError):
                     capcut_workers = 30
                 try:
-                    capcut_batch_size = max(1, int(os.getenv("CAPCUT_TTS_BATCH_SIZE", "60")))
+                    capcut_batch_size = max(1, int(os.getenv("CAPCUT_TTS_BATCH_SIZE", "30")))
                 except (TypeError, ValueError):
-                    capcut_batch_size = 60
+                    capcut_batch_size = 30
                 worker_count = max(1, min(capcut_workers, len(pending_jobs)))
             else:
                 capcut_batch_size = 1
@@ -1849,6 +1854,8 @@ class VoiceWorkflow:
         os.makedirs(tmp_dir, exist_ok=True)
         effective_model_id = self._effective_elevenlabs_model_id(elevenlabs_model_id)
         language_code = self._normalize_language_code(target_language)
+        if language_code and language_code != "vi":
+            normalizer_dictionary = None
         safe_voice_speed = self._clamp_requested_speed(float(voice_speed))
         voice_provider = self._voice_provider(voice_name)
         prepared_segments = self._prepare_segments_for_tts(
@@ -1917,6 +1924,8 @@ class VoiceWorkflow:
             effective_target_language = getattr(state, "target_language", None)
         language_code = self._normalize_language_code(effective_target_language)
         normalizer_dictionary = self._normalizer_dictionary_from_state(state)
+        if language_code and language_code != "vi":
+            normalizer_dictionary = {}
         normalizer_signature = self._normalizer_signature(normalizer_dictionary)
         print(
             "[Voice Workflow] Project normalizer dictionary: "

@@ -191,7 +191,8 @@ class TestRangeTranscriptionDialog(unittest.TestCase):
         self.assertIsNotNone(cfg)
         self.assertEqual(cfg["start"], 5.0)
         self.assertEqual(cfg["end"], 15.0)
-        self.assertEqual(cfg["engine"], "sensevoice")
+        # Vietnamese is unsupported by SenseVoice; the dialog switches to Whisper.
+        self.assertEqual(cfg["engine"], "whisper")
         self.assertIn("ocr_backend", cfg)
         self.assertIn(cfg["ocr_backend"], ("rapidocr", "winocr"))
 

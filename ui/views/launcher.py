@@ -1093,32 +1093,16 @@ class LauncherWindow(QDialog):
         device = self.selected_device
         is_ok, missing, advisory = self._launch_resource_state(service)
         self.new_btn.setEnabled(is_ok)
-        if device == "cuda":
-            has_gpu = True
-            gpu_name = ""
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                    capture_output=True, text=True, timeout=10,
-                    **subprocess_hidden_kwargs(),
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    gpu_name = result.stdout.strip().split("\n")[0].strip()
-            except Exception:
-                pass
-            cuda_ready = is_ok
-            self._update_gpu_label(has_gpu, gpu_name, cuda_ready)
-            if not cuda_ready:
-                self.gpu_btn.setEnabled(False)
-                self.gpu_btn.setText(t("GPU (N/A)"))
-        elif device == "cpu":
-            has_gpu, _gpu_name, cuda_ready = self._detect_gpu_with_cuda()
-            gpu_usable = has_gpu and cuda_ready
-            if gpu_usable:
-                self.gpu_btn.setEnabled(True)
-                self.gpu_btn.setText(t("GPU (Recommended)"))
-                self._update_gpu_label(has_gpu, _gpu_name, cuda_ready)
+        # Hardware identity (including VRAM) must not depend on which mode is
+        # selected. CUDA readiness is distinct from missing pipeline models.
+        has_gpu, gpu_name, cuda_ready = self._detect_gpu_with_cuda()
+        LauncherWindow._gpu_name = gpu_name if has_gpu else ""
+        self._update_gpu_label(has_gpu, gpu_name, cuda_ready)
+        gpu_usable = has_gpu and cuda_ready
+        self.gpu_btn.setEnabled(gpu_usable)
+        self.gpu_btn.setText(t("GPU (Recommended)") if gpu_usable else t("GPU (N/A)"))
+        if device == "cuda" and not gpu_usable:
+            self.new_btn.setEnabled(False)
         if is_ok and not advisory:
             self._missing_label.hide()
             self._missing_label.setText("")

@@ -65,7 +65,7 @@ def build_translation_messages(
         else:
             system_message = render_prompt(f"{prompt_key}.system.md", **values)
             # Inherit active preset's naming and address rules during rewrite/refinement
-            if not is_direct and preset_id:
+            if not is_direct and preset_id and str(target_lang).lower().split("-")[0] == "vi":
                 try:
                     rules = extract_preset_rules(preset_id)
                     if rules:

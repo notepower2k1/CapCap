@@ -309,7 +309,7 @@ def _find_overlap_suffix_prefix(s1: str, s2: str, min_len: int = 2) -> int:
 def _plan_silence_aware_chunks(
     audio_path: str,
     total_duration: float,
-    chunk_seconds: float = 300.0,
+    chunk_seconds: float = 600.0,
     overlap_seconds: float = 2.0,
     search_window: float = 20.0,
 ) -> list[tuple[float, float]]:
@@ -492,9 +492,9 @@ def transcribe_audio_capcut(
 
     if chunk_seconds is None:
         try:
-            chunk_seconds = float(os.getenv("CAPCUT_STT_CHUNK_SECONDS", "300.0"))
+            chunk_seconds = float(os.getenv("CAPCUT_STT_CHUNK_SECONDS", "600.0"))
         except (TypeError, ValueError):
-            chunk_seconds = 300.0
+            chunk_seconds = 600.0
     if overlap_seconds is None:
         try:
             overlap_seconds = float(os.getenv("CAPCUT_STT_OVERLAP_SECONDS", "2.0"))

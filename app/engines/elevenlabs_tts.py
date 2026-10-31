@@ -486,6 +486,13 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
         if any(c in vietnamese_chars for c in text):
             clean_lang = "vi"
 
+    from language_support import elevenlabs_supports_language
+    if clean_lang and not elevenlabs_supports_language(resolved_model_id, clean_lang):
+        raise ValueError(
+            f"ElevenLabs model '{resolved_model_id}' does not support '{clean_lang}'. "
+            "Select Eleven v3 in Settings for Thai, or a model supporting the output language."
+        )
+
     if on_progress:
         on_progress(f"[ElevenLabs] Đang tạo giọng nói ({clean_voice_id})...")
     print(f"[ElevenLabs] Synthesizing speech for voice_id='{clean_voice_id}'...")
@@ -537,7 +544,7 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
             if "unsupported_language" in err_lower or "does not support language_code" in err_lower:
                 raise RuntimeError(
                     f"ElevenLabs API (Lỗi 400 - Model không hỗ trợ ngôn ngữ): Model '{resolved_model_id}' không hỗ trợ mã ngôn ngữ '{clean_lang}'. "
-                    "Vui lòng vào Settings chọn model 'eleven_turbo_v2_5' hoặc 'eleven_flash_v2_5' để hỗ trợ tiếng Việt."
+                    "Please select a model supporting the output language in Settings (Eleven v3 for Thai)."
                 )
             raise RuntimeError(f"ElevenLabs API error 400: {err_text}")
 

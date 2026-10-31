@@ -28,6 +28,10 @@ ROOT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if ROOT_PATH not in sys.path:
     sys.path.append(ROOT_PATH)
 
+from language_support import (
+    SOURCE_LANGUAGES, SENSEVOICE_LANGUAGES, VOICE_PREVIEW_TEXT, available_voice_engines,
+    voice_matches_language, elevenlabs_supports_language,
+)
 from services import GUIProjectBridge, ProjectService, ResourceDownloadService, VoiceCatalogService
 from controllers import PipelineController, PreviewController, SubtitleController
 from helpers import (
@@ -1415,7 +1419,14 @@ class VideoTranslatorGUI(QMainWindow):
             self.preview_voice_btn.setVisible(True)
             self.preview_voice_btn.setEnabled(total_entries > 0)
         if total_entries <= 0:
-            self.voice_preview_meta_label.setText(t("No voices are available in the catalog yet."))
+            self.voice_preview_meta_label.setText(t("No matching voice is available. Download a voice model or configure an API provider in Settings."))
+            self.voice_preview_meta_label.show()
+            return
+        if self._current_voice_engine_key() == "elevenlabs" and not elevenlabs_supports_language(
+            os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5"), self.get_target_language_code()
+        ):
+            self.voice_preview_meta_label.setText(t("This ElevenLabs model does not support the output language. Select Eleven v3 in Settings for Thai."))
+            self.voice_preview_meta_label.show()
             return
         self.voice_preview_meta_label.setText(
             t("Local voices: {count}. Click “Preview voice” to generate a short test clip.", count=total_entries)
@@ -1438,12 +1449,47 @@ class VideoTranslatorGUI(QMainWindow):
         settings = getattr(state, "settings", {}) if state is not None else {}
         value = str(settings.get("transcription_engine", "") or "").strip().lower()
         if value in {"whisper", "sensevoice", "ocr", "capcut"}:
-            return value
+            return VideoTranslatorGUI._compatible_transcription_engine(self, value)
         settings_obj = getattr(self, "settings", None)
         saved_default = str(settings_obj.value("default_transcription_engine", "") or "").strip().lower() if settings_obj is not None else ""
         if saved_default in {"whisper", "sensevoice", "ocr", "capcut"}:
-            return saved_default
-        return _default_asr_engine()
+            return VideoTranslatorGUI._compatible_transcription_engine(self, saved_default)
+        return VideoTranslatorGUI._compatible_transcription_engine(self, _default_asr_engine())
+
+    def _compatible_transcription_engine(self, engine):
+        if engine == "sensevoice" and self.get_source_language_code() not in SENSEVOICE_LANGUAGES:
+            return "whisper"
+        return engine
+
+    def on_source_language_changed(self, _index=-1):
+        if hasattr(self, "settings"):
+            self.settings.setValue("source_lang", self.get_source_language_code())
+
+    def _refresh_language_voice_engines(self):
+        combo = getattr(self, "voice_engine_combo", None)
+        if not isinstance(combo, QComboBox):
+            return
+        previous = combo.currentData()
+        choices = available_voice_engines(
+            self.get_target_language_code(), getattr(self, "voice_catalog_entries_all", [])
+        )
+        old_choices = [combo.itemData(i) for i in range(combo.count())]
+        if old_choices == [key for _, key in choices]:
+            return
+        blocked = combo.blockSignals(True)
+        try:
+            combo.clear()
+            for label, key in choices:
+                combo.addItem(t(label), key)
+            index = combo.findData(previous)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            combo.blockSignals(blocked)
+        engine = str(combo.currentData() or "")
+        if previous and previous != engine and hasattr(self, "log"):
+            self.log(t("Voice engine changed to match the output language: {engine}", engine=combo.currentText()))
+        if hasattr(self, "create_voice_clone_btn"):
+            self.create_voice_clone_btn.setVisible(engine == "vieneu")
 
     def set_project_transcription_engine(self, engine: str) -> None:
         """Apply a project-local source choice and clear incompatible range state."""
@@ -1501,7 +1547,7 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _resolve_active_voice_name(self, *, persist_new_clone: bool = False) -> str:
         target_language = self.get_target_language_code()
-        if target_language == "en":
+        if target_language != "vi":
             if hasattr(self, "free_voice_combo") and self.free_voice_combo.count() > 0:
                 current_val = str(self.free_voice_combo.currentData() or "").strip()
                 if not current_val:
@@ -2054,6 +2100,7 @@ class VideoTranslatorGUI(QMainWindow):
                 pass
 
     def refresh_voice_catalog_combos(self):
+        VideoTranslatorGUI._refresh_language_voice_engines(self)
         self.voice_catalog_entries = []
         target_language = self.get_target_language_code()
         current_engine = self._current_voice_engine_key()
@@ -2076,7 +2123,7 @@ class VideoTranslatorGUI(QMainWindow):
                 if provider not in {"piper", "edge"}:
                     continue
             entry_language = str(entry.get("language", "")).strip().lower().split("-", 1)[0]
-            if entry_language and entry_language not in (target_language, "multilingual", "multi", "any", "all"):
+            if not voice_matches_language(entry, target_language):
                 continue
             self.voice_catalog_entries.append(entry)
         self.voice_catalog_entries.sort(key=self._voice_entry_sort_key)
@@ -2145,9 +2192,9 @@ class VideoTranslatorGUI(QMainWindow):
 
         settings_obj = getattr(self, "settings", None)
         saved_free = str(settings_obj.value("free_voice_value", "") or "").strip() if settings_obj is not None else ""
-        if previous_free and (target_language != "en" or previous_free != "ngochuyen") and self.free_voice_combo.findData(previous_free) >= 0 and _is_item_enabled(self.free_voice_combo.findData(previous_free)):
+        if previous_free and (target_language == "vi" or previous_free != "ngochuyen") and self.free_voice_combo.findData(previous_free) >= 0 and _is_item_enabled(self.free_voice_combo.findData(previous_free)):
             self.set_voice_combo_value(self.free_voice_combo, previous_free)
-        elif saved_free and (target_language != "en" or saved_free != "ngochuyen") and self.free_voice_combo.findData(saved_free) >= 0 and _is_item_enabled(self.free_voice_combo.findData(saved_free)):
+        elif saved_free and (target_language == "vi" or saved_free != "ngochuyen") and self.free_voice_combo.findData(saved_free) >= 0 and _is_item_enabled(self.free_voice_combo.findData(saved_free)):
             self.set_voice_combo_value(self.free_voice_combo, saved_free)
         elif current_engine == "vieneu":
             if self.free_voice_combo.findData("vieneu:Minh Đức") >= 0 and _is_item_enabled(self.free_voice_combo.findData("vieneu:Minh Đức")):
@@ -2195,7 +2242,7 @@ class VideoTranslatorGUI(QMainWindow):
         if settings_obj is not None:
             settings_obj.setValue("target_language", target_lang)
         self._voiceover_force_refresh = True
-        if getattr(self, "voice_catalog_entries_all", None):
+        if hasattr(self, "free_voice_combo"):
             self.refresh_voice_catalog_combos()
 
     def on_selected_voice_changed(self):
@@ -5348,6 +5395,13 @@ class VideoTranslatorGUI(QMainWindow):
     def load_project_context(self, state):
         if not state:
             return
+        # Restore the language pair before filtering this project's engines/voices.
+        for combo_name, field in (("lang_whisper_combo", "source_language"), ("lang_target_combo", "target_language")):
+            combo = getattr(self, combo_name, None)
+            if isinstance(combo, QComboBox):
+                index = combo.findData(str(getattr(state, field, "") or ""))
+                if index >= 0:
+                    combo.setCurrentIndex(index)
         self._allow_post_pipeline_preview_assets = False
         # Subtitle Source is stored only with this project.  Old projects
         # without a value start from the normal default instead of inheriting
@@ -10938,9 +10992,9 @@ class VideoTranslatorGUI(QMainWindow):
         language_combo.addItem(f"Project language ({source_language})", source_language)
         if source_language != "auto":
             language_combo.addItem("Auto detect", "auto")
-        for label, code in (("Chinese", "zh"), ("English", "en"), ("Vietnamese", "vi"), ("Japanese", "ja"), ("Korean", "ko")):
-            if code != source_language:
-                language_combo.addItem(label, code)
+        for label, code in SOURCE_LANGUAGES:
+            if code not in {source_language, "auto"}:
+                language_combo.addItem(t(label), code)
         audio_language_layout.addWidget(language_combo)
 
         audio_hint = QLabel(audio_language_box)
@@ -11019,6 +11073,14 @@ class VideoTranslatorGUI(QMainWindow):
         run_button.clicked.connect(dialog.accept)
 
         def update_engine_options():
+            sense_index = engine_combo.findData("sensevoice")
+            # Disable unsupported recognition before it can be submitted.
+            supports_sense = str(language_combo.currentData() or "auto") in SENSEVOICE_LANGUAGES
+            if sense_index >= 0:
+                engine_combo.model().item(sense_index).setEnabled(supports_sense)
+                engine_combo.view().setRowHidden(sense_index, not supports_sense)
+                if not supports_sense and engine_combo.currentData() == "sensevoice":
+                    engine_combo.setCurrentIndex(engine_combo.findData("whisper"))
             eng = str(engine_combo.currentData() or "whisper")
             whisper_box.setVisible(eng == "whisper")
             audio_language_box.setVisible(True)
@@ -11039,6 +11101,7 @@ class VideoTranslatorGUI(QMainWindow):
                 dialog.adjustSize()
 
         engine_combo.currentIndexChanged.connect(update_engine_options)
+        language_combo.currentIndexChanged.connect(update_engine_options)
         update_engine_options()
 
         if dialog.exec() != QDialog.Accepted:
@@ -14150,11 +14213,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         voice_speed = self._parse_voice_speed_value()
         target_language = str(self.get_target_language_code() or "vi").strip().lower()
-        text = (
-            "Hello, this is a preview of the selected voice sample."
-            if target_language.startswith("en")
-            else "Chào bạn, đây là bản xem trước giọng nói của mẫu được chọn."
-        )
+        text = VOICE_PREVIEW_TEXT.get(target_language, VOICE_PREVIEW_TEXT["en"])
 
         if hasattr(self, "preview_voice_btn"):
             self.preview_voice_btn.setEnabled(False)
@@ -16132,6 +16191,9 @@ class VideoTranslatorGUI(QMainWindow):
         engine_combo.addItem("Audio (Whisper) - Quality", "whisper")
         engine_combo.addItem("CapCut API (Beta)", "capcut")
         engine_combo.addItem("Video (OCR)", "ocr")
+        source_language = self.get_source_language_code() if hasattr(self, "get_source_language_code") else "auto"
+        if source_language not in SENSEVOICE_LANGUAGES:
+            engine_combo.removeItem(engine_combo.findData("sensevoice"))
         current_engine = self.get_transcription_engine()
         idx = engine_combo.findData(current_engine)
         if idx >= 0:
@@ -16373,14 +16435,15 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_chunk_row = QHBoxLayout()
         capcut_chunk_label = QLabel(t("STT Chunk duration:"), capcut_stt_widget)
         capcut_chunk_combo = QComboBox(capcut_stt_widget)
-        capcut_chunk_combo.addItem("5 minutes (default)", "300")
-        capcut_chunk_combo.addItem("10 minutes", "600")
+        capcut_chunk_combo.setObjectName("capcut_stt_chunk_combo")
+        capcut_chunk_combo.addItem(t("5 minutes"), "300")
+        capcut_chunk_combo.addItem(t("10 minutes (default)"), "600")
         capcut_chunk_combo.addItem("15 minutes", "900")
         capcut_chunk_combo.addItem("20 minutes", "1200")
         capcut_chunk_combo.addItem("30 minutes", "1800")
-        current_chunk = str(os.getenv("CAPCUT_STT_CHUNK_SECONDS", self.settings.value("capcut_stt_chunk_seconds", "300"))).strip()
+        current_chunk = str(os.getenv("CAPCUT_STT_CHUNK_SECONDS", self.settings.value("capcut_stt_chunk_seconds", "600"))).strip()
         idx = capcut_chunk_combo.findData(current_chunk)
-        capcut_chunk_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        capcut_chunk_combo.setCurrentIndex(idx if idx >= 0 else capcut_chunk_combo.findData("600"))
         capcut_chunk_row.addWidget(capcut_chunk_label)
         capcut_chunk_row.addWidget(capcut_chunk_combo, 1)
         capcut_stt_layout.addLayout(capcut_chunk_row)
@@ -16907,10 +16970,10 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_tts_batch_combo = QComboBox(capcut_tts_widget)
         capcut_tts_batch_combo.setObjectName("capcut_tts_batch_combo")
         for b in ("1", "4", "8", "16", "30", "32", "60"):
-            capcut_tts_batch_combo.addItem(f"{b} line / req" if b == "1" else (f"{b} lines / req" + (" (default)" if b == "60" else "")), b)
-        current_tts_batch = str(os.getenv("CAPCUT_TTS_BATCH_SIZE", self.settings.value("capcut_tts_batch_size", "60"))).strip()
+            capcut_tts_batch_combo.addItem(f"{b} line / req" if b == "1" else (f"{b} lines / req" + (" (default)" if b == "30" else "")), b)
+        current_tts_batch = str(os.getenv("CAPCUT_TTS_BATCH_SIZE", self.settings.value("capcut_tts_batch_size", "30"))).strip()
         idx = capcut_tts_batch_combo.findData(current_tts_batch)
-        capcut_tts_batch_combo.setCurrentIndex(idx if idx >= 0 else 6)
+        capcut_tts_batch_combo.setCurrentIndex(idx if idx >= 0 else capcut_tts_batch_combo.findData("30"))
         capcut_tts_batch_row.addWidget(capcut_tts_batch_label)
         capcut_tts_batch_row.addWidget(capcut_tts_batch_combo, 1)
         capcut_tts_layout.addLayout(capcut_tts_batch_row)
@@ -17019,9 +17082,9 @@ class VideoTranslatorGUI(QMainWindow):
         self.settings.setValue("ocr_backend", new_ocr_backend)
         os.environ["OCR_BACKEND"] = new_ocr_backend
 
-        new_capcut_chunk = str(capcut_chunk_combo.currentData() or "300").strip()
+        new_capcut_chunk = str(capcut_chunk_combo.currentData() or "600").strip()
         new_capcut_stt_workers = str(capcut_stt_workers_combo.currentData() or "5").strip()
-        new_capcut_tts_batch = str(capcut_tts_batch_combo.currentData() or "60").strip()
+        new_capcut_tts_batch = str(capcut_tts_batch_combo.currentData() or "30").strip()
         new_capcut_tts_workers = str(capcut_tts_workers_combo.currentData() or "30").strip()
 
         os.environ["CAPCUT_STT_CHUNK_SECONDS"] = new_capcut_chunk

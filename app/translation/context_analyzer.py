@@ -252,6 +252,18 @@ Return ONLY concise, clear rules in {target_lang} (under 250 words), starting im
 IMPORTANT: Do NOT use LaTeX math symbols, math mode, or dollar signs (NO $\\leftrightarrow$, NO $\\rightarrow$, NO $\\to$). Always use standard arrows like '↔' or '->'.
 """
 
+    if str(target_lang).lower().split("-")[0] != "vi":
+        system_prompt = f"""You are an expert dialogue and script analyzer.
+Analyze these {src_lang}->{target_lang} subtitle cues.
+{speaker_clause}{feedback_and_context_clause}
+Identify characters, genders, relationships, and who addresses whom.
+Keep names, titles, honorifics and formality consistent using natural conventions
+of the target language ({target_lang}). Do not apply Vietnamese pronoun pairs or
+Vietnamese readings of names. Do not invent relationships unsupported by the cues.
+Return only concise character profiles and address rules in {target_lang}, under
+250 words. No preamble, LaTeX or markdown backticks.
+"""
+
     try:
         context = polisher.generate_text(
             system_msg=system_prompt.strip(),
