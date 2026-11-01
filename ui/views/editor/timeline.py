@@ -213,33 +213,15 @@ class EditorTimeline(QGraphicsView):
         warps = getattr(self, "_video_time_warps", [])
         if not warps:
             return []
-        sorted_warps = sorted(warps, key=lambda w: float(w.get("time", 0.0)))
         spans = []
-        for w in sorted_warps:
-            w_type = w.get("type", "freeze")
-            dur = float(w.get("duration", 0.0))
-            if dur <= 0:
-                continue
-            speed_val = float(w.get("speed", 1.0) or 1.0)
-            if w_type == "slow":
-                m_start = float(w.get("media_start", w.get("time", 0.0)))
-                m_end = float(w.get("media_end", m_start))
-                t_start = TimeWarpService.media_to_timeline_time(m_start, warps)
-                t_end = TimeWarpService.media_to_timeline_time(m_end, warps)
-                badge_text = f"🐢 {speed_val:.2f}x (+{dur:.1f}s)"
-            else:
-                anchor = float(w.get("time", 0.0))
-                t_end = TimeWarpService.media_to_timeline_time(anchor, warps)
-                t_start = max(0.0, t_end - dur)
-                badge_text = f"⏸ +{dur:.1f}s"
+        for span in TimeWarpService.compile_plan(warps):
+            w = warps[span.indices[0]]
+            w_type, dur, speed_val = span.type, span.duration, span.speed
+            badge_text = f"🐢 {speed_val:.2f}x (+{dur:.1f}s)" if w_type == "slow" else f"⏸ +{dur:.1f}s"
             spans.append({
-                "id": w.get("id", ""),
-                "type": w_type,
-                "t_start": round(t_start, 3),
-                "t_end": round(t_end, 3),
-                "duration": dur,
-                "speed": speed_val,
-                "badge_text": badge_text,
+                "id": w.get("id", ""), "type": w_type,
+                "t_start": round(span.timeline_start, 3), "t_end": round(span.timeline_end, 3),
+                "duration": dur, "speed": speed_val, "badge_text": badge_text,
                 "segment_index": w.get("segment_index"),
             })
         return spans

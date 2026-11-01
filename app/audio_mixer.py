@@ -44,11 +44,11 @@ def _probe_wav_duration_seconds(wav_path: str) -> float:
         return 0.0
 
 
-def _atomic_write_wav(output_wav_path: str, data: np.ndarray, sample_rate: int = 16000) -> str:
+def _atomic_write_wav(output_wav_path: str, data: np.ndarray, sample_rate: int = 16000, *, subtype: str = "PCM_16") -> str:
     os.makedirs(os.path.dirname(os.path.abspath(output_wav_path)) or ".", exist_ok=True)
     part_path = f"{output_wav_path}.{uuid.uuid4().hex[:8]}.part.wav"
     try:
-        sf.write(part_path, data, sample_rate, format="WAV", subtype="PCM_16")
+        sf.write(part_path, data, sample_rate, format="WAV", subtype=subtype)
         info = sf.info(part_path)
         if info.frames < 0:
             raise RuntimeError(f"Generated WAV file is invalid: {part_path}")
@@ -391,6 +391,51 @@ def change_wav_speed(
                 os.remove(part_path)
             except OSError:
                 pass
+
+
+def trim_tts_boundary_silence(*, input_wav_path: str, output_wav_path: str) -> str:
+    """Trim only confidently silent outer edges, retaining 120 ms padding.
+
+    Use per-channel peaks, not averaged/RMS loudness: quiet syllables, breath
+    and opposite-phase stereo must not be mistaken for dead air. Natural
+    pauses shorter than 350 ms, internal pauses, all-silent/very quiet clips
+    and uncertain/unreadable files are retained. Provider audio is immutable.
+    """
+    from app.tts_audio_policy import (
+        BOUNDARY_SILENCE_DB, BOUNDARY_MIN_SILENCE_SECONDS, BOUNDARY_PADDING_SECONDS,
+    )
+    if not os.path.isfile(input_wav_path) or os.path.realpath(input_wav_path) == os.path.realpath(output_wav_path):
+        return input_wav_path
+    try:
+        info = sf.info(input_wav_path)
+        data, sr = sf.read(input_wav_path, dtype="float64", always_2d=True)
+        if sr <= 0 or not len(data) or not np.isfinite(data).all():
+            return input_wav_path
+        peaks = np.max(np.abs(data), axis=1)
+        threshold = 10. ** (BOUNDARY_SILENCE_DB / 20.)
+        if np.max(peaks) < threshold * 10:
+            return input_wav_path  # low-volume/whisper recordings: leave intact
+        block = max(1, round(sr * .01))
+        starts = np.arange(0, len(data), block)
+        active = np.flatnonzero(np.maximum.reduceat(peaks, starts) > threshold)
+        if not len(active):
+            return input_wav_path
+        first, last = int(starts[active[0]]), min(len(data), int(starts[active[-1]]) + block)
+        if last - first < round(sr * .08):
+            return input_wav_path  # isolated click/tiny signal is not reliable speech
+        padding = round(sr * BOUNDARY_PADDING_SECONDS)
+        minimum = round(sr * BOUNDARY_MIN_SILENCE_SECONDS)
+        begin = max(0, first - padding) if first >= minimum else 0
+        end = min(len(data), last + padding) if len(data) - last >= minimum else len(data)
+        if begin == 0 and end == len(data):
+            return input_wav_path
+        result = _atomic_write_wav(output_wav_path, data[begin:end], sample_rate=sr, subtype=info.subtype)
+        print(f"[TTS Cleanup] {os.path.basename(input_wav_path)}: removed start={begin / sr:.3f}s, "
+              f"end={(len(data) - end) / sr:.3f}s; kept {BOUNDARY_PADDING_SECONDS:.2f}s edge padding")
+        return result
+    except Exception:
+        # Cleanup is optional; decoding/writing trouble must never lose speech.
+        return input_wav_path
 
 
 def trim_trailing_silence(
@@ -943,6 +988,8 @@ def mix_audio_tracks(
         warps = raw.get("time_warps") or []
         if warps:
             from app.services.time_warp_service import TimeWarpService
+
+            warps = TimeWarpService.normalize_warps(warps)
 
             # Only source audio is warped; dubbed files already follow timeline time.
             duration = TimeWarpService.media_to_timeline_time(len(audio) / sample_rate, warps)

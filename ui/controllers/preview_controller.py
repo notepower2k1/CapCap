@@ -1030,8 +1030,10 @@ class PreviewController:
         return hasher.hexdigest()
 
     def _build_styled_preview_signature(self, *, video_path: str, audio_path: str, mode: str, srt_path: str, subtitle_style: dict, mask_regions=None, logo_layers=None) -> str:
+        from app.services.time_warp_plan import PLAN_VERSION
         payload = {
             "kind": "styled_preview_v2",
+            "time_warp_plan_version": PLAN_VERSION,
             "mode": mode,
             "video": self._file_signature(video_path),
             "audio": self._file_signature(audio_path),

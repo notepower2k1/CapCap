@@ -50,3 +50,5 @@ installer/*.exe
 *.zip
 bug*.png
 logs/*
+imported_packages/*
+.capcap-resource-import.lock

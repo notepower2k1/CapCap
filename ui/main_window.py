@@ -5402,6 +5402,9 @@ class VideoTranslatorGUI(QMainWindow):
     def load_project_context(self, state):
         if not state:
             return
+        if state.settings.get("package_output_controls"):
+            from controllers.resource_export_controller import restore_package_output_controls
+            restore_package_output_controls(self, state)
         self._restore_video_mirror_state(state)
         # Restore the language pair before filtering this project's engines/voices.
         for combo_name, field in (("lang_whisper_combo", "source_language"), ("lang_target_combo", "target_language")):
@@ -19208,6 +19211,18 @@ class VideoTranslatorGUI(QMainWindow):
 
             # 3. Load project state and timeline metadata
             self._is_cleaning_or_resetting = False
+            # Preserve imported language preferences before ensure_project()
+            # applies the current widgets. This also covers a cold launcher.
+            candidate = os.path.join(self.project_service.projects_root,
+                self.project_service._build_project_id(video_path), "project.json")
+            if os.path.isfile(candidate):
+                try:
+                    imported_state = self.project_service.load_project(candidate)
+                    if imported_state.settings.get("resource_package_imported"):
+                        from controllers.resource_export_controller import restore_imported_project_languages
+                        restore_imported_project_languages(self, imported_state)
+                except Exception as exc:
+                    self.log(f"[Resources] Could not restore imported project preferences: {exc}")
             self.current_project_state = self.ensure_current_project()
             self.load_project_context(self.current_project_state)
 

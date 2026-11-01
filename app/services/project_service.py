@@ -210,6 +210,7 @@ class ProjectService:
         model_id: str | None = None,
         language_code: str | None = None,
     ) -> str:
+        from app.tts_audio_policy import BOUNDARY_TRIM_VERSION
         safe_voice_speed = max(0.5, min(2.0, float(voice_speed or 1.0)))
         segments = list(segments or [])
         def _segment_voice_text(seg) -> str:
@@ -222,6 +223,7 @@ class ProjectService:
             return subtitle_text
         payload = {
             "audio_handling_mode": str(audio_handling_mode or "fast").strip().lower(),
+            "tts_boundary_trim_version": BOUNDARY_TRIM_VERSION,
             "voice_name": str(voice_name or "").strip(),
             "voice_speed": round(safe_voice_speed, 3),
             "timing_sync_mode": str(timing_sync_mode or "off").strip().lower(),

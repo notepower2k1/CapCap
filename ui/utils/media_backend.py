@@ -277,27 +277,17 @@ class QtMediaPlayerBackend(QObject):
         self._current_applied_speed = 1.0
 
     def _get_warp_speed_for_media_time(self, media_time_s: float) -> float:
-        warps = getattr(self, "_video_time_warps", [])
-        if not warps:
-            return 1.0
-        for w in warps:
-            if w.get("type", "freeze") == "slow":
-                m_start = float(w.get("media_start", w.get("time", 0.0)))
-                m_end = float(w.get("media_end", m_start))
-                if (m_start - 0.02) <= media_time_s <= (m_end + 0.02):
-                    speed = float(w.get("speed", 1.0))
-                    if speed > 0:
-                        return speed
-        return 1.0
+        from app.services.time_warp_service import TimeWarpService
+        return TimeWarpService.speed_at_media_time(media_time_s, getattr(self, "_video_time_warps", []))
 
     def _update_video_speed_for_time_warps(self, current_time_s: float) -> None:
         if getattr(self, "_video_frozen", False):
             return
         base_rate = getattr(self, "_base_playback_rate", 1.0)
         warp_speed = self._get_warp_speed_for_media_time(current_time_s)
-        target_speed = max(0.1, min(4.0, base_rate * warp_speed))
+        target_speed = max(0.01, min(4.0, base_rate * warp_speed))
         current_speed = getattr(self, "_current_applied_speed", 1.0)
-        if abs(target_speed - current_speed) > 0.01:
+        if abs(target_speed - current_speed) > max(1e-6, abs(current_speed) * 0.001):
             self._current_applied_speed = target_speed
             try:
                 self._player.setPlaybackRate(float(target_speed))
@@ -316,7 +306,8 @@ class QtMediaPlayerBackend(QObject):
             pass
 
     def set_time_warps(self, warps):
-        self._video_time_warps = list(warps or [])
+        from app.services.time_warp_service import TimeWarpService
+        self._video_time_warps = TimeWarpService.normalize_warps(warps or [])
         self._update_video_speed_for_time_warps(self.position() / 1000.0)
 
     def freeze_video_frame(self, anchor_ms):
@@ -723,18 +714,8 @@ class MpvMediaPlayerBackend(QObject):
     def _get_warp_speed_for_media_time(self, media_time_s: float) -> float:
         if self._is_warped_preview():
             return 1.0
-        warps = getattr(self, "_video_time_warps", [])
-        if not warps:
-            return 1.0
-        for w in warps:
-            if w.get("type", "freeze") == "slow":
-                m_start = float(w.get("media_start", w.get("time", 0.0)))
-                m_end = float(w.get("media_end", m_start))
-                if (m_start - 0.02) <= media_time_s <= (m_end + 0.02):
-                    speed = float(w.get("speed", 1.0))
-                    if speed > 0:
-                        return speed
-        return 1.0
+        from app.services.time_warp_service import TimeWarpService
+        return TimeWarpService.speed_at_media_time(media_time_s, getattr(self, "_video_time_warps", []))
 
     def _update_video_speed_for_time_warps(self, current_time_s: float) -> None:
         if not getattr(self, "_source_path", None) or getattr(self, "_video_frozen", False) or not hasattr(self, "_player"):
@@ -742,7 +723,7 @@ class MpvMediaPlayerBackend(QObject):
         base_rate = getattr(self, "_base_playback_rate", 1.0)
         is_warped = self._is_warped_preview()
         warp_speed = 1.0 if is_warped else self._get_warp_speed_for_media_time(current_time_s)
-        nominal_speed = max(0.1, min(4.0, base_rate * warp_speed))
+        nominal_speed = max(0.01, min(4.0, base_rate * warp_speed))
 
         # When native audio engine is active and playing, slave MPV's video timing to the audio clock
         has_warps = bool(getattr(self, "_video_time_warps", []))
@@ -773,14 +754,14 @@ class MpvMediaPlayerBackend(QObject):
                 # Video has moderate drift (60ms - 400ms).
                 # Gently nudge MPV speed by up to ±12% so video smoothly locks onto audio without seeking.
                 steer = max(-0.12, min(0.12, drift_s * 0.8))
-                target_speed = max(0.1, min(4.0, nominal_speed * (1.0 + steer)))
+                target_speed = max(0.01, min(4.0, nominal_speed * (1.0 + steer)))
             else:
                 target_speed = nominal_speed
         else:
             target_speed = nominal_speed
 
         current_speed = getattr(self, "_current_applied_speed", 1.0)
-        if abs(target_speed - current_speed) > 0.01:
+        if abs(target_speed - current_speed) > max(1e-6, abs(current_speed) * 0.001):
             self._current_applied_speed = target_speed
             try:
                 self._player.speed = float(target_speed)
@@ -994,7 +975,8 @@ class MpvMediaPlayerBackend(QObject):
             pass
 
     def set_time_warps(self, warps):
-        self._video_time_warps = list(warps or [])
+        from app.services.time_warp_service import TimeWarpService
+        self._video_time_warps = TimeWarpService.normalize_warps(warps or [])
         native_engine = getattr(self, "_native_audio_engine", None)
         if native_engine is not None and hasattr(native_engine, "set_warps"):
             native_engine.set_warps(self._video_time_warps)
@@ -1118,7 +1100,8 @@ class MpvMediaPlayerBackend(QObject):
 
     def set_audio_tracks_snapshot(self, tracks, warps=None):
         """Send tracks snapshot to native PCM audio engine."""
-        effective_warps = list(warps) if warps is not None else list(getattr(self, "_video_time_warps", []))
+        from app.services.time_warp_service import TimeWarpService
+        effective_warps = TimeWarpService.normalize_warps(warps if warps is not None else getattr(self, "_video_time_warps", []))
         self._video_time_warps = effective_warps
         self._last_tracks_snapshot = (list(tracks), effective_warps)
         if self._native_audio_active and self._native_audio_engine is not None:
@@ -1159,7 +1142,10 @@ class MpvMediaPlayerBackend(QObject):
         if self._native_audio_active:
             self._dubbed_position_ms = pos_ms
             warps = getattr(self, "_video_time_warps", [])
-            if warps:
+            # A rendered preview already uses expanded timeline time. Mapping
+            # it back to source time here makes its playhead stick, then jump.
+            is_warped_preview = getattr(self, "_is_warped_preview", lambda: False)()
+            if warps and not is_warped_preview:
                 from app.services.time_warp_service import TimeWarpService
                 media_pos_s = TimeWarpService.timeline_to_media_time(pos_ms / 1000.0, warps)
                 self._position_ms = int(round(media_pos_s * 1000))
@@ -1712,7 +1698,7 @@ class MpvMediaPlayerBackend(QObject):
                 v_pos_ms = int(float(v_time) * 1000)
                 a_pos = self._native_audio_engine.timeline_position_ms()
                 warps = getattr(self, "_video_time_warps", [])
-                if warps:
+                if warps and not self._is_warped_preview():
                     from app.services.time_warp_service import TimeWarpService
                     expected_a_pos_ms = int(round(TimeWarpService.media_to_timeline_time(v_pos_ms / 1000.0, warps) * 1000.0))
                 else:
@@ -1760,7 +1746,13 @@ class MpvMediaPlayerBackend(QObject):
 
             a_pos = self._native_audio_engine.timeline_position_ms()
             warps = getattr(self, "_video_time_warps", [])
-            if warps:
+            # During warped playback audio owns the timeline clock; the video
+            # speed controller above follows it. Seeking audio back/forward
+            # to a delayed MPV frame creates a feedback loop and teleports the
+            # playhead through Fit Voice sections. Keep paused/EOF correction.
+            if current_state == QMediaPlayer.PlayingState and not v_paused and warps:
+                return
+            if warps and not self._is_warped_preview():
                 from app.services.time_warp_service import TimeWarpService
                 expected_a_pos_ms = int(round(TimeWarpService.media_to_timeline_time(v_pos_ms / 1000.0, warps) * 1000.0))
             else:
@@ -1823,7 +1815,7 @@ class MpvMediaPlayerBackend(QObject):
 
             target_a_pos = v_pos_ms
             warps = getattr(self, "_video_time_warps", [])
-            if warps:
+            if warps and not self._is_warped_preview():
                 try:
                     from app.services.time_warp_service import TimeWarpService
                     target_a_pos = int(round(TimeWarpService.media_to_timeline_time(v_pos_ms / 1000.0, warps) * 1000))

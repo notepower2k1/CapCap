@@ -222,7 +222,7 @@ class _PreviewAudioWorker(QObject):
     @Slot(list, list)
     def set_tracks(self, tracks: List[Dict[str, Any]], warps: Optional[List[Dict[str, Any]]] = None) -> None:
         """Update active audio tracks and timeline warp markers."""
-        self._warps = list(warps or [])
+        self._warps = TimeWarpService.normalize_warps(warps or [])
         new_tracks = []
         needed_paths = set()
 
@@ -381,7 +381,7 @@ class _PreviewAudioWorker(QObject):
     @Slot(list)
     def set_warps(self, warps: Optional[List[Dict[str, Any]]] = None) -> None:
         """Update timeline warp markers."""
-        self._warps = list(warps or [])
+        self._warps = TimeWarpService.normalize_warps(warps or [])
         self._generation_id += 1
 
     def _is_time_frozen(self, t_sec: float) -> bool:

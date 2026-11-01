@@ -5,6 +5,7 @@ import math
 import hashlib
 import threading
 import time
+import tempfile
 from functools import lru_cache
 
 from new_highlight_selector import auto_select_matches
@@ -54,6 +55,21 @@ class _CompletedProcess:
 
 
 def _run_ffmpeg_command_with_progress(command: list, total_duration: float = None, on_progress=None):
+    # Long Fit Voice projects can exceed Windows' 32767-character process
+    # command-line limit. Keep the graph in a scoped UTF-8 file instead.
+    cmd = list(command)
+    if "-filter_complex" in cmd and len(subprocess.list2cmdline([str(x) for x in cmd])) > 24000:
+        index = cmd.index("-filter_complex")
+        with tempfile.TemporaryDirectory(prefix="capcap-ffgraph-") as directory:
+            graph_path = os.path.join(directory, "filters.ffgraph")
+            with open(graph_path, "w", encoding="utf-8") as graph:
+                graph.write(str(cmd[index + 1]))
+            cmd[index:index + 2] = ["-filter_complex_script", graph_path]
+            return _run_ffmpeg_command_with_progress_impl(cmd, total_duration, on_progress)
+    return _run_ffmpeg_command_with_progress_impl(cmd, total_duration, on_progress)
+
+
+def _run_ffmpeg_command_with_progress_impl(command: list, total_duration: float = None, on_progress=None):
     """Run an FFmpeg command with optional live progress parsing via `-progress pipe:1`.
 
     If on_progress is callable and total_duration is known (>0), parses

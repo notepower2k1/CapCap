@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QComboBox,
     QProgressBar,
     QPushButton,
@@ -665,6 +666,8 @@ class LauncherWindow(QDialog):
         action_row_one.setSpacing(6)
         action_row_two = QHBoxLayout()
         action_row_two.setSpacing(6)
+        utility_row = QHBoxLayout()
+        utility_row.setSpacing(6)
 
         self.new_btn = QPushButton("+ New Project")
         self.new_btn.setMinimumHeight(44)
@@ -685,6 +688,23 @@ class LauncherWindow(QDialog):
         self.new_btn.clicked.connect(self._on_new_project)
         action_row_one.addWidget(self.new_btn)
 
+        self.import_project_btn = QPushButton(t("Import Project"))
+        self.import_project_btn.setMinimumHeight(44)
+        self.import_project_btn.setMinimumWidth(150)
+        self.import_project_btn.setStyleSheet("""
+            QPushButton { background-color: #22344d; color: #8ad7ff; font-weight: 600;
+                font-size: 13px; border-radius: 8px; border: 1px solid #34506f; }
+            QPushButton:hover { background-color: #29405d; }
+        """)
+        self.import_project_menu = QMenu(self.import_project_btn)
+        self.import_project_menu.setStyleSheet("QMenu { background: #101b2c; color: #cfe6ff; border: 1px solid #34506f; } QMenu::item { padding: 9px 16px; } QMenu::item:selected { background: #29405d; }")
+        self.import_capcap_action = self.import_project_menu.addAction(t("Import CapCap package…"))
+        self.import_capcut_action = self.import_project_menu.addAction(t("Import exported CapCut package…"))
+        self.import_capcap_action.triggered.connect(self._on_import_capcap_package)
+        self.import_capcut_action.triggered.connect(self._on_import_capcut_package)
+        self.import_project_btn.setMenu(self.import_project_menu)
+        action_row_one.addWidget(self.import_project_btn)
+
         self.split_btn = QPushButton("Split Video")
         self.split_btn.setMinimumHeight(44)
         self.split_btn.setMinimumWidth(120)
@@ -702,7 +722,7 @@ class LauncherWindow(QDialog):
             }
         """)
         self.split_btn.clicked.connect(self._on_split_video)
-        action_row_one.addWidget(self.split_btn)
+        utility_row.addWidget(self.split_btn)
 
         self.resource_btn = QPushButton("Manage Resources")
         self.resource_btn.setMinimumHeight(44)
@@ -721,7 +741,7 @@ class LauncherWindow(QDialog):
             }
         """)
         self.resource_btn.clicked.connect(self._on_manage_resources)
-        action_row_one.addWidget(self.resource_btn)
+        utility_row.addWidget(self.resource_btn)
 
         self.clean_video_btn = QPushButton("Clean Video Data")
         self.clean_video_btn.setMinimumHeight(44)
@@ -778,6 +798,7 @@ class LauncherWindow(QDialog):
         action_row_two.addStretch()
 
         action_rows.addLayout(action_row_one)
+        action_rows.addLayout(utility_row)
         action_rows.addLayout(action_row_two)
         header.addLayout(action_rows)
         root.addLayout(header)
@@ -893,6 +914,9 @@ class LauncherWindow(QDialog):
             bool(getattr(self, "_last_cuda_ready", False)),
         )
         self.new_btn.setText(t("+ New Project"))
+        self.import_project_btn.setText(t("Import Project"))
+        self.import_capcap_action.setText(t("Import CapCap package…"))
+        self.import_capcut_action.setText(t("Import exported CapCut package…"))
         self.split_btn.setText(t("Split Video"))
         self.resource_btn.setText(t("Manage Resources"))
         self.clean_video_btn.setText(t("Clean Video Data"))
@@ -920,6 +944,7 @@ class LauncherWindow(QDialog):
             self.empty_label.hide()
         for btn in (
             getattr(self, "new_btn", None),
+            getattr(self, "import_project_btn", None),
             getattr(self, "split_btn", None),
             getattr(self, "resource_btn", None),
             getattr(self, "clean_video_btn", None),
@@ -1188,6 +1213,23 @@ class LauncherWindow(QDialog):
         if path:
             self.selected_video = path
             self.accept()
+
+    def _on_import_capcap_package(self):
+        from controllers.resource_export_controller import choose_and_import_capcap_package
+        result = choose_and_import_capcap_package(self, workspace_root())
+        if not result:
+            return
+        self.selected_video = result["video_path"]
+        LauncherWindow.add_recent(None, self.selected_video)
+        self._load_recent()
+        if result.get("warnings"):
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, t("Import CapCap package…"), "\n\n".join(t(w) for w in result["warnings"]))
+        self.accept()
+
+    def _on_import_capcut_package(self):
+        from controllers.capcut_export_controller import import_capcut_package
+        import_capcut_package(self)
 
     def _on_manage_resources(self):
         from views.resource_manager import open_resource_manager

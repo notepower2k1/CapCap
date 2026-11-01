@@ -205,6 +205,15 @@ class QuickPreviewWorker(QThread):
 
             base_clip = os.path.join(temp_dir, f"preview_base_{stamp}.mp4")
             temp_paths.append(base_clip)
+            if media_dur <= 0:
+                # A window entirely inside a freeze needs only a source
+                # frame. At EOF, sample the last frame rather than trim an
+                # empty clip beyond the source. The plan still has zero
+                # source duration, so this decode handle adds no output time.
+                from video_processor import get_video_duration
+                source_duration = get_video_duration(self.video_path)
+                if source_duration > 0:
+                    media_start = min(media_start, max(0., source_duration - 1. / 30.))
             trim_video_clip(self.video_path, base_clip, media_start, media_dur)
 
             # Apply timewarps (slow-motion / freeze) to the base clip if any exist

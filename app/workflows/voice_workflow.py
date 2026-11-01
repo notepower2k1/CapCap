@@ -1042,6 +1042,19 @@ class VoiceWorkflow:
         for idx, (seg, wav_path) in enumerate(zip(list(segments or []), polished_wavs)):
             if not wav_path or not os.path.exists(wav_path):
                 continue
+            from app.tts_audio_policy import BOUNDARY_TRIM_VERSION
+            original_duration = self._probe_wav_duration_seconds(wav_path)
+            trimmed = self.engine_runtime.trim_tts_boundary_silence(
+                input_wav_path=wav_path,
+                output_wav_path=os.path.join(tmp_dir, f"seg_{idx:04d}_boundary_v{BOUNDARY_TRIM_VERSION}.wav"),
+            )
+            if isinstance(trimmed, (str, os.PathLike)) and trimmed != wav_path and os.path.isfile(trimmed):
+                polished_wavs[idx] = wav_path = str(trimmed)
+                seg["_trimmed_silence"] = True
+                metrics = dict(seg.get("_tts_metrics") or {})
+                metrics["boundary_trim_version"] = BOUNDARY_TRIM_VERSION
+                metrics["boundary_trim_saved_seconds"] = round(max(0., original_duration - self._probe_wav_duration_seconds(wav_path)), 3)
+                seg["_tts_metrics"] = metrics
             try:
                 manual_speed = float(seg.get("voice_speed", 1.0) or 1.0)
             except (TypeError, ValueError):
@@ -1052,21 +1065,10 @@ class VoiceWorkflow:
             actual_duration = self._probe_wav_duration_seconds(wav_path)
             ratio = (actual_duration / target_duration) if target_duration > 0 else 0.0
 
+            seg["pre_speed_ratio"] = round(ratio, 3) if target_duration > 0 else 1.0
             if not has_manual_override:
-                # SMART: trim trailing silence first so the duration
-                # estimate used by speed-adjustment heuristics is based
-                # on actual speech, not dead air.
-                if (sync_mode or "off").strip().lower() == "smart":
-                    trimmed_path = os.path.join(tmp_dir, f"seg_{idx:04d}_silencetrim.wav")
-                    trimmed = self.engine_runtime.trim_trailing_silence(
-                        input_wav_path=polished_wavs[idx],
-                        output_wav_path=trimmed_path,
-                    )
-                    if trimmed != polished_wavs[idx]:
-                        polished_wavs[idx] = trimmed
-                        actual_duration = self._probe_wav_duration_seconds(trimmed)
-                        ratio = (actual_duration / target_duration) if target_duration > 0 else 0.0
-                        seg["_trimmed_silence"] = True
+                # Boundary cleanup above is shared by every mode. Do not run
+                # the older, more aggressive -40 dB tail trimmer in Smart.
                 speech_cost = int(((seg.get("_tts_metrics") or {}).get("speech_cost")) or 0)
                 duration_sec = float(((seg.get("_tts_metrics") or {}).get("duration_sec")) or target_duration)
                 attempt_count = int((seg.get("attempt_count") or (seg.get("_tts_metrics") or {}).get("attempt_count") or 1))
@@ -1344,7 +1346,11 @@ class VoiceWorkflow:
             if audio_end > end_s + 0.01:
                 if "end" in seg and "_original_end" not in seg:
                     seg["_original_end"] = end_s
-                seg["_audio_end"] = audio_end
+            # Always refresh, even if cleanup removed the previous overflow.
+            # Otherwise the UI/track can keep a stale, longer _audio_end.
+            seg["_audio_end"] = audio_end
+            if isinstance(seg.get("metadata"), dict):
+                seg["metadata"]["_audio_end"] = audio_end
 
     def _synthesize_segment_wavs(
         self,
@@ -2011,6 +2017,8 @@ class VoiceWorkflow:
         for s, w in zip(segments, wavs):
             if isinstance(s, dict):
                 s["_wav_path"] = str(w or "")
+                if isinstance(s.get("metadata"), dict):
+                    s["metadata"]["_wav_path"] = str(w or "")
 
         synth_elapsed = time.perf_counter() - synth_started
         print(

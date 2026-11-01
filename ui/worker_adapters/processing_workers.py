@@ -1454,15 +1454,21 @@ class SegmentAudioPreviewWorker(QThread):
             manifest["by_cache_key"] = manifest_by_cache_key
             save_manifest(cache_temp_dir, manifest)
 
+            from app.tts_audio_policy import BOUNDARY_TRIM_VERSION
+            trimmed = engine.trim_tts_boundary_silence(
+                input_wav_path=base_wav_path,
+                output_wav_path=os.path.join(preview_temp_dir, f"segment_{self.index}_boundary_v{BOUNDARY_TRIM_VERSION}.wav"),
+            )
+            processed_wav_path = str(trimmed) if isinstance(trimmed, (str, os.PathLike)) and os.path.isfile(trimmed) else base_wav_path
             wav_path = os.path.join(preview_temp_dir, f"segment_{self.index}_{os.getpid()}.wav")
             if abs(residual_speed - 1.0) >= 0.02:
                 output = engine.change_wav_speed(
-                    input_wav_path=base_wav_path,
+                    input_wav_path=processed_wav_path,
                     output_wav_path=wav_path,
                     speed_ratio=residual_speed,
                 )
             else:
-                output = base_wav_path
+                output = processed_wav_path
             self.finished.emit(self.index, output, "")
         except Exception as exc:
             details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
