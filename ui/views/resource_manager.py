@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QTabWidget,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -89,6 +90,12 @@ def open_resource_manager(workspace_root: str = None, parent=None,
         QLabel#resourceHint { color: #9fb3ca; font-size: 12px; }
         QWidget#resourceContent { background-color: transparent; }
         QScrollArea { border: none; background-color: #0f1724; }
+        QTabWidget::pane { border: none; }
+        QTabBar::tab {
+            background: #17263a; color: #9fb3ca; padding: 8px 18px;
+            border-top-left-radius: 7px; border-top-right-radius: 7px; margin-right: 4px;
+        }
+        QTabBar::tab:selected { background: #223b58; color: #8ad7ff; }
         QFrame#resourceCard { background-color: #132033; border: 1px solid #2f4868; border-radius: 12px; }
         QPushButton {
             background-color: #22344d; color: #f8fbff; border: 1px solid #34506f;
@@ -123,10 +130,13 @@ def open_resource_manager(workspace_root: str = None, parent=None,
     hint.setWordWrap(True)
     layout.addWidget(hint)
 
-    scroll = QScrollArea(dialog)
+    tabs = QTabWidget(dialog)
+    tabs.setObjectName("resourceTabs")
+    layout.addWidget(tabs, 1)
+    scroll = QScrollArea(tabs)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
-    layout.addWidget(scroll, 1)
+    tabs.addTab(scroll, t("Resources"))
 
     content = QWidget(dialog)
     content.setObjectName("resourceContent")
@@ -134,6 +144,17 @@ def open_resource_manager(workspace_root: str = None, parent=None,
     content_layout.setContentsMargins(0, 0, 0, 0)
     content_layout.setSpacing(10)
     scroll.setWidget(content)
+
+    omni_scroll = QScrollArea(tabs)
+    omni_scroll.setWidgetResizable(True)
+    omni_scroll.setFrameShape(QFrame.NoFrame)
+    omni_content = QWidget()
+    omni_content.setObjectName("resourceContent")
+    omni_layout = QVBoxLayout(omni_content)
+    omni_layout.setContentsMargins(0, 0, 0, 0)
+    omni_layout.setSpacing(10)
+    omni_scroll.setWidget(omni_content)
+    tabs.addTab(omni_scroll, "OmniVoice")
 
     dialog._resource_rows = {}
     download_worker = [None]
@@ -423,14 +444,31 @@ def open_resource_manager(workspace_root: str = None, parent=None,
             _set_download_button(row, active=is_active)
 
     def _populate():
-        for i in reversed(range(content_layout.count())):
-            it = content_layout.takeAt(i)
-            widget = it.widget() if it is not None else None
-            if widget is not None:
-                widget.deleteLater()
+        for target in (content_layout, omni_layout):
+            for i in reversed(range(target.count())):
+                it = target.takeAt(i)
+                widget = it.widget() if it is not None else None
+                if widget is not None:
+                    widget.deleteLater()
         dialog._resource_rows = {}
 
-        resources = service.list_resources()
+        all_resources = service.list_resources()
+        omni_items = [r for r in all_resources if str(r.get("id", "")).startswith("voice:omnivoice")]
+        resources = [r for r in all_resources if not str(r.get("id", "")).startswith("voice:omnivoice")]
+        omni_title = QLabel(t("OmniVoice: what to download"))
+        omni_title.setObjectName("resourceTitle")
+        omni_layout.addWidget(omni_title)
+        for text in (
+            "For NVIDIA GPU: download the OmniVoice model and CUDA runtime. Existing GPU Acceleration Pack libraries are reused. CPU and Vulkan runtimes are alternatives; you do not need all three.",
+            "GPU VRAM: 6 GB or more recommended (tested on RTX 2060 6 GB). The minimum has not been verified. Longer text and reference audio can require more memory. CPU mode does not require GPU VRAM.",
+        ):
+            note = QLabel(t(text))
+            note.setObjectName("resourceHint")
+            note.setWordWrap(True)
+            omni_layout.addWidget(note)
+        for item in omni_items:
+            _add_card(item, omni_layout)
+        omni_layout.addStretch()
         cpu_items = [r for r in resources if r.get("kind") in {"sensevoice", "whisper_cpu", "ocr"}]
         gpu_kinds = {"ai", "whisper", "cuda"}
         gpu_items = [r for r in resources if r.get("kind") in gpu_kinds]

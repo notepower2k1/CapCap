@@ -117,6 +117,8 @@ class VoiceWorkflow:
 
     def cancel(self):
         self._cancelled = True
+        from engines.omnivoice_tts import unload_omnivoice
+        unload_omnivoice()
         try:
             from vieneu_tts import unload_vieneu_model
             unload_vieneu_model()
@@ -253,7 +255,7 @@ class VoiceWorkflow:
             if segment_provider == "elevenlabs" and not self._is_valid_elevenlabs_audio(wav_path):
                 continue
             segment_model_id = model_id if segment_provider == "elevenlabs" else None
-            segment_language_code = language_code if segment_provider == "elevenlabs" else None
+            segment_language_code = language_code if segment_provider in {"elevenlabs", "omnivoice"} else None
             cache_key = segment_cache_key(
                 text=text,
                 voice_name=segment_voice_name,
@@ -761,6 +763,8 @@ class VoiceWorkflow:
             on_progress=on_progress,
             normalizer_dictionary=normalizer_dictionary,
         )
+        if self._voice_provider(voice_name) == "omnivoice":
+            synthesize_kwargs["language_code"] = language_code
         if self._voice_provider(voice_name) == "elevenlabs":
             synthesize_kwargs["language_code"] = self._normalize_language_code(language_code)
             synthesize_kwargs["model_id"] = self._effective_elevenlabs_model_id(model_id)
@@ -1393,7 +1397,7 @@ class VoiceWorkflow:
                 validate_voice_language(segment_voice_name, effective_language_code, model_id=effective_model_id)
                 validated_voices.add(segment_voice_name)
             segment_model_id = effective_model_id if segment_provider == "elevenlabs" else None
-            segment_language_code = effective_language_code if segment_provider == "elevenlabs" else None
+            segment_language_code = effective_language_code if segment_provider in {"elevenlabs", "omnivoice"} else None
             cache_key = self._segment_cache_key(
                 text=txt,
                 voice_name=segment_voice_name,
@@ -1402,7 +1406,7 @@ class VoiceWorkflow:
                 model_id=segment_model_id,
                 language_code=segment_language_code,
             )
-            if segment_provider == "elevenlabs":
+            if segment_provider in {"elevenlabs", "omnivoice"}:
                 seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}_{cache_key[:16]}_base.wav")
             else:
                 seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}_base.wav")
@@ -1495,6 +1499,8 @@ class VoiceWorkflow:
                     cache_hits += 1
                 except Exception:
                     pass
+            elif pending_providers == {"omnivoice"}:
+                worker_count = 1
             elif pending_providers == {"edge"}:
                 worker_count = 1
             elif "elevenlabs" in pending_providers:
@@ -1551,11 +1557,14 @@ class VoiceWorkflow:
                 return f"voice '{raw}'"
             return "voiceover"
 
+        omnivoice_failure_event = Event()
         elevenlabs_failure_event = Event()
         elevenlabs_failure_lock = Lock()
         elevenlabs_first_failure = {"error": None}
 
         def _run_synthesis_job(job):
+            if job["provider"] == "omnivoice" and (omnivoice_failure_event.is_set() or _is_stopped()):
+                raise RuntimeError("OmniVoice synthesis was stopped.")
             output_path = str(job["wav_path"])
             if job["provider"] == "elevenlabs":
                 # ThreadPoolExecutor may start a queued job before the coordinator
@@ -1588,6 +1597,14 @@ class VoiceWorkflow:
                         if elevenlabs_first_failure["error"] is None:
                             elevenlabs_first_failure["error"] = exc
                         elevenlabs_failure_event.set()
+                    raise
+            if job["provider"] == "omnivoice":
+                kwargs["language_code"] = job["language_code"]
+                kwargs["on_progress"] = on_progress
+                try:
+                    return self.engine_runtime.synthesize_segment(**kwargs)
+                except Exception:
+                    omnivoice_failure_event.set()
                     raise
             return self.engine_runtime.synthesize_segment(**kwargs)
 
@@ -1748,6 +1765,14 @@ class VoiceWorkflow:
                             if not self._is_valid_elevenlabs_audio(seg_wav):
                                 raise RuntimeError("ElevenLabs output could not be saved as valid audio.")
                     except Exception as exc:
+                        if job["provider"] == "omnivoice":
+                            omnivoice_failure_event.set()
+                            for pending_future in future_map:
+                                pending_future.cancel()
+                            manifest["segments"] = manifest_segments
+                            manifest["by_cache_key"] = manifest_by_cache_key
+                            self._save_manifest(tmp_dir, manifest)
+                            raise RuntimeError(f"OmniVoice failed at subtitle segment {idx + 1}: {exc}") from exc
                         if job["provider"] == "elevenlabs":
                             with elevenlabs_failure_lock:
                                 exc = elevenlabs_first_failure["error"] or exc

@@ -45,11 +45,11 @@ class LanguageSupportTests(unittest.TestCase):
         ]
         def engines(code):
             return {key for _, key in available_voice_engines(code, voices)}
-        self.assertEqual(engines("ko"), {"elevenlabs"})
-        self.assertEqual(engines("ru"), {"elevenlabs"})
-        self.assertEqual(engines("fr"), {"elevenlabs"})
-        self.assertEqual(engines("ja"), {"capcut", "elevenlabs"})
-        self.assertEqual(engines("th"), {"capcut", "elevenlabs"})
+        self.assertEqual(engines("ko"), {"elevenlabs", "omnivoice"})
+        self.assertEqual(engines("ru"), {"elevenlabs", "omnivoice"})
+        self.assertEqual(engines("fr"), {"elevenlabs", "omnivoice"})
+        self.assertEqual(engines("ja"), {"capcut", "elevenlabs", "omnivoice"})
+        self.assertEqual(engines("th"), {"capcut", "elevenlabs", "omnivoice"})
         self.assertTrue({"piper", "vieneu"} <= engines("vi"))
         self.assertFalse(voice_matches_language({"provider": "piper", "language": "vi"}, "ko"))
         self.assertFalse(voice_matches_language({"provider": "vieneu", "language": "multilingual"}, "de"))

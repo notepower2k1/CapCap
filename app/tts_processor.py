@@ -387,6 +387,8 @@ def validate_voice_language(voice, language, *, model_id=None):
         if target != "vi":
             raise ValueError("VieNeu only supports Vietnamese. Choose a voice for the output language.")
         return
+    if voice.startswith("omnivoice:"):
+        return
     if voice.startswith("elevenlabs:"):
         if not elevenlabs_supports_language(model_id, target):
             raise ValueError("The ElevenLabs model does not support this language. Select Eleven v3 for Thai in Settings.")
@@ -698,6 +700,11 @@ def synthesize_text_to_wav_16k_mono(
     voice_to_search = str(voice).strip()
     model_to_use = str(model_id or os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5") or "eleven_turbo_v2_5").strip()
     lang_to_use = language_code or language
+
+    if voice_to_search.startswith("omnivoice:"):
+        from engines.omnivoice_tts import synthesize_omnivoice_wav_16k_mono
+        return synthesize_omnivoice_wav_16k_mono(text=text, wav_path=wav_path, voice=voice_to_search,
+            language=lang_to_use, speed=speed, on_progress=on_progress)
 
     # Fast path for VieNeu voices
     if voice_to_search.startswith(("vieneu:", "vieneu_clone:")):

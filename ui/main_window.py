@@ -1362,7 +1362,7 @@ class VideoTranslatorGUI(QMainWindow):
             return entry_id
         if provider == "edge":
             return f"edge:{provider_voice or 'vi-VN-HoaiMyNeural'}"
-        if provider in ("vieneu", "capcut", "elevenlabs"):
+        if provider in ("vieneu", "capcut", "elevenlabs", "omnivoice"):
             return entry_id
         return ""
 
@@ -1370,6 +1370,8 @@ class VideoTranslatorGUI(QMainWindow):
         provider_key = str(provider or "").strip().lower()
         if provider_key == "piper":
             return "Piper"
+        if provider_key == "omnivoice":
+            return "OmniVoice"
         if provider_key == "vieneu":
             return "VieNeu"
         if provider_key == "capcut":
@@ -1440,7 +1442,7 @@ class VideoTranslatorGUI(QMainWindow):
         key = str(combo.currentData() or "piper").strip().lower() or "piper"
         if key in ("fast", "piper"):
             return "piper"
-        if key not in ("vieneu", "capcut", "elevenlabs"):
+        if key not in ("vieneu", "capcut", "elevenlabs", "omnivoice"):
             return "piper"
         return key
 
@@ -1471,9 +1473,13 @@ class VideoTranslatorGUI(QMainWindow):
         if not isinstance(combo, QComboBox):
             return
         previous = combo.currentData()
+        if hasattr(self, "omnivoice_quality_panel"):
+            self.omnivoice_quality_panel.setVisible(previous == "omnivoice")
         choices = available_voice_engines(
             self.get_target_language_code(), getattr(self, "voice_catalog_entries_all", [])
         )
+        if is_remote_profile():
+            choices = [(label, key) for label, key in choices if key != "omnivoice"]
         old_choices = [combo.itemData(i) for i in range(combo.count())]
         if old_choices == [key for _, key in choices]:
             return
@@ -1487,10 +1493,12 @@ class VideoTranslatorGUI(QMainWindow):
         finally:
             combo.blockSignals(blocked)
         engine = str(combo.currentData() or "")
+        if hasattr(self, "omnivoice_quality_panel"):
+            self.omnivoice_quality_panel.setVisible(engine == "omnivoice")
         if previous and previous != engine and hasattr(self, "log"):
             self.log(t("Voice engine changed to match the output language: {engine}", engine=combo.currentText()))
         if hasattr(self, "create_voice_clone_btn"):
-            self.create_voice_clone_btn.setVisible(engine == "vieneu")
+            self.create_voice_clone_btn.setVisible(engine in ("vieneu", "omnivoice"))
 
     def set_project_transcription_engine(self, engine: str) -> None:
         """Apply a project-local source choice and clear incompatible range state."""
@@ -1579,6 +1587,8 @@ class VideoTranslatorGUI(QMainWindow):
         combo_has_items = bool(hasattr(self, "free_voice_combo") and self.free_voice_combo.count())
         target_language = self.get_target_language_code()
         current_engine = self._current_voice_engine_key()
+        if current_engine == "omnivoice":
+            return ""  # No fallback to an automatic voice when clone selection is empty.
         if current_engine == "vieneu":
             if hasattr(self, "free_voice_combo") and self.free_voice_combo.count() > 0:
                 fallback_value = str(self.free_voice_combo.itemData(0) or "").strip()
@@ -1629,7 +1639,37 @@ class VideoTranslatorGUI(QMainWindow):
                 return fallback_entry_id
         return ""
 
+    def _omnivoice_quality_busy(self):
+        workers = [getattr(self, name, None) for name in ("voice_thread", "prepare_workflow_thread", "_voice_sample_preview_thread")]
+        workers.extend((getattr(self, "_segment_preview_threads", {}) or {}).values())
+        if bool(getattr(self, "_pipeline_active", False)):
+            return True
+        for worker in workers:
+            try:
+                if worker is not None and worker.isRunning():
+                    return True
+            except RuntimeError:  # A completed Qt worker may already be deleted.
+                continue
+        return False
+
+    def on_omnivoice_quality_changed(self, *_):
+        from engines.omnivoice_tts import INFERENCE_PRESETS, inference_steps
+        combo = self.omnivoice_quality_combo
+        # Keep one setting for the running batch/preview and its cache keys.
+        if VideoTranslatorGUI._omnivoice_quality_busy(self):
+            blocked = combo.blockSignals(True)
+            combo.setCurrentIndex(combo.findData(inference_steps()))
+            combo.blockSignals(blocked)
+            return
+        steps = inference_steps(combo.currentData())
+        os.environ["CAPCAP_OMNIVOICE_STEPS"] = str(steps)
+        self.settings.setValue("omnivoice_steps", steps)
+        self.omnivoice_quality_hint.setText(t(next(p[2] for p in INFERENCE_PRESETS if p[1] == steps)))
+        self._voiceover_force_refresh = True
+
     def on_voice_engine_changed(self, *args):
+        if hasattr(self, "omnivoice_quality_panel"):
+            self.omnivoice_quality_panel.setVisible(self._current_voice_engine_key() == "omnivoice")
         self._voiceover_force_refresh = True
         if not getattr(self, "voice_catalog_entries_all", None):
             self.load_voice_preview_catalog()
@@ -1638,7 +1678,7 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "voice_selector_label"):
             self.voice_selector_label.setText(t("Voice model"))
         if hasattr(self, "create_voice_clone_btn"):
-            self.create_voice_clone_btn.setVisible(engine == "vieneu")
+            self.create_voice_clone_btn.setVisible(engine in ("vieneu", "omnivoice"))
         self.refresh_voice_catalog_combos()
         self._update_voice_preview_meta()
         if hasattr(self, "refresh_detected_speakers_section"):
@@ -2117,6 +2157,9 @@ class VideoTranslatorGUI(QMainWindow):
             elif current_engine == "capcut":
                 if provider != "capcut":
                     continue
+            elif current_engine == "omnivoice":
+                if provider != "omnivoice":
+                    continue
             elif current_engine == "elevenlabs":
                 if provider != "elevenlabs":
                     continue
@@ -2449,6 +2492,9 @@ class VideoTranslatorGUI(QMainWindow):
                 elif wanted_engine == "edge":
                     if provider != "edge" and value != assigned:
                         continue
+                elif wanted_engine == "omnivoice":
+                    if provider != "omnivoice" and value != assigned:
+                        continue
                 elif wanted_engine == "elevenlabs":
                     if provider != "elevenlabs" and value != assigned:
                         continue
@@ -2536,9 +2582,9 @@ class VideoTranslatorGUI(QMainWindow):
             engine_box.setSpacing(2)
             engine_box.addWidget(QLabel(t("Engine")))
             engine_combo = QComboBox()
-            engine_combo.addItems(["All", "Piper", "VieNeu", "CapCut"])
+            engine_combo.addItems(["All", "Piper", "VieNeu", "OmniVoice", "CapCut", "ElevenLabs"])
             saved_engine = str(entry.get("voice_engine_filter", "All") or "All").strip()
-            eng_map = {"all": "All", "piper": "Piper", "vieneu": "VieNeu", "capcut": "CapCut"}
+            eng_map = {"all": "All", "piper": "Piper", "vieneu": "VieNeu", "capcut": "CapCut", "omnivoice": "OmniVoice", "elevenlabs": "ElevenLabs"}
             engine_combo.setCurrentText(eng_map.get(saved_engine.lower(), "All"))
             engine_box.addWidget(engine_combo)
             filter_row.addLayout(engine_box, 1)
@@ -3174,6 +3220,14 @@ class VideoTranslatorGUI(QMainWindow):
                     voices_to_check.add(active_v)
 
             for v in voices_to_check:
+                if str(v).startswith("omnivoice:"):
+                    if not service.is_resource_installed("voice:omnivoice"):
+                        missing.append(("voice:omnivoice", "OmniVoice original model"))
+                    cpu_mode = os.getenv("CAPCAP_DEVICE", "cuda").strip().lower() == "cpu"
+                    runtime_ids = ["voice:omnivoice-runtime-cpu"] if cpu_mode else ["voice:omnivoice-runtime-cuda", "voice:omnivoice-runtime-vulkan"]
+                    if not any(service.is_resource_installed(r) for r in runtime_ids):
+                        missing.append((runtime_ids[0], "OmniVoice audio.cpp CPU runtime" if cpu_mode else "OmniVoice audio.cpp CUDA GPU runtime"))
+                    continue
                 if (
                     v
                     and not str(v).startswith("edge:")
@@ -6785,6 +6839,7 @@ class VideoTranslatorGUI(QMainWindow):
         names = {
             "piper": "Piper",
             "vieneu": "VieNeu",
+            "omnivoice": "OmniVoice",
             "capcut": "CapCut",
             "kokoro": "Kokoro",
             "edgetts": "Edge TTS",
@@ -14287,6 +14342,8 @@ class VideoTranslatorGUI(QMainWindow):
         worker.progress.connect(self.log)
         worker.finished.connect(self.on_voice_sample_preview_ready)
         self._voice_sample_preview_thread = worker
+        if hasattr(self, "omnivoice_quality_combo"):
+            self.omnivoice_quality_combo.setEnabled(False)
         worker.start()
 
     def on_voice_sample_preview_ready(self, audio_path: str, error: str):
@@ -14294,6 +14351,8 @@ class VideoTranslatorGUI(QMainWindow):
             self.preview_voice_btn.setEnabled(True)
             self.preview_voice_btn.setText(t("Preview Selected Voice"))
         self._voice_sample_preview_thread = None
+        if hasattr(self, "omnivoice_quality_combo"):
+            self.omnivoice_quality_combo.setEnabled(not VideoTranslatorGUI._omnivoice_quality_busy(self))
 
         if error:
             self.show_error(t("Voice Preview Failed"), t("Could not generate the preview audio."), error)
@@ -14311,7 +14370,7 @@ class VideoTranslatorGUI(QMainWindow):
     def open_create_voice_clone_dialog(self):
         from widgets.voice_clone_dialog import CreateVoiceCloneDialog
 
-        dialog = CreateVoiceCloneDialog(self)
+        dialog = CreateVoiceCloneDialog(self, provider=self._current_voice_engine_key())
         if dialog.exec():
             entry = dialog.created_voice_entry
             if entry and isinstance(entry, dict):
@@ -14319,7 +14378,7 @@ class VideoTranslatorGUI(QMainWindow):
                 self.load_voice_preview_catalog()
                 if voice_id and hasattr(self, "free_voice_combo"):
                     self.set_voice_combo_value(self.free_voice_combo, voice_id)
-                self.log(f"[VieNeu] Added new cloned voice: {entry.get('name', voice_id)}")
+                self.log(f"[Voice Clone] Added new cloned voice: {entry.get('name', voice_id)}")
 
     def preview_segment_audio(self, index: int):
         if index < 0 or index >= len(self.current_translated_segments or self.current_segments):
@@ -14375,12 +14434,16 @@ class VideoTranslatorGUI(QMainWindow):
         )
         worker.finished.connect(self.on_segment_audio_preview_ready)
         self._segment_preview_threads[index] = worker
+        if hasattr(self, "omnivoice_quality_combo"):
+            self.omnivoice_quality_combo.setEnabled(False)
         worker.start()
 
     def on_segment_audio_preview_ready(self, index: int, audio_path: str, error: str):
         btn = getattr(self, "audio_inspector_regenerate_voice_btn", None)
 
         self._segment_preview_threads.pop(index, None)
+        if hasattr(self, "omnivoice_quality_combo"):
+            self.omnivoice_quality_combo.setEnabled(not VideoTranslatorGUI._omnivoice_quality_busy(self))
 
         if error:
             if btn is not None:
@@ -15667,6 +15730,8 @@ class VideoTranslatorGUI(QMainWindow):
             self.free_voice_combo.setEnabled(voice_controls_enabled)
         if hasattr(self, "voice_engine_combo"):
             self.voice_engine_combo.setEnabled(voice_controls_enabled)
+        if hasattr(self, "omnivoice_quality_combo"):
+            self.omnivoice_quality_combo.setEnabled(voice_controls_enabled and not VideoTranslatorGUI._omnivoice_quality_busy(self))
         if hasattr(self, "premium_voice_combo"):
             self.premium_voice_combo.setEnabled(False)
         if hasattr(self, "bg_music_edit"):
@@ -18953,6 +19018,8 @@ class VideoTranslatorGUI(QMainWindow):
                     print(f"[Cleanup] Failed to stop segment thread {idx}: {e}")
             threads_dict.clear()
         try:
+            from engines.omnivoice_tts import unload_omnivoice
+            unload_omnivoice()
             from vieneu_tts import unload_vieneu_model
             unload_vieneu_model()
         except Exception:

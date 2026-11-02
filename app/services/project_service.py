@@ -256,6 +256,11 @@ class ProjectService:
             [str(voice_name or "").strip()]
             + [str((seg or {}).get("voice_name") or "").strip() for seg in segments]
         ))
+        omni_voices = [name for name in voice_names if name.startswith("omnivoice:")]
+        if omni_voices:
+            from engines.omnivoice_tts import voice_fingerprint
+            payload["omnivoice"] = {name: voice_fingerprint(name) for name in omni_voices}
+            payload["omnivoice_language"] = str(language_code or "").lower()
         if any(self._is_elevenlabs_voice(name) for name in voice_names if name):
             if model_id:
                 payload["elevenlabs_model_id"] = str(model_id).strip()

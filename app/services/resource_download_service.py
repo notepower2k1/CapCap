@@ -78,6 +78,10 @@ class ResourceDownloadService:
         "voice:pack",
         "voice:pack-en",
         "voice:vieneu",
+        "voice:omnivoice",
+        "voice:omnivoice-runtime-cpu",
+        "voice:omnivoice-runtime-vulkan",
+        "voice:omnivoice-runtime-cuda",
     }
 
     def __init__(self, workspace_root: str):
@@ -612,7 +616,7 @@ class ResourceDownloadService:
     def validate_piper_voice_runtime(self, voice_id: str) -> list[tuple[str, str]]:
         """Check the chosen local Piper voice before a default Both run."""
         voice_id = str(voice_id or "").strip()
-        if not voice_id or voice_id.startswith(("edge:", "f5:", "vieneu:", "vieneu_clone:", "capcut:", "elevenlabs:")):
+        if not voice_id or voice_id.startswith(("edge:", "f5:", "vieneu:", "vieneu_clone:", "capcut:", "elevenlabs:", "omnivoice:")):
             return []
         issues: list[tuple[str, str]] = []
         entry = self._find_voice_entry(voice_id)
@@ -934,9 +938,14 @@ class ResourceDownloadService:
                 ),
             }
         )
+        from services.omnivoice_resources import entries
+        resources.extend(entries(self.workspace_root))
         return resources
 
     def is_resource_installed(self, resource_id: str) -> bool:
+        from services.omnivoice_resources import IDS, installed
+        if resource_id in IDS:
+            return installed(self.workspace_root, resource_id)
         if resource_id in ("voice:capcut", "voice:elevenlabs") or resource_id.startswith(("voice:capcut:", "voice:elevenlabs:")):
             return True
         if resource_id == "voice:vieneu":
@@ -1346,6 +1355,9 @@ class ResourceDownloadService:
             progress_cb(100, "VieNeu-TTS models are ready.")
 
     def download_resource(self, resource_id: str, progress_cb=None) -> None:
+        from services.omnivoice_resources import IDS, download
+        if resource_id in IDS:
+            return download(self, resource_id, progress_cb)
         if resource_id.startswith("whisper:"):
             model_name = resource_id.split(":", 1)[1].strip().lower()
             zip_name = self.WHISPER_ZIP_FILES.get(model_name)

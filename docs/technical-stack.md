@@ -11,7 +11,7 @@
 | Speaker diarization | Sherpa-ONNX |
 | VAD | Silero VAD via Sherpa-ONNX |
 | Translation | Google Translate, Bing Translate, OpenAI (GPT-4o), Google AI Studio (Gemini 2.5/1.5), DeepSeek, and Ollama |
-| TTS | Piper, Edge TTS, CapCut TTS, and VieNeu TTS (Voice Cloning) |
+| TTS | Piper, Edge TTS, CapCut TTS, ElevenLabs, VieNeu TTS, and OmniVoice via audio.cpp (CPU / CUDA / Vulkan, voice cloning) |
 | Video/audio processing | FFmpeg (NVENC GPU accelerated with CPU libx264 failover), pydub, NumPy, SciPy, librosa, soundfile |
 | External integrations | CapCut Draft project generator |
 | Packaging | PyInstaller & Inno Setup |

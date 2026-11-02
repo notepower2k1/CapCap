@@ -18,7 +18,7 @@ VOICE_PREVIEW_TEXT = {
 }
 SENSEVOICE_LANGUAGES = frozenset({"auto", "zh", "en", "ja", "ko", "yue"})
 VOICE_ENGINES = (("Piper Voice", "piper"), ("VieNeu TTS", "vieneu"),
-                 ("CapCut API (Beta)", "capcut"), ("ElevenLabs API", "elevenlabs"))
+                 ("OmniVoice (audio.cpp)", "omnivoice"), ("CapCut API (Beta)", "capcut"), ("ElevenLabs API", "elevenlabs"))
 
 
 def language_code(value):
@@ -38,7 +38,7 @@ def voice_matches_language(entry, language):
 
 def available_voice_engines(language, voices=()):
     target = language_code(language)
-    available = {"elevenlabs"}  # Configuration/key availability is a separate concern.
+    available = {"elevenlabs", "omnivoice"}  # Configuration/key availability is a separate concern.
     if target in {"vi", "en"}:
         available.add("piper")  # These packs are offered by Manage Resources.
     if target == "vi":
