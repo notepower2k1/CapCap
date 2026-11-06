@@ -524,7 +524,7 @@ class LauncherWindow(QDialog):
             self.setWindowIcon(build_contrasting_window_icon(logo, is_dark_bg=True))
 
         self.setWindowTitle(t("CapCap - Video Translator"))
-        self.setMinimumSize(840, 540)
+        self.setMinimumSize(1040, 680)
         self.setStyleSheet("""
             QDialog {
                 background-color: #0a101e;
@@ -543,6 +543,15 @@ class LauncherWindow(QDialog):
             pass
 
         self._build_ui()
+        self._build_processing_modes()
+        # Leave room for mode selection and the queue toolbar/table. Clamp the
+        # default to the usable desktop so smaller laptop screens still fit.
+        screen=self.screen()
+        available=screen.availableGeometry() if screen is not None else None
+        width=min(1280,max(640,available.width()-40)) if available is not None else 1280
+        height=min(820,max(480,available.height()-64)) if available is not None else 820
+        self.setMinimumSize(min(1040,width),min(680,height))
+        self.resize(width,height)
         QTimer.singleShot(0, self._load_recent)
         QTimer.singleShot(0, self._validate_resources_for_device)
 
@@ -900,6 +909,43 @@ class LauncherWindow(QDialog):
         set_language(code)
         self._retranslate_ui()
 
+    def _build_processing_modes(self):
+        from PySide6.QtCore import QSettings
+        from views.processing_queue import QueuePanel
+        settings = QSettings("CapCap","VideoTranslatorGUI")
+        self.ui_mode_combo = QComboBox()
+        self.ui_mode_combo.setStyleSheet("QComboBox { background:#14243a; color:#cfe6ff; border:1px solid #34506f; border-radius:8px; padding:9px 14px; min-height:22px; } QComboBox QAbstractItemView { background:#14243a; color:#cfe6ff; selection-background-color:#284969; }")
+        self.ui_mode_combo.addItem(t("Quality — full editor"),"quality")
+        self.ui_mode_combo.addItem(t("Performance — video queue"),"performance")
+        selected = settings.value("ui_work_mode","quality")
+        self.ui_mode_combo.setCurrentIndex(max(0,self.ui_mode_combo.findData(selected)))
+        self.layout().insertWidget(1,self.ui_mode_combo)
+        self._queue_panel = QueuePanel(workspace_root(),self)
+        self.layout().insertWidget(4,self._queue_panel,1)
+        def changed(*_):
+            mode = str(self.ui_mode_combo.currentData())
+            os.environ["CAPCAP_UI_MODE"]=mode
+            settings.setValue("ui_work_mode",mode)
+            performance = mode=="performance"
+            self._queue_panel.setVisible(performance)
+            self.section_label.setVisible(not performance)
+            self.scroll.setVisible(not performance)
+            self.empty_label.setVisible(not performance and not _load_recent_projects())
+            self.new_btn.setText(t("Add videos") if performance else t("+ New Project"))
+            if not performance:
+                self._load_recent()
+        self.ui_mode_combo.currentIndexChanged.connect(changed)
+        changed()
+
+    def reject(self):
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self,t("Processing"),t("Wait for the current video or stop the queue before closing."))
+            return
+        super().reject()
+
+
     def _retranslate_ui(self):
         """Refresh launcher copy and cards after an immediate language change."""
         localize_widget_tree(self)
@@ -913,7 +959,7 @@ class LauncherWindow(QDialog):
             str(getattr(self, "_last_gpu_name", "")),
             bool(getattr(self, "_last_cuda_ready", False)),
         )
-        self.new_btn.setText(t("+ New Project"))
+        self.new_btn.setText(t("Add videos") if hasattr(self,"ui_mode_combo") and self.ui_mode_combo.currentData()=="performance" else t("+ New Project"))
         self.import_project_btn.setText(t("Import Project"))
         self.import_capcap_action.setText(t("Import CapCap package…"))
         self.import_capcut_action.setText(t("Import exported CapCut package…"))
@@ -973,8 +1019,23 @@ class LauncherWindow(QDialog):
         QApplication.processEvents()
 
     def accept(self):
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self,t("Processing"),t("A video is being processed. Wait or stop it before opening an editor."))
+            return
+        if hasattr(self,"ui_mode_combo") and self.ui_mode_combo.currentData()=="performance":
+            if self.selected_video:
+                self._queue_panel.add_paths([self.selected_video])
+            return
         if not self.selected_video or not os.path.exists(self.selected_video):
             super().accept()
+            return
+
+        from services.project_work_mode import project_work_mode
+        if project_work_mode(workspace_root(),self.selected_video)=="performance":
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self,t("Quality"),t("This video belongs to Performance. Use Open in Quality in the queue to move it to Quality."))
             return
 
         try:
@@ -1005,7 +1066,6 @@ class LauncherWindow(QDialog):
         self._save_device_env()
         self.show_loading(self.selected_video)
 
-        from runtime_paths import workspace_root
         temp_root = os.path.join(workspace_root(), "temp")
 
         self._cache_worker = VisualCacheWorker(self.selected_video, temp_root, None)
@@ -1042,6 +1102,12 @@ class LauncherWindow(QDialog):
         super().accept()
 
     def closeEvent(self, event):
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            event.ignore()
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self,t("Processing"),t("Wait for the current video or stop the queue before closing."))
+            return
         worker = getattr(self, "_cache_worker", None)
         if worker is not None and worker.isRunning():
             try:
@@ -1177,6 +1243,11 @@ class LauncherWindow(QDialog):
             pass
 
     def _load_recent(self):
+        if getattr(self,"_cleaning_video_data",False):
+            return
+        if hasattr(self,"ui_mode_combo") and self.ui_mode_combo.currentData()=="performance":
+            self.empty_label.hide()
+            return
         projects = _load_recent_projects()
         os.makedirs(self._thumbnail_dir, exist_ok=True)
 
@@ -1197,6 +1268,10 @@ class LauncherWindow(QDialog):
         columns = min(3, max(1, (self.grid_widget.width() - 24) // 242))
         for i, proj in enumerate(existing):
             card = ProjectCard(proj["video_path"], self._thumbnail_dir, self)
+            from services.project_work_mode import project_work_mode
+            if project_work_mode(workspace_root(),proj["video_path"])=="performance":
+                card.setEnabled(False)
+                card.setToolTip(t("This video belongs to Performance. Use Open in Quality in the queue to move it to Quality."))
             row, col = divmod(i, max(1, columns))
             self.grid.addWidget(card, row, col)
             self.grid.setColumnStretch(col, 1)
@@ -1206,6 +1281,9 @@ class LauncherWindow(QDialog):
         QTimer.singleShot(0, self._load_recent)
 
     def _on_new_project(self):
+        if hasattr(self,"ui_mode_combo") and self.ui_mode_combo.currentData()=="performance":
+            self._queue_panel.add_videos()
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, t("Select Video"), "",
             t("Video Files (*.mp4 *.mkv *.avi *.mov *.webm);;All Files (*)")
@@ -1254,6 +1332,9 @@ class LauncherWindow(QDialog):
             message.exec()
 
     def _on_clean_video_data(self):
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            return
         from PySide6.QtWidgets import QMessageBox
 
         confirm = QMessageBox(QMessageBox.Warning, t("Clean Video Data"),
@@ -1264,69 +1345,56 @@ class LauncherWindow(QDialog):
         if confirm.exec() != QMessageBox.Yes:
             return
 
-        # Keep generated project/cache data in the explicit writable runtime
-        # root rather than deriving it from a module location.
-        root = workspace_root()
-        targets = [
-            os.path.join(root, "projects"),
-            os.path.join(root, "temp"),
-        ]
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QApplication
+        from services.project_service import ProjectService
+        from services.video_data_cleanup import clean_generated_video_data, retain_existing_project_entries
 
-        # Project cards can still own loaded thumbnail pixmaps from temp.
-        # Detach them and process their deferred deletion before removing the
-        # cache tree; this avoids a common first-click Windows file lock.
+        errors = []
+        self._cleaning_video_data = True
+        self.setEnabled(False)
         try:
-            from PySide6.QtWidgets import QApplication
+            stop_all_launcher_workers()
+            worker = getattr(self, "_cache_worker", None)
+            if worker is not None and worker.isRunning():
+                worker.requestInterruption()
+                if not worker.wait(2000):
+                    raise RuntimeError(t("Wait for the current video or stop the queue before closing."))
+            # Do not rebuild thumbnail cards during processEvents/retry while
+            # their caches are being removed.
             for index in reversed(range(self.grid.count())):
                 item = self.grid.takeAt(index)
                 widget = item.widget() if item is not None else None
                 if widget is not None:
-                    widget.setParent(None)
                     widget.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
             QApplication.processEvents()
-        except Exception:
-            pass
-
-        removed = 0
-        errors = []
-        for target in targets:
-            if not os.path.exists(target):
-                continue
-            last_error = None
-            # FFmpeg/thumbnail work can release a file just after the user
-            # confirms cleanup. Retry briefly instead of making the user
-            # click Clean Video Data a second time.
-            for attempt in range(5):
-                try:
-                    shutil.rmtree(target)
-                    removed += 1
-                    last_error = None
-                    break
-                except FileNotFoundError:
-                    last_error = None
-                    break
-                except OSError as exc:
-                    last_error = exc
-                    if attempt < 4:
-                        try:
-                            QApplication.processEvents()
-                        except Exception:
-                            pass
-                        time.sleep(0.25 * (attempt + 1))
-            if last_error is not None:
-                errors.append(f"{os.path.basename(target)}: {last_error}")
-        for target in targets:
-            try:
-                os.makedirs(target, exist_ok=True)
-            except OSError:
-                pass
-        # Cleaning all generated project data also resets the launcher history;
-        # no deleted project should remain listed in recent_projects.json.
-        try:
-            _save_recent_projects(None, [])
-            self._load_recent()
+            result = clean_generated_video_data(workspace_root(), process_events=QApplication.processEvents)
+            errors.extend(result.errors)
+            if result.projects_checked:
+                service = ProjectService(workspace_root())
+                recents = retain_existing_project_entries(_load_recent_projects(), service,
+                    result.remaining_project_ids, video_field="video_path")
+                _save_recent_projects(None, recents)
+                panel = getattr(self, "_queue_panel", None)
+                if panel is not None:
+                    previous = panel.store.jobs
+                    panel.store.jobs = retain_existing_project_entries(previous, service,
+                        result.remaining_project_ids, video_field="video")
+                    try:
+                        panel.store.save()
+                    except Exception:
+                        panel.store.jobs = previous
+                        raise
         except Exception as exc:
-            errors.append(f"recent projects: {exc}")
+            errors.append(str(exc))
+        finally:
+            self._cleaning_video_data = False
+            self.setEnabled(True)
+            self._load_recent()
+            panel = getattr(self, "_queue_panel", None)
+            if panel is not None:
+                panel.refresh()
 
         if errors:
             detail = "\n".join(errors)
@@ -1665,8 +1733,18 @@ def stop_all_launcher_workers():
 
 def show_launcher(settings_or_none, project_loader=None):
     """Show launcher, return selected video path or empty string."""
+    from PySide6.QtCore import QEventLoop
+
     w = LauncherWindow()
-    result = w.exec()
+    # QDialog.exec() exits as soon as the dialog is hidden. Queue configuration
+    # temporarily hides this launcher while an editor is open; only an explicit
+    # accept/reject should finish the launcher and its application entrypoint.
+    loop = QEventLoop()
+    w.finished.connect(loop.quit)
+    w.setWindowModality(Qt.ApplicationModal)
+    w.show()
+    loop.exec()
+    result = w.result()
     selected_video = str(getattr(w, "selected_video", "") or "")
     try:
         w.close()

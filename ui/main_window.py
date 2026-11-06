@@ -276,6 +276,9 @@ class VideoTranslatorGUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            raise RuntimeError(t("A video is being processed. Wait or stop it before opening an editor."))
         self._current_video_path = ""
         title = t("CapCap Video Translator")
         if is_remote_profile():
@@ -1229,7 +1232,8 @@ class VideoTranslatorGUI(QMainWindow):
         if getattr(self, "_deferred_startup_stage1_done", False):
             return
         self._deferred_startup_stage1_done = True
-        self.setup_audio_preview_player()
+        if not getattr(self,"performance_mode",False):
+            self.setup_audio_preview_player()
         self.load_user_settings()
         self.refresh_saved_subtitle_style_presets()
 
@@ -1246,6 +1250,10 @@ class VideoTranslatorGUI(QMainWindow):
                 return
         self._media_backend_ready = False
         self.setup_media_player()
+        self._bind_preview_edit_signals()
+
+    def _bind_preview_edit_signals(self):
+        """Share layer editing gestures with the still preview without a player."""
         if hasattr(self, "video_view") and hasattr(self.video_view, "blurRegionChanged"):
             if getattr(self, "_blur_region_signal_bound", False):
                 try:
@@ -5142,6 +5150,16 @@ class VideoTranslatorGUI(QMainWindow):
         self._capture_subtitle_custom_style_state()
         self.on_subtitle_preset_changed()
 
+    def save_processing_profile(self):
+        from utils.performance_config import capture
+        self._flush_pending_timeline_persist()
+        self.persist_current_timeline_project_data()
+        state=self.ensure_current_project()
+        if state:
+            state.set_setting("subtitle_style_controls",self._current_subtitle_style_controls_state())
+            state.set_setting("processing_profile",capture(self))
+            self.project_service.save_project(state)
+
     def ensure_current_project(self):
         video_path = self.video_path_edit.text().strip()
         state = self.project_bridge.ensure_project(
@@ -7532,13 +7550,8 @@ class VideoTranslatorGUI(QMainWindow):
                 status_label.setText("")
 
     def _resolve_segment_voice_text(self, segment: dict) -> str:
-        current = dict(segment or {})
-        subtitle_text = " ".join(str(current.get("text", "") or "").split()).strip()
-        if bool(current.get("voice_edited")):
-            edited_text = " ".join(str(current.get("tts_text") or current.get("dubbing_vi") or "").split()).strip()
-            if edited_text:
-                return edited_text
-        return subtitle_text
+        from services.voice_edit_service import resolve_voice_text
+        return resolve_voice_text(segment)
 
     def on_segment_spoken_text_edited(self, index: int, editor: QTextEdit):
         if getattr(self, "_syncing_segment_editor", False):
@@ -14151,6 +14164,8 @@ class VideoTranslatorGUI(QMainWindow):
                     except Exception as exc:
                         self.log(f"[Voice Preview] native winsound failed: {exc}")
             if not played_native:
+                if not hasattr(self,"voice_preview_library_player"):
+                    self.setup_audio_preview_player()
                 self.voice_preview_library_player.setSource(source)
                 self.voice_preview_library_player.play()
             if button is not None:
@@ -17781,65 +17796,9 @@ class VideoTranslatorGUI(QMainWindow):
         browse_voice_output_folder_impl(self)
 
     def _get_voiceover_segments(self):
-        source_segments = list(self.current_translated_segments or [])
-        if not source_segments:
-            translated_srt = self.translated_text.toPlainText().strip()
-            return self._apply_speaker_voice_assignments(self.parse_srt_to_segments(translated_srt)) if translated_srt else []
-
-        grouped_segments = []
-        idx = 0
-        while idx < len(source_segments):
-            segment = dict(source_segments[idx])
-            group_id = str(segment.get('tts_group_id', '') or '').strip()
-            tts_text = self._resolve_segment_voice_text(segment)
-            if not group_id:
-                segment['text'] = tts_text
-                segment['tts_text'] = str(segment.get('tts_text') or '').strip() if bool(segment.get('voice_edited')) else ''
-                grouped_segments.append(segment)
-                idx += 1
-                continue
-
-            group_items = [segment]
-            cursor = idx + 1
-            while cursor < len(source_segments):
-                candidate = source_segments[cursor]
-                if str(candidate.get('tts_group_id', '') or '').strip() != group_id:
-                    break
-                group_items.append(dict(candidate))
-                cursor += 1
-
-            voice_text = ""
-            voice_edited = False
-            for item in group_items:
-                if bool(item.get('voice_edited')):
-                    candidate_text = " ".join(str(item.get('tts_text') or item.get('dubbing_vi') or '').split()).strip()
-                    if candidate_text:
-                        voice_text = candidate_text
-                        voice_edited = True
-                        break
-            if not voice_text:
-                voice_text = ' '.join(
-                    ' '.join(str(item.get('text') or '').split()).strip()
-                    for item in group_items
-                ).strip()
-
-            grouped_segments.append({
-                'start': float(group_items[0].get('tts_group_start', group_items[0].get('start', 0.0)) or group_items[0].get('start', 0.0)),
-                'end': float(group_items[-1].get('tts_group_end', group_items[-1].get('end', 0.0)) or group_items[-1].get('end', 0.0)),
-                'text': voice_text,
-                'tts_text': voice_text if voice_edited else '',
-                'tts_group_id': group_id,
-                'voice_edited': voice_edited,
-                'source_text': ' '.join(
-                    ' '.join(str(item.get('source_text') or item.get('text') or '').split()).strip()
-                    for item in group_items
-                ).strip(),
-                'speaker': str(group_items[0].get('speaker', '') or ''),
-                'voice_speed': group_items[0].get('voice_speed', 1.0),
-                '_auto_fit_applied': bool(group_items[0].get('_auto_fit_applied', False)),
-            })
-            idx = cursor
-        return self._apply_speaker_voice_assignments(grouped_segments)
+        from services.voice_edit_service import group_voice_segments
+        source = self.current_translated_segments or self.parse_srt_to_segments(self.translated_text.toPlainText().strip())
+        return self._apply_speaker_voice_assignments(group_voice_segments(source))
 
     def run_voiceover(self):
         state = self.ensure_current_project()
@@ -18020,122 +17979,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.voice_thread.start()
 
     def _apply_generated_tts_texts(self, voice_segments):
-        source_segments = self.current_translated_segments
-        if not source_segments or not voice_segments:
-            return False
-
-        updated = False
-        grouped_updates = {}
-        positional_updates = []
-        for seg in list(voice_segments or []):
-            tts_text = ' '.join(str((seg or {}).get("tts_text") or (seg or {}).get("text") or "").split()).strip()
-            subtitle_vi = ' '.join(str((seg or {}).get("subtitle_vi") or (seg or {}).get("text") or "").split()).strip()
-            dubbing_vi = ' '.join(str((seg or {}).get("dubbing_vi") or tts_text).split()).strip()
-            action_taken = str((seg or {}).get("action_taken") or "").strip().lower()
-            ratio = float((seg or {}).get("ratio") or 0.0)
-            group_id = str((seg or {}).get("tts_group_id") or "").strip()
-            try:
-                new_start = float((seg or {}).get("start", 0.0))
-                new_end = float((seg or {}).get("end", 0.0))
-            except (TypeError, ValueError):
-                new_start = new_end = None
-            try:
-                new_original_end = float((seg or {}).get("_original_end")) if (seg or {}).get("_original_end") is not None else None
-            except (TypeError, ValueError):
-                new_original_end = None
-            try:
-                new_audio_end = float((seg or {}).get("_audio_end")) if (seg or {}).get("_audio_end") is not None else None
-            except (TypeError, ValueError):
-                new_audio_end = None
-            try:
-                seg_speed = float((seg or {}).get("voice_speed", 1.0) or 1.0)
-            except (TypeError, ValueError):
-                seg_speed = 1.0
-            payload = {
-                "tts_text": tts_text,
-                "subtitle_vi": subtitle_vi,
-                "dubbing_vi": dubbing_vi,
-                "action_taken": action_taken,
-                "ratio": ratio,
-                "attempt_count": int((seg or {}).get("attempt_count") or 1),
-                "voice_speed": seg_speed,
-                "_auto_fit_applied": bool((seg or {}).get("_auto_fit_applied", False)),
-                "start": new_start,
-                "end": new_end,
-                "_original_end": new_original_end,
-                "_audio_end": new_audio_end,
-                "_wav_path": str((seg or {}).get("_wav_path") or ""),
-            }
-            if group_id:
-                grouped_updates[group_id] = payload
-            else:
-                positional_updates.append(payload)
-
-        positional_index = 0
-        for seg in source_segments:
-            group_id = str((seg or {}).get("tts_group_id") or "").strip()
-            if group_id and group_id in grouped_updates:
-                next_payload = grouped_updates[group_id]
-            elif positional_index < len(positional_updates):
-                next_payload = positional_updates[positional_index]
-                positional_index += 1
-            else:
-                continue
-
-            next_tts_text = next_payload["tts_text"]
-            current_tts_text = ' '.join(str(seg.get("tts_text") or "").split()).strip()
-            if current_tts_text != next_tts_text:
-                seg["tts_text"] = next_tts_text
-                updated = True
-            seg["subtitle_vi"] = next_payload["subtitle_vi"]
-            seg["dubbing_vi"] = next_payload["dubbing_vi"]
-            seg["action_taken"] = next_payload["action_taken"]
-            seg["ratio"] = next_payload["ratio"]
-            seg["attempt_count"] = next_payload["attempt_count"]
-            seg["_tts_dirty"] = False
-            if next_payload.get("_wav_path"):
-                seg["_wav_path"] = next_payload["_wav_path"]
-            try:
-                new_speed = float(next_payload.get("voice_speed") or 1.0)
-            except (TypeError, ValueError):
-                new_speed = 1.0
-            try:
-                old_speed = float(seg.get("voice_speed") or 1.0)
-            except (TypeError, ValueError):
-                old_speed = 1.0
-            if abs(new_speed - old_speed) >= 0.0005:
-                seg["voice_speed"] = round(new_speed, 3)
-                updated = True
-            auto_fit = bool(next_payload.get("_auto_fit_applied", False))
-            if bool(seg.get("_auto_fit_applied", False)) != auto_fit:
-                updated = True
-            seg["_auto_fit_applied"] = auto_fit
-            # When group_id is present, multiple sub-segments share the same group_id.
-            # Do NOT overwrite their individual start/end times with the entire group's start/end,
-            # which would collapse them onto the same time slice!
-            if not group_id:
-                new_start = next_payload.get("start")
-                new_end = next_payload.get("end")
-                if new_start is not None and new_end is not None and new_end > new_start:
-                    try:
-                        old_start = float(seg.get("start", 0.0))
-                        old_end = float(seg.get("end", 0.0))
-                    except (TypeError, ValueError):
-                        old_start = old_end = None
-                    if old_start is not None and old_end is not None:
-                        if abs(new_start - old_start) > 0.01 or abs(new_end - old_end) > 0.01:
-                            seg["start"] = new_start
-                            seg["end"] = new_end
-                            updated = True
-            new_original_end = next_payload.get("_original_end")
-            if new_original_end is not None:
-                seg["_original_end"] = new_original_end
-            new_audio_end = next_payload.get("_audio_end")
-            if new_audio_end is not None:
-                seg["_audio_end"] = new_audio_end
-            else:
-                seg.pop("_audio_end", None)
-        return updated
+        from services.voice_edit_service import merge_generated_voice_segments
+        return merge_generated_voice_segments(self.current_translated_segments, voice_segments)
 
     def _regenerate_translated_srt_from_segments(self):
         """Regenerate the project SRT from current_translated_segments.
@@ -18415,6 +18260,8 @@ class VideoTranslatorGUI(QMainWindow):
         self.refresh_ui_state()
 
     def run_all_pipeline(self):
+        if getattr(self,"performance_mode",False) or (self.current_project_state and self.current_project_state.settings.get("processing_profile")):
+            self.save_processing_profile()
         mode = self.get_output_mode_key()
         include_voice = mode in ("voice", "both")
         is_ocr = self.get_transcription_engine() == "ocr"
@@ -18852,6 +18699,8 @@ class VideoTranslatorGUI(QMainWindow):
             _do_return()
 
     def _return_to_launcher(self, project_removed_from_recent=True, *, persist_project_data=True, target_video_path=""):
+        if persist_project_data and self.current_project_state and self.current_project_state.settings.get("processing_profile"):
+            self.save_processing_profile()
         # Keep the complete saved timeline when returning to the launcher.
         # Optional tracks (Text, Logo, Blur, Mask) are part of the project
         # state and must be available when that project is reopened.
@@ -18898,6 +18747,17 @@ class VideoTranslatorGUI(QMainWindow):
         QTimer.singleShot(50, lambda: _relaunch_launcher(existing_window=self))
 
     def _terminate_workers(self, close_media: bool = True):
+        # Paused/finished QMediaPlayers can still hold the last WAV open on
+        # Windows. Release those sources before launcher data cleanup.
+        self.stop_audio_preview()
+        for name in ("audio_preview_player","voice_preview_library_player"):
+            player=getattr(self,name,None)
+            if player is not None:
+                try:
+                    player.stop()
+                    player.setSource(QUrl())
+                except RuntimeError:
+                    pass
         controller = getattr(self, "pipeline_controller", None)
         if controller is not None:
             controller._stop_prepare_status_polling()
@@ -19068,6 +18928,8 @@ class VideoTranslatorGUI(QMainWindow):
 
     def closeEvent(self, event):
         try:
+            if self.current_project_state and self.current_project_state.settings.get("processing_profile"):
+                self.save_processing_profile()
             # A drag may have ended less than one debounce interval ago.
             # Flush it before teardown so the final overlay position is not
             # lost when the window is closed immediately.
@@ -19202,6 +19064,20 @@ class VideoTranslatorGUI(QMainWindow):
 
         if not video_path:
             return
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            QMessageBox.information(self,t("Processing"),t("A video is being processed. Wait or stop it before opening an editor."))
+            return
+        candidate = os.path.join(self.project_service.projects_root,self.project_service._build_project_id(video_path),"project.json")
+        if os.path.isfile(candidate):
+            saved_state = self.project_service.load_project(candidate)
+            profile = saved_state.settings.get("processing_profile")
+            if profile:
+                self._run_deferred_startup_stage1()
+                self._run_deferred_startup_stage2()
+                from utils.performance_config import restore
+                self._is_cleaning_or_resetting = True
+                restore(self,profile,refresh=False)
 
         LauncherWindow.add_recent(getattr(self, "settings", None), video_path)
         self.show_loading_overlay(video_path)
@@ -19291,7 +19167,12 @@ class VideoTranslatorGUI(QMainWindow):
                 except Exception as exc:
                     self.log(f"[Resources] Could not restore imported project preferences: {exc}")
             self.current_project_state = self.ensure_current_project()
+            self.current_project_state.set_setting("ui_work_mode","performance" if getattr(self,"performance_mode",False) else "quality")
+            self.project_service.save_project(self.current_project_state)
             self.load_project_context(self.current_project_state)
+            if self.current_project_state.settings.get("processing_profile"):
+                from utils.performance_config import restore
+                restore(self,self.current_project_state.settings["processing_profile"])
 
             if hasattr(self, "timeline") and hasattr(self.timeline, "set_video_source"):
                 dur = 0.0
@@ -19331,6 +19212,12 @@ class VideoTranslatorGUI(QMainWindow):
 
             # 4. Resolve initial layout geometry while hidden so first paint is already settled
             self.prepare_initial_editor_layout()
+
+            if getattr(self,"performance_mode",False):
+                self.show()
+                self.raise_()
+                self.hide_loading_overlay(fade=False)
+                return
 
             # 4a. Pre-initialize media backend BEFORE showing the window.
             # mpv.MPV() GPU context init blocks for 2-5 seconds on first run.
@@ -19427,11 +19314,27 @@ def _relaunch_launcher(existing_window=None):
     LauncherWindow.add_recent(None, video_path)
 
     if existing_window is not None:
+        requested_mode = os.getenv("CAPCAP_UI_MODE","quality")
+        if bool(getattr(existing_window,"performance_mode",False)) != (requested_mode=="performance"):
+            existing_window._terminate_workers(close_media=True)
+            existing_window.hide()
+            existing_window.deleteLater()
+            from editor_factory import create_editor
+            new_window = create_editor(requested_mode)
+            new_window.load_video_project(video_path)
+            app = QApplication.instance()
+            if app is not None:
+                app._active_editor = new_window
+            return new_window
         existing_window.load_video_project(video_path)
         return existing_window
 
-    new_window = VideoTranslatorGUI()
+    from editor_factory import create_editor
+    new_window = create_editor()
     new_window.load_video_project(video_path)
+    app = QApplication.instance()
+    if app is not None:
+        app._active_editor = new_window
     return new_window
 
 if __name__ == "__main__":

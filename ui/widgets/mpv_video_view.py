@@ -615,8 +615,8 @@ class _BlurRegionOverlayWindow(QWidget):
     def _queue_sync_to_view(self):
         if not (self._editable and self._regions and self._target_view and self._target_view.isVisible()):
             return
-        QTimer.singleShot(0, self.sync_to_view)
-        QTimer.singleShot(120, self.sync_to_view)
+        QTimer.singleShot(0, self, self.sync_to_view)
+        QTimer.singleShot(120, self, self.sync_to_view)
 
     def hideEvent(self, event):
         try:
@@ -1002,7 +1002,7 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
             if self._target_view is not None and watched is self._target_view and event.type() in (
                 QEvent.Resize, QEvent.Move,
             ):
-                QTimer.singleShot(0, self.sync_to_view)
+                QTimer.singleShot(0, self, self.sync_to_view)
         except (RuntimeError, ReferenceError):
             return False
         return super().eventFilter(watched, event)
@@ -1239,7 +1239,7 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
             if self._target_view is not None and watched is self._target_view and event.type() in (
                 QEvent.Resize, QEvent.Move,
             ):
-                QTimer.singleShot(0, self.sync_to_view)
+                QTimer.singleShot(0, self, self.sync_to_view)
         except (RuntimeError, ReferenceError):
             return False
         return super().eventFilter(watched, event)
@@ -1428,7 +1428,7 @@ class MpvVideoView(QWidget):
     textLayerSelected = Signal(str)
     textLayerMoved = Signal(str, float, float)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, native_surface=True):
         super().__init__(parent)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet("background-color: black; border-radius: 10px;")
@@ -1467,7 +1467,7 @@ class MpvVideoView(QWidget):
         # established preview path.
         self.text_overlay = None
         self.video_surface = QWidget(self)
-        self.video_surface.setAttribute(Qt.WA_NativeWindow, True)
+        self.video_surface.setAttribute(Qt.WA_NativeWindow, native_surface)
         self.video_surface.setAttribute(Qt.WA_NoSystemBackground, True)
         self.video_surface.setAutoFillBackground(True)
         surface_pal = self.video_surface.palette()
@@ -1642,7 +1642,7 @@ class MpvVideoView(QWidget):
             if watched is self.window():
                 event_type = event.type()
                 if event_type == QEvent.WindowActivate:
-                    QTimer.singleShot(0, self._restore_subtitle_overlay)
+                    QTimer.singleShot(0, self, self._restore_subtitle_overlay)
                 else:
                     blocked_type = getattr(QEvent.Type, "WindowBlocked", None)
                     if event_type != QEvent.WindowDeactivate and event_type != blocked_type:
@@ -2094,9 +2094,9 @@ class MpvVideoView(QWidget):
         self.logo_overlay.attach_to_view(self)
         self.logo_overlay.sync_to_view()
         # Delayed syncs in case the view geometry isn't ready yet
-        QTimer.singleShot(50, self.logo_overlay.sync_to_view)
-        QTimer.singleShot(200, self.logo_overlay.sync_to_view)
-        QTimer.singleShot(500, self.logo_overlay.sync_to_view)
+        QTimer.singleShot(50, self.logo_overlay, self.logo_overlay.sync_to_view)
+        QTimer.singleShot(200, self.logo_overlay, self.logo_overlay.sync_to_view)
+        QTimer.singleShot(500, self.logo_overlay, self.logo_overlay.sync_to_view)
 
     def set_logos(self, logos, *, active_index: int = 0, editable: bool = True):
         """Render all L1 logos; only the selected layer is editable."""

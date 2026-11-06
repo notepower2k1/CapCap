@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 from typing import Any
 
 from core.models import Segment, coerce_segments
@@ -63,9 +64,24 @@ class ProjectService:
         self._ensure_project_dirs(state.project_root)
         state.touch()
         state_path = self.project_file(state.project_root)
-        with open(state_path, "w", encoding="utf-8") as handle:
-            json.dump(state.to_dict(), handle, ensure_ascii=False, indent=2)
+        self._write_json_atomically(state_path,state.to_dict())
         return state_path
+
+    @staticmethod
+    def _write_json_atomically(path, payload):
+        # Queue cancellation can terminate a worker between writes. Publish a
+        # complete JSON atomically so the previous saved project remains readable.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w",encoding="utf-8",dir=os.path.dirname(path),prefix=".project-",suffix=".tmp",delete=False) as handle:
+                temporary = handle.name
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary,path)
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
 
     def save_json_artifact(
         self,
@@ -76,8 +92,7 @@ class ProjectService:
     ) -> str:
         output_path = os.path.join(state.project_root, relative_path)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
+        self._write_json_atomically(output_path,payload)
         state.set_artifact(artifact_name, output_path)
         self.save_project(state)
         return output_path

@@ -312,8 +312,13 @@ class OcrRegionOverlay(QWidget):
             self.hide()
             return
         self._load_rect()
-        top_left = self._target_view.mapToGlobal(QtCore.QPoint(0, 0))
-        self.setGeometry(QtCore.QRect(top_left, self._target_view.size()))
+        if self.isWindow():
+            top_left = self._target_view.mapToGlobal(QtCore.QPoint(0, 0))
+            self.setGeometry(QtCore.QRect(top_left, self._target_view.size()))
+        else:
+            # Performance uses an ordinary child over a still image, so its
+            # geometry is local to the preview, not desktop coordinates.
+            self.setGeometry(self._target_view.rect())
         self.show()
         self.raise_()
         self.update()
@@ -453,8 +458,12 @@ class OcrRegionOverlay(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setCompositionMode(QPainter.CompositionMode_Source)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 0))
+        # Only a separate native tool window owns a transparent backing store.
+        # A child overlay shares the still preview's backing store: clearing
+        # it in Source mode erases the video image and reveals black below.
+        if self.isWindow():
+            p.setCompositionMode(QPainter.CompositionMode_Source)
+            p.fillRect(self.rect(), QColor(0, 0, 0, 0))
         p.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
         color = QColor(110, 231, 214) if not self._editable else QColor(255, 180, 80)
@@ -1120,13 +1129,17 @@ def build_preview_panel(gui):
     gui.frame_preview_image_label = FramePreviewWidget()
     gui.frame_preview_image_label.hide()
 
-    gui.video_view = MpvVideoView() if is_mpv_backend_available() else VideoView()
+    if getattr(gui, "performance_mode", False):
+        from widgets.performance_preview import StaticVideoView
+        gui.video_view = StaticVideoView()
+    else:
+        gui.video_view = MpvVideoView() if is_mpv_backend_available() else VideoView()
     # The vertical workspace is splitter-resizable.  Keep a practical but
     # compact minimum so the transport row always has its own space when the
     # user gives more room to the timeline.
     gui.video_view.setMinimumHeight(270)
     gui.video_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    gui.timeline = _import_editor_timeline()()
+    gui.timeline = _import_editor_timeline()(data_only=True) if getattr(gui, "performance_mode", False) else _import_editor_timeline()()
     # The outer Timeline card owns the usable minimum height.  Do not give
     # the nested QGraphicsView the same large minimum: the card also contains
     # its title, toolbar, margins and progress strip, which otherwise causes

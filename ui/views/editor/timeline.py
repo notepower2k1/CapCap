@@ -55,8 +55,9 @@ class EditorTimeline(QGraphicsView):
     MIN_PPS = 30
     MAX_PPS = 500
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, data_only=False):
         super().__init__(parent)
+        self._data_only = bool(data_only)
         self.setFrameShape(QFrame.NoFrame)
         self.setStyleSheet("background-color: #0d1220; border: none;")
         self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
@@ -67,8 +68,9 @@ class EditorTimeline(QGraphicsView):
         self.setMouseTracking(True)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
 
-        self._scene = QGraphicsScene(self)
-        self.setScene(self._scene)
+        self._scene = None if self._data_only else QGraphicsScene(self)
+        if self._scene is not None:
+            self.setScene(self._scene)
 
         self.pixels_per_second = self.DEFAULT_PPS
         self._duration = 10.0
@@ -752,6 +754,8 @@ class EditorTimeline(QGraphicsView):
         self.viewport().update()
 
     def _redraw(self) -> None:
+        if self._data_only:
+            return
         if not self._timeline:
             return
         self._overlap_layout_cache.clear()
@@ -778,6 +782,8 @@ class EditorTimeline(QGraphicsView):
         self.viewport().update()
 
     def _refresh_scene_bounds_for_viewport(self) -> None:
+        if self._data_only:
+            return
         """Refresh scroll extents after a pure widget resize.
 
         Track/layer data has not changed in this path, so preserve the costly
@@ -1218,6 +1224,8 @@ class EditorTimeline(QGraphicsView):
         return max(lower, min(start, upper))
 
     def paintEvent(self, event):
+        if self._data_only:
+            return
         super().paintEvent(event)
         if not self._timeline:
             return
@@ -2522,6 +2530,8 @@ class EditorTimeline(QGraphicsView):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if self._data_only:
+            return
         # A splitter can emit many resize events per drag. Coalesce them to
         # one refresh per UI frame and keep the subtitle overlap cache intact.
         if not self._resize_refresh_pending:
