@@ -2,9 +2,9 @@
 
 | Area | Technology |
 | --- | --- |
-| Desktop UI | PySide6 (Qt for Python) with Adaptive 16:9 & 9:16 Layout Engine |
-| Video preview | libmpv with Qt Multimedia fallback |
-| Background work | QThread workers |
+| Desktop UI | PySide6; full Quality editor with adaptive 16:9/9:16 layouts, or Performance editor with a virtual subtitle table |
+| Video preview | Quality: libmpv with Qt Multimedia fallback; Performance: FFmpeg still frame with Qt layer editors |
+| Background work | QThread workers; sequential queue uses one isolated subprocess per video |
 | Audio transcription | Faster-Whisper / CTranslate2, SenseVoice / Sherpa-ONNX |
 | Vocal / BGM separation | ONNX Runtime (`CUDAExecutionProvider` GPU acceleration with CPU fallback) |
 | OCR | RapidOCR PP-OCRv4 with OpenCV and ONNX Runtime |
@@ -17,6 +17,13 @@
 | Packaging | PyInstaller & Inno Setup |
 
 ## Processing notes
+
+- **Performance queue**:
+  - Reuses the prepare, voice and export workflows without loading an editor, player or rendered timeline in the worker. Processing can stop after saving the project; export-only tasks reuse saved subtitles/TTS and rebuild the audio mix without invoking transcription, translation or TTS generation.
+  - The UI blocks opening another editor during a running job. Cancellation stops the owned process tree and waits for worker termination before unlocking.
+  - Per-video processing settings and OCR crop are persisted in the normal project. Launcher mode ownership prevents adding the same video to both modes; explicit transfer to Quality retains the project and removes its queue entry.
+  - Separate worker processes release model resources between videos, at the cost of loading models again for each video. RAM/VRAM savings on long real-world videos have not been benchmarked.
+  - Project/JSON artifact writes use temporary files and atomic replacement. Cleanup reconciles recent projects and queue entries against project folders that remain after deletion errors.
 
 - **Adaptive Workspace Engine**:
   - Automatically switches between widescreen Landscape (16:9) and vertical Portrait (9:16) layouts without relying on disk cache.

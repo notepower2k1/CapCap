@@ -1,3 +1,17 @@
+# Chưa phát hành — nhánh capcapv9
+
+- Thêm chọn **Quality / Performance** trên launcher; Performance dùng frame tĩnh, bảng phụ đề gọn và inspector cho các layer.
+- Thêm hàng đợi video chạy tuần tự, cấu hình riêng từng video, dừng sau video hiện tại/dừng ngay và lưu trạng thái khi mở lại app.
+- Tách **Chạy xử lý** khỏi **Xuất video đã chọn**; tùy chọn tự xuất sau xử lý mặc định tắt. Xuất riêng dùng dữ liệu đã lưu, không chạy lại chép lời/dịch/TTS.
+- Hỗ trợ chọn và lưu vùng OCR riêng từng video trong Performance; sửa kéo/resize vùng chọn và lỗi lớp OCR làm đen frame.
+- Giữ menu **Thêm** với Cài đặt, Phản hồi, Dọn dẹp, Xuất tài nguyên và Quay về Launcher; phân biệt quay về launcher với đóng ứng dụng bằng X.
+- Tăng kích thước launcher; ngăn thêm trùng video giữa hai chế độ; hỗ trợ chuyển project Performance sang Quality để chỉnh tiếp.
+- Sửa xóa dữ liệu video bị lệch giữa file trên đĩa, lịch sử và hàng đợi khi gặp file đang dùng.
+
+Hướng dẫn: [Quality, Performance và hàng đợi video](docs/performance-mode.md).
+
+---
+
 # RELEASE NOTES — V8.0.6.1
 
 **Ngày phát hành: 20/10/2026**

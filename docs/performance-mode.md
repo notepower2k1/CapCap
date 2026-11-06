@@ -47,4 +47,6 @@ Mỗi video trong hàng đợi chạy trong một tiến trình riêng để nh�
 
 Đã thử xuất hai video liên tiếp, một video hỏng xen giữa, và luồng local OmniVoice CUDA → mix audio → xuất video. Chưa đóng gói installer cho thay đổi này.
 
-Kiểm tra hồi quy: 209 bài và 23 subtest đạt. Một bài cũ `test_voice_workflow_manual_speed_bypasses_smart_and_force_fit` vẫn thất bại khi chạy riêng: kỳ vọng bước timing polish gọi lại đổi tốc độ thủ công. File workflow và bài kiểm tra này không thay đổi so với HEAD; bài này được loại riêng trong lần chạy xác nhận. Chưa kiểm thử hiệu năng trên video dài thực tế.
+Kiểm tra mở rộng ban đầu: 209 bài và 23 subtest đạt. Một bài cũ `test_voice_workflow_manual_speed_bypasses_smart_and_force_fit` vẫn thất bại khi chạy riêng: kỳ vọng bước timing polish gọi lại đổi tốc độ thủ công. File workflow và bài kiểm tra này không thay đổi so với commit nền `e2e43a3`; bài này được loại riêng trong lần chạy xác nhận. Chưa kiểm thử hiệu năng trên video dài thực tế.
+
+Lần xác nhận gần nhất cho phần xử lý/xuất riêng: 38 bài liên quan đạt, gồm hàng đợi, cleanup và UI giọng/ngôn ngữ. Đã kiểm tra chạy xử lý không tạo MP4, xuất nhiều mục mà không xử lý các video đang chờ khác, và render dùng TTS đã lưu với các lời gọi prepare/TTS bị chặn trong test. Đây là nhóm kiểm tra liên quan, không phải toàn bộ test suite.

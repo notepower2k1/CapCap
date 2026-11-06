@@ -1,6 +1,23 @@
 # How to Use CapCap
 
-## 🖥️ Workspace Layouts (16:9 Landscape & 9:16 Portrait)
+## Quality / Performance and the video queue
+
+Choose the work mode in the launcher independently of CPU/GPU mode and output encoding quality:
+
+- **Quality** opens the full editor with timeline and video playback. Full Pipeline prepares transcription, translation and TTS; click **Export** separately to render the final video.
+- **Performance** opens a still-frame editor with a virtual subtitle table and layer inspectors. It does not play video or draw a timeline. Add videos or a folder in the launcher, configure each video, then use **More → Back to Launcher** to save its settings and return.
+- Click **Process queue** to process pending videos sequentially and save their projects. **Automatically export video after processing** is off by default; enable it to render each video as part of processing. Otherwise, finished jobs show **Processed — not exported**.
+- Select one or more processed jobs with Ctrl/Shift and click **Export selected videos** to render from saved subtitles, TTS and layers without rerunning transcription, translation or voice generation. Pending, unselected videos are left alone.
+
+The still preview has Blur, Logo, Mask and Text shortcuts. Selecting OCR enables a draggable crop region; the crop is saved independently for each video and passed to its queue worker. OCR Translation is hidden in Performance. **Change frame** extracts an image at the entered time; clicking a subtitle changes its preview text without automatically seeking the image. Blur/Mask effects in the still are approximate; export uses the full renderer.
+
+Use **Stop after current video** or **Stop now** to stop the queue. **Process again** queues processing again; to retry only rendering, use **Export selected videos** when saved processing data is available. Editors cannot be opened while a queue job is running. Closing the editor with X saves and exits the app; **More → Back to Launcher** saves and returns instead.
+
+A video belongs to one launcher mode, including after the app restarts. Existing Quality projects cannot be added to Performance; Performance videos cannot be opened directly from Quality's recent-project list or file picker. Use **Open in Quality** in the queue to transfer a project for further editing; this removes its queue entry while retaining project data. **Clean Video Data** updates both lists after successful deletion and retains entries whose project data could not be removed.
+
+See [the detailed Performance guide (Vietnamese)](performance-mode.md).
+
+## 🖥️ Quality Workspace Layouts (16:9 Landscape & 9:16 Portrait)
 
 CapCap automatically optimizes its workspace layout based on the video's aspect ratio:
 
@@ -14,9 +31,9 @@ CapCap automatically optimizes its workspace layout based on the video's aspect 
 
 ---
 
-## Basic Workflow
+## Basic Workflow in Quality
 
-1. Open CapCap and select **CPU** or **GPU** mode in the launcher.
+1. Open CapCap, choose **Quality**, then select **CPU** or **GPU** mode in the launcher.
 2. Create or open a video project. **Prepare** completes once the video is analyzed and ready.
 3. In **Settings**, choose a Subtitle Source: **Audio** (SenseVoice or Faster-Whisper) or **Video** (RapidOCR). This choice is saved per-project.
 4. Set source and target languages, then select a translation provider.
@@ -26,7 +43,7 @@ CapCap automatically optimizes its workspace layout based on the video's aspect 
    - **Step-by-Step → Run to Transcript**: Choose **Auto Transcript** or **Import Transcript File…** to load an external original `.srt`. Imported cues and timestamps remain the transcript source until you explicitly choose **Re-transcript**.
 6. Review subtitles, speaker assignments, typography, and timed visual layers in the editor.
 7. Use **Fast Preview** to check a five-second rendered sample, or playback smoothly in real-time.
-8. Click **Export** to render the final localized video or export to **CapCut Draft**.
+8. Click **Export** to render the final localized video. For a **CapCut Draft**, use **More → Export Resources → Export to CapCut**.
 
 ### Languages and voices
 
