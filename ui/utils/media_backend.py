@@ -503,6 +503,7 @@ class MpvMediaPlayerBackend(QObject):
         self._mask_region = None
         self._color_filter_state = {}
         self._managed_vf_label = "capcap-managed"
+        self._last_applied_vf_combined: str | None = None
         self._gpu_lut = None
         self.supports_native_lut = False
         self._mute_original = False
@@ -614,6 +615,7 @@ class MpvMediaPlayerBackend(QObject):
                 else:
                     reason = getattr(event, "reason", None)
                 if reason == "eof":
+                    self._pause_all_audio_sidecars()
                     self._state = QMediaPlayer.PausedState
                     try:
                         self.stateChanged.emit(int(QMediaPlayer.PausedState.value))
@@ -711,6 +713,34 @@ class MpvMediaPlayerBackend(QObject):
             and os.path.abspath(self._source_path) == os.path.abspath(preview_source)
         )
 
+    def _effective_timeline_duration_ms(self) -> int:
+        dur_ms = int(getattr(self, "_duration_ms", 0) or 0)
+        if dur_ms <= 0:
+            return 0
+        is_warped_preview = getattr(self, "_is_warped_preview", lambda: False)()
+        warps = getattr(self, "_video_time_warps", []) or []
+        if warps and not is_warped_preview:
+            extra_ms = int(round(sum(float(w.get("duration", 0.0)) for w in warps) * 1000.0))
+            return max(0, dur_ms + extra_ms)
+        return dur_ms
+
+    def _pause_all_audio_sidecars(self) -> None:
+        if getattr(self, "_native_audio_engine", None) is not None:
+            try:
+                self._native_audio_engine.pause()
+            except Exception:
+                pass
+        if getattr(self, "_original_loaded_path", "") and getattr(self, "_original_player", None) is not None:
+            try:
+                self._original_player.pause()
+            except Exception:
+                pass
+        if getattr(self, "_dubbed_loaded_path", "") and getattr(self, "_dubbed_player", None) is not None:
+            try:
+                self._dubbed_player.pause()
+            except Exception:
+                pass
+
     def _get_warp_speed_for_media_time(self, media_time_s: float) -> float:
         if self._is_warped_preview():
             return 1.0
@@ -804,6 +834,16 @@ class MpvMediaPlayerBackend(QObject):
             if next_duration != self._duration_ms:
                 self._duration_ms = next_duration
                 self.durationChanged.emit(next_duration)
+                if next_duration > 0 and getattr(self, "_last_tracks_snapshot", None):
+                    snapshot_tracks, snapshot_warps = self._last_tracks_snapshot
+                    updated_any = False
+                    eff_dur_s = self._effective_timeline_duration_ms() / 1000.0
+                    for t in snapshot_tracks:
+                        if float(t.get("end", 0.0) or 0.0) <= 0.0:
+                            t["end"] = eff_dur_s
+                            updated_any = True
+                    if updated_any and getattr(self, "_native_audio_active", False) and getattr(self, "_native_audio_engine", None) is not None:
+                        self._native_audio_engine.set_tracks(snapshot_tracks, snapshot_warps)
 
         next_state = QMediaPlayer.PausedState if pause else QMediaPlayer.PlayingState
         prev_state = self._state
@@ -820,6 +860,7 @@ class MpvMediaPlayerBackend(QObject):
             and (eof or core_idle or self._duration_ms <= 0
                  or self._position_ms >= self._duration_ms - 250)
         ):
+            self._pause_all_audio_sidecars()
             try:
                 self.stateChanged.emit(int(next_state.value))
             except Exception:
@@ -828,6 +869,7 @@ class MpvMediaPlayerBackend(QObject):
     def setSource(self, source):
         if getattr(self, "_is_closed", False):
             return
+        self._last_applied_vf_combined = None
         source_path = self._normalize_source(source)
         if not source_path:
             self.stop()
@@ -942,6 +984,7 @@ class MpvMediaPlayerBackend(QObject):
     def stop(self):
         self._video_frozen = False
         self._player.pause = True
+        self._last_applied_vf_combined = None
         self._current_applied_speed = getattr(self, "_base_playback_rate", 1.0)
         try:
             self._player.speed = float(self._current_applied_speed)
@@ -1103,9 +1146,15 @@ class MpvMediaPlayerBackend(QObject):
         from app.services.time_warp_service import TimeWarpService
         effective_warps = TimeWarpService.normalize_warps(warps if warps is not None else getattr(self, "_video_time_warps", []))
         self._video_time_warps = effective_warps
-        self._last_tracks_snapshot = (list(tracks), effective_warps)
+        eff_dur_s = self._effective_timeline_duration_ms() / 1000.0
+        tracks_list = [dict(t) for t in tracks]
+        if eff_dur_s > 0:
+            for t in tracks_list:
+                if t.get("id") in ("A1 Audio", "TS1") and float(t.get("end", 0.0) or 0.0) <= 0.0:
+                    t["end"] = eff_dur_s
+        self._last_tracks_snapshot = (tracks_list, effective_warps)
         if self._native_audio_active and self._native_audio_engine is not None:
-            self._native_audio_engine.set_tracks(tracks, effective_warps)
+            self._native_audio_engine.set_tracks(tracks_list, effective_warps)
 
     def set_track_gain(self, track_id: str, gain: float, muted: bool = False):
         """Update track volume without regenerating media files."""
@@ -1139,18 +1188,33 @@ class MpvMediaPlayerBackend(QObject):
                 pass
 
     def _on_native_audio_position_changed(self, pos_ms: int):
-        if self._native_audio_active:
+        if getattr(self, "_native_audio_active", False):
+            dur_ms = int(getattr(self, "_duration_ms", 0) or 0)
+            warps = getattr(self, "_video_time_warps", []) or []
+            is_warped_preview = getattr(self, "_is_warped_preview", lambda: False)()
+            max_tl_ms = dur_ms + (int(round(sum(float(w.get("duration", 0.0)) for w in warps) * 1000.0)) if (warps and not is_warped_preview) else 0)
+            if dur_ms > 0 and pos_ms > max_tl_ms:
+                pos_ms = max_tl_ms
+                if getattr(self, "_native_audio_engine", None) is not None and getattr(self, "_state", None) != QMediaPlayer.PlayingState:
+                    if int(getattr(self, "_position_ms", 0) or 0) >= dur_ms - 50:
+                        try:
+                            self._native_audio_engine.pause()
+                        except Exception:
+                            pass
+                        return
+
             self._dubbed_position_ms = pos_ms
-            warps = getattr(self, "_video_time_warps", [])
             # A rendered preview already uses expanded timeline time. Mapping
             # it back to source time here makes its playhead stick, then jump.
-            is_warped_preview = getattr(self, "_is_warped_preview", lambda: False)()
             if warps and not is_warped_preview:
                 from app.services.time_warp_service import TimeWarpService
                 media_pos_s = TimeWarpService.timeline_to_media_time(pos_ms / 1000.0, warps)
                 self._position_ms = int(round(media_pos_s * 1000))
             else:
                 self._position_ms = pos_ms
+
+            if dur_ms > 0:
+                self._position_ms = max(0, min(int(self._position_ms), dur_ms))
 
             # Use 60 Hz slots so 10/16ms audio ticks do not halve the UI refresh rate.
             frame = int(time.monotonic() * 60)
@@ -1362,6 +1426,9 @@ class MpvMediaPlayerBackend(QObject):
             input_label=("b_last" if blur_body else ("color_main" if color_body else None))
         )
         if not color_body and not blur_body and not mask_body:
+            if getattr(self, "_last_applied_vf_combined", None) == "":
+                return
+            self._last_applied_vf_combined = ""
             try:
                 self._player.command("vf", "remove", f"@{self._managed_vf_label}")
             except Exception:
@@ -1383,6 +1450,9 @@ class MpvMediaPlayerBackend(QObject):
             combined = mask_body
         if color_body:
             combined = f"{color_body};{combined}" if combined else color_body
+        if getattr(self, "_last_applied_vf_combined", None) == combined:
+            return
+        self._last_applied_vf_combined = combined
         try:
             self._player.command("vf", "set", f"@{self._managed_vf_label}:lavfi=[{combined}]")
         except Exception:
@@ -1704,6 +1774,11 @@ class MpvMediaPlayerBackend(QObject):
                 else:
                     expected_a_pos_ms = v_pos_ms
                 if abs(a_pos - expected_a_pos_ms) <= 300:
+                    if getattr(self._native_audio_engine, "is_playing", lambda: False)():
+                        try:
+                            self._native_audio_engine.pause()
+                        except Exception:
+                            pass
                     return
             except Exception:
                 return

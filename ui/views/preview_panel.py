@@ -1,11 +1,10 @@
 import os
 
-import os
-
 from PySide6 import QtCore
 from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFrame,
@@ -30,6 +29,22 @@ from runtime_paths import asset_path
 from widgets import MpvVideoView, VideoView
 from utils.icon_utils import load_icon
 from utils.media_backend import is_mpv_backend_available
+
+try:
+    import shiboken6
+except Exception:  # pragma: no cover
+    shiboken6 = None
+
+
+def _is_valid_qobject(obj) -> bool:
+    if obj is None:
+        return False
+    if shiboken6 is not None:
+        try:
+            return bool(shiboken6.isValid(obj))
+        except Exception:
+            return False
+    return True
 
 try:
     from i18n import current_source_text, t
@@ -162,10 +177,25 @@ class OcrRegionOverlay(QWidget):
         os.environ["OCR_CROP_RATIO"] = f"{r.height():.4f}"
 
     def attach_to_view(self, view):
+        if self._target_view is not None and _is_valid_qobject(self._target_view):
+            try:
+                self._target_view.destroyed.disconnect(self._on_target_view_destroyed)
+            except Exception:
+                pass
         self._target_view = view
-        if view and view.window():
-            self._main_window = view.window()
-            self._main_window.installEventFilter(self)
+        if view:
+            if hasattr(view, "destroyed"):
+                try:
+                    view.destroyed.connect(self._on_target_view_destroyed)
+                except Exception:
+                    pass
+            if view.window():
+                self._main_window = view.window()
+                self._main_window.installEventFilter(self)
+
+    def _on_target_view_destroyed(self):
+        self._target_view = None
+        self.hide()
 
     def set_editable(self, editable: bool):
         self._editable = editable
@@ -275,12 +305,8 @@ class OcrRegionOverlay(QWidget):
         super().hideEvent(event)
 
     def eventFilter(self, obj, event):
-        try:
-            import shiboken6
-            if not shiboken6.isValid(self):
-                return False
-        except Exception:
-            pass
+        if not _is_valid_qobject(self):
+            return False
         try:
             w = getattr(self, "_main_window", None)
             if w is not None and obj is w:
@@ -296,7 +322,11 @@ class OcrRegionOverlay(QWidget):
         return False
 
     def sync_to_view(self):
-        if not self._target_view:
+        if not _is_valid_qobject(self._target_view):
+            self.hide()
+            return
+        app = QApplication.instance()
+        if app is not None and (app.activePopupWidget() is not None or app.activeModalWidget() is not None):
             self.hide()
             return
         if self._main_window is None and self._target_view.window() is not None:
@@ -517,11 +547,25 @@ class OcrTranslatorOverlay(QWidget):
         self.hide()
 
     def attach_to_view(self, view):
+        if self._target_view is not None and _is_valid_qobject(self._target_view):
+            try:
+                self._target_view.destroyed.disconnect(self._on_target_view_destroyed)
+            except Exception:
+                pass
         self._target_view = view
         if view:
+            if hasattr(view, "destroyed"):
+                try:
+                    view.destroyed.connect(self._on_target_view_destroyed)
+                except Exception:
+                    pass
             self._main_window = view.window()
         if self._main_window is not None:
             self._main_window.installEventFilter(self)
+
+    def _on_target_view_destroyed(self):
+        self._target_view = None
+        self.hide()
 
     def normalized_rect(self):
         r = self._norm
@@ -585,12 +629,8 @@ class OcrTranslatorOverlay(QWidget):
         super().show()
 
     def eventFilter(self, obj, event):
-        try:
-            import shiboken6
-            if not shiboken6.isValid(self):
-                return False
-        except Exception:
-            pass
+        if not _is_valid_qobject(self):
+            return False
         try:
             w = getattr(self, "_main_window", None)
             if w is not None and obj is w:
@@ -604,7 +644,11 @@ class OcrTranslatorOverlay(QWidget):
         return False
 
     def sync_to_view(self):
-        if not self._target_view:
+        if not _is_valid_qobject(self._target_view):
+            self.hide()
+            return
+        app = QApplication.instance()
+        if app is not None and (app.activePopupWidget() is not None or app.activeModalWidget() is not None):
             self.hide()
             return
         current_window = self._target_view.window()
@@ -1154,7 +1198,7 @@ def build_preview_panel(gui):
     gui._scrub_was_playing = False
     gui._scrub_throttle_timer = QTimer(gui)
     gui._scrub_throttle_timer.setSingleShot(True)
-    gui._scrub_throttle_timer.setInterval(33)
+    gui._scrub_throttle_timer.setInterval(16)
 
     def _flush_scrub_seek():
         if getattr(gui, "_scrub_pending_pos_ms", None) is not None:

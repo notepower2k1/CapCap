@@ -3,10 +3,112 @@ from __future__ import annotations
 import os
 import re
 import math
+import time
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QBitmap, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPalette, QPen, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
+
+try:
+    import shiboken6
+except Exception:  # pragma: no cover
+    shiboken6 = None
+
+
+def _is_valid_qobject(obj) -> bool:
+    if obj is None:
+        return False
+    if shiboken6 is not None:
+        try:
+            return bool(shiboken6.isValid(obj))
+        except Exception:
+            return False
+    return True
+
+
+def _is_own_overlay_window(target_view, widget) -> bool:
+    if widget is None or target_view is None:
+        return False
+    if getattr(widget, "_target_view", None) is target_view:
+        return True
+    for attr in ("subtitle_item", "blur_overlay", "mask_overlay", "logo_overlay", "text_overlay"):
+        if getattr(target_view, attr, None) is widget:
+            return True
+    return False
+
+
+def _should_suppress_overlay(target_view) -> bool:
+    if not _is_valid_qobject(target_view):
+        return True
+    try:
+        if not target_view.isVisible():
+            return True
+        win = target_view.window()
+        if win is None or not _is_valid_qobject(win) or not win.isVisible() or win.isMinimized():
+            return True
+        if getattr(win, "_project_loading_in_progress", False):
+            return True
+        app = QApplication.instance()
+        if app is not None:
+            if app.activeModalWidget() is not None or app.activePopupWidget() is not None:
+                return True
+            active_win = app.activeWindow()
+            if (
+                active_win is not None
+                and _is_valid_qobject(active_win)
+                and active_win.isVisible()
+                and not active_win.isMinimized()
+                and active_win is not win
+                and getattr(active_win, "window", lambda: None)() is not win
+                and not _is_own_overlay_window(target_view, active_win)
+            ):
+                return True
+    except Exception:
+        return True
+    return False
+
+
+def _clipped_view_local_rect(target_view: QWidget, local_rect: QRect | QRectF) -> QRect:
+    if not _is_valid_qobject(target_view):
+        return QRect()
+    if isinstance(local_rect, QRectF):
+        local_rect = local_rect.toRect()
+    clipped = local_rect.intersected(target_view.rect())
+    try:
+        vis_reg = target_view.visibleRegion()
+        if not vis_reg.isEmpty():
+            clipped = clipped.intersected(vis_reg.boundingRect())
+        win = target_view.window()
+        if _is_valid_qobject(win) and win is not target_view:
+            win_top_left_in_view = target_view.mapFromGlobal(win.mapToGlobal(QPoint(0, 0)))
+            win_rect_in_view = QRect(win_top_left_in_view, win.size())
+            clipped = clipped.intersected(win_rect_in_view)
+    except Exception:
+        pass
+    return clipped
+
+
+def _draw_layer_badge(painter: QPainter, rect: QRectF, label: str, accent_color: QColor, active: bool = False) -> None:
+    if not label or rect.width() < 24 or rect.height() < 16:
+        return
+    painter.save()
+    font = QFont("Segoe UI", 8)
+    font.setBold(True)
+    painter.setFont(font)
+    fm = painter.fontMetrics()
+    text_w = fm.horizontalAdvance(label) if hasattr(fm, "horizontalAdvance") else fm.boundingRect(label).width()
+    badge_h = 16.0
+    badge_w = min(float(rect.width() - 4.0), float(text_w + 12.0))
+    bx = float(rect.left() + 3.0)
+    by = float(rect.top() + 3.0)
+    badge_rect = QRectF(bx, by, max(16.0, badge_w), badge_h)
+    bg = QColor(accent_color.red(), accent_color.green(), accent_color.blue(), 230 if active else 175)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(bg)
+    painter.drawRoundedRect(badge_rect, 4.0, 4.0)
+    painter.setPen(QColor(8, 18, 28, 245))
+    painter.drawText(badge_rect, int(Qt.AlignCenter | Qt.TextSingleLine), label)
+    painter.restore()
 
 
 class _SubtitleOverlayWidget(QWidget):
@@ -57,7 +159,14 @@ class _SubtitleOverlayWidget(QWidget):
         self.custom_x_percent = 50
         self.custom_y_percent = 86
         self.W, self.H = 640, 48
+        self._offset_x = 0.0
+        self._offset_y = 0.0
+        self._snap_x = False
+        self._snap_y = False
+        self._canvas_size = QSize(0, 0)
         self._drag_active = False
+        self._drag_x_pct: float | None = None
+        self._drag_y_pct: float | None = None
         self._editable = False
         self._suppressed = False
         self._drag_grab_offset = QPointF()
@@ -68,7 +177,21 @@ class _SubtitleOverlayWidget(QWidget):
         self.hide()
 
     def attach_to_view(self, view: QWidget):
+        if self._target_view is not None and _is_valid_qobject(self._target_view):
+            try:
+                self._target_view.destroyed.disconnect(self._on_target_view_destroyed)
+            except Exception:
+                pass
         self._target_view = view
+        if view and hasattr(view, "destroyed"):
+            try:
+                view.destroyed.connect(self._on_target_view_destroyed)
+            except Exception:
+                pass
+
+    def _on_target_view_destroyed(self):
+        self._target_view = None
+        self.hide()
 
     def set_editable(self, editable: bool):
         """Allow moving this subtitle layer only for a selected TS segment."""
@@ -77,12 +200,27 @@ class _SubtitleOverlayWidget(QWidget):
             self._drag_active = False
         self.setAttribute(Qt.WA_TransparentForMouseEvents, not self._editable)
         self.setCursor(Qt.OpenHandCursor if self._editable else Qt.ArrowCursor)
+        if self._target_view is not None and hasattr(self._target_view, "_sync_overlay_stack_order"):
+            self._target_view._sync_overlay_stack_order()
 
     def set_suppressed(self, suppressed: bool):
         """Temporarily keep this top-level overlay below modal dialogs."""
         self._suppressed = bool(suppressed)
         if self._suppressed:
             super().hide()
+
+    def hideEvent(self, event):
+        try:
+            if self.mouseGrabber() is self:
+                self.releaseMouse()
+        except Exception:
+            pass
+        self._drag_active = False
+        self._drag_x_pct = None
+        self._drag_y_pct = None
+        self._snap_x = False
+        self._snap_y = False
+        super().hideEvent(event)
 
     def show(self):
         # This is a top-level tool window so it can cover MPV's native
@@ -100,7 +238,11 @@ class _SubtitleOverlayWidget(QWidget):
             event.ignore()
             return
         self._drag_active = True
-        self._drag_grab_offset = QPointF(event.position())
+        self._drag_grab_offset = QPointF(event.position()) - QPointF(getattr(self, "_offset_x", 0.0), getattr(self, "_offset_y", 0.0))
+        try:
+            self.grabMouse()
+        except Exception:
+            pass
         self.setCursor(Qt.ClosedHandCursor)
         self.positionDragStarted.emit()
         event.accept()
@@ -121,8 +263,8 @@ class _SubtitleOverlayWidget(QWidget):
         # preview widget. Convert through global coordinates to avoid Qt's
         # parent-hierarchy warning and get the correct canvas-relative point.
         pointer = view.mapFromGlobal(self.mapToGlobal(event.position().toPoint()))
-        center_x = pointer.x() - self._drag_grab_offset.x() + self.width() / 2.0
-        center_y = pointer.y() - self._drag_grab_offset.y() + self.height() / 2.0
+        center_x = pointer.x() - self._drag_grab_offset.x() + float(self.W) / 2.0
+        center_y = pointer.y() - self._drag_grab_offset.y() + float(self.H) / 2.0
         # The drag position represents the subtitle's anchor/centre, not the
         # outer edge of its (often wide) wrapping widget.  Constraining by
         # half the widget width limited wide subtitles to a narrow strip in
@@ -131,8 +273,22 @@ class _SubtitleOverlayWidget(QWidget):
         # centre for preview and export.
         center_x = max(canvas.left(), min(center_x, canvas.right()))
         center_y = max(canvas.top(), min(center_y, canvas.bottom()))
-        x_percent = int(round(max(0.0, min(100.0, (center_x - canvas.left()) * 100.0 / canvas.width()))))
-        y_percent = int(round(max(0.0, min(100.0, (center_y - canvas.top()) * 100.0 / canvas.height()))))
+        x_pct = (center_x - canvas.left()) * 100.0 / canvas.width()
+        y_pct = (center_y - canvas.top()) * 100.0 / canvas.height()
+        if abs(x_pct - 50.0) <= 1.8:
+            x_pct = 50.0
+            self._snap_x = True
+        else:
+            self._snap_x = False
+        if abs(y_pct - 50.0) <= 1.8:
+            y_pct = 50.0
+            self._snap_y = True
+        else:
+            self._snap_y = False
+        self._drag_x_pct = max(0.0, min(100.0, float(x_pct)))
+        self._drag_y_pct = max(0.0, min(100.0, float(y_pct)))
+        x_percent = int(round(self._drag_x_pct))
+        y_percent = int(round(self._drag_y_pct))
         self.custom_position_enabled = True
         self.custom_x_percent = x_percent
         self.custom_y_percent = y_percent
@@ -141,8 +297,18 @@ class _SubtitleOverlayWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         if self._drag_active and event.button() == Qt.LeftButton:
+            try:
+                if self.mouseGrabber() is self:
+                    self.releaseMouse()
+            except Exception:
+                pass
             self._drag_active = False
+            self._drag_x_pct = None
+            self._drag_y_pct = None
+            self._snap_x = False
+            self._snap_y = False
             self.setCursor(Qt.OpenHandCursor)
+            self.update()
             self.positionDragFinished.emit(self.custom_x_percent, self.custom_y_percent)
             event.accept()
             return
@@ -361,7 +527,11 @@ class _SubtitleOverlayWidget(QWidget):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        if getattr(self, "_offset_x", 0.0) != 0.0 or getattr(self, "_offset_y", 0.0) != 0.0:
+            painter.translate(self._offset_x, self._offset_y)
         rect = QRectF(0, 0, float(self.W), float(self.H))
+        if self._editable:
+            painter.fillRect(rect, QColor(255, 255, 255, 2))
 
         if not self.current_lines:
             return
@@ -454,10 +624,50 @@ class _SubtitleOverlayWidget(QWidget):
                 painter.setPen(self.font_color)
                 painter.drawText(line_rect, int(wrap_flags), line_text)
 
+        if self._editable and visible_lines:
+            painter.save()
+            painter.setPen(QPen(QColor("#6ee7d6"), 1, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            if line_rects:
+                fm = painter.fontMetrics()
+                get_adv = getattr(fm, "horizontalAdvance", None)
+                if callable(get_adv):
+                    max_line_w = max((get_adv(line) for line in visible_lines), default=0)
+                else:
+                    max_line_w = max((fm.boundingRect(line).width() for line in visible_lines), default=0)
+                cx = rect.center().x()
+                block_top = line_rects[0].top()
+                block_bottom = line_rects[-1].bottom()
+                text_rect = QRectF(
+                    cx - max_line_w / 2.0,
+                    block_top,
+                    float(max_line_w),
+                    max(1.0, block_bottom - block_top),
+                ).adjusted(-8, -4, 8, 4).intersected(rect)
+                painter.drawRect(text_rect)
+                target_box_rect = text_rect
+            else:
+                target_box_rect = rect.adjusted(1, 1, -1, -1)
+                painter.drawRect(target_box_rect)
+            _draw_layer_badge(painter, target_box_rect, "Subtitle", QColor("#6ee7d6"), active=True)
+            painter.restore()
+
+        if self._drag_active and (self._snap_x or self._snap_y):
+            painter.save()
+            painter.setPen(QPen(QColor("#6ee7d6"), 1, Qt.DashLine))
+            if self._snap_x:
+                cx = rect.center().x()
+                painter.drawLine(QPointF(cx, -10000), QPointF(cx, 10000))
+            if self._snap_y:
+                cy = rect.center().y()
+                painter.drawLine(QPointF(-10000, cy), QPointF(10000, cy))
+            painter.restore()
+
 
 
 
 class _BlurRegionOverlayWindow(QWidget):
+    BADGE_LABEL = "Blur"
     HANDLE_SIZE = 12
     MIN_WIDTH = HANDLE_SIZE * 2
     MIN_HEIGHT = HANDLE_SIZE * 2
@@ -480,7 +690,13 @@ class _BlurRegionOverlayWindow(QWidget):
         self._drag_offset = QPointF()
         self._rect_on_press = QRectF()
         self._press_pos = QPointF()
+        self._snap_x = False
+        self._snap_y = False
+        self._offset_x = 0.0
+        self._offset_y = 0.0
         self._editable = False
+        self._logical_visible = True
+        self._in_review_mode = False
         self._target_view = None
         self._main_window = None
         self._suspended = False
@@ -488,40 +704,66 @@ class _BlurRegionOverlayWindow(QWidget):
         self._on_edit_finished = on_edit_finished
         self.hide()
 
+    def set_logical_visible(self, visible: bool):
+        self._logical_visible = bool(visible)
+        self.sync_to_view()
+        self.update()
+
+    def set_review_mode(self, in_review: bool):
+        self._in_review_mode = bool(in_review)
+        self.sync_to_view()
+        self.update()
+
+    def _should_show_overlay(self) -> bool:
+        return bool(
+            self._logical_visible
+            and not self._in_review_mode
+            and self._regions
+        )
+
     def attach_to_view(self, view: QWidget):
-        self._target_view = view
-        if view and view.window():
-            new_win = view.window()
-            if self._main_window is not None and self._main_window is not new_win:
-                try:
-                    self._main_window.removeEventFilter(self)
-                except Exception:
-                    pass
-            self._main_window = new_win
+        if self._target_view is not None and _is_valid_qobject(self._target_view):
             try:
-                self._main_window.removeEventFilter(self)
-                self._main_window.installEventFilter(self)
+                self._target_view.destroyed.disconnect(self._on_target_view_destroyed)
             except Exception:
                 pass
+        self._target_view = view
+        if view:
+            if hasattr(view, "destroyed"):
+                try:
+                    view.destroyed.connect(self._on_target_view_destroyed)
+                except Exception:
+                    pass
+            if view.window():
+                new_win = view.window()
+                if self._main_window is not None and self._main_window is not new_win:
+                    try:
+                        self._main_window.removeEventFilter(self)
+                    except Exception:
+                        pass
+                self._main_window = new_win
+                try:
+                    self._main_window.removeEventFilter(self)
+                    self._main_window.installEventFilter(self)
+                except Exception:
+                    pass
         self.sync_to_view()
+
+    def _on_target_view_destroyed(self):
+        self._target_view = None
+        self.hide()
 
     def set_editable(self, editable: bool):
         self._editable = bool(editable)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, not self._editable)
         self.setCursor(Qt.OpenHandCursor if self._editable else Qt.ArrowCursor)
-        if self._editable:
-            # Only show the overlay if there are regions to edit. Do NOT
-            # auto-add a region here - that previously caused a phantom
-            # blur rectangle to appear on project reopen even when the
-            # user had deleted all blurs. The user must press "+" to add
-            # a region explicitly.
-            if self._regions:
-                self.sync_to_view()
-            else:
-                self.hide()
+        if self._should_show_overlay():
+            self.sync_to_view()
         else:
             self.hide()
         self.update()
+        if self._target_view is not None and hasattr(self._target_view, "_sync_overlay_stack_order"):
+            self._target_view._sync_overlay_stack_order()
 
     def clear_region(self):
         self._drag_mode = ""
@@ -597,34 +839,44 @@ class _BlurRegionOverlayWindow(QWidget):
         self.update()
 
     def sync_to_view(self):
+        if not _is_valid_qobject(self._target_view):
+            self.hide()
+            return
+        if _should_suppress_overlay(self._target_view):
+            self.hide()
+            return
         if (
             self._suspended
-            or not self._target_view
             or not self._target_view.isVisible()
-            or not self._regions
-            or not self._editable
+            or not self._should_show_overlay()
         ):
             self.hide()
             return
-        top_left = self._target_view.mapToGlobal(QPoint(0, 0))
-        self.setGeometry(QRect(top_left, self._target_view.size()))
+        target_rect = self._target_view.rect()
+        clipped_rect = _clipped_view_local_rect(self._target_view, target_rect)
+        if clipped_rect.width() <= 2 or clipped_rect.height() <= 2:
+            self.hide()
+            return
+        self._offset_x = float(target_rect.left() - clipped_rect.left())
+        self._offset_y = float(target_rect.top() - clipped_rect.top())
+        top_left = self._target_view.mapToGlobal(clipped_rect.topLeft())
+        self.setGeometry(QRect(top_left, clipped_rect.size()))
         self.show()
-        self.raise_()
+        if hasattr(self._target_view, "_sync_overlay_stack_order"):
+            self._target_view._sync_overlay_stack_order()
+        else:
+            self.raise_()
         self.update()
 
     def _queue_sync_to_view(self):
-        if not (self._editable and self._regions and self._target_view and self._target_view.isVisible()):
+        if not (self._should_show_overlay() and self._target_view and self._target_view.isVisible()):
             return
-        QTimer.singleShot(0, self, self.sync_to_view)
-        QTimer.singleShot(120, self, self.sync_to_view)
+        QTimer.singleShot(0, lambda: self.sync_to_view() if _is_valid_qobject(self) else None)
+        QTimer.singleShot(120, lambda: self.sync_to_view() if _is_valid_qobject(self) else None)
 
     def hideEvent(self, event):
-        try:
-            import shiboken6
-            if not shiboken6.isValid(self):
-                return
-        except Exception:
-            pass
+        if not _is_valid_qobject(self):
+            return
         if getattr(self, "mouseGrabber", None) and self.mouseGrabber() is self:
             try:
                 self.releaseMouse()
@@ -636,21 +888,20 @@ class _BlurRegionOverlayWindow(QWidget):
             pass
 
     def eventFilter(self, watched, event):
-        try:
-            import shiboken6
-            if not shiboken6.isValid(self):
-                return False
-        except Exception:
-            pass
+        if not _is_valid_qobject(self):
+            return False
         try:
             if self._main_window is not None and watched is self._main_window:
-                if event.type() == QEvent.WindowDeactivate:
+                event_type = event.type()
+                if event_type == QEvent.WindowDeactivate:
+                    if _is_own_overlay_window(self._target_view, QApplication.activeWindow()):
+                        return False
                     self._suspended = True
                     if self.isVisible():
                         self.hide()
-                elif event.type() == QEvent.WindowActivate:
+                elif event_type in (QEvent.WindowActivate, QEvent.WindowStateChange, getattr(QEvent, "ApplicationStateChange", None)):
                     self._suspended = False
-                    if self._editable and self._regions and not self._has_active_popup():
+                    if self._should_show_overlay() and not self._has_active_popup():
                         self._queue_sync_to_view()
         except (RuntimeError, ReferenceError):
             return False
@@ -781,7 +1032,7 @@ class _BlurRegionOverlayWindow(QWidget):
         if not self._editable or event.button() != Qt.LeftButton:
             event.ignore()
             return
-        pos = QPointF(event.position())
+        pos = QPointF(event.position()) - QPointF(getattr(self, "_offset_x", 0.0), getattr(self, "_offset_y", 0.0))
         hit_index, hit_mode = self._hit_test(pos)
         self._drag_index = hit_index
         self._active_index = hit_index
@@ -800,7 +1051,7 @@ class _BlurRegionOverlayWindow(QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event):
-        pos = QPointF(event.position())
+        pos = QPointF(event.position()) - QPointF(getattr(self, "_offset_x", 0.0), getattr(self, "_offset_y", 0.0))
         if not self._editable:
             event.ignore()
             return
@@ -821,7 +1072,25 @@ class _BlurRegionOverlayWindow(QWidget):
         rect = QRectF(self._rect_on_press)
         if self._drag_mode == "move":
             rect.moveTopLeft(pos - self._drag_offset)
+            visible_rect = self._visible_canvas_rect()
+            if visible_rect.width() > 0 and visible_rect.height() > 0:
+                cx = (rect.center().x() - visible_rect.left()) / visible_rect.width()
+                cy = (rect.center().y() - visible_rect.top()) / visible_rect.height()
+                if abs(cx - 0.5) <= 0.02:
+                    desired_center_x = visible_rect.left() + 0.5 * visible_rect.width()
+                    rect.moveLeft(desired_center_x - rect.width() / 2.0)
+                    self._snap_x = True
+                else:
+                    self._snap_x = False
+                if abs(cy - 0.5) <= 0.02:
+                    desired_center_y = visible_rect.top() + 0.5 * visible_rect.height()
+                    rect.moveTop(desired_center_y - rect.height() / 2.0)
+                    self._snap_y = True
+                else:
+                    self._snap_y = False
         else:
+            self._snap_x = False
+            self._snap_y = False
             delta = pos - self._press_pos
             if "left" in self._drag_mode:
                 rect.setLeft(rect.left() + delta.x())
@@ -848,10 +1117,13 @@ class _BlurRegionOverlayWindow(QWidget):
         finished_drag = bool(self._drag_mode)
         self._drag_mode = ""
         self._drag_index = -1
+        self._snap_x = False
+        self._snap_y = False
         if self.mouseGrabber() is self:
             self.releaseMouse()
         if self._editable:
             self.setCursor(Qt.OpenHandCursor)
+        self.update()
         if finished_drag and callable(self._on_edit_finished):
             self._on_edit_finished()
         event.accept()
@@ -861,6 +1133,8 @@ class _BlurRegionOverlayWindow(QWidget):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        if getattr(self, "_offset_x", 0.0) != 0.0 or getattr(self, "_offset_y", 0.0) != 0.0:
+            painter.translate(self._offset_x, self._offset_y)
         if self._target_view is not None:
             # Match the native MPV surface: Fill crops to the selected
             # canvas, so editable overlay chrome must not paint into the
@@ -877,23 +1151,34 @@ class _BlurRegionOverlayWindow(QWidget):
             rect = self.region_rect(index)
             if rect.width() <= 0 or rect.height() <= 0:
                 continue
-            # B1 is a single effect type: unlike generic region tools,
-            # every blur layer uses the same visual identity.
             color = self.BLUR_COLOR
-            # Blur regions are outlines only. Any translucent fill blends
-            # with the frame beneath it and can look dark blue on inactive
-            # regions, even though the logical overlay colour is identical.
-            if self._editable and index == self._active_index:
-                # Keep a nearly transparent hit surface across the whole
-                # region. Native layered windows otherwise hit-test only
-                # the visible dashed border, making center drags unreliable.
-                painter.setBrush(QColor(0, 0, 0, 1))
+            is_active = bool(self._editable and index == self._active_index)
+            if is_active:
+                painter.setBrush(QColor(color.red(), color.green(), color.blue(), 24))
                 painter.setPen(QPen(QColor(color.red(), color.green(), color.blue(), 235), 2, Qt.DashLine))
                 painter.drawRect(rect)
+                _draw_layer_badge(painter, rect, self.BADGE_LABEL, color, active=True)
                 painter.setBrush(QColor(color.red(), color.green(), color.blue(), 235))
                 painter.setPen(QPen(QColor(12, 24, 38, 220), 1))
                 for handle_rect in self._handle_rects(rect).values():
                     painter.drawEllipse(handle_rect)
+            else:
+                painter.setBrush(QColor(color.red(), color.green(), color.blue(), 16))
+                painter.setPen(QPen(QColor(color.red(), color.green(), color.blue(), 165), 1.5, Qt.DashLine))
+                painter.drawRect(rect)
+                _draw_layer_badge(painter, rect, self.BADGE_LABEL, color, active=False)
+
+        if self._drag_mode == "move" and (getattr(self, "_snap_x", False) or getattr(self, "_snap_y", False)):
+            visible_rect = self._visible_canvas_rect()
+            painter.save()
+            painter.setPen(QPen(QColor("#6ee7d6"), 1, Qt.DashLine))
+            if self._snap_x:
+                cx = visible_rect.left() + 0.5 * visible_rect.width()
+                painter.drawLine(QPointF(cx, visible_rect.top()), QPointF(cx, visible_rect.bottom()))
+            if self._snap_y:
+                cy = visible_rect.top() + 0.5 * visible_rect.height()
+                painter.drawLine(QPointF(visible_rect.left(), cy), QPointF(visible_rect.right(), cy))
+            painter.restore()
 
 
 class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
@@ -904,6 +1189,7 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
     Delete button.
     """
 
+    BADGE_LABEL = "Logo"
     logoMoved = Signal(float, float, float, float)
     logoDeleted = Signal()
     logoEditFinished = Signal()
@@ -932,10 +1218,11 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
         if self._regions and self._target_view and self._target_view.isVisible():
             self.sync_to_view()
             self.show()
-            self.raise_()
         elif not self._regions:
             self.hide()
         self.update()
+        if self._target_view is not None and hasattr(self._target_view, "_sync_overlay_stack_order"):
+            self._target_view._sync_overlay_stack_order()
 
     def clear_region(self):
         if hasattr(self, "_sync_timer") and self._sync_timer is not None:
@@ -956,40 +1243,62 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
 
     def sync_to_view(self):
         """Keep the logo image positioned even when edit handles are hidden."""
-        win = self._target_view.window() if self._target_view else None
-        if getattr(win, "_project_loading_in_progress", False):
+        if not _is_valid_qobject(self._target_view):
             self.hide()
             return
-        if (not self._logical_visible or self._suspended or not self._target_view
-                or not self._target_view.isVisible() or not self._regions):
+        if _should_suppress_overlay(self._target_view):
             self.hide()
             return
-        top_left = self._target_view.mapToGlobal(QPoint(0, 0))
-        self.setGeometry(QRect(top_left, self._target_view.size()))
+        if (not self._logical_visible or self._suspended or not self._target_view.isVisible()
+                or not self._regions):
+            self.hide()
+            return
+        target_rect = self._target_view.rect()
+        clipped_rect = _clipped_view_local_rect(self._target_view, target_rect)
+        if clipped_rect.width() <= 2 or clipped_rect.height() <= 2:
+            self.hide()
+            return
+        self._offset_x = float(target_rect.left() - clipped_rect.left())
+        self._offset_y = float(target_rect.top() - clipped_rect.top())
+        top_left = self._target_view.mapToGlobal(clipped_rect.topLeft())
+        self.setGeometry(QRect(top_left, clipped_rect.size()))
         self.show()
-        self.raise_()
+        if hasattr(self._target_view, "_sync_overlay_stack_order"):
+            self._target_view._sync_overlay_stack_order()
+        else:
+            self.raise_()
         self.update()
 
     def attach_to_view(self, view: QWidget):
-        # Inherit the base behavior (event filter on main window,
-        # initial sync).
         super().attach_to_view(view)
-        # Also install an event filter on the target view so the
-        # overlay follows it on Resize/Move (the base blur overlay
-        # only filters the main window).
         if view is not None:
             try:
                 view.installEventFilter(self)
             except Exception:
                 pass
-        # Periodic sync as a fallback to keep the overlay aligned
-        # with the target view (covers missed resize/move events,
-        # e.g. when the dock is resized by the splitter).
         if self._sync_timer is None:
             self._sync_timer = QTimer(self)
             self._sync_timer.setInterval(300)
-            self._sync_timer.timeout.connect(self.sync_to_view)
+            self._sync_timer.timeout.connect(self._on_sync_timer)
         self._sync_timer.start()
+
+    def _on_sync_timer(self):
+        if not _is_valid_qobject(self._target_view) or not self._target_view.isVisible():
+            return
+        if _should_suppress_overlay(self._target_view):
+            self.hide()
+            return
+        target_rect = self._target_view.rect()
+        clipped_rect = _clipped_view_local_rect(self._target_view, target_rect)
+        if clipped_rect.width() <= 2 or clipped_rect.height() <= 2:
+            self.hide()
+            return
+        self._offset_x = float(target_rect.left() - clipped_rect.left())
+        self._offset_y = float(target_rect.top() - clipped_rect.top())
+        top_left = self._target_view.mapToGlobal(clipped_rect.topLeft())
+        new_geom = QRect(top_left, clipped_rect.size())
+        if self.geometry() != new_geom:
+            self.setGeometry(new_geom)
 
     def eventFilter(self, watched, event):
         try:
@@ -1096,6 +1405,8 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        if getattr(self, "_offset_x", 0.0) != 0.0 or getattr(self, "_offset_y", 0.0) != 0.0:
+            painter.translate(self._offset_x, self._offset_y)
         painter.setCompositionMode(QPainter.CompositionMode_Source)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
@@ -1124,17 +1435,34 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
             # border) so they remain axis-aligned and
             # fully opaque even when the logo is rotated or faded.
             painter.restore()
-            if self._editable and index == self._active_index:
-                pen = QPen(QColor(110, 231, 214, int(255 * max(opacity, 0.4))),
-                           2, Qt.DashLine)
+            is_active = bool(self._editable and index == self._active_index)
+            if is_active:
+                pen = QPen(QColor(110, 231, 214), 2, Qt.DashLine)
                 painter.setPen(pen)
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRect(rect)
-            if self._editable and index == self._active_index:
+                _draw_layer_badge(painter, rect, self.BADGE_LABEL, QColor(110, 231, 214), active=True)
                 painter.setBrush(QColor(110, 231, 214))
                 painter.setPen(QPen(QColor(12, 24, 38, 220), 1))
                 for handle_rect in self._handle_rects(rect).values():
                     painter.drawEllipse(handle_rect)
+            elif not getattr(self, "_in_review_mode", False):
+                painter.setPen(QPen(QColor(110, 231, 214, 150), 1.2, Qt.DashLine))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(rect)
+                _draw_layer_badge(painter, rect, self.BADGE_LABEL, QColor(110, 231, 214), active=False)
+
+        if self._drag_mode == "move" and (getattr(self, "_snap_x", False) or getattr(self, "_snap_y", False)):
+            visible_rect = self._visible_canvas_rect()
+            painter.save()
+            painter.setPen(QPen(QColor("#6ee7d6"), 1, Qt.DashLine))
+            if self._snap_x:
+                cx = visible_rect.left() + 0.5 * visible_rect.width()
+                painter.drawLine(QPointF(cx, visible_rect.top()), QPointF(cx, visible_rect.bottom()))
+            if self._snap_y:
+                cy = visible_rect.top() + 0.5 * visible_rect.height()
+                painter.drawLine(QPointF(visible_rect.left(), cy), QPointF(visible_rect.right(), cy))
+            painter.restore()
 class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
     """Mask overlay that reuses the blur overlay's full structure.
 
@@ -1149,6 +1477,7 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
     a UI affordance for the user to position the region.
     """
 
+    BADGE_LABEL = "Mask"
     maskMoved = Signal(float, float, float, float)
     maskDeleted = Signal()
     maskEditFinished = Signal()
@@ -1225,16 +1554,30 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
         if self._sync_timer is None:
             self._sync_timer = QTimer(self)
             self._sync_timer.setInterval(300)
-            self._sync_timer.timeout.connect(self.sync_to_view)
+            self._sync_timer.timeout.connect(self._on_sync_timer)
         self._sync_timer.start()
 
+    def _on_sync_timer(self):
+        if not _is_valid_qobject(self._target_view) or not self._target_view.isVisible():
+            return
+        if _should_suppress_overlay(self._target_view):
+            self.hide()
+            return
+        target_rect = self._target_view.rect()
+        clipped_rect = _clipped_view_local_rect(self._target_view, target_rect)
+        if clipped_rect.width() <= 2 or clipped_rect.height() <= 2:
+            self.hide()
+            return
+        self._offset_x = float(target_rect.left() - clipped_rect.left())
+        self._offset_y = float(target_rect.top() - clipped_rect.top())
+        top_left = self._target_view.mapToGlobal(clipped_rect.topLeft())
+        new_geom = QRect(top_left, clipped_rect.size())
+        if self.geometry() != new_geom:
+            self.setGeometry(new_geom)
+
     def eventFilter(self, watched, event):
-        try:
-            import shiboken6
-            if not shiboken6.isValid(self):
-                return False
-        except Exception:
-            pass
+        if not _is_valid_qobject(self):
+            return False
         try:
             if self._target_view is not None and watched is self._target_view and event.type() in (
                 QEvent.Resize, QEvent.Move,
@@ -1249,6 +1592,8 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        if getattr(self, "_offset_x", 0.0) != 0.0 or getattr(self, "_offset_y", 0.0) != 0.0:
+            painter.translate(self._offset_x, self._offset_y)
         painter.setCompositionMode(QPainter.CompositionMode_Source)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
@@ -1258,21 +1603,35 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
             rect = self.region_rect(index)
             if rect.width() <= 0 or rect.height() <= 0:
                 continue
-            # The actual mask effect is rendered by MPV. The editor overlay
-            # must remain transparent so selecting a layer cannot tint or
-            # change the opacity of the video beneath it.
+            is_active = bool(self._editable and index == self._active_index)
             accent = QColor(self.ACCENT)
-            pen = QPen(accent, 2, Qt.DashLine)
-            if self._editable and index == self._active_index:
-                painter.setPen(pen)
-                # Preserve a full-region hit target while keeping the mask
-                # editor visually transparent over the video.
-                painter.setBrush(QColor(0, 0, 0, 1))
+            fill = QColor(self._fill_color.red(), self._fill_color.green(), self._fill_color.blue(), 36 if is_active else 22)
+            if is_active:
+                painter.setPen(QPen(accent, 2, Qt.DashLine))
+                painter.setBrush(fill)
                 painter.drawRect(rect)
+                _draw_layer_badge(painter, rect, self.BADGE_LABEL, accent, active=True)
                 painter.setBrush(accent)
                 painter.setPen(QPen(QColor(12, 24, 38, 220), 1))
                 for handle_rect in self._handle_rects(rect).values():
                     painter.drawEllipse(handle_rect)
+            else:
+                painter.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), 175), 1.5, Qt.DashLine))
+                painter.setBrush(fill)
+                painter.drawRect(rect)
+                _draw_layer_badge(painter, rect, self.BADGE_LABEL, accent, active=False)
+
+        if self._drag_mode == "move" and (getattr(self, "_snap_x", False) or getattr(self, "_snap_y", False)):
+            visible_rect = self._visible_canvas_rect()
+            painter.save()
+            painter.setPen(QPen(QColor("#6ee7d6"), 1, Qt.DashLine))
+            if self._snap_x:
+                cx = visible_rect.left() + 0.5 * visible_rect.width()
+                painter.drawLine(QPointF(cx, visible_rect.top()), QPointF(cx, visible_rect.bottom()))
+            if self._snap_y:
+                cy = visible_rect.top() + 0.5 * visible_rect.height()
+                painter.drawLine(QPointF(visible_rect.left(), cy), QPointF(visible_rect.right(), cy))
+            painter.restore()
 class _TextLayerOverlayWindow(QWidget):
     """Top-level, editable overlay for ordinary text layers."""
     layerSelected = Signal(str)
@@ -1285,19 +1644,88 @@ class _TextLayerOverlayWindow(QWidget):
         self._target_view, self._items, self._active_id = None, [], ""
         self._drag_id, self._drag_offset, self._suppressed = "", QPointF(), False
         self._editable = False
+        self._in_review_mode = False
+        self._snap_x, self._snap_y = False, False
+        self._offset_x, self._offset_y = 0.0, 0.0
+        self._last_emit_ts = 0.0
+        self._main_window = None
+        self._canvas_width, self._canvas_height = 0.0, 0.0
         self.hide()
 
-    def attach_to_view(self, view): self._target_view = view
+    def set_review_mode(self, in_review: bool):
+        self._in_review_mode = bool(in_review)
+        self.update()
+
+    def attach_to_view(self, view):
+        if self._target_view is not None and _is_valid_qobject(self._target_view):
+            try:
+                self._target_view.destroyed.disconnect(self._on_target_view_destroyed)
+            except Exception:
+                pass
+        self._target_view = view
+        if view:
+            if hasattr(view, "destroyed"):
+                try:
+                    view.destroyed.connect(self._on_target_view_destroyed)
+                except Exception:
+                    pass
+            if view.window():
+                new_win = view.window()
+                if self._main_window is not None and self._main_window is not new_win:
+                    try:
+                        self._main_window.removeEventFilter(self)
+                    except Exception:
+                        pass
+                self._main_window = new_win
+                try:
+                    self._main_window.removeEventFilter(self)
+                    self._main_window.installEventFilter(self)
+                except Exception:
+                    pass
+
+    def _on_target_view_destroyed(self):
+        self._target_view = None
+        self.hide()
+
+    def eventFilter(self, watched, event):
+        if not _is_valid_qobject(self):
+            return False
+        try:
+            if self._main_window is not None and watched is self._main_window:
+                event_type = event.type()
+                if event_type == QEvent.WindowDeactivate:
+                    if _is_own_overlay_window(self._target_view, QApplication.activeWindow()):
+                        return False
+                    self._suppressed = True
+                    if self.isVisible():
+                        self.hide()
+                elif event_type in (QEvent.WindowActivate, QEvent.WindowStateChange, getattr(QEvent, "ApplicationStateChange", None)):
+                    self._suppressed = False
+                    if self._items and _is_valid_qobject(self._target_view) and self._target_view.isVisible():
+                        self.sync_to_view()
+                        self.show()
+                        if hasattr(self._target_view, "_sync_overlay_stack_order"):
+                            self._target_view._sync_overlay_stack_order()
+                        else:
+                            self.raise_()
+        except (RuntimeError, ReferenceError):
+            return False
+        return False
+
     def set_suppressed(self, suppressed):
         self._suppressed = bool(suppressed)
-        win = self._target_view.window() if self._target_view else None
-        is_loading = getattr(win, "_project_loading_in_progress", False)
-        if self._suppressed or is_loading:
+        if _should_suppress_overlay(self._target_view):
             super().hide()
-        elif self._items and self._target_view and self._target_view.isVisible():
+        elif self._items and _is_valid_qobject(self._target_view) and self._target_view.isVisible():
             self.sync_to_view()
             super().show()
-            self.raise_()
+            if hasattr(self._target_view, "_sync_overlay_stack_order"):
+                self._target_view._sync_overlay_stack_order()
+            else:
+                self.raise_()
+        else:
+            super().hide()
+
     def set_editable(self, editable):
         """Make the tool overlay interactive only in paused Edit Mode."""
         self._editable = bool(editable)
@@ -1307,30 +1735,46 @@ class _TextLayerOverlayWindow(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, not self._editable)
         self._update_input_mask()
         self.update()
+        if self._target_view is not None and hasattr(self._target_view, "_sync_overlay_stack_order"):
+            self._target_view._sync_overlay_stack_order()
+
     def set_items(self, items, active_id=""):
         self._items, self._active_id = list(items or []), str(active_id or "")
         self.sync_to_view()
         self._update_input_mask()
         self.update()
-        win = self._target_view.window() if self._target_view else None
-        is_loading = getattr(win, "_project_loading_in_progress", False)
-        if self._items and not self._suppressed and not is_loading and self._target_view and self._target_view.isVisible():
+        if self._items and not self._suppressed and not _should_suppress_overlay(self._target_view):
             self.show()
-            self.raise_()
+            if hasattr(self._target_view, "_sync_overlay_stack_order"):
+                self._target_view._sync_overlay_stack_order()
+            else:
+                self.raise_()
         else:
             self.hide()
+
     def sync_to_view(self):
-        if not self._target_view:
+        if not _is_valid_qobject(self._target_view):
+            self.hide()
             return
-        win = self._target_view.window() if self._target_view else None
-        if getattr(win, "_project_loading_in_progress", False):
+        if _should_suppress_overlay(self._target_view):
             self.hide()
             return
         canvas = self._target_view.get_preview_canvas_rect()
-        if canvas.width() > 0 and canvas.height() > 0:
-            canvas_rect = canvas.toRect() if hasattr(canvas, "toRect") else canvas
-            self.setGeometry(QRect(self._target_view.mapToGlobal(canvas_rect.topLeft()), canvas_rect.size()))
-            self._update_input_mask()
+        if canvas.width() <= 0 or canvas.height() <= 0:
+            self.hide()
+            return
+        canvas_rect = canvas.toRect() if hasattr(canvas, "toRect") else canvas
+        clipped_rect = _clipped_view_local_rect(self._target_view, canvas_rect)
+        if clipped_rect.width() <= 2 or clipped_rect.height() <= 2:
+            self.hide()
+            return
+        self._offset_x = float(canvas_rect.left() - clipped_rect.left())
+        self._offset_y = float(canvas_rect.top() - clipped_rect.top())
+        self._canvas_width = float(canvas_rect.width())
+        self._canvas_height = float(canvas_rect.height())
+        top_left = self._target_view.mapToGlobal(clipped_rect.topLeft())
+        self.setGeometry(QRect(top_left, clipped_rect.size()))
+        self._update_input_mask()
 
     def _update_input_mask(self):
         """Let clicks pass through unused parts of this full-canvas tool window."""
@@ -1338,77 +1782,153 @@ class _TextLayerOverlayWindow(QWidget):
         if not self._editable:
             self.setMask(region)
             return
+        ox = getattr(self, "_offset_x", 0.0)
+        oy = getattr(self, "_offset_y", 0.0)
         for item in self._items:
             rect, *_ = self._rect_for(item)
-            region |= QRegion(rect.adjusted(-4, -4, 4, 4).toAlignedRect())
+            region |= QRegion(rect.translated(ox, oy).adjusted(-4, -4, 4, 4).toAlignedRect())
         self.setMask(region)
+
     def _rect_for(self, item):
         from app.layers.text_renderer import layout_text_layer
-        layout = layout_text_layer(item, self.width(), self.height())
+        w = getattr(self, "_canvas_width", 0.0) or float(self.width())
+        h = getattr(self, "_canvas_height", 0.0) or float(self.height())
+        layout = layout_text_layer(item, int(round(w)), int(round(h)))
         return layout.rect, layout.font, layout.metrics, layout.lines
+
     def paintEvent(self, event):
-        painter = QPainter(self); painter.setRenderHint(QPainter.TextAntialiasing)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        if getattr(self, "_offset_x", 0.0) != 0.0 or getattr(self, "_offset_y", 0.0) != 0.0:
+            painter.translate(self._offset_x, self._offset_y)
+        w = getattr(self, "_canvas_width", 0.0) or float(self.width())
+        h = getattr(self, "_canvas_height", 0.0) or float(self.height())
         for item in self._items:
             from app.layers.text_renderer import layout_text_layer, paint_text_layer
-            layout = layout_text_layer(item, self.width(), self.height())
+            layout = layout_text_layer(item, int(round(w)), int(round(h)))
             rect = layout.rect
+            if self._editable:
+                painter.fillRect(rect, QColor(255, 255, 255, 2))
             paint_text_layer(painter, item, layout)
-            if str(item.get("id", "")) == self._active_id:
-                painter.setPen(QPen(QColor("#6ee7d6"), 1, Qt.DashLine)); painter.setBrush(Qt.NoBrush); painter.drawRect(rect)
+            is_active = (str(item.get("id", "")) == self._active_id and not getattr(self, "_in_review_mode", False))
+            if is_active:
+                painter.setPen(QPen(QColor("#6ee7d6"), 1.5, Qt.DashLine))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(rect)
+                _draw_layer_badge(painter, rect, "Text", QColor("#6ee7d6"), active=True)
+            elif not getattr(self, "_in_review_mode", False):
+                painter.setPen(QPen(QColor(110, 231, 214, 135), 1, Qt.DashLine))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(rect)
+                _draw_layer_badge(painter, rect, "Text", QColor("#6ee7d6"), active=False)
+        if self._drag_id and (getattr(self, "_snap_x", False) or getattr(self, "_snap_y", False)):
+            painter.save()
+            painter.setPen(QPen(QColor("#6ee7d6"), 1, Qt.DashLine))
+            if self._snap_x:
+                cx = w * 0.5
+                painter.drawLine(QPointF(cx, 0), QPointF(cx, h))
+            if self._snap_y:
+                cy = h * 0.5
+                painter.drawLine(QPointF(0, cy), QPointF(w, cy))
+            painter.restore()
+
     def mousePressEvent(self, event):
         if not self._editable:
-            event.ignore(); return
+            event.ignore()
+            return
         if event.button() == Qt.LeftButton:
-            pos = QPointF(event.position())
+            pos = QPointF(event.position()) - QPointF(getattr(self, "_offset_x", 0.0), getattr(self, "_offset_y", 0.0))
             for item in reversed(self._items):
                 rect, *_ = self._rect_for(item)
                 if rect.contains(pos):
-                    self._active_id = self._drag_id = str(item.get("id", "")); self._drag_offset = pos - rect.center()
-                    # Selection refreshes the inspector and preview
-                    # synchronously. Emit it first, then install the full
-                    # canvas mask so that refresh cannot replace it with the
-                    # text-sized click mask mid-drag.
+                    self._active_id = self._drag_id = str(item.get("id", ""))
+                    self._drag_offset = pos - rect.center()
                     self.layerSelected.emit(self._active_id)
-                    # The normal input mask is limited to text bounds so other
-                    # preview tools remain clickable. Once a drag starts it
-                    # must cover the full canvas, otherwise Qt stops sending
-                    # move events as soon as the pointer leaves the text.
                     self.setMask(QRegion(self.rect()))
-                    self.setCursor(Qt.ClosedHandCursor); self.update(); event.accept(); return
+                    try:
+                        self.grabMouse()
+                    except Exception:
+                        pass
+                    self.setCursor(Qt.ClosedHandCursor)
+                    self.update()
+                    event.accept()
+                    return
         event.ignore()
+
     def mouseMoveEvent(self, event):
         if not self._editable:
-            event.ignore(); return
-        if not self._drag_id or self.width() <= 0 or self.height() <= 0: return
-        point = QPointF(event.position()) - self._drag_offset
+            event.ignore()
+            return
+        w = getattr(self, "_canvas_width", 0.0) or float(self.width())
+        h = getattr(self, "_canvas_height", 0.0) or float(self.height())
+        if not self._drag_id or w <= 0 or h <= 0:
+            return
+        pos = QPointF(event.position()) - QPointF(getattr(self, "_offset_x", 0.0), getattr(self, "_offset_y", 0.0))
+        point = pos - self._drag_offset
         item = next((candidate for candidate in self._items
                      if str(candidate.get("id", "")) == self._drag_id), None)
         if item is None:
             return
-        # x/y are the text block's center, unlike a resize handle's top-left
-        # coordinates.  Clamping the center alone lets a wide/tall text block
-        # cross the canvas edge, which made Text behave differently from the
-        # other visual layers.  Keep the whole rendered block inside the
-        # preview canvas while preserving its current layout metrics.
         rect, *_ = self._rect_for(item)
-        half_w = max(0.0, float(rect.width()) / (2.0 * self.width()))
-        half_h = max(0.0, float(rect.height()) / (2.0 * self.height()))
+        half_w = max(0.0, float(rect.width()) / (2.0 * w))
+        half_h = max(0.0, float(rect.height()) / (2.0 * h))
         if half_w >= 0.5:
             x = 0.5
         else:
-            x = max(half_w, min(1.0 - half_w, point.x() / self.width()))
+            x = max(half_w, min(1.0 - half_w, point.x() / w))
         if half_h >= 0.5:
             y = 0.5
         else:
-            y = max(half_h, min(1.0 - half_h, point.y() / self.height()))
+            y = max(half_h, min(1.0 - half_h, point.y() / h))
+
+        if abs(x - 0.5) <= 0.02:
+            x = 0.5
+            self._snap_x = True
+        else:
+            self._snap_x = False
+        if abs(y - 0.5) <= 0.02:
+            y = 0.5
+            self._snap_y = True
+        else:
+            self._snap_y = False
         item["x"], item["y"] = x, y
-        self.layerMoved.emit(self._drag_id, x, y); self.update(); event.accept()
+
+        now = time.monotonic()
+        if now - getattr(self, "_last_emit_ts", 0.0) >= 0.016:
+            self._last_emit_ts = now
+            self.layerMoved.emit(self._drag_id, x, y)
+        self.update()
+        event.accept()
+
     def mouseReleaseEvent(self, event):
         if self._drag_id:
+            try:
+                if self.mouseGrabber() is self:
+                    self.releaseMouse()
+            except Exception:
+                pass
+            item = next((candidate for candidate in self._items
+                         if str(candidate.get("id", "")) == self._drag_id), None)
+            if item is not None and "x" in item and "y" in item:
+                self.layerMoved.emit(self._drag_id, item["x"], item["y"])
             self._drag_id = ""
+            self._snap_x = False
+            self._snap_y = False
             self._update_input_mask()
             self.setCursor(Qt.OpenHandCursor)
+            self.update()
             event.accept()
+
+    def hideEvent(self, event):
+        try:
+            if self.mouseGrabber() is self:
+                self.releaseMouse()
+        except Exception:
+            pass
+        self._drag_id = ""
+        self._snap_x = False
+        self._snap_y = False
+        super().hideEvent(event)
 
 
 class MpvVideoView(QWidget):
@@ -1489,6 +2009,10 @@ class MpvVideoView(QWidget):
         # maskDeleted signal is emitted but nothing listens, so the
         # layer is never removed from the timeline.
         self.mask_overlay.maskDeleted.connect(self.maskDeleted.emit)
+        self._blur_overlay = self.blur_overlay
+        self._mask_overlay = self.mask_overlay
+        self._logo_overlay = getattr(self, "logo_overlay", None)
+        self._text_overlay = self.text_overlay
         self.ratio_badge = QLabel(self)
         self.ratio_badge.setObjectName("previewRatioBadge")
         self.ratio_badge.setAlignment(Qt.AlignCenter)
@@ -1506,14 +2030,78 @@ class MpvVideoView(QWidget):
         # showEvent() once the main window is displayed, avoiding an orphan native surface.
         self._sync_preview_stack()
 
+    def _sync_aux_overlays(self):
+        if hasattr(self, "blur_overlay") and self.blur_overlay is not None:
+            self.blur_overlay.sync_to_view()
+        if hasattr(self, "mask_overlay") and self.mask_overlay is not None:
+            self.mask_overlay.sync_to_view()
+        if getattr(self, "logo_overlay", None) is not None:
+            self.logo_overlay.sync_to_view()
+        if getattr(self, "text_overlay", None) is not None:
+            self.text_overlay.sync_to_view()
+        self._sync_overlay_stack_order()
+
+    def _sync_overlay_stack_order(self):
+        overlays = [
+            getattr(self, "blur_overlay", None),
+            getattr(self, "mask_overlay", None),
+            getattr(self, "logo_overlay", None),
+            getattr(self, "text_overlay", None),
+            getattr(self, "subtitle_item", None),
+        ]
+        valid_overlays = [o for o in overlays if o is not None and _is_valid_qobject(o)]
+        if _should_suppress_overlay(self):
+            for o in valid_overlays:
+                try:
+                    o.hide()
+                except Exception:
+                    pass
+            return
+
+        editable_overlay = None
+        for o in valid_overlays:
+            if o.isVisible():
+                try:
+                    o.raise_()
+                except Exception:
+                    pass
+            if getattr(o, "_editable", False):
+                editable_overlay = o
+
+        if editable_overlay is not None and editable_overlay.isVisible():
+            try:
+                editable_overlay.raise_()
+            except Exception:
+                pass
+
+    def set_blur_region_editable(self, editable: bool):
+        self.set_blur_edit_enabled(editable)
+
+    def set_logo_editable(self, editable: bool):
+        if getattr(self, "logo_overlay", None) is not None:
+            self.logo_overlay.set_editable(editable)
+        self._sync_overlay_stack_order()
+
+    def set_mask_editable(self, editable: bool):
+        if getattr(self, "mask_overlay", None) is not None:
+            self.mask_overlay.set_editable(editable)
+        self._sync_overlay_stack_order()
+
+    def set_subtitle_editable(self, editable: bool):
+        if getattr(self, "subtitle_item", None) is not None:
+            self.subtitle_item.set_editable(editable)
+        self._sync_overlay_stack_order()
+
+    def set_text_layer_editable(self, editable: bool):
+        if getattr(self, "text_overlay", None) is not None:
+            self.text_overlay.set_editable(editable)
+        self._sync_overlay_stack_order()
 
     def _sync_preview_stack(self):
         self._update_preview_clip_mask()
         self._update_video_surface_mask()
         self.video_surface.lower()
-        self.subtitle_item.raise_()
-        if self.text_overlay is not None:
-            self.text_overlay.raise_()
+        self._sync_overlay_stack_order()
         self.ratio_badge.raise_()
 
     def _update_preview_clip_mask(self):
@@ -1556,10 +2144,12 @@ class MpvVideoView(QWidget):
         """Update every ordinary text layer visible above the MPV surface."""
         if self.text_overlay is None:
             self.text_overlay = _TextLayerOverlayWindow()
+            self._text_overlay = self.text_overlay
             self.text_overlay.attach_to_view(self)
             self.text_overlay.layerSelected.connect(self.textLayerSelected.emit)
             self.text_overlay.layerMoved.connect(self.textLayerMoved.emit)
         self.text_overlay.set_items(layers, active_id)
+        self._sync_overlay_stack_order()
 
     def set_video_dimensions(self, width: int, height: int):
         self.video_source_width = max(0, int(width or 0))
@@ -1642,10 +2232,13 @@ class MpvVideoView(QWidget):
             if watched is self.window():
                 event_type = event.type()
                 if event_type == QEvent.WindowActivate:
-                    QTimer.singleShot(0, self, self._restore_subtitle_overlay)
+                    QTimer.singleShot(0, lambda: self._restore_subtitle_overlay() if _is_valid_qobject(self) else None)
+                    QTimer.singleShot(60, lambda: self._restore_subtitle_overlay() if _is_valid_qobject(self) else None)
                 else:
                     blocked_type = getattr(QEvent.Type, "WindowBlocked", None)
                     if event_type != QEvent.WindowDeactivate and event_type != blocked_type:
+                        return False
+                    if _is_own_overlay_window(self, QApplication.activeWindow()):
                         return False
                     self.subtitle_item.hide()
                     if self.text_overlay is not None:
@@ -1655,7 +2248,7 @@ class MpvVideoView(QWidget):
         return False
 
     def _restore_subtitle_overlay(self):
-        if not self.isVisible():
+        if not _is_valid_qobject(self) or not self.isVisible():
             return
         win = self.window()
         if getattr(win, "_project_loading_in_progress", False):
@@ -1663,15 +2256,25 @@ class MpvVideoView(QWidget):
         modal = QApplication.activeModalWidget()
         if modal is not None and modal.isVisible():
             return
+
+        for attr in ("blur_overlay", "mask_overlay", "logo_overlay"):
+            ov = getattr(self, attr, None)
+            if ov is not None and _is_valid_qobject(ov):
+                ov._suspended = False
+                ov.attach_to_view(self)
+                ov.sync_to_view()
+
+        if self.text_overlay is not None and _is_valid_qobject(self.text_overlay):
+            self.text_overlay._suppressed = False
+            if self.text_overlay._items:
+                self.text_overlay.sync_to_view()
+                self.text_overlay.show()
+
         if self._subtitle_track_visible and self.subtitle_item.current_text:
             self.reposition_subtitle()
             self.subtitle_item.show()
-            self.subtitle_item.raise_()
-        if (self.text_overlay is not None and self.text_overlay._items
-                and not self.text_overlay._suppressed):
-            self.text_overlay.sync_to_view()
-            self.text_overlay.show()
-            self.text_overlay.raise_()
+
+        self._sync_overlay_stack_order()
 
     def set_subtitle_track_visible(self, visible: bool):
         """Set logical TS1 visibility independently of native window focus."""
@@ -1683,6 +2286,7 @@ class MpvVideoView(QWidget):
             self.reposition_subtitle()
             self.subtitle_item.show()
             self.subtitle_item.raise_()
+        self._sync_overlay_stack_order()
 
     def set_logo_track_visible(self, visible: bool):
         """Preserve L1 Hide/Show across native surface show/focus events."""
@@ -1698,13 +2302,22 @@ class MpvVideoView(QWidget):
         self.subtitle_render_height = max(0, int(height or 0))
         self.reposition_subtitle()
 
+    def closeEvent(self, event):
+        self._hide_all_overlays()
+        super().closeEvent(event)
+
     def hideEvent(self, event):
+        self._hide_all_overlays()
         super().hideEvent(event)
-        self.subtitle_item.hide()
-        self.blur_overlay.hide()
-        self.mask_overlay.hide()
-        if self.text_overlay is not None:
-            self.text_overlay.hide()
+
+    def _hide_all_overlays(self):
+        for attr in ("subtitle_item", "blur_overlay", "mask_overlay", "logo_overlay", "text_overlay"):
+            overlay = getattr(self, attr, None)
+            if overlay is not None and _is_valid_qobject(overlay):
+                try:
+                    overlay.hide()
+                except Exception:
+                    pass
 
     def set_preview_aspect_ratio(self, aspect_key: str):
         self.preview_aspect_key = str(aspect_key or "source").strip().lower() or "source"
@@ -1861,6 +2474,12 @@ class MpvVideoView(QWidget):
 
     def reposition_subtitle(self):
         item = self.subtitle_item
+        if not _is_valid_qobject(self) or not _is_valid_qobject(item):
+            return
+        if _should_suppress_overlay(self):
+            item.hide()
+            return
+
         rect = self.get_preview_canvas_rect()
         if rect.width() <= 0 or rect.height() <= 0:
             return
@@ -1883,8 +2502,10 @@ class MpvVideoView(QWidget):
         right_limit = rect.right() - item_w - side_margin_px
 
         if item.custom_position_enabled:
-            x_pos = rect.left() + (rect.width() * item.custom_x_percent / 100.0) - (item_w / 2.0)
-            y_pos = rect.top() + (rect.height() * item.custom_y_percent / 100.0) - (item_h / 2.0)
+            eff_x_pct = item._drag_x_pct if (getattr(item, "_drag_active", False) and getattr(item, "_drag_x_pct", None) is not None) else float(item.custom_x_percent)
+            eff_y_pct = item._drag_y_pct if (getattr(item, "_drag_active", False) and getattr(item, "_drag_y_pct", None) is not None) else float(item.custom_y_percent)
+            x_pos = rect.left() + (rect.width() * eff_x_pct / 100.0) - (item_w / 2.0)
+            y_pos = rect.top() + (rect.height() * eff_y_pct / 100.0) - (item_h / 2.0)
         else:
             if item.alignment == "Bottom Left":
                 x_pos = left_pad
@@ -1914,22 +2535,34 @@ class MpvVideoView(QWidget):
             y_max = rect.bottom()
             y_pos = max(y_min, min(y_pos, y_max))
 
-        # The subtitle uses a top-level overlay so it stays above MPV's
-        # native surface. Convert the preview-local position to global
-        # screen coordinates before moving it.
-        if item.is_top_level_overlay():
-            target_position = self.mapToGlobal(QPoint(int(x_pos), int(y_pos)))
-        else:
-            target_position = QPoint(int(x_pos), int(y_pos))
-        target_size = (int(item_w), int(item_h))
-        current_size = (item.width(), item.height())
-        if item.pos() == target_position and current_size == target_size:
+        raw_box = QRect(int(round(x_pos)), int(round(y_pos)), int(round(item_w)), int(round(item_h)))
+        visible_canvas = _clipped_view_local_rect(self, rect)
+        if visible_canvas.width() <= 2 or visible_canvas.height() <= 2:
+            item.hide()
             return
-        item.move(target_position)
+
+        clipped_box = raw_box.intersected(visible_canvas)
+        if clipped_box.width() <= 0 or clipped_box.height() <= 0:
+            item.hide()
+            return
+
+        item._offset_x = float(raw_box.left() - clipped_box.left())
+        item._offset_y = float(raw_box.top() - clipped_box.top())
+        item._canvas_size = rect.size().toSize()
+
+        if item.is_top_level_overlay():
+            target_position = self.mapToGlobal(clipped_box.topLeft())
+        else:
+            target_position = clipped_box.topLeft()
+        target_size = (int(clipped_box.width()), int(clipped_box.height()))
+        current_size = (item.width(), item.height())
+        if item.pos() != target_position:
+            item.move(target_position)
         if current_size != target_size:
             item.setFixedSize(*target_size)
         item.sync_to_view()
         item.update()
+        self._sync_overlay_stack_order()
 
     def _can_drag_framing(self) -> bool:
         if not bool(getattr(self, "_preview_framing_edit_enabled", False)):
@@ -2013,23 +2646,35 @@ class MpvVideoView(QWidget):
         painter.drawRoundedRect(canvas_rect, 12, 12)
 
     def set_blur_edit_enabled(self, enabled: bool):
-        if enabled:
-            self.blur_overlay.attach_to_view(self)
-            self.blur_overlay.set_editable(True)
-        else:
-            self.blur_overlay.hide()
-            self.blur_overlay.set_editable(False)
+        self.blur_overlay.attach_to_view(self)
+        self.blur_overlay.set_editable(bool(enabled))
+        self.blur_overlay.sync_to_view()
+        self._sync_overlay_stack_order()
 
     def add_blur_region(self):
         self.blur_overlay.attach_to_view(self)
         self.blur_overlay.add_region()
 
     def set_blur_regions_normalized(self, regions):
+        self.blur_overlay.attach_to_view(self)
         self.blur_overlay.set_regions(regions)
+        self._sync_overlay_stack_order()
 
     def set_blur_active_index(self, index: int):
         """Choose the sole editable B1 region; all others remain visible."""
         self.blur_overlay.set_active_index(index)
+
+    def set_blur_track_visible(self, visible: bool):
+        self.blur_overlay.set_logical_visible(bool(visible))
+
+    def set_mask_track_visible(self, visible: bool):
+        self.mask_overlay.set_logical_visible(bool(visible))
+
+    def set_overlays_review_mode(self, in_review: bool):
+        for attr in ("blur_overlay", "mask_overlay", "logo_overlay", "text_overlay"):
+            ov = getattr(self, attr, None)
+            if ov is not None and hasattr(ov, "set_review_mode"):
+                ov.set_review_mode(bool(in_review))
 
     def clear_blur_region(self):
         self.blur_overlay.clear_region()
@@ -2044,6 +2689,7 @@ class MpvVideoView(QWidget):
         self.mask_overlay.set_fill_color(color)
         self.mask_overlay.set_editable(True)
         self.mask_overlay.sync_to_view()
+        self._sync_overlay_stack_order()
 
     def set_mask_region(self, *, x: float, y: float, w: float, h: float,
                         color: str | QColor | None = None,
@@ -2054,6 +2700,7 @@ class MpvVideoView(QWidget):
             self.mask_overlay.set_fill_color(color)
         self.mask_overlay.set_editable(bool(editable))
         self.mask_overlay.sync_to_view()
+        self._sync_overlay_stack_order()
 
     def set_mask_regions(self, regions, *, active_index: int = 0,
                          editable: bool = True):
@@ -2062,6 +2709,7 @@ class MpvVideoView(QWidget):
         self.mask_overlay.set_mask_regions(regions, active_index)
         self.mask_overlay.set_editable(bool(editable))
         self.mask_overlay.sync_to_view()
+        self._sync_overlay_stack_order()
 
     def clear_mask_region(self):
         self.mask_overlay.set_editable(False)
@@ -2093,10 +2741,13 @@ class MpvVideoView(QWidget):
         self.logo_overlay.set_editable(True)
         self.logo_overlay.attach_to_view(self)
         self.logo_overlay.sync_to_view()
+        self._logo_overlay = self.logo_overlay
+        self._sync_overlay_stack_order()
         # Delayed syncs in case the view geometry isn't ready yet
-        QTimer.singleShot(50, self.logo_overlay, self.logo_overlay.sync_to_view)
-        QTimer.singleShot(200, self.logo_overlay, self.logo_overlay.sync_to_view)
-        QTimer.singleShot(500, self.logo_overlay, self.logo_overlay.sync_to_view)
+        logo_ov = self.logo_overlay
+        QTimer.singleShot(50, lambda: logo_ov.sync_to_view() if _is_valid_qobject(logo_ov) else None)
+        QTimer.singleShot(200, lambda: logo_ov.sync_to_view() if _is_valid_qobject(logo_ov) else None)
+        QTimer.singleShot(500, lambda: logo_ov.sync_to_view() if _is_valid_qobject(logo_ov) else None)
 
     def set_logos(self, logos, *, active_index: int = 0, editable: bool = True):
         """Render all L1 logos; only the selected layer is editable."""
@@ -2110,6 +2761,8 @@ class MpvVideoView(QWidget):
         self.logo_overlay.set_editable(bool(editable))
         self.logo_overlay.attach_to_view(self)
         self.logo_overlay.sync_to_view()
+        self._logo_overlay = self.logo_overlay
+        self._sync_overlay_stack_order()
 
     def update_logo_rect(self, x: float, y: float, w: float, h: float):
         if hasattr(self, "logo_overlay") and self.logo_overlay is not None:

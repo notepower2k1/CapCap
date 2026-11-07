@@ -1618,7 +1618,7 @@ class PreviewController:
         mask_regions, logo_layers, _text_layers = self._extract_overlay_layers()
         has_overlays = bool(mask_regions or logo_layers or (hasattr(self.gui, "has_active_overlay_layers") and self.gui.has_active_overlay_layers()))
         has_warps = bool(getattr(self.gui, "video_time_warps", []))
-        self.gui._preview_video_has_burned_subtitles = bool(mode == "subtitle" and (has_active_video_filters or has_overlays))
+        self.gui._preview_video_has_burned_subtitles = False
 
         # Subtitle-only preview can stay live when no canvas/filter/overlay processing is needed and no video time warps.
         if mode == "subtitle" and not has_active_video_filters and not has_overlays and not has_warps:
@@ -1705,7 +1705,7 @@ class PreviewController:
         if styled_signature:
             self.gui.log(f"[Preview] styled cache miss: {styled_signature[:10]}")
         self.gui._styled_preview_running = True
-        self.gui._preview_video_has_burned_subtitles = bool(mode == "subtitle" and has_active_video_filters)
+        self.gui._preview_video_has_burned_subtitles = False
         if hasattr(self.gui, "preview_btn"):
             self.gui.preview_btn.setEnabled(False)
         self.gui.progress_bar.setValue(95)
@@ -1720,7 +1720,7 @@ class PreviewController:
             mode=mode,
             srt_path=preview_srt_path,
             subtitle_style=subtitle_style,
-            render_subtitles=bool(mode == "subtitle" and (has_active_video_filters or has_overlays)),
+            render_subtitles=False,
             target_width=target_width,
             target_height=target_height,
             output_scale_mode=self.gui.get_output_scale_mode_key(),

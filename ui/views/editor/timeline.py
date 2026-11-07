@@ -2,7 +2,7 @@ import math
 import os
 from bisect import bisect_right
 from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView, QPushButton
 
 
@@ -108,9 +108,13 @@ class EditorTimeline(QGraphicsView):
         # refreshes.  This prevents inserting an earlier cue from reflowing
         # every existing cue to different rows.
         self._overlap_row_assignments: dict[str, dict[str, int]] = {}
+        self._snap_guide_time: float | None = None
+        self._explicit_drag_mode: str | None = None
         self._waveform_samples: list[float] = []
         self._waveform_duration_s = 0.0
+        self._waveform_pixmap_cache: tuple | None = None  # tuple: (key, QPixmap)
         self._video_thumbnails: list[tuple[float, object]] = []
+        self._thumbnails_pixmap_cache: tuple | None = None  # tuple: (key, QPixmap)
         self._video_time_warps: list[dict] = []
         self._has_add_btn = False
         self._voice_sync_mode: str = "Smart"
@@ -163,13 +167,17 @@ class EditorTimeline(QGraphicsView):
         self._hover_layer_id = ""
         self._highlighted_speaker = ""
         self._drag_state = None
+        self._snap_guide_time = None
+        self._explicit_drag_mode = None
         self._timeline_hidden_track_ids.clear()
         self._segment_indices.clear()
         self._overlap_layout_cache.clear()
         self._overlap_row_assignments.clear()
         self._waveform_samples = []
         self._waveform_duration_s = 0.0
+        self._waveform_pixmap_cache = None
         self._video_thumbnails = []
+        self._thumbnails_pixmap_cache = None
         self._video_time_warps = []
         self._duration = 0.0
         self._duration_explicit = False
@@ -446,6 +454,30 @@ class EditorTimeline(QGraphicsView):
                 self.viewport().update()
                 return
 
+    @property
+    def playhead(self) -> float:
+        return self._playhead
+
+    @property
+    def waveform_samples(self) -> list[float]:
+        return self._waveform_samples
+
+    @property
+    def video_thumbnails(self) -> list[tuple[float, object]]:
+        return self._video_thumbnails
+
+    @property
+    def _drag_mode(self) -> str | None:
+        if hasattr(self, "_explicit_drag_mode") and self._explicit_drag_mode is not None:
+            return self._explicit_drag_mode
+        if self._drag_state and isinstance(self._drag_state, dict):
+            return self._drag_state.get("type")
+        return None
+
+    @_drag_mode.setter
+    def _drag_mode(self, val: str | None) -> None:
+        self._explicit_drag_mode = val
+
     def set_waveform_data(self, samples: list, duration_s: float) -> None:
         self._waveform_samples = [
             max(0.0, min(1.0, float(value)))
@@ -453,7 +485,12 @@ class EditorTimeline(QGraphicsView):
             if isinstance(value, (int, float))
         ]
         self._waveform_duration_s = max(0.0, float(duration_s or 0.0))
+        self._waveform_pixmap_cache = None
         self.viewport().update()
+
+    def set_waveform(self, *args, **kwargs) -> None:
+        """Alias for set_waveform_data."""
+        return self.set_waveform_data(*args, **kwargs)
 
     def set_video_thumbnails(self, thumbnails: list) -> None:
         self._video_thumbnails = [
@@ -461,6 +498,7 @@ class EditorTimeline(QGraphicsView):
             for timestamp, pixmap in (thumbnails or [])
             if pixmap is not None and not getattr(pixmap, "isNull", lambda: True)()
         ]
+        self._thumbnails_pixmap_cache = None
         self.viewport().update()
 
     def set_video_source(self, path: str, duration_s: float) -> None:
@@ -551,6 +589,11 @@ class EditorTimeline(QGraphicsView):
     # ---- End legacy API ----
 
     def set_playhead(self, seconds: float) -> None:
+        max_dur = float(getattr(self, "_duration", 0.0) or 0.0)
+        if max_dur > 0.0:
+            seconds = max(0.0, min(float(seconds), max_dur))
+        else:
+            seconds = max(0.0, float(seconds))
         self._playhead = seconds
         self._follow_playhead_during_playback()
         viewport = self.viewport()
@@ -1079,6 +1122,7 @@ class EditorTimeline(QGraphicsView):
         neighboring layer boundary and no other layer is moved, trimmed, or
         reassigned to another row.
         """
+        self._snap_guide_time = None
         if track is None:
             return value
         visible = [item for item in track.layers if item.visible]
@@ -1090,6 +1134,10 @@ class EditorTimeline(QGraphicsView):
         elif self._uses_layer_rows(track):
             # Each overlay row is independent, so it has no same-row
             # neighbors to constrain against.
+            threshold = getattr(self, "SNAP_THRESHOLD", 0.05)
+            if abs(value - self._playhead) <= threshold:
+                self._snap_guide_time = self._playhead
+                return self._playhead
             return value
         else:
             # A normal single-row track (including legacy layer tracks) uses
@@ -1099,22 +1147,56 @@ class EditorTimeline(QGraphicsView):
         if row is None:
             row = row_map.get(str(getattr(layer, "id", "")))
         if row is None:
+            threshold = getattr(self, "SNAP_THRESHOLD", 0.05)
+            if abs(value - self._playhead) <= threshold:
+                self._snap_guide_time = self._playhead
+                return self._playhead
             return value
         neighbors = [item for item in visible
                      if item is not layer and row_map.get(str(getattr(item, "id", ""))) == row]
+        threshold = getattr(self, "SNAP_THRESHOLD", 0.05)
         if edge == "left":
             left_boundary = max(
                 (float(getattr(item, "end", 0.0) or 0.0) for item in neighbors
                  if float(getattr(item, "end", 0.0) or 0.0) <= float(layer.start) + 0.001),
                 default=0.0,
             )
-            return max(value, left_boundary)
+            snaps = []
+            if abs(value - self._playhead) <= threshold:
+                snaps.append((abs(value - self._playhead), self._playhead))
+            if left_boundary > 0.0 and abs(value - left_boundary) <= threshold:
+                snaps.append((abs(value - left_boundary), left_boundary))
+            if snaps:
+                snaps.sort(key=lambda s: s[0])
+                snap_time = snaps[0][1]
+                if snap_time >= left_boundary:
+                    value = snap_time
+                    self._snap_guide_time = snap_time
+            clamped = max(value, left_boundary)
+            if self._snap_guide_time is not None and abs(clamped - self._snap_guide_time) > 1e-4:
+                self._snap_guide_time = None
+            return clamped
+
         right_boundary = min(
             (float(getattr(item, "start", self._duration) or self._duration) for item in neighbors
              if float(getattr(item, "start", self._duration) or self._duration) >= float(layer.end) - 0.001),
             default=self._duration,
         )
-        return min(value, right_boundary)
+        snaps = []
+        if abs(value - self._playhead) <= threshold:
+            snaps.append((abs(value - self._playhead), self._playhead))
+        if right_boundary < self._duration and abs(value - right_boundary) <= threshold:
+            snaps.append((abs(value - right_boundary), right_boundary))
+        if snaps:
+            snaps.sort(key=lambda s: s[0])
+            snap_time = snaps[0][1]
+            if snap_time <= right_boundary:
+                value = snap_time
+                self._snap_guide_time = snap_time
+        clamped = min(value, right_boundary)
+        if self._snap_guide_time is not None and abs(clamped - self._snap_guide_time) > 1e-4:
+            self._snap_guide_time = None
+        return clamped
 
     def _clamp_subtitle_resize(self, track, layer, edge: str, value: float) -> float:
         """Backward-compatible alias for subtitle timing callers."""
@@ -1184,6 +1266,7 @@ class EditorTimeline(QGraphicsView):
 
     def _clamp_layer_move(self, track, layer, start: float, end: float) -> float:
         """Clamp a body drag without moving any neighboring layer."""
+        self._snap_guide_time = None
         if track is None:
             return start
         visible = [item for item in track.layers if item.visible and item is not layer]
@@ -1198,6 +1281,17 @@ class EditorTimeline(QGraphicsView):
             visible = [item for item in visible
                        if row_map.get(str(getattr(item, "id", ""))) == row]
         elif self._uses_layer_rows(track):
+            threshold = getattr(self, "SNAP_THRESHOLD", 0.05)
+            duration = max(self.MIN_DUR, end - start)
+            snaps = []
+            if abs(start - self._playhead) <= threshold:
+                snaps.append((abs(start - self._playhead), self._playhead, self._playhead))
+            if abs(end - self._playhead) <= threshold:
+                snaps.append((abs(end - self._playhead), self._playhead - duration, self._playhead))
+            if snaps:
+                snaps.sort(key=lambda s: s[0])
+                self._snap_guide_time = snaps[0][2]
+                return max(0.0, snaps[0][1])
             return start
         else:
             # Single-row tracks constrain against every visible neighbor.
@@ -1207,21 +1301,61 @@ class EditorTimeline(QGraphicsView):
         original_end = float(getattr(layer, "end", end) or end)
         lower = 0.0
         upper = self._duration - duration
+        prev_end = None
+        next_start = None
         for item in visible:
             item_start = float(getattr(item, "start", 0.0) or 0.0)
             item_end = float(self._get_effective_layer_end(item))
             if item_end <= original_start + 0.001:
-                lower = max(lower, item_end)
+                if item_end > lower:
+                    lower = item_end
+                    prev_end = item_end
             elif item_start >= original_end - 0.001:
-                upper = min(upper, item_start - duration)
+                cand_upper = item_start - duration
+                if cand_upper < upper:
+                    upper = cand_upper
+                    next_start = item_start
+
+        threshold = getattr(self, "SNAP_THRESHOLD", 0.05)
+        snaps = []
+        if abs(start - self._playhead) <= threshold:
+            snaps.append((abs(start - self._playhead), self._playhead, self._playhead))
+        if abs(end - self._playhead) <= threshold:
+            snaps.append((abs(end - self._playhead), self._playhead - duration, self._playhead))
+        if prev_end is not None and abs(start - prev_end) <= threshold:
+            snaps.append((abs(start - prev_end), prev_end, prev_end))
+        if next_start is not None and abs(end - next_start) <= threshold:
+            snaps.append((abs(end - next_start), next_start - duration, next_start))
+
+        target_start = start
+        guide_time = None
+        if snaps:
+            snaps.sort(key=lambda s: s[0])
+            target_start = snaps[0][1]
+            guide_time = snaps[0][2]
+
         if lower > upper:
             # The gap between lower and upper is smaller than duration!
             # Layer cannot fit between them; keep it on its original valid side
-            if start <= (lower + upper) / 2.0:
-                return min(start, upper)
+            if target_start <= (lower + upper) / 2.0:
+                clamped = min(target_start, upper)
             else:
-                return max(start, lower)
-        return max(lower, min(start, upper))
+                clamped = max(target_start, lower)
+        else:
+            clamped = max(lower, min(target_start, upper))
+
+        if guide_time is not None:
+            if guide_time == self._playhead:
+                if abs(clamped - self._playhead) < 1e-4 or abs((clamped + duration) - self._playhead) < 1e-4:
+                    self._snap_guide_time = guide_time
+            elif guide_time == prev_end:
+                if abs(clamped - prev_end) < 1e-4:
+                    self._snap_guide_time = guide_time
+            elif guide_time == next_start:
+                if abs((clamped + duration) - next_start) < 1e-4:
+                    self._snap_guide_time = guide_time
+
+        return clamped
 
     def paintEvent(self, event):
         if self._data_only:
@@ -1247,6 +1381,17 @@ class EditorTimeline(QGraphicsView):
             self._draw_track_body(painter, track, scroll_x, y, th)
             self._draw_track_layers(painter, track, scroll_x, y, th)
             y += th
+
+        # Draw magnetic snap visual guide line right before playhead
+        if self._drag_mode in ("move", "resize_left", "resize_right") and self._snap_guide_time is not None:
+            snap_raw_x = int(self._snap_guide_time * self.pixels_per_second)
+            snap_x = self.CONTENT_LEFT_PAD + snap_raw_x - scroll_x
+            left = 0
+            right = view_w
+            if left <= snap_x <= right:
+                h = max(self.viewport().height() if self.viewport() else 0, int(self._scene.height()) if self._scene else 0)
+                painter.setPen(QPen(QColor("#6ee7d6"), 1, Qt.DashLine))
+                painter.drawLine(int(snap_x), 28, int(snap_x), int(h))
 
         # Playhead spans the full scene height (uses scene coords)
         self._draw_selection_range(painter, scroll_x)
@@ -1564,27 +1709,84 @@ class EditorTimeline(QGraphicsView):
                 painter.drawRoundedRect(QRectF(x, bar_y, w, bar_h), 4, 4)
             visible_row_index += 1
 
-    def _draw_waveform(self, painter: QPainter, x: int, y: float, w: int,
-                       h: float, view_w: int) -> None:
+    def _draw_waveform(self, painter: QPainter, *args, **kwargs) -> None:
+        if len(args) == 6:
+            y, h, left, right, x, w = args
+            view_w = kwargs.get("view_w", right)
+        elif len(args) == 5:
+            x, y, w, h, view_w = args
+            left = kwargs.get("left", max(0, x))
+            right = kwargs.get("right", min(view_w, x + w))
+        else:
+            x = kwargs.get("x", 0)
+            y = kwargs.get("y", 0.0)
+            w = kwargs.get("w", 0)
+            h = kwargs.get("h", 0.0)
+            view_w = kwargs.get("view_w", 0)
+            left = kwargs.get("left", max(0, x))
+            right = kwargs.get("right", min(view_w, x + w))
+
         samples = self._waveform_samples
         duration_s = self._waveform_duration_s or self._duration
         if not samples or duration_s <= 0.0 or h <= 4:
             return
-        left = max(0, x)
-        right = min(view_w, x + w)
-        if right <= left:
+
+        vis_l = max(x, left)
+        vis_r = min(x + w, right)
+        if vis_r <= vis_l:
             return
+
+        cache_key = (int(w), int(h), round(float(self.pixels_per_second), 3), len(self.waveform_samples), id(self.waveform_samples))
+
+        if w <= 8192:
+            if self._waveform_pixmap_cache is not None and self._waveform_pixmap_cache[0] == cache_key:
+                pix = self._waveform_pixmap_cache[1]
+            else:
+                w_int = max(1, int(w))
+                h_int = max(1, int(h))
+                pix = QPixmap(w_int, h_int)
+                pix.fill(Qt.transparent)
+                p = QPainter(pix)
+                center_y = h_int / 2.0
+                max_amp = max(2.0, (h_int - 8.0) / 2.0)
+                p.setPen(QPen(QColor("#248d82"), 1))
+                p.drawLine(0, int(center_y), w_int, int(center_y))
+
+                waveform_gradient = QLinearGradient(0, 0, 0, h_int)
+                waveform_gradient.setColorAt(0.0, QColor(18, 108, 102, 135))
+                waveform_gradient.setColorAt(0.5, QColor(41, 151, 136, 185))
+                waveform_gradient.setColorAt(1.0, QColor(8, 67, 76, 155))
+                soft_pen = QPen(QBrush(waveform_gradient), 3)
+                soft_pen.setCapStyle(Qt.RoundCap)
+                detail_pen = QPen(QColor("#083946"), 1)
+                detail_pen.setCapStyle(Qt.RoundCap)
+
+                strokes = []
+                for local_x in range(0, w_int, 2):
+                    time_s = (local_x / max(1, w)) * duration_s
+                    index = min(len(samples) - 1, max(0, int((time_s / duration_s) * len(samples))))
+                    amplitude = samples[index] * max_amp
+                    strokes.append((local_x, int(center_y - amplitude), int(center_y + amplitude)))
+                p.setPen(soft_pen)
+                for local_x, top_y, bottom_y in strokes:
+                    p.drawLine(local_x, top_y, local_x, bottom_y)
+                p.setPen(detail_pen)
+                for local_x, top_y, bottom_y in strokes:
+                    p.drawLine(local_x, top_y, local_x, bottom_y)
+                p.end()
+                self._waveform_pixmap_cache = (cache_key, pix)
+
+            painter.drawPixmap(vis_l, int(y), pix, vis_l - x, 0, vis_r - vis_l, int(h))
+            return
+
+        # Fallback for extreme zoom w > 8192
         center_y = y + h / 2.0
         max_amp = max(2.0, (h - 8.0) / 2.0)
         painter.save()
-        painter.setClipRect(QRectF(left, y, right - left, h))
-        # Teal-on-teal styling keeps A1 cohesive with the application while
-        # the darker waveform remains legible on its green track.
+        painter.setClipRect(QRectF(vis_l, y, vis_r - vis_l, h))
         painter.setPen(QPen(QColor("#248d82"), 1))
-        painter.drawLine(left, int(center_y), right, int(center_y))
-        # This is a single vertical gradient brush reused for every peak,
-        # giving A1 a subtle modern highlight without changing sample count
-        # or doing any additional media processing.
+        painter.drawLine(vis_l, int(center_y), vis_r, int(center_y))
+
         waveform_gradient = QLinearGradient(0, y, 0, y + h)
         waveform_gradient.setColorAt(0.0, QColor(18, 108, 102, 135))
         waveform_gradient.setColorAt(0.5, QColor(41, 151, 136, 185))
@@ -1593,10 +1795,9 @@ class EditorTimeline(QGraphicsView):
         soft_pen.setCapStyle(Qt.RoundCap)
         detail_pen = QPen(QColor("#083946"), 1)
         detail_pen.setCapStyle(Qt.RoundCap)
-        # One inexpensive vertical stroke per two display pixels. Sample
-        # lookup is proportional to the viewport width, never video length.
+
         strokes = []
-        for pixel_x in range(left, right, 2):
+        for pixel_x in range(vis_l, vis_r, 2):
             time_s = ((pixel_x - x) / max(1, w)) * duration_s
             index = min(len(samples) - 1, max(0, int((time_s / duration_s) * len(samples))))
             amplitude = samples[index] * max_amp
@@ -1609,19 +1810,98 @@ class EditorTimeline(QGraphicsView):
             painter.drawLine(pixel_x, top_y, pixel_x, bottom_y)
         painter.restore()
 
-    def _draw_video_thumbnails(self, painter: QPainter, x: int, y: float, w: int,
-                               h: float, view_w: int) -> None:
+    def _draw_video_thumbnails(self, painter: QPainter, *args, **kwargs) -> None:
+        if len(args) == 6:
+            y, h, left, right, x, w = args
+            view_w = kwargs.get("view_w", right)
+        elif len(args) == 5:
+            x, y, w, h, view_w = args
+            left = kwargs.get("left", max(0, x))
+            right = kwargs.get("right", min(view_w, x + w))
+        else:
+            x = kwargs.get("x", 0)
+            y = kwargs.get("y", 0.0)
+            w = kwargs.get("w", 0)
+            h = kwargs.get("h", 0.0)
+            view_w = kwargs.get("view_w", 0)
+            left = kwargs.get("left", max(0, x))
+            right = kwargs.get("right", min(view_w, x + w))
+
         thumbnails = self._video_thumbnails
         if not thumbnails or self._duration <= 0.0 or h <= 8:
             return
-        left = max(0, x)
-        right = min(view_w, x + w)
-        if right <= left:
+
+        vis_l = max(x, left)
+        vis_r = min(x + w, right)
+        if vis_r <= vis_l:
             return
+
+        cache_key = (int(w), int(h), round(float(self.pixels_per_second), 3), len(self.video_thumbnails), id(self.video_thumbnails))
+
+        if w <= 8192:
+            if self._thumbnails_pixmap_cache is not None and self._thumbnails_pixmap_cache[0] == cache_key:
+                pix = self._thumbnails_pixmap_cache[1]
+            else:
+                w_int = max(1, int(w))
+                h_int = max(1, int(h))
+                target_h = max(12, int(h_int - 8))
+                pix = QPixmap(w_int, h_int)
+                pix.fill(Qt.transparent)
+                p = QPainter(pix)
+                p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+                for index, (timestamp_s, pixmap) in enumerate(thumbnails):
+                    block_end_s = (
+                        thumbnails[index + 1][0]
+                        if index + 1 < len(thumbnails)
+                        else self._duration
+                    )
+                    block_left = int(timestamp_s * self.pixels_per_second)
+                    block_right = int(block_end_s * self.pixels_per_second)
+                    if block_right <= 0 or block_left >= w_int:
+                        continue
+                    source_w = max(1, int(pixmap.width()))
+                    source_h = max(1, int(pixmap.height()))
+                    max_tile_w = max(48, source_w * 2)
+                    tile_left = block_left
+                    while tile_left < block_right:
+                        tile_right = min(block_right, tile_left + max_tile_w)
+                        if tile_right > 0 and tile_left < w_int:
+                            target_w = max(1, tile_right - tile_left)
+                            target_ratio = target_w / max(1, target_h)
+                            source_ratio = source_w / source_h
+                            if source_ratio > target_ratio:
+                                crop_h = source_h
+                                crop_w = crop_h * target_ratio
+                                crop_x = (source_w - crop_w) / 2.0
+                                crop_y = 0.0
+                            else:
+                                crop_w = source_w
+                                crop_h = crop_w / target_ratio
+                                crop_x = 0.0
+                                crop_y = (source_h - crop_h) / 2.0
+                            rect = QRectF(tile_left, 4, target_w, target_h)
+                            p.drawPixmap(rect, pixmap, QRectF(crop_x, crop_y, crop_w, crop_h))
+                        tile_left = tile_right
+                    if 0 < block_right < w_int:
+                        fade_w = 14
+                        edge_fade = QLinearGradient(block_right - fade_w, 0, block_right + fade_w, 0)
+                        edge_fade.setColorAt(0.0, QColor(10, 18, 30, 0))
+                        edge_fade.setColorAt(0.5, QColor(10, 18, 30, 44))
+                        edge_fade.setColorAt(1.0, QColor(10, 18, 30, 0))
+                        p.fillRect(QRectF(block_right - fade_w, 4, fade_w * 2, target_h), QBrush(edge_fade))
+                        p.setPen(QPen(QColor(207, 232, 239, 42), 1))
+                        p.drawLine(block_right, 4, block_right, 4 + target_h)
+                p.end()
+                self._thumbnails_pixmap_cache = (cache_key, pix)
+
+            painter.drawPixmap(vis_l, int(y), pix, vis_l - x, 0, vis_r - vis_l, int(h))
+            return
+
+        # Fallback for extreme zoom w > 8192
         target_h = max(12, int(h - 8))
         painter.save()
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        painter.setClipRect(QRectF(left, y, right - left, h))
+        painter.setClipRect(QRectF(vis_l, y, vis_r - vis_l, h))
         for index, (timestamp_s, pixmap) in enumerate(thumbnails):
             block_end_s = (
                 thumbnails[index + 1][0]
@@ -1630,29 +1910,24 @@ class EditorTimeline(QGraphicsView):
             )
             block_left = x + int(timestamp_s * self.pixels_per_second)
             block_right = x + int(block_end_s * self.pixels_per_second)
-            if block_right <= left or block_left >= right:
+            if block_right <= vis_l or block_left >= vis_r:
                 continue
             source_w = max(1, int(pixmap.width()))
             source_h = max(1, int(pixmap.height()))
-            # Avoid turning one small cached thumbnail into an enormous,
-            # blurry block. Cap horizontal enlargement at 2x its cached
-            # width, then repeat that same frame when the time block is wider.
             max_tile_w = max(48, source_w * 2)
             tile_left = block_left
             while tile_left < block_right:
                 tile_right = min(block_right, tile_left + max_tile_w)
-                if tile_right > left and tile_left < right:
+                if tile_right > vis_l and tile_left < vis_r:
                     target_w = max(1, tile_right - tile_left)
                     target_ratio = target_w / max(1, target_h)
                     source_ratio = source_w / source_h
                     if source_ratio > target_ratio:
-                        # Centered cover crop: remove equal left/right excess.
                         crop_h = source_h
                         crop_w = crop_h * target_ratio
                         crop_x = (source_w - crop_w) / 2.0
                         crop_y = 0.0
                     else:
-                        # Centered cover crop for tall source frames.
                         crop_w = source_w
                         crop_h = crop_w / target_ratio
                         crop_x = 0.0
@@ -1660,9 +1935,7 @@ class EditorTimeline(QGraphicsView):
                     rect = QRectF(tile_left, y + 4, target_w, target_h)
                     painter.drawPixmap(rect, pixmap, QRectF(crop_x, crop_y, crop_w, crop_h))
                 tile_left = tile_right
-            # A narrow translucent transition softens the hand-off to the
-            # next cached source frame without blurring either thumbnail.
-            if left < block_right < right:
+            if vis_l < block_right < vis_r:
                 fade_w = 14
                 edge_fade = QLinearGradient(block_right - fade_w, 0, block_right + fade_w, 0)
                 edge_fade.setColorAt(0.0, QColor(10, 18, 30, 0))
@@ -2279,6 +2552,7 @@ class EditorTimeline(QGraphicsView):
                         "end_time": float(effective_end),
                         "layer_start_x": float(self.CONTENT_LEFT_PAD + int(layer.start * self.pixels_per_second) - scroll_x),
                     }
+                    setattr(layer, "row_index", self._drag_state["row_index"])
                     self._selected_layer_id = lid
                     self.layerSelected.emit(lid)
                     idx = self.segment_index_for_layer_id(lid)
@@ -2321,6 +2595,7 @@ class EditorTimeline(QGraphicsView):
                     "anchor_y": pos.y() + scroll_y,
                     "initial_row": self._layer_row_index(track, layer),
                 }
+                setattr(layer, "row_index", self._drag_state["row_index"])
                 self.viewport().update()
                 event.accept()
                 return
@@ -2340,6 +2615,7 @@ class EditorTimeline(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
+        self._snap_guide_time = None
         if self._selection_drag is not None and event.button() == Qt.LeftButton:
             drag = self._selection_drag
             self._selection_drag = None
@@ -2357,6 +2633,8 @@ class EditorTimeline(QGraphicsView):
         if self._drag_state and event.button() == Qt.LeftButton:
             drag = self._drag_state
             self._drag_state = None
+            self._snap_guide_time = None
+            self._overlap_layout_cache.clear()
             self.setCursor(Qt.ArrowCursor)
             lid = drag["layer_id"]
             track, layer = self._find_layer_by_id(lid)
@@ -2364,6 +2642,7 @@ class EditorTimeline(QGraphicsView):
                 start = float(layer.start)
                 end = float(self._get_effective_layer_end(layer))
                 final_row = int(drag.get("row_index", 0) or 0)
+                setattr(layer, "row_index", final_row)
                 if isinstance(getattr(layer, "metadata", None), dict):
                     layer.metadata["row_index"] = final_row
                 self._overlap_row_assignments.setdefault(str(track.id), {})[lid] = final_row
@@ -2372,7 +2651,10 @@ class EditorTimeline(QGraphicsView):
                 idx = self.segment_index_for_layer_id(lid)
                 if idx >= 0:
                     self.segmentTimingChanged.emit(idx, start, end)
+            self._overlap_layout_cache.clear()
+            self._snap_guide_time = None
             self.viewport().update()
+            self.update()
         super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -2398,6 +2680,11 @@ class EditorTimeline(QGraphicsView):
             t = max(0.0, min(t, self._duration))
             track, layer = self._find_layer_by_id(drag["layer_id"])
             if layer and str(getattr(track, "id", "") or "") == str(drag.get("track_id", "") or ""):
+                if not hasattr(layer, "row_index"):
+                    meta_row = (getattr(layer, "metadata", None) or {}).get("row_index") if isinstance(getattr(layer, "metadata", None), dict) else None
+                    setattr(layer, "row_index", int(meta_row if meta_row is not None else (drag.get("row_index", 0) or 0)))
+                old_row = getattr(layer, "row_index", 0)
+
                 if drag["type"] == "move":
                     delta = t - float(drag["anchor_time"])
                     original_start = float(drag["start_time"])
@@ -2414,6 +2701,7 @@ class EditorTimeline(QGraphicsView):
                             can_fit, _ = self._can_place_layer_on_row(track, layer, target_row, proposed_start, duration)
                             if can_fit:
                                 drag["row_index"] = target_row
+                                setattr(layer, "row_index", target_row)
                                 if isinstance(getattr(layer, "metadata", None), dict):
                                     layer.metadata["row_index"] = target_row
                                 self._overlap_row_assignments.setdefault(str(track.id), {})[drag["layer_id"]] = target_row
@@ -2423,6 +2711,7 @@ class EditorTimeline(QGraphicsView):
                                 fallback_row = int(drag.get("initial_row", 0) or 0)
                                 if drag.get("row_index") != fallback_row:
                                     drag["row_index"] = fallback_row
+                                    setattr(layer, "row_index", fallback_row)
                                     if isinstance(getattr(layer, "metadata", None), dict):
                                         layer.metadata["row_index"] = fallback_row
                                     self._overlap_row_assignments.setdefault(str(track.id), {})[drag["layer_id"]] = fallback_row
@@ -2445,9 +2734,44 @@ class EditorTimeline(QGraphicsView):
                     new_end = self._clamp_layer_resize(track, layer, "right", new_end)
                     new_end = max(new_end, drag["start_time"] + self.MIN_DUR)
                     layer.end = new_end
-                # Timing is being edited in place, so the cached overlap
-                # layout is no longer valid until the next paint.
-                self._overlap_layout_cache.clear()
+
+                if getattr(layer, "row_index", 0) != old_row:
+                    self._overlap_layout_cache.clear()
+                else:
+                    cache_keys = [k for k in (track.id, str(track.id), old_row) if k in self._overlap_layout_cache]
+                    for k in cache_keys:
+                        entry = self._overlap_layout_cache[k]
+                        if len(entry) == 5:
+                            sub_row_map, max_rows, layers_in_track, _, _ = entry
+                            sorted_layers = sorted(layers_in_track, key=lambda l: float(getattr(l, "start", 0.0) or 0.0))
+                            sorted_starts = [float(getattr(l, "start", 0.0) or 0.0) for l in sorted_layers]
+                            prefix_max_ends = []
+                            max_end = float("-inf")
+                            for l in sorted_layers:
+                                try:
+                                    layer_end = float(getattr(l, "end", 0.0) or 0.0)
+                                except (TypeError, ValueError):
+                                    layer_end = 0.0
+                                meta = getattr(l, "metadata", None)
+                                if isinstance(meta, dict):
+                                    raw_ae = meta.get("_audio_end")
+                                    if raw_ae is not None:
+                                        try:
+                                            layer_end = max(layer_end, float(raw_ae))
+                                        except (TypeError, ValueError):
+                                            pass
+                                max_end = max(max_end, layer_end)
+                                prefix_max_ends.append(max_end)
+                            self._overlap_layout_cache[k] = (
+                                sub_row_map,
+                                max_rows,
+                                sorted_layers,
+                                sorted_starts,
+                                prefix_max_ends,
+                            )
+                        elif len(entry) == 2:
+                            sub_row_map, max_rows = entry
+                            self._overlap_layout_cache[k] = (sub_row_map, max_rows)
                 self.viewport().update()
             event.accept()
             return

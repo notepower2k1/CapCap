@@ -1272,6 +1272,8 @@ class VideoTranslatorGUI(QMainWindow):
             self._blur_edit_finished_signal_bound = True
         if hasattr(self, "video_view") and hasattr(self.video_view, "subtitlePositionChanged"):
             if not getattr(self, "_subtitle_position_drag_signal_bound", False):
+                if hasattr(self.video_view, "subtitleDragStarted"):
+                    self.video_view.subtitleDragStarted.connect(self.on_subtitle_drag_started)
                 self.video_view.subtitlePositionChanged.connect(self.on_subtitle_position_dragged)
                 self._subtitle_position_drag_signal_bound = True
         if hasattr(self, "video_view") and hasattr(self.video_view, "textLayerSelected"):
@@ -7901,15 +7903,6 @@ class VideoTranslatorGUI(QMainWindow):
             or next_id != str(getattr(self, "_deferred_effect_edit_layer_id", "") or "")
         )
         if changed:
-            previous_id = str(getattr(self, "_deferred_effect_edit_layer_id", "") or "")
-            # Restore the previously edited layer before changing the shared
-            # target. This prevents a stale suppression from surviving a
-            # Blur A -> Blur B or Mask A -> Mask B selection switch.
-            if previous_id and not self._preview_is_playing():
-                self._deferred_effect_edit_type = ""
-                self._deferred_effect_edit_layer_id = ""
-                self._timed_layer_preview_signature = None
-                self.refresh_timed_layer_preview()
             self._deferred_effect_edit_type = next_type
             self._deferred_effect_edit_layer_id = next_id
             self._timed_layer_preview_signature = None
@@ -7935,7 +7928,14 @@ class VideoTranslatorGUI(QMainWindow):
         """
         self._preview_edit_layer_id = ""
         self.commit_deferred_effect_editing(refresh=False)
+        was_subtitle_editable = bool(
+            hasattr(self, "video_view")
+            and hasattr(self.video_view, "subtitle_item")
+            and getattr(self.video_view.subtitle_item, "_editable", False)
+        )
         if hasattr(self, "video_view"):
+            if hasattr(self.video_view, "set_overlays_review_mode"):
+                self.video_view.set_overlays_review_mode(True)
             if hasattr(self.video_view, "subtitle_item"):
                 self.video_view.subtitle_item.set_editable(False)
             if hasattr(self.video_view, "set_blur_edit_enabled"):
@@ -7949,6 +7949,8 @@ class VideoTranslatorGUI(QMainWindow):
         self._timed_layer_preview_signature = None
         self._refresh_text_layer_preview("")
         self.refresh_timed_layer_preview()
+        if was_subtitle_editable:
+            self.sync_live_subtitle_preview()
 
     def refresh_timed_layer_preview(self, position_ms=None) -> None:
         """Show only overlay layers whose timeline interval contains the playhead."""
@@ -8032,6 +8034,9 @@ class VideoTranslatorGUI(QMainWindow):
                     })
                 if hasattr(self.video_view, "set_blur_regions_normalized"):
                     self.video_view.set_blur_regions_normalized(overlay_regions)
+                    if hasattr(self.video_view, "set_blur_active_index"):
+                        active_index = next((i for i, l in enumerate(active_layers) if l.id == selected_id), 0)
+                        self.video_view.set_blur_active_index(active_index)
                 if hasattr(self.video_view, "set_blur_edit_enabled"):
                     # B1's effect remains rendered, but its border/handles
                     # are shown only while a B1 layer is selected and the
@@ -8184,11 +8189,17 @@ class VideoTranslatorGUI(QMainWindow):
         # it stays click-through, preventing accidental moves while editing
         # other video layers.
         is_review_mode = self._preview_is_playing()
+        was_subtitle_editable = bool(
+            hasattr(self, "video_view")
+            and hasattr(self.video_view, "subtitle_item")
+            and getattr(self.video_view.subtitle_item, "_editable", False)
+        )
         if hasattr(self, "video_view") and hasattr(self.video_view, "subtitle_item"):
             layer_type = str(getattr(getattr(layer, "type", ""), "value", getattr(layer, "type", ""))).lower() if layer else ""
-            self.video_view.subtitle_item.set_editable(
-                not is_review_mode and layer_type in {"subtitle", "dub_subtitle"}
-            )
+            next_editable = not is_review_mode and layer_type in {"subtitle", "dub_subtitle"}
+            self.video_view.subtitle_item.set_editable(next_editable)
+            if was_subtitle_editable != next_editable:
+                self.sync_live_subtitle_preview()
         # During review mode a layer may still be inspected/focused, but it
         # must never acquire preview drag handles. A real paused selection is
         # the only entry point into preview editing.
@@ -13265,7 +13276,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._sync_blur_controls()
         if hasattr(self, "media_player"):
             if checked:
-                self.apply_preview_blur_region(force=True)
+                self.apply_preview_blur_region()
             else:
                 self.media_player.clear_blur_region()
         self.persist_project_blur_state()
@@ -13482,6 +13493,8 @@ class VideoTranslatorGUI(QMainWindow):
             return
         self._blur_region_preview_dirty = False
         blur_enabled = self._blur_effect_enabled()
+        if hasattr(self.video_view, "set_blur_track_visible"):
+            self.video_view.set_blur_track_visible(blur_enabled)
         if regions is not None:
             blur_region = regions
         else:
@@ -13499,10 +13512,8 @@ class VideoTranslatorGUI(QMainWindow):
                         region for region, layer in zip(blur_region, blur_layers)
                         if str(getattr(layer, "id", "") or "") != suppressed_id
                     ]
-        # Always apply the blur when enabled and regions exist, even
-        # when the video is paused, so the user can see the cached
-        # blur effect on the video preview.
-        if blur_enabled and blur_region:
+        should_apply_mpv = bool(force or self._preview_is_playing())
+        if blur_enabled and blur_region and should_apply_mpv:
             self.media_player.set_blur_region(blur_region)
         else:
             self.media_player.clear_blur_region()
@@ -13673,7 +13684,7 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "media_player"):
             try:
                 if blur_enabled:
-                    self.apply_preview_blur_region(force=True)
+                    self.apply_preview_blur_region()
                 else:
                     self.media_player.clear_blur_region()
             except Exception:
@@ -13720,23 +13731,12 @@ class VideoTranslatorGUI(QMainWindow):
         return items
 
     def _apply_mask_to_preview(self, *, regions=None, force: bool = False):
-        """Push the M1 mask track into the mpv filter chain.
-
-        The mask effect is independent of timeline selection and playback
-        state.  Pausing or selecting another layer must not remove it from
-        the preview; only the dedicated M1 visibility control (or an empty
-        mask track) may clear the effect.  The editable outline/handles are
-        managed separately by the timeline selection.
-
-        `force=True` bypasses the play-state gate (used by direct
-        calls from `toggle_play` so the mask is applied/cleared in
-        the same code path as the play/pause).
-        """
         if not hasattr(self, "media_player"):
             return
-        # M1 Hide/Show must survive play/pause, project restoration, and
-        # native-window focus changes.  Never rebuild a hidden mask graph.
-        if not bool(getattr(self, "_mask_track_preview_visible", True)):
+        mask_visible = bool(getattr(self, "_mask_track_preview_visible", True))
+        if hasattr(self, "video_view") and hasattr(self.video_view, "set_mask_track_visible"):
+            self.video_view.set_mask_track_visible(mask_visible)
+        if not mask_visible:
             self.media_player.clear_mask_region()
             return
         if regions is None:
@@ -13744,13 +13744,8 @@ class VideoTranslatorGUI(QMainWindow):
                 include_inactive=True,
                 exclude_layer_id=self._deferred_effect_layer_id_for("mask"),
             )
-        if force:
-            if regions:
-                self.media_player.set_mask_region(regions)
-            else:
-                self.media_player.clear_mask_region()
-            return
-        if regions:
+        should_apply_mpv = bool(force or self._preview_is_playing())
+        if regions and should_apply_mpv:
             self.media_player.set_mask_region(regions)
         else:
             self.media_player.clear_mask_region()
@@ -13775,6 +13770,8 @@ class VideoTranslatorGUI(QMainWindow):
             is_playing = False
         was_review_mode = bool(getattr(self, "_review_mode_active", False))
         self._review_mode_active = is_playing
+        if hasattr(self, "video_view") and hasattr(self.video_view, "set_overlays_review_mode"):
+            self.video_view.set_overlays_review_mode(is_playing)
         if is_playing:
             # Entering review mode is an explicit commit boundary. This
             # restores a deferred Blur/Mask at its final geometry before the
@@ -13874,6 +13871,11 @@ class VideoTranslatorGUI(QMainWindow):
         # don't drift ahead of the held last frame.
         if not is_playing and hasattr(self, "media_player"):
             try:
+                if getattr(self.media_player, "_native_audio_engine", None) is not None:
+                    self.media_player._native_audio_engine.pause()
+            except Exception:
+                pass
+            try:
                 if hasattr(self.media_player, "_original_loaded_path") and getattr(self.media_player, "_original_loaded_path", ""):
                     self.media_player._original_player.pause()
             except Exception:
@@ -13884,7 +13886,8 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception:
                 pass
         try:
-            self._apply_mask_to_preview()
+            self.apply_preview_blur_region(force=is_playing)
+            self._apply_mask_to_preview(force=is_playing)
         except Exception:
             pass
         # Disable UI collapse toggles during playback to prevent Qt layout
@@ -15555,8 +15558,15 @@ class VideoTranslatorGUI(QMainWindow):
                 self.video_view.subtitle_item.set_text("")
                 self.video_view.subtitle_item.hide()
             return
+        subtitle_item = getattr(getattr(self, "video_view", None), "subtitle_item", None)
+        is_paused_subtitle_edit = bool(
+            subtitle_item is not None
+            and (getattr(subtitle_item, "_editable", False) or getattr(subtitle_item, "_drag_active", False))
+            and not self._preview_is_playing()
+        )
         can_render_libass = bool(
-            getattr(self, "_use_libass_live_preview", False)
+            not is_paused_subtitle_edit
+            and getattr(self, "_use_libass_live_preview", False)
             and hasattr(self.media_player, "set_subtitle_file")
             and hasattr(self.media_player, "_sub_track_id")
         )
@@ -15590,6 +15600,7 @@ class VideoTranslatorGUI(QMainWindow):
                 self.video_view.subtitle_item.hide()
             return
         self.media_player.clear_subtitle()
+        self._loaded_live_ass_path = ""
         self._set_subtitle_item_text_rendering(True)
         position = 0
         try:
