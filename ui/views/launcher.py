@@ -714,7 +714,8 @@ class LauncherWindow(QDialog):
         self.import_project_btn.setMenu(self.import_project_menu)
         action_row_one.addWidget(self.import_project_btn)
 
-        self.split_btn = QPushButton("Split Video")
+        self.split_btn = QPushButton(t("Media Tools"))
+        self.split_btn.setToolTip(t("Split video, merge videos, separate or mux audio & video"))
         self.split_btn.setMinimumHeight(44)
         self.split_btn.setMinimumWidth(120)
         self.split_btn.setStyleSheet("""
@@ -963,7 +964,8 @@ class LauncherWindow(QDialog):
         self.import_project_btn.setText(t("Import Project"))
         self.import_capcap_action.setText(t("Import CapCap package…"))
         self.import_capcut_action.setText(t("Import exported CapCut package…"))
-        self.split_btn.setText(t("Split Video"))
+        self.split_btn.setText(t("Media Tools"))
+        self.split_btn.setToolTip(t("Split video, merge videos, separate or mux audio & video"))
         self.resource_btn.setText(t("Manage Resources"))
         self.clean_video_btn.setText(t("Clean Video Data"))
         self.clean_video_btn.setToolTip(t("Remove generated project data and video preview caches"))
@@ -1484,26 +1486,6 @@ class LauncherWindow(QDialog):
         donation_row.addWidget(donation_label)
         donation_row.addWidget(qr_label)
         donation_row.addStretch()
-
-        coffee_group = QHBoxLayout()
-        coffee_group.setSpacing(5)
-        coffee_text = QLabel(t("International Donation\nClick to Buy Me a Coffee"), dialog)
-        coffee_text.setStyleSheet("color:#d7e3f4; font-weight:600;")
-        coffee_group.addWidget(coffee_text)
-        coffee_path = asset_path("buymeacoffee.png")
-        coffee_pixmap = QPixmap(coffee_path)
-        coffee_image = QLabel(dialog)
-        coffee_image.setAlignment(Qt.AlignCenter)
-        if not coffee_pixmap.isNull():
-            coffee_image.setPixmap(coffee_pixmap.scaled(190, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        else:
-            coffee_image.setText(t("Buy Me a Coffee image unavailable"))
-        coffee_image.setToolTip(t("Open Buy Me a Coffee"))
-        coffee_image.setCursor(Qt.PointingHandCursor)
-        coffee_image.setAccessibleName("International Donation - Buy Me a Coffee")
-        coffee_image.mousePressEvent = lambda _event: QDesktopServices.openUrl(QUrl("https://buymeacoffee.com/hcaht"))
-        coffee_group.addWidget(coffee_image)
-        donation_row.addLayout(coffee_group)
         layout.addLayout(donation_row)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, parent=dialog)
         buttons.rejected.connect(dialog.reject)
@@ -1511,76 +1493,9 @@ class LauncherWindow(QDialog):
         dialog.exec()
 
     def _on_split_video(self):
-        from PySide6.QtWidgets import QMessageBox, QProgressDialog, QInputDialog
-        from PySide6.QtCore import QThread, Signal
-        path, _ = QFileDialog.getOpenFileName(
-            self, t("Select Long Video to Split"), "",
-            t("Video Files (*.mp4 *.mkv *.avi *.mov *.webm);;All Files (*)")
-        )
-        if not path:
-            return
-
-        duration = _get_video_duration(path)
-        if duration <= 0:
-            mb = QMessageBox(QMessageBox.Warning, t("Invalid Video"),
-                t("Could not determine video duration."),
-                QMessageBox.Ok, self)
-            mb.setStyleSheet(MSG_STYLE)
-            mb.exec()
-            return
-
-        h = int(duration // 3600)
-        m = int((duration % 3600) // 60)
-
-        seg_minutes, ok = QInputDialog.getInt(
-            self, t("Segment Duration"),
-            t("Video is {hours}h {minutes}m.\nSplit into segments of how many minutes?", hours=h, minutes=m),
-            120, 10, 1440, 10,
-        )
-        if not ok:
-            return
-
-        seg_seconds = seg_minutes * 60
-        base, ext = os.path.splitext(path)
-        out_pattern = f"{base}_part%03d{ext}"
-
-        reply = QMessageBox(QMessageBox.Question, t("Confirm Split"),
-            t("Split into {minutes}-minute segments using stream copy (no re-encode, fast).\n\nOutput: {output}\n\nContinue?", minutes=seg_minutes, output=out_pattern),
-            QMessageBox.Yes | QMessageBox.No, self)
-        reply.setStyleSheet(MSG_STYLE)
-        if reply.exec() != QMessageBox.Yes:
-            return
-
-        progress = QProgressDialog(t("Splitting video..."), None, 0, 0, self)
-        progress.setWindowTitle(t("Split Video"))
-        progress.setModal(True)
-        progress.setCancelButton(None)
-        progress.show()
-
-        import subprocess
-        import threading
-
-        def _do_split():
-            try:
-                subprocess.run(
-                    [_ffmpeg_path(), "-y", "-i", path, "-c", "copy",
-                     "-f", "segment", "-segment_time", str(seg_seconds),
-                     "-reset_timestamps", "1", out_pattern],
-                    capture_output=True, timeout=3600, **subprocess_hidden_kwargs(),
-                )
-                progress.accept()
-            except Exception as e:
-                progress.accept()
-                print(f"[Split] Error: {e}")
-
-        threading.Thread(target=_do_split, daemon=True).start()
-        progress.exec()
-
-        mb = QMessageBox(QMessageBox.Information, t("Done"),
-            t("Video split into {minutes}-minute segments.\nSaved alongside the original file.", minutes=seg_minutes),
-            QMessageBox.Ok, self)
-        mb.setStyleSheet(MSG_STYLE)
-        mb.exec()
+        from ui.views.media_tools_dialog import MediaToolsDialog
+        dialog = MediaToolsDialog(parent=self)
+        dialog.exec()
 
     def _detect_gpu_with_cuda(self):
         has_gpu = False

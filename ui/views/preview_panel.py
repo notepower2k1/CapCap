@@ -1995,7 +1995,7 @@ def build_preview_panel(gui):
     gui.blur_inspector_card = blur_inspector_card
     blur_layout = QVBoxLayout(blur_inspector_card)
     blur_layout.setContentsMargins(12, 10, 12, 10)
-    blur_layout.setSpacing(6)
+    blur_layout.setSpacing(8)
 
     gui.blur_inspector_track_name_label = QLabel("-")
     gui.blur_inspector_track_name_label.setObjectName("helperLabel")
@@ -2015,29 +2015,37 @@ def build_preview_panel(gui):
     _add_layer_timing_controls(blur_layout, "blur")
 
     # --- Blur Radius ---
-    radius_row = QHBoxLayout()
+    radius_header = QHBoxLayout()
     radius_label = QLabel("Blur radius")
     radius_label.setObjectName("sectionTitle")
-    radius_label.setFixedWidth(90)
-    radius_row.addWidget(radius_label)
+    radius_header.addWidget(radius_label)
+    radius_header.addStretch(1)
+    gui.blur_inspector_radius_value_label = QLabel("20")
+    gui.blur_inspector_radius_value_label.setMinimumWidth(40)
+    gui.blur_inspector_radius_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    radius_header.addWidget(gui.blur_inspector_radius_value_label)
+    blur_layout.addLayout(radius_header)
+
     gui.blur_inspector_radius_slider = QSlider(Qt.Horizontal)
     gui.blur_inspector_radius_slider.setRange(1, 20)
     gui.blur_inspector_radius_slider.setValue(20)
     gui.blur_inspector_radius_slider.setToolTip(
         "How strong the blur is (1 = light, 20 = heavy)."
     )
-    radius_row.addWidget(gui.blur_inspector_radius_slider, 1)
-    gui.blur_inspector_radius_value_label = QLabel("20")
-    gui.blur_inspector_radius_value_label.setFixedWidth(28)
-    radius_row.addWidget(gui.blur_inspector_radius_value_label)
-    blur_layout.addLayout(radius_row)
+    blur_layout.addWidget(gui.blur_inspector_radius_slider)
 
     # --- Blur Opacity ---
-    blur_opacity_row = QHBoxLayout()
+    blur_opacity_header = QHBoxLayout()
     blur_opacity_label = QLabel("Opacity")
     blur_opacity_label.setObjectName("sectionTitle")
-    blur_opacity_label.setFixedWidth(90)
-    blur_opacity_row.addWidget(blur_opacity_label)
+    blur_opacity_header.addWidget(blur_opacity_label)
+    blur_opacity_header.addStretch(1)
+    gui.blur_inspector_opacity_value_label = QLabel("100%")
+    gui.blur_inspector_opacity_value_label.setMinimumWidth(44)
+    gui.blur_inspector_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    blur_opacity_header.addWidget(gui.blur_inspector_opacity_value_label)
+    blur_layout.addLayout(blur_opacity_header)
+
     gui.blur_inspector_opacity_slider = QSlider(Qt.Horizontal)
     gui.blur_inspector_opacity_slider.setRange(0, 100)
     gui.blur_inspector_opacity_slider.setValue(100)
@@ -2045,17 +2053,13 @@ def build_preview_panel(gui):
         "Transparency of the blurred region (0% fully transparent, "
         "100% fully visible)."
     )
-    blur_opacity_row.addWidget(gui.blur_inspector_opacity_slider, 1)
-    gui.blur_inspector_opacity_value_label = QLabel("100%")
-    gui.blur_inspector_opacity_value_label.setFixedWidth(40)
-    blur_opacity_row.addWidget(gui.blur_inspector_opacity_value_label)
-    blur_layout.addLayout(blur_opacity_row)
+    blur_layout.addWidget(gui.blur_inspector_opacity_slider)
 
     # --- Pixelate toggle ---
     pixelate_row = QHBoxLayout()
+    pixelate_row.setSpacing(10)
     pixelate_label = QLabel("Pixelate")
     pixelate_label.setObjectName("sectionTitle")
-    pixelate_label.setFixedWidth(90)
     pixelate_row.addWidget(pixelate_label)
     gui.blur_inspector_pixelate_cb = QCheckBox("Enable pixelate (mosaic)")
     gui.blur_inspector_pixelate_cb.setChecked(False)
@@ -2067,22 +2071,24 @@ def build_preview_panel(gui):
     blur_layout.addLayout(pixelate_row)
 
     # --- Pixelate size ---
-    pixel_size_row = QHBoxLayout()
+    pixel_size_header = QHBoxLayout()
     pixel_size_label = QLabel("Pixel size")
     pixel_size_label.setObjectName("sectionTitle")
-    pixel_size_label.setFixedWidth(90)
-    pixel_size_row.addWidget(pixel_size_label)
+    pixel_size_header.addWidget(pixel_size_label)
+    pixel_size_header.addStretch(1)
+    gui.blur_inspector_pixel_size_value_label = QLabel("12")
+    gui.blur_inspector_pixel_size_value_label.setMinimumWidth(40)
+    gui.blur_inspector_pixel_size_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    pixel_size_header.addWidget(gui.blur_inspector_pixel_size_value_label)
+    blur_layout.addLayout(pixel_size_header)
+
     gui.blur_inspector_pixel_size_slider = QSlider(Qt.Horizontal)
     gui.blur_inspector_pixel_size_slider.setRange(2, 60)
     gui.blur_inspector_pixel_size_slider.setValue(12)
     gui.blur_inspector_pixel_size_slider.setToolTip(
         "Mosaic cell size in pixels (larger = chunkier pixels)."
     )
-    pixel_size_row.addWidget(gui.blur_inspector_pixel_size_slider, 1)
-    gui.blur_inspector_pixel_size_value_label = QLabel("12")
-    gui.blur_inspector_pixel_size_value_label.setFixedWidth(28)
-    pixel_size_row.addWidget(gui.blur_inspector_pixel_size_value_label)
-    blur_layout.addLayout(pixel_size_row)
+    blur_layout.addWidget(gui.blur_inspector_pixel_size_slider)
 
     gui.blur_inspector_tip_label = QLabel(
         "Each click of the 'Blur' button adds a new blur region to this "
@@ -2102,7 +2108,7 @@ def build_preview_panel(gui):
     gui.logo_inspector_card = logo_inspector_card
     logo_layout = QVBoxLayout(logo_inspector_card)
     logo_layout.setContentsMargins(12, 10, 12, 10)
-    logo_layout.setSpacing(6)
+    logo_layout.setSpacing(8)
 
     gui.logo_inspector_summary_label = QLabel(
         "Adjust the watermark image on the video. Drag the logo on the "
@@ -2115,40 +2121,44 @@ def build_preview_panel(gui):
     _add_layer_timing_controls(logo_layout, "logo")
 
     # --- Opacity ---
-    opacity_row = QHBoxLayout()
+    opacity_header = QHBoxLayout()
     opacity_label = QLabel("Opacity")
     opacity_label.setObjectName("sectionTitle")
-    opacity_label.setFixedWidth(90)
-    opacity_row.addWidget(opacity_label)
+    opacity_header.addWidget(opacity_label)
+    opacity_header.addStretch(1)
+    gui.logo_inspector_opacity_value_label = QLabel("100%")
+    gui.logo_inspector_opacity_value_label.setMinimumWidth(44)
+    gui.logo_inspector_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    opacity_header.addWidget(gui.logo_inspector_opacity_value_label)
+    logo_layout.addLayout(opacity_header)
+
     gui.logo_inspector_opacity_slider = QSlider(Qt.Horizontal)
     gui.logo_inspector_opacity_slider.setRange(0, 100)
     gui.logo_inspector_opacity_slider.setValue(100)
     gui.logo_inspector_opacity_slider.setToolTip(
         "Set the transparency of the logo (0% invisible, 100% fully visible)."
     )
-    opacity_row.addWidget(gui.logo_inspector_opacity_slider, 1)
-    gui.logo_inspector_opacity_value_label = QLabel("100%")
-    gui.logo_inspector_opacity_value_label.setFixedWidth(40)
-    opacity_row.addWidget(gui.logo_inspector_opacity_value_label)
-    logo_layout.addLayout(opacity_row)
+    logo_layout.addWidget(gui.logo_inspector_opacity_slider)
 
     # --- Rotation ---
-    rotation_row = QHBoxLayout()
+    rotation_header = QHBoxLayout()
     rotation_label = QLabel("Rotation")
     rotation_label.setObjectName("sectionTitle")
-    rotation_label.setFixedWidth(90)
-    rotation_row.addWidget(rotation_label)
+    rotation_header.addWidget(rotation_label)
+    rotation_header.addStretch(1)
+    gui.logo_inspector_rotation_value_label = QLabel("0°")
+    gui.logo_inspector_rotation_value_label.setMinimumWidth(40)
+    gui.logo_inspector_rotation_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    rotation_header.addWidget(gui.logo_inspector_rotation_value_label)
+    logo_layout.addLayout(rotation_header)
+
     gui.logo_inspector_rotation_slider = QSlider(Qt.Horizontal)
     gui.logo_inspector_rotation_slider.setRange(-180, 180)
     gui.logo_inspector_rotation_slider.setValue(0)
     gui.logo_inspector_rotation_slider.setToolTip(
         "Rotate the logo in degrees (-180 to 180)."
     )
-    rotation_row.addWidget(gui.logo_inspector_rotation_slider, 1)
-    gui.logo_inspector_rotation_value_label = QLabel("0°")
-    gui.logo_inspector_rotation_value_label.setFixedWidth(40)
-    rotation_row.addWidget(gui.logo_inspector_rotation_value_label)
-    logo_layout.addLayout(rotation_row)
+    logo_layout.addWidget(gui.logo_inspector_rotation_slider)
 
     gui.logo_inspector_tip_label = QLabel(
         "Tip: drag the logo on the video preview to reposition it; "
@@ -2174,7 +2184,7 @@ def build_preview_panel(gui):
     gui.mask_inspector_card = mask_inspector_card
     mask_layout = QVBoxLayout(mask_inspector_card)
     mask_layout.setContentsMargins(12, 10, 12, 10)
-    mask_layout.setSpacing(6)
+    mask_layout.setSpacing(8)
 
     gui.mask_inspector_summary_label = QLabel(
         "Drag the mask on the video to move it. Drag a corner to "
@@ -2190,7 +2200,6 @@ def build_preview_panel(gui):
     color_row = QHBoxLayout()
     color_label = QLabel("Colour")
     color_label.setObjectName("sectionTitle")
-    color_label.setFixedWidth(90)
     color_row.addWidget(color_label)
     gui.mask_inspector_color_btn = QPushButton("#000000")
     gui.mask_inspector_color_btn.setFixedWidth(110)
@@ -2203,22 +2212,24 @@ def build_preview_panel(gui):
     mask_layout.addLayout(color_row)
 
     # --- Opacity ---
-    m_opacity_row = QHBoxLayout()
+    m_opacity_header = QHBoxLayout()
     m_opacity_label = QLabel("Opacity")
     m_opacity_label.setObjectName("sectionTitle")
-    m_opacity_label.setFixedWidth(90)
-    m_opacity_row.addWidget(m_opacity_label)
+    m_opacity_header.addWidget(m_opacity_label)
+    m_opacity_header.addStretch(1)
+    gui.mask_inspector_opacity_value_label = QLabel("100%")
+    gui.mask_inspector_opacity_value_label.setMinimumWidth(44)
+    gui.mask_inspector_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    m_opacity_header.addWidget(gui.mask_inspector_opacity_value_label)
+    mask_layout.addLayout(m_opacity_header)
+
     gui.mask_inspector_opacity_slider = QSlider(Qt.Horizontal)
     gui.mask_inspector_opacity_slider.setRange(0, 100)
     gui.mask_inspector_opacity_slider.setValue(100)
     gui.mask_inspector_opacity_slider.setToolTip(
         "Mask transparency (0% invisible, 100% fully visible)."
     )
-    m_opacity_row.addWidget(gui.mask_inspector_opacity_slider, 1)
-    gui.mask_inspector_opacity_value_label = QLabel("100%")
-    gui.mask_inspector_opacity_value_label.setFixedWidth(40)
-    m_opacity_row.addWidget(gui.mask_inspector_opacity_value_label)
-    mask_layout.addLayout(m_opacity_row)
+    mask_layout.addWidget(gui.mask_inspector_opacity_slider)
 
     gui.mask_inspector_tip_label = QLabel(
         "Tip: position and resize the mask on the video preview. The "
@@ -2374,7 +2385,7 @@ def build_preview_panel(gui):
         row = QHBoxLayout()
         lbl = QLabel(field_label)
         lbl.setObjectName("sectionTitle")
-        lbl.setFixedWidth(90)
+        lbl.setMinimumWidth(115)
         row.addWidget(lbl)
         slider = QSlider(Qt.Horizontal)
         slider.setRange(-100, 100)
