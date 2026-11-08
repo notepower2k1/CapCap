@@ -12,7 +12,6 @@ from unittest.mock import MagicMock, patch
 ROOT = Path(__file__).resolve().parents[1]
 for path in (ROOT, ROOT / "app", ROOT / "ui"):
     sys.path.insert(0, str(path))
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import preview_processor
 import video_processor
@@ -190,6 +189,106 @@ class TestExportQualitySelection(unittest.TestCase):
                     self.assertEqual(low[low.index("-preset") + 1], "p2" if gpu else "veryfast")
                     quality_flag = "-cq" if gpu else "-crf"
                     self.assertEqual(low[low.index(quality_flag) + 1], "28" if gpu else "26")
+
+
+class TestExportPerformanceOptimizations(unittest.TestCase):
+    def test_mux_audio_omits_faststart_for_temp_mux_and_keeps_for_regular_output(self):
+        # 1. Copy branch
+        captured_cmds = []
+        def fake_run(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            return MagicMock(returncode=0)
+
+        with patch("video_processor._run_ffmpeg_command_with_progress", side_effect=fake_run), \
+             patch("os.path.exists", return_value=True):
+            # Temp mux
+            preview_processor.mux_audio_into_video_for_preview(
+                "video.mp4", "audio.wav", "D:/temp/final_mux_123.mp4"
+            )
+            self.assertNotIn("-movflags", captured_cmds[-1])
+            self.assertNotIn("+faststart", captured_cmds[-1])
+
+            preview_processor.mux_audio_into_video_for_preview(
+                "video.mp4", "audio.wav", "D:/temp/preview_mux_123.mp4"
+            )
+            self.assertNotIn("-movflags", captured_cmds[-1])
+
+            # Regular output
+            preview_processor.mux_audio_into_video_for_preview(
+                "video.mp4", "audio.wav", "D:/output/rendered.mp4"
+            )
+            self.assertIn("-movflags", captured_cmds[-1])
+            self.assertIn("+faststart", captured_cmds[-1])
+
+        # 2. Encode branch
+        captured_encode_cmds = []
+        def fake_fallback(ffmpeg, base_cmd, output, **kwargs):
+            captured_encode_cmds.append(list(base_cmd))
+
+        with patch("preview_processor._run_ffmpeg_with_h264_fallback", side_effect=fake_fallback), \
+             patch("os.path.exists", return_value=True):
+            preview_processor.mux_audio_into_video_for_preview(
+                "video.mp4", "audio.wav", "D:/temp/final_mux_123.mp4", output_fps=30
+            )
+            self.assertNotIn("-movflags", captured_encode_cmds[-1])
+            self.assertIn("-hwaccel", captured_encode_cmds[-1])
+
+            preview_processor.mux_audio_into_video_for_preview(
+                "video.mp4", "audio.wav", "D:/output/rendered.mp4", output_fps=30
+            )
+            self.assertIn("-movflags", captured_encode_cmds[-1])
+            self.assertIn("+faststart", captured_encode_cmds[-1])
+
+    def test_embed_ass_subtitles_performance_options_and_single_frame_png(self):
+        captured_cmds = []
+        def fake_run(command, **kwargs):
+            captured_cmds.append(list(command))
+            return MagicMock(stderr="", returncode=0)
+
+        text_layer = {"path": "C:/dummy/layer1.png", "x": 10, "y": 20, "start": 0.5, "end": 2.5}
+
+        with patch("video_processor._run_ffmpeg_command_with_progress", side_effect=fake_run), \
+             patch("video_processor.get_video_duration", return_value=10.0), \
+             patch("video_processor.get_video_dimensions", return_value=(1920, 1080)), \
+             patch("video_processor._has_audio_stream", return_value=True), \
+             patch("os.path.exists", return_value=True):
+
+            video_processor.embed_ass_subtitles(
+                video_path="D:/temp/final_mux_123.mp4",
+                ass_path="sub.ass",
+                output_path="out.mp4",
+                text_image_layers=[text_layer],
+                audio_gain_db=0.0,
+            )
+
+            cmd = captured_cmds[-1]
+            self.assertIn("-hwaccel", cmd)
+            self.assertIn("auto", cmd)
+            self.assertIn("-filter_threads", cmd)
+            self.assertIn("0", cmd)
+            self.assertIn("-filter_complex_threads", cmd)
+
+            idx_ca = cmd.index("-c:a")
+            self.assertEqual(cmd[idx_ca + 1], "copy")
+            self.assertNotIn("-loop", cmd)
+            self.assertIn("C:/dummy/layer1.png", cmd)
+
+            # Also verify _build_logo_overlay_command branch when logo_layers present
+            video_processor.embed_ass_subtitles(
+                video_path="D:/temp/final_mux_456.mp4",
+                ass_path="sub.ass",
+                output_path="out.mp4",
+                logo_layers=[{"source": "C:/dummy/logo.png", "x": 0, "y": 0, "opacity": 1.0, "rotation": 0}],
+                text_image_layers=[text_layer],
+                audio_gain_db=0.0,
+            )
+
+            cmd_logo = captured_cmds[-1]
+            self.assertIn("-hwaccel", cmd_logo)
+            self.assertIn("-filter_threads", cmd_logo)
+            idx_ca_logo = cmd_logo.index("-c:a")
+            self.assertEqual(cmd_logo[idx_ca_logo + 1], "copy")
+            self.assertNotIn("-loop", cmd_logo)
 
 
 if __name__ == "__main__":
