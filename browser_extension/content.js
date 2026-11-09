@@ -606,15 +606,14 @@
     },
 
     isTemporaryChat() {
+      // Gemini places the entry button inside main even in normal chats.
+      // Its icon alone is NOT evidence that temporary mode is active.
+      // These active-state classes persist after the welcome card disappears.
+      if (document.querySelector('chat-window.is-temporary-chat, .temp-chat-button.temp-chat-on')) return true;
       if (this.temporaryChatButtons().some((button) =>
         button.getAttribute("aria-pressed") === "true" || button.getAttribute("aria-checked") === "true"
       )) return true;
-      // The sidebar's entry button exists in normal chats too. Only accept
-      // an active-chat indicator or the temporary-chat explanation in main.
-      if (document.querySelector('main [data-mat-icon-name="gemini_chat_temp"], main .temporary-chat-banner, main [data-test-id="temporary-chat-banner"]')) return true;
-      const main = document.querySelector('main, [role="main"]');
-      const text = main ? (main.innerText || main.textContent || "") : "";
-      return /temporary chats (?:don.t|do not|won.t) appear|cuộc trò chuyện tạm thời (?:sẽ )?không (?:xuất hiện|hiển thị)/i.test(text);
+      return false;
     },
 
     async ensureTemporaryChat(timeoutMs = 15000) {

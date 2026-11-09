@@ -33,6 +33,7 @@
 - **Prompt ChatGPT chỉ được điền mà chưa gửi**: Chờ nút gửi sẵn sàng và xác nhận tin nhắn đã được trang tiếp nhận trước khi chờ kết quả.
 - **Mở thêm cửa sổ sau khi phân tích nhân vật**: Bước dịch tiếp quản cửa sổ phân tích, tránh tạo thêm cửa sổ cho mỗi bước hoặc mỗi lần phân tích lại.
 - **Chat tạm thời Gemini chưa được bật đúng**: Bật và xác nhận Temporary Chat trước khi gửi. Nếu không xác nhận được, tác vụ báo lỗi thay vì gửi vào cuộc trò chuyện thường.
+  - Bản sửa 10/11: phân biệt nút mở chat tạm thời với trạng thái đang bật; giữ nhận diện sau khi có phản hồi để batch tiếp theo không bị lỗi xác nhận và chuyển sang Google Translate.
 - **Phân tích xưng hô không chạy với đoạn ngắn**: Bỏ việc bỏ qua đoạn dưới ba câu và hiển thị nguyên nhân khi phân tích thủ công thất bại.
 - **Vùng OCR trong Performance bị lệch hoặc làm đen khung hình**: Sửa kéo/đổi kích thước, lưu vùng chọn riêng theo video và cách hiển thị lớp OCR.
 - **Dữ liệu video và hàng đợi không đồng bộ sau khi xóa**: Đối chiếu lại file còn trên đĩa, lịch sử và hàng đợi khi gặp file đang được sử dụng; ngăn thêm trùng video giữa Quality và Performance.

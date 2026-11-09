@@ -76,10 +76,44 @@ test('Gemini does not treat a sidebar entry as an active temporary chat', () => 
   finally { dom.window.close(); }
 });
 
-test('Gemini recognizes an active-chat indicator', async () => {
-  const { dom, gemini } = load('<main><i data-mat-icon-name="gemini_chat_temp"></i></main>');
+test('Gemini recognizes the active state observed in the live DOM', async () => {
+  const { dom, gemini } = load('<main><chat-window class="is-temporary-chat"></chat-window><gem-icon-button class="temp-chat-button temp-chat-on"><button aria-label="Cuộc trò chuyện tạm thời"></button></gem-icon-button></main>');
   try { await gemini.ensureTemporaryChat(); }
   finally { dom.window.close(); }
+});
+
+test('Gemini entry icon inside main does not falsely confirm temporary mode', () => {
+  const { dom, gemini } = load('<main><chat-window></chat-window><gem-icon-button class="temp-chat-button"><button aria-label="Cuộc trò chuyện tạm thời"><mat-icon data-mat-icon-name="gemini_chat_temp"></mat-icon></button></gem-icon-button></main>');
+  try { assert.equal(gemini.isTemporaryChat(), false); }
+  finally { dom.window.close(); }
+});
+
+test('Gemini switches real active-state classes on before the first prompt', async () => {
+  const { dom, gemini } = load('<main><chat-window></chat-window><gem-icon-button class="temp-chat-button"><button aria-label="Cuộc trò chuyện tạm thời"><mat-icon data-mat-icon-name="gemini_chat_temp"></mat-icon></button></gem-icon-button></main>');
+  try {
+    const button = dom.window.document.querySelector('button');
+    Object.defineProperty(button, 'offsetWidth', { value: 20 });
+    button.addEventListener('click', () => {
+      dom.window.document.querySelector('chat-window').classList.add('is-temporary-chat');
+      button.parentElement.classList.add('temp-chat-on');
+    });
+    await gemini.ensureTemporaryChat();
+    assert.equal(gemini.isTemporaryChat(), true);
+  } finally { dom.window.close(); }
+});
+
+test('Gemini keeps the same temporary conversation through six batches', async () => {
+  const { dom, gemini } = load('<main><chat-window class="is-temporary-chat"><h1 class="temporary-chat-card-container">Temporary chat</h1></chat-window><gem-icon-button class="temp-chat-button temp-chat-on"><button aria-label="Cuộc trò chuyện tạm thời"></button></gem-icon-button></main>');
+  try {
+    let clicks = 0;
+    dom.window.document.querySelector('button').addEventListener('click', () => { clicks++; });
+    for (let batch = 0; batch < 6; batch++) {
+      await gemini.ensureTemporaryChat();
+      const chat = dom.window.document.querySelector('chat-window');
+      chat.innerHTML = '<model-response>Batch ' + (batch + 1) + ' finished</model-response>';
+    }
+    assert.equal(clicks, 0);
+  } finally { dom.window.close(); }
 });
 
 test('Gemini refuses to send if temporary mode cannot be verified', async () => {
