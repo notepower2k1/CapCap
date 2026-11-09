@@ -5,6 +5,7 @@ import math
 import hashlib
 import threading
 import time
+import tempfile
 from functools import lru_cache
 
 from new_highlight_selector import auto_select_matches
@@ -54,6 +55,21 @@ class _CompletedProcess:
 
 
 def _run_ffmpeg_command_with_progress(command: list, total_duration: float = None, on_progress=None):
+    # Long Fit Voice projects can exceed Windows' 32767-character process
+    # command-line limit. Keep the graph in a scoped UTF-8 file instead.
+    cmd = list(command)
+    if "-filter_complex" in cmd and len(subprocess.list2cmdline([str(x) for x in cmd])) > 24000:
+        index = cmd.index("-filter_complex")
+        with tempfile.TemporaryDirectory(prefix="capcap-ffgraph-") as directory:
+            graph_path = os.path.join(directory, "filters.ffgraph")
+            with open(graph_path, "w", encoding="utf-8") as graph:
+                graph.write(str(cmd[index + 1]))
+            cmd[index:index + 2] = ["-filter_complex_script", graph_path]
+            return _run_ffmpeg_command_with_progress_impl(cmd, total_duration, on_progress)
+    return _run_ffmpeg_command_with_progress_impl(cmd, total_duration, on_progress)
+
+
+def _run_ffmpeg_command_with_progress_impl(command: list, total_duration: float = None, on_progress=None):
     """Run an FFmpeg command with optional live progress parsing via `-progress pipe:1`.
 
     If on_progress is callable and total_duration is known (>0), parses
@@ -194,6 +210,18 @@ def _ffmpeg_supports_encoder(ffmpeg_path: str, encoder_name: str) -> bool:
             **_text_subprocess_run_kwargs(),
         )
         supported = encoder_name in (result.stdout or '')
+        if supported and encoder_name in ("h264_nvenc", "hevc_nvenc", "h264_qsv", "h264_amf") and os.path.exists(ffmpeg_path):
+            probe = subprocess.run(
+                [
+                    ffmpeg_path, "-hide_banner", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "color=c=black:s=256x256:r=1:d=0.04",
+                    "-frames:v", "1", "-c:v", encoder_name, "-f", "null", "-",
+                ],
+                capture_output=True,
+                timeout=5,
+                **_text_subprocess_run_kwargs(),
+            )
+            supported = (probe.returncode == 0)
     except Exception:
         supported = False
     _FFMPEG_ENCODER_CACHE[cache_key] = supported
@@ -1802,7 +1830,7 @@ def _append_text_image_filter_parts(filter_parts, current_label, text_image_laye
         filter_parts.append(f"[{input_index}:v]format=rgba[{image_label}]")
         timing = f":enable='between(t,{start:.3f},{end:.3f})'" if end > start else ""
         filter_parts.append(
-            f"[{current_label}][{image_label}]overlay={x}:{y}:shortest=1{timing}[{next_label}]"
+            f"[{current_label}][{image_label}]overlay={x}:{y}{timing}[{next_label}]"
         )
         current_label = next_label
     return current_label
@@ -1930,6 +1958,13 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
         
         video_encoder_args = _preferred_h264_encoder_args(ffmpeg, fast=fast, video_quality=video_quality)
 
+        can_copy_audio = (
+            not warped_audio_pad
+            and abs(float(audio_gain_db or 0.0)) <= 0.001
+            and os.path.basename(str(video_path)).startswith(("final_mux_", "preview_mux_"))
+        )
+        audio_codec_args = ['-c:a', 'copy'] if can_copy_audio else ['-c:a', 'aac', '-b:a', '192k']
+
         audio_map = f"[{warped_audio_pad}]" if warped_audio_pad else "0:a?"
         command = [
             ffmpeg,
@@ -1940,20 +1975,22 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
             # application log.
             'verbose',
             '-y',
+            '-hwaccel', 'auto',
+            '-filter_threads', '0',
+            '-filter_complex_threads', '0',
             '-i', video_path,
             '-map', '[out]',
             '-map', audio_map,
             '-filter_complex', filter_complex,
             *video_encoder_args,
-            '-c:a', 'aac', '-b:a', '192k',
+            *audio_codec_args,
             '-movflags', '+faststart',
         ]
-        # FFmpeg needs a looping image stream so each static text bitmap can
-        # remain available for its entire timed overlay interval.
+        # FFmpeg holds the single decoded RGBA frame in memory (repeatlast=1 default).
         insert_at = command.index('-map')
         image_inputs = []
         for layer in text_image_layers:
-            image_inputs += ['-loop', '1', '-framerate', '30', '-i', str(layer['path'])]
+            image_inputs += ['-i', str(layer['path'])]
         command[insert_at:insert_at] = image_inputs
         try:
             if output_fps:
@@ -2027,6 +2064,12 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
         '-loglevel',
         'error',
         '-y',
+        '-hwaccel',
+        'auto',
+        '-filter_threads',
+        '0',
+        '-filter_complex_threads',
+        '0',
         '-i', video_path,
     ]
     
@@ -2037,7 +2080,7 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
             command += ['-i', source]
     text_image_layers = _valid_text_image_layers(text_image_layers)
     for layer in text_image_layers:
-        command += ['-loop', '1', '-framerate', '30', '-i', str(layer['path'])]
+        command += ['-i', str(layer['path'])]
     
     # Build filter_complex
     filter_parts = []
@@ -2159,13 +2202,19 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
     
     # Complete the command
     video_encoder_args = _preferred_h264_encoder_args(ffmpeg, video_quality=video_quality)
+    can_copy_audio = (
+        not warped_audio_pad
+        and abs(float(audio_gain_db or 0.0)) <= 0.001
+        and os.path.basename(str(video_path)).startswith(("final_mux_", "preview_mux_"))
+    )
+    audio_codec_args = ['-c:a', 'copy'] if can_copy_audio else ['-c:a', 'aac', '-b:a', '192k']
     audio_map = f"[{warped_audio_pad}]" if warped_audio_pad else "0:a?"
     command += [
         '-filter_complex', filter_complex,
         '-map', '[final]',
         '-map', audio_map,
         *video_encoder_args,
-        '-c:a', 'aac', '-b:a', '192k',
+        *audio_codec_args,
         '-movflags', '+faststart',
     ]
     try:

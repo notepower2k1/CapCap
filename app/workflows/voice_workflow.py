@@ -117,6 +117,8 @@ class VoiceWorkflow:
 
     def cancel(self):
         self._cancelled = True
+        from engines.omnivoice_tts import unload_omnivoice
+        unload_omnivoice()
         try:
             from vieneu_tts import unload_vieneu_model
             unload_vieneu_model()
@@ -253,7 +255,7 @@ class VoiceWorkflow:
             if segment_provider == "elevenlabs" and not self._is_valid_elevenlabs_audio(wav_path):
                 continue
             segment_model_id = model_id if segment_provider == "elevenlabs" else None
-            segment_language_code = language_code if segment_provider == "elevenlabs" else None
+            segment_language_code = language_code if segment_provider in {"elevenlabs", "omnivoice"} else None
             cache_key = segment_cache_key(
                 text=text,
                 voice_name=segment_voice_name,
@@ -761,6 +763,8 @@ class VoiceWorkflow:
             on_progress=on_progress,
             normalizer_dictionary=normalizer_dictionary,
         )
+        if self._voice_provider(voice_name) == "omnivoice":
+            synthesize_kwargs["language_code"] = language_code
         if self._voice_provider(voice_name) == "elevenlabs":
             synthesize_kwargs["language_code"] = self._normalize_language_code(language_code)
             synthesize_kwargs["model_id"] = self._effective_elevenlabs_model_id(model_id)
@@ -1042,6 +1046,19 @@ class VoiceWorkflow:
         for idx, (seg, wav_path) in enumerate(zip(list(segments or []), polished_wavs)):
             if not wav_path or not os.path.exists(wav_path):
                 continue
+            from app.tts_audio_policy import BOUNDARY_TRIM_VERSION
+            original_duration = self._probe_wav_duration_seconds(wav_path)
+            trimmed = self.engine_runtime.trim_tts_boundary_silence(
+                input_wav_path=wav_path,
+                output_wav_path=os.path.join(tmp_dir, f"seg_{idx:04d}_boundary_v{BOUNDARY_TRIM_VERSION}.wav"),
+            )
+            if isinstance(trimmed, (str, os.PathLike)) and trimmed != wav_path and os.path.isfile(trimmed):
+                polished_wavs[idx] = wav_path = str(trimmed)
+                seg["_trimmed_silence"] = True
+                metrics = dict(seg.get("_tts_metrics") or {})
+                metrics["boundary_trim_version"] = BOUNDARY_TRIM_VERSION
+                metrics["boundary_trim_saved_seconds"] = round(max(0., original_duration - self._probe_wav_duration_seconds(wav_path)), 3)
+                seg["_tts_metrics"] = metrics
             try:
                 manual_speed = float(seg.get("voice_speed", 1.0) or 1.0)
             except (TypeError, ValueError):
@@ -1052,21 +1069,10 @@ class VoiceWorkflow:
             actual_duration = self._probe_wav_duration_seconds(wav_path)
             ratio = (actual_duration / target_duration) if target_duration > 0 else 0.0
 
+            seg["pre_speed_ratio"] = round(ratio, 3) if target_duration > 0 else 1.0
             if not has_manual_override:
-                # SMART: trim trailing silence first so the duration
-                # estimate used by speed-adjustment heuristics is based
-                # on actual speech, not dead air.
-                if (sync_mode or "off").strip().lower() == "smart":
-                    trimmed_path = os.path.join(tmp_dir, f"seg_{idx:04d}_silencetrim.wav")
-                    trimmed = self.engine_runtime.trim_trailing_silence(
-                        input_wav_path=polished_wavs[idx],
-                        output_wav_path=trimmed_path,
-                    )
-                    if trimmed != polished_wavs[idx]:
-                        polished_wavs[idx] = trimmed
-                        actual_duration = self._probe_wav_duration_seconds(trimmed)
-                        ratio = (actual_duration / target_duration) if target_duration > 0 else 0.0
-                        seg["_trimmed_silence"] = True
+                # Boundary cleanup above is shared by every mode. Do not run
+                # the older, more aggressive -40 dB tail trimmer in Smart.
                 speech_cost = int(((seg.get("_tts_metrics") or {}).get("speech_cost")) or 0)
                 duration_sec = float(((seg.get("_tts_metrics") or {}).get("duration_sec")) or target_duration)
                 attempt_count = int((seg.get("attempt_count") or (seg.get("_tts_metrics") or {}).get("attempt_count") or 1))
@@ -1344,7 +1350,11 @@ class VoiceWorkflow:
             if audio_end > end_s + 0.01:
                 if "end" in seg and "_original_end" not in seg:
                     seg["_original_end"] = end_s
-                seg["_audio_end"] = audio_end
+            # Always refresh, even if cleanup removed the previous overflow.
+            # Otherwise the UI/track can keep a stale, longer _audio_end.
+            seg["_audio_end"] = audio_end
+            if isinstance(seg.get("metadata"), dict):
+                seg["metadata"]["_audio_end"] = audio_end
 
     def _synthesize_segment_wavs(
         self,
@@ -1372,6 +1382,7 @@ class VoiceWorkflow:
         wavs = [""] * len(segments)
         pending_jobs = []
         cache_hits = 0
+        validated_voices = set()
 
         for idx, seg in enumerate(segments):
             global_idx = int(index_offset) + idx
@@ -1381,8 +1392,12 @@ class VoiceWorkflow:
                 continue
             segment_voice_name = str(seg.get("voice_name") or voice_name).strip() or voice_name
             segment_provider = self._voice_provider(segment_voice_name)
+            if effective_language_code and segment_voice_name not in validated_voices:
+                from tts_processor import validate_voice_language
+                validate_voice_language(segment_voice_name, effective_language_code, model_id=effective_model_id)
+                validated_voices.add(segment_voice_name)
             segment_model_id = effective_model_id if segment_provider == "elevenlabs" else None
-            segment_language_code = effective_language_code if segment_provider == "elevenlabs" else None
+            segment_language_code = effective_language_code if segment_provider in {"elevenlabs", "omnivoice"} else None
             cache_key = self._segment_cache_key(
                 text=txt,
                 voice_name=segment_voice_name,
@@ -1391,7 +1406,7 @@ class VoiceWorkflow:
                 model_id=segment_model_id,
                 language_code=segment_language_code,
             )
-            if segment_provider == "elevenlabs":
+            if segment_provider in {"elevenlabs", "omnivoice"}:
                 seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}_{cache_key[:16]}_base.wav")
             else:
                 seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}_base.wav")
@@ -1484,6 +1499,8 @@ class VoiceWorkflow:
                     cache_hits += 1
                 except Exception:
                     pass
+            elif pending_providers == {"omnivoice"}:
+                worker_count = 1
             elif pending_providers == {"edge"}:
                 worker_count = 1
             elif "elevenlabs" in pending_providers:
@@ -1498,9 +1515,9 @@ class VoiceWorkflow:
                 except (TypeError, ValueError):
                     capcut_workers = 30
                 try:
-                    capcut_batch_size = max(1, int(os.getenv("CAPCUT_TTS_BATCH_SIZE", "60")))
+                    capcut_batch_size = max(1, int(os.getenv("CAPCUT_TTS_BATCH_SIZE", "30")))
                 except (TypeError, ValueError):
-                    capcut_batch_size = 60
+                    capcut_batch_size = 30
                 worker_count = max(1, min(capcut_workers, len(pending_jobs)))
             else:
                 capcut_batch_size = 1
@@ -1517,6 +1534,11 @@ class VoiceWorkflow:
 
         if _is_stopped():
             return wavs
+
+        if on_progress:
+            total_segments = len(segments)
+            pct = (cache_hits / max(1, total_segments)) * 100.0
+            on_progress(f"Synthesizing with TTS: {cache_hits}/{total_segments} ({pct:.1f}%)...")
 
         if not pending_jobs:
             if log:
@@ -1540,11 +1562,14 @@ class VoiceWorkflow:
                 return f"voice '{raw}'"
             return "voiceover"
 
+        omnivoice_failure_event = Event()
         elevenlabs_failure_event = Event()
         elevenlabs_failure_lock = Lock()
         elevenlabs_first_failure = {"error": None}
 
         def _run_synthesis_job(job):
+            if job["provider"] == "omnivoice" and (omnivoice_failure_event.is_set() or _is_stopped()):
+                raise RuntimeError("OmniVoice synthesis was stopped.")
             output_path = str(job["wav_path"])
             if job["provider"] == "elevenlabs":
                 # ThreadPoolExecutor may start a queued job before the coordinator
@@ -1577,6 +1602,14 @@ class VoiceWorkflow:
                         if elevenlabs_first_failure["error"] is None:
                             elevenlabs_first_failure["error"] = exc
                         elevenlabs_failure_event.set()
+                    raise
+            if job["provider"] == "omnivoice":
+                kwargs["language_code"] = job["language_code"]
+                kwargs["on_progress"] = on_progress
+                try:
+                    return self.engine_runtime.synthesize_segment(**kwargs)
+                except Exception:
+                    omnivoice_failure_event.set()
                     raise
             return self.engine_runtime.synthesize_segment(**kwargs)
 
@@ -1737,6 +1770,14 @@ class VoiceWorkflow:
                             if not self._is_valid_elevenlabs_audio(seg_wav):
                                 raise RuntimeError("ElevenLabs output could not be saved as valid audio.")
                     except Exception as exc:
+                        if job["provider"] == "omnivoice":
+                            omnivoice_failure_event.set()
+                            for pending_future in future_map:
+                                pending_future.cancel()
+                            manifest["segments"] = manifest_segments
+                            manifest["by_cache_key"] = manifest_by_cache_key
+                            self._save_manifest(tmp_dir, manifest)
+                            raise RuntimeError(f"OmniVoice failed at subtitle segment {idx + 1}: {exc}") from exc
                         if job["provider"] == "elevenlabs":
                             with elevenlabs_failure_lock:
                                 exc = elevenlabs_first_failure["error"] or exc
@@ -1849,6 +1890,8 @@ class VoiceWorkflow:
         os.makedirs(tmp_dir, exist_ok=True)
         effective_model_id = self._effective_elevenlabs_model_id(elevenlabs_model_id)
         language_code = self._normalize_language_code(target_language)
+        if language_code and language_code != "vi":
+            normalizer_dictionary = None
         safe_voice_speed = self._clamp_requested_speed(float(voice_speed))
         voice_provider = self._voice_provider(voice_name)
         prepared_segments = self._prepare_segments_for_tts(
@@ -1917,6 +1960,8 @@ class VoiceWorkflow:
             effective_target_language = getattr(state, "target_language", None)
         language_code = self._normalize_language_code(effective_target_language)
         normalizer_dictionary = self._normalizer_dictionary_from_state(state)
+        if language_code and language_code != "vi":
+            normalizer_dictionary = {}
         normalizer_signature = self._normalizer_signature(normalizer_dictionary)
         print(
             "[Voice Workflow] Project normalizer dictionary: "
@@ -2002,6 +2047,8 @@ class VoiceWorkflow:
         for s, w in zip(segments, wavs):
             if isinstance(s, dict):
                 s["_wav_path"] = str(w or "")
+                if isinstance(s.get("metadata"), dict):
+                    s["metadata"]["_wav_path"] = str(w or "")
 
         synth_elapsed = time.perf_counter() - synth_started
         print(

@@ -22,6 +22,7 @@ from .models import TranslationResult
 from .prompt_loader import render_prompt
 from .providers import (
     BingWebTranslatorProvider,
+    BrowserBridgePolisherProvider,
     GoogleWebTranslatorProvider,
     OpenAICompatiblePolisherProvider,
 )
@@ -537,6 +538,7 @@ class TranslationOrchestrator:
             max_cues=300,
             user_guidance=user_guidance,
             existing_context=existing_context,
+            raise_on_error=True,
         )
 
     def _normalize_source_language(self, src_lang: str) -> str:
@@ -561,6 +563,15 @@ class TranslationOrchestrator:
             override_provider or os.getenv("OPENAI_PROVIDER") or os.getenv("AI_POLISHER_PROVIDER") or "gemini"
         ).strip().lower()
         provider_type = configured_provider
+        if provider_type in ("browser_ai", "gemini_web", "chatgpt_web"):
+            if provider_type == "gemini_web":
+                platform = "gemini"
+            elif provider_type == "chatgpt_web":
+                platform = "chatgpt"
+            else:
+                platform = os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini").strip().lower()
+            return "browser_ai", BrowserBridgePolisherProvider(provider_id="browser_ai", platform=platform)
+
         if provider_type == "gemini":  # backward compatibility for saved settings
             provider_type = "google_ai_studio"
         definitions = {
@@ -582,7 +593,12 @@ class TranslationOrchestrator:
         )
 
     def _describe_ai_provider(self, provider_type: str) -> str:
-        names = {"google_ai_studio": "Google AI Studio", "openai": "OpenAI", "ollama": "Ollama"}
+        names = {
+            "google_ai_studio": "Google AI Studio",
+            "openai": "OpenAI",
+            "ollama": "Ollama",
+            "browser_ai": "Web Browser AI",
+        }
         return f"{names.get(provider_type, 'AI')} ({getattr(self._resolve_ai_provider(provider_type)[1], 'model_name', '')})"
 
     def _run_ai_batches(
@@ -625,6 +641,8 @@ class TranslationOrchestrator:
                 f"max_segments={max((len(source) for source, *_ in batches), default=0)}"
             )
         use_parallel = os.getenv("CAPCAP_TRANSLATION_PARALLEL_BATCHES", "0").strip().lower() in ("1", "true", "yes")
+        if (provider_type or "").strip().lower() in ("browser_ai", "gemini_web", "chatgpt_web"):
+            use_parallel = False
         mode = "full_context" if full_context_request else ("parallel" if use_parallel else "sequential")
         print(
             f"[AI Translation] Batch plan: mode={mode}, "
@@ -718,6 +736,12 @@ class TranslationOrchestrator:
             except Exception as batch_exc:
                 print(f"[AI Translation] AI batch translation failed. Falling back to Google Translate. ({batch_exc})")
                 raise AIBatchTranslationError(str(batch_exc)) from batch_exc
+        finally:
+            if hasattr(polisher, "finish_session"):
+                try:
+                    polisher.finish_session()
+                except Exception:
+                    pass
 
     def _run_ai_batches_sequential(
         self,
@@ -748,6 +772,7 @@ class TranslationOrchestrator:
         ledger = RollingContextLedger(base_context=context_guidance)
 
         total_batches = len(batches)
+        total_cues = sum(len(b[0]) for b in batches)
         offset = 0
         for idx, batch_item in enumerate(batches):
             if is_canceled and is_canceled():
@@ -766,6 +791,7 @@ class TranslationOrchestrator:
                 batch_number=idx + 1,
                 total_batches=total_batches,
                 start_offset=offset,
+                total_cues=total_cues,
                 source_texts=source_batch,
                 translated_texts=draft_batch,
                 source_speakers=speaker_batch,
@@ -810,7 +836,7 @@ class TranslationOrchestrator:
         return translated_texts, sorted(providers_used), warnings
 
     @staticmethod
-    def _translate_ai_batch(*, polisher, batch_number, total_batches, start_offset, **kwargs):
+    def _translate_ai_batch(*, polisher, batch_number, total_batches, start_offset, total_cues=0, **kwargs):
         trace = f"{os.getpid()}:{threading.get_ident()}"
         label = f"batch={batch_number}/{total_batches} cues={start_offset + 1}-{start_offset + len(kwargs['source_texts'])}"
         started = time.monotonic()
@@ -819,7 +845,20 @@ class TranslationOrchestrator:
             f"context_chars={len(kwargs.get('context_guidance') or '')}\n", end="", flush=True,
         )
         try:
-            result = polisher.polish_batch(**kwargs)
+            polish_kwargs = dict(kwargs)
+            try:
+                import inspect
+                sig = inspect.signature(polisher.polish_batch)
+                if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()) or "batch_number" in sig.parameters:
+                    polish_kwargs.update({
+                        "batch_number": batch_number,
+                        "total_batches": total_batches,
+                        "start_offset": start_offset,
+                        "total_cues": total_cues,
+                    })
+            except Exception:
+                pass
+            result = polisher.polish_batch(**polish_kwargs)
         except Exception as exc:
             print(
                 f"[AI Translation] Batch ERROR trace={trace} {label} "
@@ -859,6 +898,7 @@ class TranslationOrchestrator:
             batch_timeout = int(os.getenv("CAPCAP_OLLAMA_TIMEOUT") or "3600") if is_ollama else int(os.getenv("CAPCAP_AI_TIMEOUT") or "300")
         except (ValueError, TypeError):
             batch_timeout = 3600 if is_ollama else 300
+        total_cues = sum(len(b[0]) for b in batches)
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_workers))
         try:
             future_to_idx = {}
@@ -873,6 +913,7 @@ class TranslationOrchestrator:
                     batch_number=idx + 1,
                     total_batches=len(batches),
                     start_offset=sum(len(batches[i][0]) for i in range(idx)),
+                    total_cues=total_cues,
                     source_texts=source_batch,
                     translated_texts=translated_batch,
                     source_speakers=speaker_batch,
@@ -939,7 +980,7 @@ class TranslationOrchestrator:
         source_texts: list[str],
         translated_texts: list[str] | None,
         source_speakers: list[str] | None = None,
-        requested_max_segments: int,
+        requested_max_segments: int = 0,
         force_ordered: bool = False,
         provider_type: str = "",
     ) -> tuple[list[tuple[list[str], list[str] | None, int, list[str] | None]], bool]:
@@ -983,6 +1024,7 @@ class TranslationOrchestrator:
 
         is_ollama = (provider_type or "").strip().lower() == "ollama"
         is_gemini = (provider_type or "").strip().lower() in ("google_ai_studio", "gemini")
+        is_browser_ai = (provider_type or "").strip().lower() in ("browser_ai", "gemini_web", "chatgpt_web")
         default_context_limit = 32000 if is_ollama else 64000
         if is_gemini:
             default_output_limit = 65536
@@ -1005,7 +1047,7 @@ class TranslationOrchestrator:
             not force_ordered
             and input_tokens <= min(context_limit, 48000)
             and response_tokens <= min(output_limit, 6000)
-            and len(source_texts) <= (30 if is_ollama else 400)
+            and len(source_texts) <= (30 if is_ollama else (120 if is_browser_ai else 400))
         )
 
         if safe_single_pass:
@@ -1028,7 +1070,7 @@ class TranslationOrchestrator:
         # which translates to roughly 80-120 lines depending on language/character density).
         default_batch_tokens = 700 if is_ollama else 1800
         default_max_chars = 4000 if is_ollama else 12000
-        default_max_segments = 25 if is_ollama else (requested_max_segments or 0)
+        default_max_segments = 25 if is_ollama else ((requested_max_segments or 80) if is_browser_ai else (requested_max_segments or 0))
 
         max_batch_tokens = _env_int("CAPCAP_AI_TRANSLATION_BATCH_TOKENS", default_batch_tokens)
         max_chars = _env_int("CAPCAP_AI_TRANSLATION_MAX_CHARS", default_max_chars)

@@ -36,6 +36,18 @@ def _ffmpeg_supports_encoder(ffmpeg_path: str, encoder_name: str) -> bool:
             **subprocess_text_kwargs(),
         )
         supported = encoder_name in (result.stdout or "")
+        if supported and encoder_name in ("h264_nvenc", "hevc_nvenc", "h264_qsv", "h264_amf") and os.path.exists(ffmpeg_path):
+            probe = subprocess.run(
+                [
+                    ffmpeg_path, "-hide_banner", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "color=c=black:s=256x256:r=1:d=0.04",
+                    "-frames:v", "1", "-c:v", encoder_name, "-f", "null", "-",
+                ],
+                capture_output=True,
+                timeout=5,
+                **subprocess_text_kwargs(),
+            )
+            supported = (probe.returncode == 0)
     except Exception:
         supported = False
     _FFMPEG_ENCODER_CACHE[cache_key] = supported
@@ -168,6 +180,8 @@ def trim_video_clip(video_path: str, output_video_path: str, start_seconds: floa
         "-loglevel",
         "error",
         "-y",
+        "-hwaccel",
+        "auto",
         "-ss",
         str(max(0.0, float(start_seconds))),
         "-t",
@@ -232,6 +246,12 @@ def apply_timewarp_to_video_clip(
         "-loglevel",
         "error",
         "-y",
+        "-hwaccel",
+        "auto",
+        "-filter_threads",
+        "0",
+        "-filter_complex_threads",
+        "0",
         "-i",
         input_video_path,
         "-filter_complex",
@@ -322,8 +342,12 @@ def mux_audio_into_video_for_preview(
     if vf:
         cmd += ["-vf", vf]
 
+    is_temp_mux = os.path.basename(str(output_video_path)).startswith(("final_mux_", "preview_mux_"))
+
     if needs_encode:
         base_cmd = list(cmd)
+        first_i = base_cmd.index("-i")
+        base_cmd[first_i:first_i] = ["-hwaccel", "auto"]
         if fps_value:
             base_cmd += ["-r", str(fps_value)]
         base_cmd += [
@@ -332,9 +356,12 @@ def mux_audio_into_video_for_preview(
             "-b:a",
             "192k",
             "-shortest",
-            "-movflags",
-            "+faststart",
         ]
+        if not is_temp_mux:
+            base_cmd += [
+                "-movflags",
+                "+faststart",
+            ]
         _run_ffmpeg_with_h264_fallback(
             ffmpeg,
             base_cmd,
@@ -354,10 +381,13 @@ def mux_audio_into_video_for_preview(
             "-b:a",
             "192k",
             "-shortest",
-            "-movflags",
-            "+faststart",
-            output_video_path,
         ]
+        if not is_temp_mux:
+            cmd += [
+                "-movflags",
+                "+faststart",
+            ]
+        cmd += [output_video_path]
         try:
             _run_ffmpeg_command_with_progress(cmd, total_duration=total_duration, on_progress=on_progress)
         except subprocess.CalledProcessError as exc:
@@ -399,6 +429,8 @@ def mux_audio_into_video_clip_for_preview(
         "-loglevel",
         "error",
         "-y",
+        "-hwaccel",
+        "auto",
     ]
     if not video_is_pretrimmed:
         cmd += [

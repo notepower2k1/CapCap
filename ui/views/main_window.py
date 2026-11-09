@@ -121,23 +121,18 @@ def _build_header_bar(gui):
     more_menu = QMenu(gui.more_actions_btn)
     more_menu.setObjectName("headerMoreMenu")
 
-    export_subtitles_menu = more_menu.addMenu(t("Export Subtitles"))
-    export_subtitles_menu.setObjectName("headerMoreMenu")
-    gui.export_subtitles_menu = export_subtitles_menu
-    gui.download_subtitle_action = export_subtitles_menu.addAction(t("Export Translated SRT…"))
-    gui.download_subtitle_action.triggered.connect(gui.download_subtitle)
-    gui.download_original_action = export_subtitles_menu.addAction(t("Export Source SRT…"))
-    gui.download_original_action.triggered.connect(gui.download_original_script)
-
-    export_audio_menu = more_menu.addMenu(t("Export Audio"))
-    export_audio_menu.setObjectName("headerMoreMenu")
-    gui.export_audio_menu = export_audio_menu
-    gui.export_voice_action = export_audio_menu.addAction(t("Export Dubbed Voice (WAV)…"))
-    gui.export_voice_action.triggered.connect(gui.export_dubbed_voice)
-    gui.export_bg_music_action = export_audio_menu.addAction(t("Export Background Music (WAV)…"))
-    gui.export_bg_music_action.triggered.connect(gui.export_background_music)
-    gui.export_mixed_audio_action = export_audio_menu.addAction(t("Export Full Audio Mix (WAV)…"))
-    gui.export_mixed_audio_action.triggered.connect(gui.export_mixed_audio)
+    gui.resource_export_menu = more_menu.addMenu(t("Export Resources"))
+    gui.resource_export_menu.setObjectName("headerMoreMenu")
+    gui.export_capcut_action = gui.resource_export_menu.addAction(t("Export to CapCut…"))
+    def export_capcut():
+        from controllers.capcut_export_controller import export_capcut_project
+        export_capcut_project(gui)
+    gui.export_capcut_action.triggered.connect(export_capcut)
+    gui.export_others_action = gui.resource_export_menu.addAction(t("Export Resources…"))
+    def export_others():
+        from controllers.resource_export_controller import export_other_resources
+        export_other_resources(gui)
+    gui.export_others_action.triggered.connect(export_others)
 
     gui.preview_5s_action = None
     more_menu.addSeparator()

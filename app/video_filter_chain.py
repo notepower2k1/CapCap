@@ -24,6 +24,7 @@ def normalize_video_filter_state(video_filter_state) -> dict:
     if not isinstance(final_values, dict):
         return {}
     normalized = {}
+    normalized["mirror_horizontal"] = video_filter_state.get("mirror_horizontal", False) is True
     for field in FILTER_FIELDS:
         try:
             normalized[field] = max(-100.0, min(100.0, float(final_values.get(field, 0.0))))
@@ -61,10 +62,10 @@ def build_video_filter_chain(video_filter_state=None) -> str:
     shadows = values["shadows"]
     lut_path = values["lut_path"]
     lut_strength = values["lut_strength"]
-    if not any(abs(values[field]) > 0.01 for field in FILTER_FIELDS) and not (lut_path and lut_strength > 0.001):
+    if not values["mirror_horizontal"] and not any(abs(values[field]) > 0.01 for field in FILTER_FIELDS) and not (lut_path and lut_strength > 0.001):
         return ""
 
-    chain = []
+    chain = ["hflip"] if values["mirror_horizontal"] else []
     eq_parts = []
     if abs(brightness) > 0.01:
         eq_parts.append(f"brightness={max(-1.0, min(1.0, brightness / 100.0 * 0.35)):.4f}")

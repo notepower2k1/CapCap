@@ -1209,6 +1209,8 @@ class VoiceOverWorker(QThread):
                 if uses_elevenlabs:
                     voice_payload["elevenlabs_model_id"] = self.elevenlabs_model_id
                     voice_payload["target_language"] = self.target_language
+                if any(name.startswith("omnivoice:") for name in selected_voice_names):
+                    voice_payload["target_language"] = self.target_language
                 response = remote_api_post(
                     "/v1/voice",
                     voice_payload,
@@ -1247,6 +1249,8 @@ class VoiceOverWorker(QThread):
                 )
                 if uses_elevenlabs:
                     workflow_kwargs["elevenlabs_model_id"] = self.elevenlabs_model_id
+                    workflow_kwargs["target_language"] = self.target_language
+                if any(name.startswith("omnivoice:") for name in selected_voice_names):
                     workflow_kwargs["target_language"] = self.target_language
                 result = workflow.run(**workflow_kwargs)
                 if self._is_cancelled:
@@ -1404,7 +1408,7 @@ class SegmentAudioPreviewWorker(QThread):
                 provider_speed=provider_speed,
                 normalizer_signature=_normalizer_signature(self.normalizer_dictionary),
                 model_id=model_id,
-                language_code=language_code if is_elevenlabs else None,
+                language_code=language_code if v_provider in {"elevenlabs", "omnivoice"} else None,
             )
             if is_elevenlabs:
                 base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_{cache_key[:16]}_base.wav")
@@ -1414,6 +1418,9 @@ class SegmentAudioPreviewWorker(QThread):
                         os.remove(staging_wav_path)
                 except OSError:
                     pass
+            elif v_provider == "omnivoice":
+                base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_{cache_key[:16]}_base.wav")
+                staging_wav_path = base_wav_path
             else:
                 base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_base.wav")
                 staging_wav_path = base_wav_path
@@ -1425,6 +1432,8 @@ class SegmentAudioPreviewWorker(QThread):
                 tmp_dir=cache_temp_dir,
                 normalizer_dictionary=self.normalizer_dictionary,
             )
+            if v_provider == "omnivoice":
+                synthesize_kwargs["language_code"] = language_code
             if is_elevenlabs:
                 synthesize_kwargs["language_code"] = language_code
                 synthesize_kwargs["model_id"] = model_id
@@ -1454,15 +1463,21 @@ class SegmentAudioPreviewWorker(QThread):
             manifest["by_cache_key"] = manifest_by_cache_key
             save_manifest(cache_temp_dir, manifest)
 
+            from app.tts_audio_policy import BOUNDARY_TRIM_VERSION
+            trimmed = engine.trim_tts_boundary_silence(
+                input_wav_path=base_wav_path,
+                output_wav_path=os.path.join(preview_temp_dir, f"segment_{self.index}_boundary_v{BOUNDARY_TRIM_VERSION}.wav"),
+            )
+            processed_wav_path = str(trimmed) if isinstance(trimmed, (str, os.PathLike)) and os.path.isfile(trimmed) else base_wav_path
             wav_path = os.path.join(preview_temp_dir, f"segment_{self.index}_{os.getpid()}.wav")
             if abs(residual_speed - 1.0) >= 0.02:
                 output = engine.change_wav_speed(
-                    input_wav_path=base_wav_path,
+                    input_wav_path=processed_wav_path,
                     output_wav_path=wav_path,
                     speed_ratio=residual_speed,
                 )
             else:
-                output = base_wav_path
+                output = processed_wav_path
             self.finished.emit(self.index, output, "")
         except Exception as exc:
             details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
@@ -1488,7 +1503,8 @@ class VoiceSamplePreviewWorker(QThread):
             temp_dir = self.temp_dir or os.path.join(self.workspace_root, "temp", "voice_sample_preview")
             os.makedirs(temp_dir, exist_ok=True)
             vpu = _get_voice_preview_utils()
-            is_elevenlabs = vpu.voice_provider(self.voice_name) == "elevenlabs"
+            v_provider = vpu.voice_provider(self.voice_name)
+            is_elevenlabs = v_provider == "elevenlabs"
             language_code = str(self.target_language or "").strip().lower().split("-", 1)[0].split("_", 1)[0] or None
             model_id = (
                 str(os.getenv("ELEVENLABS_MODEL") or "eleven_turbo_v2_5").strip()
@@ -1500,6 +1516,9 @@ class VoiceSamplePreviewWorker(QThread):
             )
             if is_elevenlabs:
                 cache_seed += f"|model={model_id}|language={language_code or ''}"
+            if v_provider == "omnivoice":
+                from engines.omnivoice_tts import voice_fingerprint
+                cache_seed += f"|omnivoice={voice_fingerprint(self.voice_name)}|language={language_code or ''}"
             cache_seed = cache_seed.encode("utf-8", errors="replace")
             cache_key = hashlib.sha1(cache_seed).hexdigest()[:16]
             wav_path = os.path.join(temp_dir, f"voice_sample_{cache_key}.wav")
@@ -1526,6 +1545,8 @@ class VoiceSamplePreviewWorker(QThread):
                 on_progress=self.progress.emit,
                 normalizer_dictionary=self.normalizer_dictionary,
             )
+            if v_provider == "omnivoice":
+                synthesize_kwargs["language_code"] = language_code
             if is_elevenlabs:
                 synthesize_kwargs["language_code"] = language_code
                 synthesize_kwargs["model_id"] = model_id

@@ -91,6 +91,14 @@ _STATUS_LOCK = threading.Lock()
 _STATUS = {"phase": "idle", "message": "Idle", "progress": 0, "detail": ""}
 
 
+def _reload_env() -> None:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(WORKSPACE_ROOT, ".env"), override=True)
+    except Exception:
+        pass
+
+
 def _set_status(phase: str, message: str = "", progress: int | None = None, detail: str = "") -> None:
     with _STATUS_LOCK:
         current_phase = _STATUS.get("phase", "idle")
@@ -284,6 +292,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
                 pass
 
     def _handle_translate_segments(self, payload: dict) -> dict:
+        _reload_env()
         segments = list(payload.get("segments") or [])
         status_updates = []
         result = translate_segments(
@@ -298,6 +307,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
         return {"ok": True, "segments": list(result or []), "translation_status": status_updates}
 
     def _handle_translate_srt(self, payload: dict) -> dict:
+        _reload_env()
         srt_text = str(payload.get("srt_text", "") or "")
         result = translate_segments_to_srt(
             srt_text,
@@ -310,6 +320,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
         return {"ok": True, "srt_text": result}
 
     def _handle_rewrite_segments(self, payload: dict) -> dict:
+        _reload_env()
         result = rewrite_translated_segments(
             list(payload.get("source_segments") or []),
             list(payload.get("translated_segments") or []),
@@ -319,6 +330,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
         return {"ok": True, "segments": list(result or [])}
 
     def _handle_rewrite_srt(self, payload: dict) -> dict:
+        _reload_env()
         segments = rewrite_translated_segments(
             list(payload.get("source_segments") or []),
             list(payload.get("translated_segments") or []),
@@ -368,6 +380,7 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
                 pass
 
     def _handle_prepare(self, payload: dict) -> dict:
+        _reload_env()
         video_path = str(payload.get("video_path", "") or "").strip()
         if not video_path or not os.path.exists(video_path):
             raise ValueError("video_path required and must exist.")

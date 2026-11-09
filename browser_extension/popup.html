@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CapCap Web AI Bridge</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #141c2e;
+      --card-border: #1f2d47;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-hover: #0ea5e9;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --purple: #8b5cf6;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      width: 340px;
+      background-color: var(--bg);
+      color: var(--text-main);
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.4;
+      overflow-x: hidden;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 12px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .app-icon {
+      width: 32px;
+      height: 32px;
+      padding: 3px;
+      border-radius: 6px;
+      background: #ffffff;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+
+    .title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: -0.2px;
+    }
+
+    .version-tag {
+      font-size: 10px;
+      background: #1e293b;
+      color: var(--text-muted);
+      padding: 2px 6px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+
+    .card-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Status indicator */
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      font-size: 12px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #64748b;
+      transition: all 0.3s ease;
+    }
+
+    .dot.connected {
+      background-color: var(--green);
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+      animation: pulse 2s infinite;
+    }
+
+    .dot.disconnected {
+      background-color: #64748b;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .last-sync-time {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Config pill list */
+    .config-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .config-item {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid #23314e;
+      border-radius: 6px;
+      padding: 6px 8px;
+    }
+
+    .config-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+
+    .config-val {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Progress section */
+    .progress-box {
+      margin-top: 4px;
+    }
+
+    .progress-status-text {
+      font-size: 11.5px;
+      color: #e2e8f0;
+      font-weight: 500;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 7px;
+      background: #1e293b;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 6px;
+      border: 1px solid #334155;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #0ea5e9, #10b981);
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+
+    .progress-details {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Tab indicator & buttons */
+    .tab-status-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .button-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 7px 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+
+    .btn:hover {
+      background: #283548;
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, rgba(14, 165, 233, 0.2), rgba(99, 102, 241, 0.2));
+      border-color: #0284c7;
+      color: #38bdf8;
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, rgba(14, 165, 233, 0.35), rgba(99, 102, 241, 0.35));
+      border-color: #38bdf8;
+    }
+
+    .select-input {
+      width: 100%;
+      background: #1e293b;
+      color: var(--text-main);
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 11px;
+      font-weight: 500;
+      outline: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .select-input:hover,
+    .select-input:focus {
+      background: #283548;
+      border-color: var(--accent);
+    }
+
+    /* Footer */
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      color: #64748b;
+      padding-top: 4px;
+    }
+
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .live-dot {
+      width: 5px;
+      height: 5px;
+      background: #38bdf8;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <img class="app-icon" src="icons/icon128.png" alt="CapCap">
+      <span class="title">CapCap Web AI Bridge</span>
+    </div>
+    <span class="version-tag">v9.0.0</span>
+  </div>
+
+  <!-- 1. Connection Status Card -->
+  <div class="card">
+    <div class="card-title">
+      <span>Trạng thái kết nối</span>
+      <span class="last-sync-time" id="syncTime">Đang kiểm tra...</span>
+    </div>
+    <div class="status-row">
+      <div class="status-badge" id="statusBadge">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Đang tìm CapCap...</span>
+      </div>
+    </div>
+    <div class="task-progress-row" style="margin-top: 8px; font-size: 11.5px; color: #94a3b8; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 6px;">
+      <span>Tác vụ: </span><span id="taskProgressLabel" style="color: #e2e8f0; font-weight: 500;">Nhàn rỗi</span>
+    </div>
+  </div>
+
+  <!-- 2. Synced Configuration Card -->
+  <div class="card">
+    <div class="card-title">Cấu hình đồng bộ từ CapCap</div>
+    <div class="config-grid">
+      <div class="config-item">
+        <div class="config-label">Nền tảng AI</div>
+        <div class="config-val" id="platformVal">--</div>
+      </div>
+      <div class="config-item">
+        <div class="config-label">Chế độ Chat</div>
+        <div class="config-val" id="chatModeVal">--</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Run Mode Option Card -->
+  <div class="card">
+    <div class="card-title">Chế độ hiển thị khi dịch</div>
+    <select id="runMode" class="select-input">
+      <option value="window" selected>Chạy trong cửa sổ riêng (mặc định)</option>
+      <option value="foreground">Dùng tab hiện tại (tùy chọn)</option>
+    </select>
+  </div>
+
+  <!-- 3. Live Translation Progress Card -->
+  <div class="card">
+    <div class="card-title">Tiến trình dịch trực tiếp</div>
+    <div class="progress-box">
+      <div class="progress-status-text">
+        <span id="progressState">Sẵn sàng nhận tác vụ</span>
+        <span id="progressPercent" style="font-weight: 700; color: var(--accent);">0%</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progressBar"></div>
+      </div>
+      <div class="progress-details">
+        <span id="batchCount">Batch: 0 / 0</span>
+        <span id="subCount">Phụ đề: 0 / 0 câu</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Tab Status & Quick Actions -->
+  <div class="card">
+    <div class="card-title">Trạng thái Tab Trình Duyệt</div>
+    <div class="tab-status-text" id="tabStatusText">
+      <span>Đang kiểm tra tab...</span>
+    </div>
+    <div class="button-group">
+      <button class="btn btn-primary" id="btnOpenGemini">
+        ✨ Mở Gemini Web
+      </button>
+      <button class="btn" id="btnOpenChatGPT">
+        🛡️ Mở ChatGPT Temp
+      </button>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span>Tự động đồng bộ mỗi 1s</span>
+    <span class="live-badge"><span class="live-dot"></span> Port 18765</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

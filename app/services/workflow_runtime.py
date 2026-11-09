@@ -123,6 +123,8 @@ class WorkflowRuntime:
         if uses_elevenlabs:
             run_kwargs["elevenlabs_model_id"] = elevenlabs_model_id
             run_kwargs["target_language"] = target_language
+        if any(name.startswith("omnivoice:") for name in voice_names):
+            run_kwargs["target_language"] = target_language
         return self.voice_workflow.run(**run_kwargs)
 
     def run_export(

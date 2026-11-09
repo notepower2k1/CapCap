@@ -2,6 +2,8 @@
 
 [English](README_en.md) | [Tiếng Việt](README.md)
 
+**Version 9.0.0** — Gemini/ChatGPT Web translation through the [CapCap extension](browser_extension/README.md), OmniVoice, and Quality/Performance workspaces. See the [release notes](release.md).
+
 | 🖥️ Landscape Layout (16:9) | 📱 Portrait Layout (9:16) |
 | :---: | :---: |
 | ![CapCap Landscape 16:9](assets/preview_1.png) | ![CapCap Portrait 9:16](assets/preview_2.png) |
@@ -24,6 +26,7 @@
 ## ✨ Highlights
 
 * 🔄 **Guided 5-Step Pipeline:** Prepare → Transcribe (STT / OCR) → Translate → Voice-over (TTS) → Export.
+* 🗂️ **Quality / Performance:** Choose the full editor or a still-frame editor for long videos. Performance processes a sequential queue with independent settings per video, manual rendering, and optional automatic export after processing.
 * 📱 **Adaptive Workspace (16:9 & 9:16):** Automatically switches layout between landscape videos (YouTube/Cinema) and portrait videos (TikTok, Shorts, Reels).
 * 🧠 **Context-Aware AI Translation & Pronoun Consistency:** Integrates Gemini 2.5, GPT-4o, DeepSeek, Ollama (offline), and Google/Bing Web Translate. Automatically infers character relationships and supports interactive natural-language feedback.
 * 🎙️ **Multi-Voice TTS & BGM Separation:** Supports ElevenLabs TTS (studio-grade quality), Piper (offline), Edge TTS, CapCut TTS, and VieNeu TTS (voice cloning). Separates speech from background music (BGM) to preserve original soundtracks.
@@ -35,6 +38,7 @@
 ## 📚 Documentation
 
 * 📖 [How to Use](docs/how-to-use.md)
+* 🗂️ [Quality, Performance and the video queue (Vietnamese)](docs/performance-mode.md)
 * 💻 [Requirements and Resources](docs/requirements.md)
 * ⚙️ [Technical Stack](docs/technical-stack.md)
 * 📁 [Project Structure](docs/project-structure.md)
@@ -44,7 +48,7 @@
 
 ### 💡 MPV Preview Player Troubleshooting
 
-CapCap uses **libmpv** by default for smooth, frame-accurate preview:
+**Quality** uses **libmpv** for smooth, frame-accurate preview. **Performance** uses a still frame without initializing the MPV player:
 * **Visual C++ Requirement:** `libmpv-2.dll` requires **Microsoft Visual C++ 2015–2022 Redistributable (x64)** (version >= 14.20).
 * **If MPV fails to start:** Run the bundled installer at `installer\vc_redist.x64.exe` or download directly from [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 

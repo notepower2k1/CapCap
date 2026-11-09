@@ -6,6 +6,7 @@ import time
 import shutil
 import hashlib
 import re
+import subprocess
 
 import threading
 
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QComboBox,
     QProgressBar,
     QPushButton,
@@ -27,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from runtime_paths import asset_path, subprocess_hidden_kwargs, workspace_root
+from runtime_paths import asset_path, subprocess_hidden_kwargs, subprocess_text_kwargs, workspace_root
 
 try:
     from i18n import get_language, language_items, localize_widget_tree, set_language, t
@@ -522,7 +524,7 @@ class LauncherWindow(QDialog):
             self.setWindowIcon(build_contrasting_window_icon(logo, is_dark_bg=True))
 
         self.setWindowTitle(t("CapCap - Video Translator"))
-        self.setMinimumSize(840, 540)
+        self.setMinimumSize(1040, 680)
         self.setStyleSheet("""
             QDialog {
                 background-color: #0a101e;
@@ -541,6 +543,15 @@ class LauncherWindow(QDialog):
             pass
 
         self._build_ui()
+        self._build_processing_modes()
+        # Leave room for mode selection and the queue toolbar/table. Clamp the
+        # default to the usable desktop so smaller laptop screens still fit.
+        screen=self.screen()
+        available=screen.availableGeometry() if screen is not None else None
+        width=min(1280,max(640,available.width()-40)) if available is not None else 1280
+        height=min(820,max(480,available.height()-64)) if available is not None else 820
+        self.setMinimumSize(min(1040,width),min(680,height))
+        self.resize(width,height)
         QTimer.singleShot(0, self._load_recent)
         QTimer.singleShot(0, self._validate_resources_for_device)
 
@@ -573,6 +584,12 @@ class LauncherWindow(QDialog):
         self._gpu_label = QLabel()
         header_text.addWidget(self._gpu_label)
         self._update_gpu_label(has_gpu, gpu_name, cuda_ready)
+
+        self._gpu_diagnostic_label = QLabel(self)
+        self._gpu_diagnostic_label.setWordWrap(True)
+        self._gpu_diagnostic_label.setStyleSheet("font-size: 11px; color: #ffa500;")
+        header_text.addWidget(self._gpu_diagnostic_label)
+        self._update_gpu_diagnostic_label()
 
         self._missing_label = QLabel("", self)
         self._missing_label.setWordWrap(True)
@@ -658,6 +675,8 @@ class LauncherWindow(QDialog):
         action_row_one.setSpacing(6)
         action_row_two = QHBoxLayout()
         action_row_two.setSpacing(6)
+        utility_row = QHBoxLayout()
+        utility_row.setSpacing(6)
 
         self.new_btn = QPushButton("+ New Project")
         self.new_btn.setMinimumHeight(44)
@@ -678,7 +697,25 @@ class LauncherWindow(QDialog):
         self.new_btn.clicked.connect(self._on_new_project)
         action_row_one.addWidget(self.new_btn)
 
-        self.split_btn = QPushButton("Split Video")
+        self.import_project_btn = QPushButton(t("Import Project"))
+        self.import_project_btn.setMinimumHeight(44)
+        self.import_project_btn.setMinimumWidth(150)
+        self.import_project_btn.setStyleSheet("""
+            QPushButton { background-color: #22344d; color: #8ad7ff; font-weight: 600;
+                font-size: 13px; border-radius: 8px; border: 1px solid #34506f; }
+            QPushButton:hover { background-color: #29405d; }
+        """)
+        self.import_project_menu = QMenu(self.import_project_btn)
+        self.import_project_menu.setStyleSheet("QMenu { background: #101b2c; color: #cfe6ff; border: 1px solid #34506f; } QMenu::item { padding: 9px 16px; } QMenu::item:selected { background: #29405d; }")
+        self.import_capcap_action = self.import_project_menu.addAction(t("Import CapCap package…"))
+        self.import_capcut_action = self.import_project_menu.addAction(t("Import exported CapCut package…"))
+        self.import_capcap_action.triggered.connect(self._on_import_capcap_package)
+        self.import_capcut_action.triggered.connect(self._on_import_capcut_package)
+        self.import_project_btn.setMenu(self.import_project_menu)
+        action_row_one.addWidget(self.import_project_btn)
+
+        self.split_btn = QPushButton(t("Media Tools"))
+        self.split_btn.setToolTip(t("Split video, merge videos, separate or mux audio & video"))
         self.split_btn.setMinimumHeight(44)
         self.split_btn.setMinimumWidth(120)
         self.split_btn.setStyleSheet("""
@@ -695,7 +732,7 @@ class LauncherWindow(QDialog):
             }
         """)
         self.split_btn.clicked.connect(self._on_split_video)
-        action_row_one.addWidget(self.split_btn)
+        utility_row.addWidget(self.split_btn)
 
         self.resource_btn = QPushButton("Manage Resources")
         self.resource_btn.setMinimumHeight(44)
@@ -714,7 +751,7 @@ class LauncherWindow(QDialog):
             }
         """)
         self.resource_btn.clicked.connect(self._on_manage_resources)
-        action_row_one.addWidget(self.resource_btn)
+        utility_row.addWidget(self.resource_btn)
 
         self.clean_video_btn = QPushButton("Clean Video Data")
         self.clean_video_btn.setMinimumHeight(44)
@@ -771,6 +808,7 @@ class LauncherWindow(QDialog):
         action_row_two.addStretch()
 
         action_rows.addLayout(action_row_one)
+        action_rows.addLayout(utility_row)
         action_rows.addLayout(action_row_two)
         header.addLayout(action_rows)
         root.addLayout(header)
@@ -802,7 +840,7 @@ class LauncherWindow(QDialog):
         footer_row = QHBoxLayout()
         footer_row.setContentsMargins(0, 0, 0, 0)
         footer_row.addStretch()
-        self._footer_version_label = QLabel("Version 8.0.6.1")
+        self._footer_version_label = QLabel("Version 9.0.0")
         self._footer_version_label.setStyleSheet("color: #4a6382; font-size: 11px; font-weight: 600;")
         footer_row.addWidget(self._footer_version_label)
         root.addLayout(footer_row)
@@ -872,6 +910,43 @@ class LauncherWindow(QDialog):
         set_language(code)
         self._retranslate_ui()
 
+    def _build_processing_modes(self):
+        from PySide6.QtCore import QSettings
+        from views.processing_queue import QueuePanel
+        settings = QSettings("CapCap","VideoTranslatorGUI")
+        self.ui_mode_combo = QComboBox()
+        self.ui_mode_combo.setStyleSheet("QComboBox { background:#14243a; color:#cfe6ff; border:1px solid #34506f; border-radius:8px; padding:9px 14px; min-height:22px; } QComboBox QAbstractItemView { background:#14243a; color:#cfe6ff; selection-background-color:#284969; }")
+        self.ui_mode_combo.addItem(t("Quality — full editor"),"quality")
+        self.ui_mode_combo.addItem(t("Performance — video queue"),"performance")
+        selected = settings.value("ui_work_mode","quality")
+        self.ui_mode_combo.setCurrentIndex(max(0,self.ui_mode_combo.findData(selected)))
+        self.layout().insertWidget(1,self.ui_mode_combo)
+        self._queue_panel = QueuePanel(workspace_root(),self)
+        self.layout().insertWidget(4,self._queue_panel,1)
+        def changed(*_):
+            mode = str(self.ui_mode_combo.currentData())
+            os.environ["CAPCAP_UI_MODE"]=mode
+            settings.setValue("ui_work_mode",mode)
+            performance = mode=="performance"
+            self._queue_panel.setVisible(performance)
+            self.section_label.setVisible(not performance)
+            self.scroll.setVisible(not performance)
+            self.empty_label.setVisible(not performance and not _load_recent_projects())
+            self.new_btn.setText(t("Add videos") if performance else t("+ New Project"))
+            if not performance:
+                self._load_recent()
+        self.ui_mode_combo.currentIndexChanged.connect(changed)
+        changed()
+
+    def reject(self):
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self,t("Processing"),t("Wait for the current video or stop the queue before closing."))
+            return
+        super().reject()
+
+
     def _retranslate_ui(self):
         """Refresh launcher copy and cards after an immediate language change."""
         localize_widget_tree(self)
@@ -885,8 +960,12 @@ class LauncherWindow(QDialog):
             str(getattr(self, "_last_gpu_name", "")),
             bool(getattr(self, "_last_cuda_ready", False)),
         )
-        self.new_btn.setText(t("+ New Project"))
-        self.split_btn.setText(t("Split Video"))
+        self.new_btn.setText(t("Add videos") if hasattr(self,"ui_mode_combo") and self.ui_mode_combo.currentData()=="performance" else t("+ New Project"))
+        self.import_project_btn.setText(t("Import Project"))
+        self.import_capcap_action.setText(t("Import CapCap package…"))
+        self.import_capcut_action.setText(t("Import exported CapCut package…"))
+        self.split_btn.setText(t("Media Tools"))
+        self.split_btn.setToolTip(t("Split video, merge videos, separate or mux audio & video"))
         self.resource_btn.setText(t("Manage Resources"))
         self.clean_video_btn.setText(t("Clean Video Data"))
         self.clean_video_btn.setToolTip(t("Remove generated project data and video preview caches"))
@@ -913,6 +992,7 @@ class LauncherWindow(QDialog):
             self.empty_label.hide()
         for btn in (
             getattr(self, "new_btn", None),
+            getattr(self, "import_project_btn", None),
             getattr(self, "split_btn", None),
             getattr(self, "resource_btn", None),
             getattr(self, "clean_video_btn", None),
@@ -941,8 +1021,23 @@ class LauncherWindow(QDialog):
         QApplication.processEvents()
 
     def accept(self):
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self,t("Processing"),t("A video is being processed. Wait or stop it before opening an editor."))
+            return
+        if hasattr(self,"ui_mode_combo") and self.ui_mode_combo.currentData()=="performance":
+            if self.selected_video:
+                self._queue_panel.add_paths([self.selected_video])
+            return
         if not self.selected_video or not os.path.exists(self.selected_video):
             super().accept()
+            return
+
+        from services.project_work_mode import project_work_mode
+        if project_work_mode(workspace_root(),self.selected_video)=="performance":
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self,t("Quality"),t("This video belongs to Performance. Use Open in Quality in the queue to move it to Quality."))
             return
 
         try:
@@ -973,7 +1068,6 @@ class LauncherWindow(QDialog):
         self._save_device_env()
         self.show_loading(self.selected_video)
 
-        from runtime_paths import workspace_root
         temp_root = os.path.join(workspace_root(), "temp")
 
         self._cache_worker = VisualCacheWorker(self.selected_video, temp_root, None)
@@ -1010,6 +1104,12 @@ class LauncherWindow(QDialog):
         super().accept()
 
     def closeEvent(self, event):
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            event.ignore()
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self,t("Processing"),t("Wait for the current video or stop the queue before closing."))
+            return
         worker = getattr(self, "_cache_worker", None)
         if worker is not None and worker.isRunning():
             try:
@@ -1093,32 +1193,16 @@ class LauncherWindow(QDialog):
         device = self.selected_device
         is_ok, missing, advisory = self._launch_resource_state(service)
         self.new_btn.setEnabled(is_ok)
-        if device == "cuda":
-            has_gpu = True
-            gpu_name = ""
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                    capture_output=True, text=True, timeout=10,
-                    **subprocess_hidden_kwargs(),
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    gpu_name = result.stdout.strip().split("\n")[0].strip()
-            except Exception:
-                pass
-            cuda_ready = is_ok
-            self._update_gpu_label(has_gpu, gpu_name, cuda_ready)
-            if not cuda_ready:
-                self.gpu_btn.setEnabled(False)
-                self.gpu_btn.setText(t("GPU (N/A)"))
-        elif device == "cpu":
-            has_gpu, _gpu_name, cuda_ready = self._detect_gpu_with_cuda()
-            gpu_usable = has_gpu and cuda_ready
-            if gpu_usable:
-                self.gpu_btn.setEnabled(True)
-                self.gpu_btn.setText(t("GPU (Recommended)"))
-                self._update_gpu_label(has_gpu, _gpu_name, cuda_ready)
+        # Hardware identity (including VRAM) must not depend on which mode is
+        # selected. CUDA readiness is distinct from missing pipeline models.
+        has_gpu, gpu_name, cuda_ready = self._detect_gpu_with_cuda()
+        LauncherWindow._gpu_name = gpu_name if has_gpu else ""
+        self._update_gpu_label(has_gpu, gpu_name, cuda_ready)
+        gpu_usable = has_gpu and cuda_ready
+        self.gpu_btn.setEnabled(gpu_usable)
+        self.gpu_btn.setText(t("GPU (Recommended)") if gpu_usable else t("GPU (N/A)"))
+        if device == "cuda" and not gpu_usable:
+            self.new_btn.setEnabled(False)
         if is_ok and not advisory:
             self._missing_label.hide()
             self._missing_label.setText("")
@@ -1161,6 +1245,11 @@ class LauncherWindow(QDialog):
             pass
 
     def _load_recent(self):
+        if getattr(self,"_cleaning_video_data",False):
+            return
+        if hasattr(self,"ui_mode_combo") and self.ui_mode_combo.currentData()=="performance":
+            self.empty_label.hide()
+            return
         projects = _load_recent_projects()
         os.makedirs(self._thumbnail_dir, exist_ok=True)
 
@@ -1181,6 +1270,10 @@ class LauncherWindow(QDialog):
         columns = min(3, max(1, (self.grid_widget.width() - 24) // 242))
         for i, proj in enumerate(existing):
             card = ProjectCard(proj["video_path"], self._thumbnail_dir, self)
+            from services.project_work_mode import project_work_mode
+            if project_work_mode(workspace_root(),proj["video_path"])=="performance":
+                card.setEnabled(False)
+                card.setToolTip(t("This video belongs to Performance. Use Open in Quality in the queue to move it to Quality."))
             row, col = divmod(i, max(1, columns))
             self.grid.addWidget(card, row, col)
             self.grid.setColumnStretch(col, 1)
@@ -1190,6 +1283,9 @@ class LauncherWindow(QDialog):
         QTimer.singleShot(0, self._load_recent)
 
     def _on_new_project(self):
+        if hasattr(self,"ui_mode_combo") and self.ui_mode_combo.currentData()=="performance":
+            self._queue_panel.add_videos()
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, t("Select Video"), "",
             t("Video Files (*.mp4 *.mkv *.avi *.mov *.webm);;All Files (*)")
@@ -1197,6 +1293,23 @@ class LauncherWindow(QDialog):
         if path:
             self.selected_video = path
             self.accept()
+
+    def _on_import_capcap_package(self):
+        from controllers.resource_export_controller import choose_and_import_capcap_package
+        result = choose_and_import_capcap_package(self, workspace_root())
+        if not result:
+            return
+        self.selected_video = result["video_path"]
+        LauncherWindow.add_recent(None, self.selected_video)
+        self._load_recent()
+        if result.get("warnings"):
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, t("Import CapCap package…"), "\n\n".join(t(w) for w in result["warnings"]))
+        self.accept()
+
+    def _on_import_capcut_package(self):
+        from controllers.capcut_export_controller import import_capcut_package
+        import_capcut_package(self)
 
     def _on_manage_resources(self):
         from views.resource_manager import open_resource_manager
@@ -1221,6 +1334,9 @@ class LauncherWindow(QDialog):
             message.exec()
 
     def _on_clean_video_data(self):
+        from services.processing_queue import editor_busy
+        if editor_busy():
+            return
         from PySide6.QtWidgets import QMessageBox
 
         confirm = QMessageBox(QMessageBox.Warning, t("Clean Video Data"),
@@ -1231,69 +1347,56 @@ class LauncherWindow(QDialog):
         if confirm.exec() != QMessageBox.Yes:
             return
 
-        # Keep generated project/cache data in the explicit writable runtime
-        # root rather than deriving it from a module location.
-        root = workspace_root()
-        targets = [
-            os.path.join(root, "projects"),
-            os.path.join(root, "temp"),
-        ]
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QApplication
+        from services.project_service import ProjectService
+        from services.video_data_cleanup import clean_generated_video_data, retain_existing_project_entries
 
-        # Project cards can still own loaded thumbnail pixmaps from temp.
-        # Detach them and process their deferred deletion before removing the
-        # cache tree; this avoids a common first-click Windows file lock.
+        errors = []
+        self._cleaning_video_data = True
+        self.setEnabled(False)
         try:
-            from PySide6.QtWidgets import QApplication
+            stop_all_launcher_workers()
+            worker = getattr(self, "_cache_worker", None)
+            if worker is not None and worker.isRunning():
+                worker.requestInterruption()
+                if not worker.wait(2000):
+                    raise RuntimeError(t("Wait for the current video or stop the queue before closing."))
+            # Do not rebuild thumbnail cards during processEvents/retry while
+            # their caches are being removed.
             for index in reversed(range(self.grid.count())):
                 item = self.grid.takeAt(index)
                 widget = item.widget() if item is not None else None
                 if widget is not None:
-                    widget.setParent(None)
                     widget.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
             QApplication.processEvents()
-        except Exception:
-            pass
-
-        removed = 0
-        errors = []
-        for target in targets:
-            if not os.path.exists(target):
-                continue
-            last_error = None
-            # FFmpeg/thumbnail work can release a file just after the user
-            # confirms cleanup. Retry briefly instead of making the user
-            # click Clean Video Data a second time.
-            for attempt in range(5):
-                try:
-                    shutil.rmtree(target)
-                    removed += 1
-                    last_error = None
-                    break
-                except FileNotFoundError:
-                    last_error = None
-                    break
-                except OSError as exc:
-                    last_error = exc
-                    if attempt < 4:
-                        try:
-                            QApplication.processEvents()
-                        except Exception:
-                            pass
-                        time.sleep(0.25 * (attempt + 1))
-            if last_error is not None:
-                errors.append(f"{os.path.basename(target)}: {last_error}")
-        for target in targets:
-            try:
-                os.makedirs(target, exist_ok=True)
-            except OSError:
-                pass
-        # Cleaning all generated project data also resets the launcher history;
-        # no deleted project should remain listed in recent_projects.json.
-        try:
-            _save_recent_projects(None, [])
-            self._load_recent()
+            result = clean_generated_video_data(workspace_root(), process_events=QApplication.processEvents)
+            errors.extend(result.errors)
+            if result.projects_checked:
+                service = ProjectService(workspace_root())
+                recents = retain_existing_project_entries(_load_recent_projects(), service,
+                    result.remaining_project_ids, video_field="video_path")
+                _save_recent_projects(None, recents)
+                panel = getattr(self, "_queue_panel", None)
+                if panel is not None:
+                    previous = panel.store.jobs
+                    panel.store.jobs = retain_existing_project_entries(previous, service,
+                        result.remaining_project_ids, video_field="video")
+                    try:
+                        panel.store.save()
+                    except Exception:
+                        panel.store.jobs = previous
+                        raise
         except Exception as exc:
-            errors.append(f"recent projects: {exc}")
+            errors.append(str(exc))
+        finally:
+            self._cleaning_video_data = False
+            self.setEnabled(True)
+            self._load_recent()
+            panel = getattr(self, "_queue_panel", None)
+            if panel is not None:
+                panel.refresh()
 
         if errors:
             detail = "\n".join(errors)
@@ -1383,26 +1486,6 @@ class LauncherWindow(QDialog):
         donation_row.addWidget(donation_label)
         donation_row.addWidget(qr_label)
         donation_row.addStretch()
-
-        coffee_group = QHBoxLayout()
-        coffee_group.setSpacing(5)
-        coffee_text = QLabel(t("International Donation\nClick to Buy Me a Coffee"), dialog)
-        coffee_text.setStyleSheet("color:#d7e3f4; font-weight:600;")
-        coffee_group.addWidget(coffee_text)
-        coffee_path = asset_path("buymeacoffee.png")
-        coffee_pixmap = QPixmap(coffee_path)
-        coffee_image = QLabel(dialog)
-        coffee_image.setAlignment(Qt.AlignCenter)
-        if not coffee_pixmap.isNull():
-            coffee_image.setPixmap(coffee_pixmap.scaled(190, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        else:
-            coffee_image.setText(t("Buy Me a Coffee image unavailable"))
-        coffee_image.setToolTip(t("Open Buy Me a Coffee"))
-        coffee_image.setCursor(Qt.PointingHandCursor)
-        coffee_image.setAccessibleName("International Donation - Buy Me a Coffee")
-        coffee_image.mousePressEvent = lambda _event: QDesktopServices.openUrl(QUrl("https://buymeacoffee.com/hcaht"))
-        coffee_group.addWidget(coffee_image)
-        donation_row.addLayout(coffee_group)
         layout.addLayout(donation_row)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, parent=dialog)
         buttons.rejected.connect(dialog.reject)
@@ -1410,87 +1493,20 @@ class LauncherWindow(QDialog):
         dialog.exec()
 
     def _on_split_video(self):
-        from PySide6.QtWidgets import QMessageBox, QProgressDialog, QInputDialog
-        from PySide6.QtCore import QThread, Signal
-        path, _ = QFileDialog.getOpenFileName(
-            self, t("Select Long Video to Split"), "",
-            t("Video Files (*.mp4 *.mkv *.avi *.mov *.webm);;All Files (*)")
-        )
-        if not path:
-            return
-
-        duration = _get_video_duration(path)
-        if duration <= 0:
-            mb = QMessageBox(QMessageBox.Warning, t("Invalid Video"),
-                t("Could not determine video duration."),
-                QMessageBox.Ok, self)
-            mb.setStyleSheet(MSG_STYLE)
-            mb.exec()
-            return
-
-        h = int(duration // 3600)
-        m = int((duration % 3600) // 60)
-
-        seg_minutes, ok = QInputDialog.getInt(
-            self, t("Segment Duration"),
-            t("Video is {hours}h {minutes}m.\nSplit into segments of how many minutes?", hours=h, minutes=m),
-            120, 10, 1440, 10,
-        )
-        if not ok:
-            return
-
-        seg_seconds = seg_minutes * 60
-        base, ext = os.path.splitext(path)
-        out_pattern = f"{base}_part%03d{ext}"
-
-        reply = QMessageBox(QMessageBox.Question, t("Confirm Split"),
-            t("Split into {minutes}-minute segments using stream copy (no re-encode, fast).\n\nOutput: {output}\n\nContinue?", minutes=seg_minutes, output=out_pattern),
-            QMessageBox.Yes | QMessageBox.No, self)
-        reply.setStyleSheet(MSG_STYLE)
-        if reply.exec() != QMessageBox.Yes:
-            return
-
-        progress = QProgressDialog(t("Splitting video..."), None, 0, 0, self)
-        progress.setWindowTitle(t("Split Video"))
-        progress.setModal(True)
-        progress.setCancelButton(None)
-        progress.show()
-
-        import subprocess
-        import threading
-
-        def _do_split():
-            try:
-                subprocess.run(
-                    [_ffmpeg_path(), "-y", "-i", path, "-c", "copy",
-                     "-f", "segment", "-segment_time", str(seg_seconds),
-                     "-reset_timestamps", "1", out_pattern],
-                    capture_output=True, timeout=3600, **subprocess_hidden_kwargs(),
-                )
-                progress.accept()
-            except Exception as e:
-                progress.accept()
-                print(f"[Split] Error: {e}")
-
-        threading.Thread(target=_do_split, daemon=True).start()
-        progress.exec()
-
-        mb = QMessageBox(QMessageBox.Information, t("Done"),
-            t("Video split into {minutes}-minute segments.\nSaved alongside the original file.", minutes=seg_minutes),
-            QMessageBox.Ok, self)
-        mb.setStyleSheet(MSG_STYLE)
-        mb.exec()
+        from ui.views.media_tools_dialog import MediaToolsDialog
+        dialog = MediaToolsDialog(parent=self)
+        dialog.exec()
 
     def _detect_gpu_with_cuda(self):
         has_gpu = False
         gpu_name = ""
         cuda_ready = False
+        diagnostic = {"reason": "", "torch": "not_needed", "detail": ""}
         try:
-            import subprocess
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=10,
-                **subprocess_hidden_kwargs(),
+                capture_output=True, timeout=10,
+                **subprocess_text_kwargs(),
             )
             if result.returncode == 0 and result.stdout.strip():
                 parts = result.stdout.strip().split("\n")[0].strip().split(",")
@@ -1503,25 +1519,76 @@ class LauncherWindow(QDialog):
                     except ValueError:
                         pass
                 has_gpu = True
-        except Exception:
-            pass
+            else:
+                diagnostic["reason"] = "smi_failed"
+                diagnostic["detail"] = f"nvidia-smi exit={result.returncode}; stderr={str(getattr(result, 'stderr', '') or '')[:1000]}"
+        except FileNotFoundError as exc:
+            diagnostic.update(reason="smi_missing", detail=str(exc))
+        except subprocess.TimeoutExpired as exc:
+            diagnostic.update(reason="smi_timeout", detail=str(exc))
+        except Exception as exc:
+            diagnostic.update(reason="smi_failed", detail=f"{type(exc).__name__}: {exc}")
         if not has_gpu:
             try:
                 import torch
                 if torch.cuda.is_available():
-                    name = torch.cuda.get_device_name(0)
-                    vram = torch.cuda.get_device_properties(0).total_mem // (1024 ** 3)
-                    gpu_name = f"{name} ({vram}GB)"
                     has_gpu = True
-            except Exception:
-                pass
+                    gpu_name = "NVIDIA GPU"
+                    diagnostic["torch"] = "ready"
+                    try:
+                        gpu_name = str(torch.cuda.get_device_name(0))
+                        vram = torch.cuda.get_device_properties(0).total_memory // (1024 ** 3)
+                        gpu_name = f"{gpu_name} ({vram}GB)"
+                    except Exception as exc:
+                        # Name/VRAM are display metadata, not a CUDA availability gate.
+                        diagnostic["detail"] += f"; GPU metadata {type(exc).__name__}: {exc}"
+                else:
+                    built_cuda = getattr(getattr(torch, "version", None), "cuda", None)
+                    diagnostic["torch"] = "no_device" if built_cuda else "cpu_build"
+                    diagnostic["detail"] += f"; torch={getattr(torch, '__version__', 'unknown')}; torch CUDA={built_cuda}; cuda.is_available=False"
+            except ImportError as exc:
+                diagnostic["torch"] = "import_error"
+                diagnostic["detail"] += f"; PyTorch import failed: {exc}"
+            except Exception as exc:
+                diagnostic["torch"] = "runtime_error"
+                diagnostic["detail"] += f"; PyTorch {type(exc).__name__}: {exc}"
         if has_gpu:
             try:
                 service = self._resource_service()
                 cuda_ready = service.is_requirement_met("cuda:whisper")
-            except Exception:
-                pass
+                diagnostic["reason"] = "" if cuda_ready else "pack_missing"
+            except Exception as exc:
+                diagnostic.update(reason="pack_check_failed")
+                diagnostic["detail"] += f"; CUDA pack check {type(exc).__name__}: {exc}"
+        self._gpu_diagnostics = diagnostic
+        record = f"has_gpu={has_gpu}, gpu={gpu_name!r}, cuda_ready={cuda_ready}, reason={diagnostic['reason']}, torch={diagnostic['torch']}; {diagnostic['detail']}"
+        if record != getattr(self, "_last_gpu_diagnostic_record", None):
+            self._last_gpu_diagnostic_record = record
+            print("[Launcher GPU] " + record.encode("ascii", "backslashreplace").decode("ascii"))
         return has_gpu, gpu_name, cuda_ready
+
+    def _update_gpu_diagnostic_label(self):
+        label = getattr(self, "_gpu_diagnostic_label", None)
+        if label is None:
+            return
+        diagnostics = getattr(self, "_gpu_diagnostics", {}) or {}
+        reason = diagnostics.get("reason", "")
+        messages = {
+            "smi_missing": "The NVIDIA GPU check tool was not found. Install or repair the NVIDIA driver, restart Windows, then reopen CapCap.",
+            "smi_failed": "CapCap could not read the NVIDIA GPU information. Update or reinstall the NVIDIA driver, restart Windows, then try again.",
+            "smi_timeout": "The NVIDIA GPU check timed out. Restart Windows and try again. If it keeps happening, update the NVIDIA driver.",
+            "pack_missing": "The GPU was detected, but CapCap's GPU Acceleration Pack is missing. Download it in Manage Resources, then close that window to check again.",
+            "pack_check_failed": "CapCap could not check the GPU Acceleration Pack. Reopen the app and check Manage Resources. If it persists, send the application log for support.",
+        }
+        message = t(messages[reason]) if reason in messages else ""
+        if diagnostics.get("torch") in {"cpu_build", "import_error", "runtime_error"} and reason.startswith("smi_"):
+            message += " " + t("The app's CUDA fallback is also unavailable. If the NVIDIA driver is working, update or reinstall the GPU-enabled CapCap build.")
+        if message:
+            message += " " + t("You can still use CPU mode. Send the application log if you need help.")
+        label.setText(message)
+        label.setVisible(bool(message))
+        if hasattr(self, "gpu_btn"):
+            self.gpu_btn.setToolTip(message)
 
     def _update_gpu_label(self, has_gpu: bool, gpu_name: str, cuda_ready: bool):
         self._last_has_gpu = bool(has_gpu)
@@ -1537,6 +1604,7 @@ class LauncherWindow(QDialog):
         else:
             self._gpu_label.setText(t("CPU only"))
             self._gpu_label.setStyleSheet("font-size: 11px; color: #5a7a9a;")
+        LauncherWindow._update_gpu_diagnostic_label(self)
 
     @staticmethod
     def add_recent(settings_or_none, video_path: str):
@@ -1580,8 +1648,18 @@ def stop_all_launcher_workers():
 
 def show_launcher(settings_or_none, project_loader=None):
     """Show launcher, return selected video path or empty string."""
+    from PySide6.QtCore import QEventLoop
+
     w = LauncherWindow()
-    result = w.exec()
+    # QDialog.exec() exits as soon as the dialog is hidden. Queue configuration
+    # temporarily hides this launcher while an editor is open; only an explicit
+    # accept/reject should finish the launcher and its application entrypoint.
+    loop = QEventLoop()
+    w.finished.connect(loop.quit)
+    w.setWindowModality(Qt.ApplicationModal)
+    w.show()
+    loop.exec()
+    result = w.result()
     selected_video = str(getattr(w, "selected_video", "") or "")
     try:
         w.close()

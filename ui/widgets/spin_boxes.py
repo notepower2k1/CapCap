@@ -151,4 +151,11 @@ class ReliableDoubleSpinBox(_ReliableSpinButtonsMixin, QDoubleSpinBox):
         self._init_reliable_spin_buttons()
 
 
-__all__ = ["ReliableSpinBox", "ReliableDoubleSpinBox"]
+class NoWheelSpinBox(ReliableSpinBox):
+    """QSpinBox that ignores mouse wheel events to prevent accidental changes while scrolling."""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+__all__ = ["ReliableSpinBox", "ReliableDoubleSpinBox", "NoWheelSpinBox"]

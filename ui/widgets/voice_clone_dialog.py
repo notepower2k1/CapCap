@@ -29,13 +29,14 @@ except ImportError:
 class CreateVoiceCloneDialog(QDialog):
     """Modal dialog allowing users to create and save a new clone voice."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, provider="vieneu"):
         super().__init__(parent)
+        self.provider = provider
         self.created_voice_entry: dict | None = None
 
         if hasattr(parent, "light_window_icon") and parent.light_window_icon and not parent.light_window_icon.isNull():
             self.setWindowIcon(parent.light_window_icon)
-        self.setWindowTitle("Create Voice Clone (VieNeu-TTS)")
+        self.setWindowTitle(t("Create Voice Clone") + (" (OmniVoice)" if self.provider == "omnivoice" else " (VieNeu-TTS)"))
         self.setModal(True)
         self.resize(580, 560)
         self.setMinimumSize(500, 480)
@@ -69,7 +70,7 @@ class CreateVoiceCloneDialog(QDialog):
         layout.addWidget(header_title)
 
         header_desc = QLabel(
-            "Provide a short reference audio sample (3 - 15s) and its matching transcript to create a cloned voice with VieNeu-TTS."
+            t("Provide a short reference audio sample (3 - 15s) and its matching transcript.")
         )
         header_desc.setObjectName("dialogSubtitle")
         header_desc.setWordWrap(True)
@@ -314,7 +315,10 @@ class CreateVoiceCloneDialog(QDialog):
         self._stop_playback()
 
         try:
-            saved_meta = save_cloned_voice(
+            saver = save_cloned_voice
+            if self.provider == "omnivoice":
+                from engines.omnivoice_tts import save_cloned_voice as saver
+            saved_meta = saver(
                 name=name,
                 audio_path=audio_path,
                 ref_text=ref_text,

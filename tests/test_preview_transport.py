@@ -391,6 +391,66 @@ class TestPreviewTransport(unittest.TestCase):
         # Must NOT seek to 2500ms
         backend._native_audio_engine.seek.assert_not_called()
 
+    def test_slow_video_drift_does_not_teleport_audio_playhead(self):
+        """A delayed video frame must not seek the audio master during Fit Voice."""
+        from PySide6.QtMultimedia import QMediaPlayer
+        from ui.utils.media_backend import MpvMediaPlayerBackend
+        backend = MpvMediaPlayerBackend.__new__(MpvMediaPlayerBackend)
+        backend._source_path = "video.mp4"
+        backend._video_frozen = False
+        backend._state = QMediaPlayer.PlayingState
+        backend._last_seek_mono = 0
+        backend._player = MagicMock(time_pos=2.8, pause=False)
+        backend._video_time_warps = [{"type": "slow", "media_start": 2., "media_end": 4.,
+                                       "duration": 4., "speed": 1 / 3}]
+        backend._native_audio_active = True
+        backend._native_audio_engine = MagicMock()
+        backend._native_audio_engine.timeline_position_ms.return_value = 5000
+        backend._original_loaded_path = backend._dubbed_loaded_path = ""
+        backend._sync_audio_to_video()
+        backend._native_audio_engine.seek.assert_not_called()
+        # Video must still be corrected towards the audio clock.
+        backend._current_applied_speed = 1.
+        backend._update_video_speed_for_time_warps(2.8)
+        self.assertAlmostEqual(backend._player.speed, 1 / 3 * 1.12)
+        # An ahead-of-clock video frame used to jump audio forward to 6.2s.
+        backend._player.time_pos = 3.4
+        backend._sync_audio_to_video()
+        backend._native_audio_engine.seek.assert_not_called()
+        # Explicit pause/EOF correction remains available.
+        backend._state = QMediaPlayer.PausedState
+        backend._player.pause = True
+        backend._sync_audio_to_video()
+        backend._native_audio_engine.seek.assert_called_once_with(6200)
+
+    def test_rendered_warp_preview_does_not_map_native_clock_twice(self):
+        from PySide6.QtMultimedia import QMediaPlayer
+        from ui.utils.media_backend import MpvMediaPlayerBackend
+        backend = MpvMediaPlayerBackend.__new__(MpvMediaPlayerBackend)
+        backend._source_path = "rendered.mp4"
+        backend._is_warped_preview = lambda: True
+        backend._state = QMediaPlayer.PlayingState
+        backend._native_audio_active = True
+        backend._native_audio_engine = MagicMock()
+        backend._video_time_warps = [{"type": "freeze", "time": 2., "duration": 3.}]
+        backend.positionChanged = MagicMock()
+        for milliseconds in (1900, 2100, 3000, 4900, 5100):
+            backend._on_native_audio_position_changed(milliseconds)
+            self.assertEqual(backend._position_ms, milliseconds)
+        backend._video_frozen = False
+        backend._last_seek_mono = 0
+        backend._player = MagicMock(time_pos=3., pause=False)
+        backend._native_audio_engine.timeline_position_ms.return_value = 3000
+        backend._original_loaded_path = backend._dubbed_loaded_path = ""
+        backend._sync_audio_to_video()
+        backend._native_audio_engine.seek.assert_not_called()
+        # Pausing still corrects real drift, in rendered timeline coordinates.
+        backend._state = QMediaPlayer.PausedState
+        backend._player.pause = True
+        backend._native_audio_engine.timeline_position_ms.return_value = 4500
+        backend._sync_audio_to_video()
+        backend._native_audio_engine.seek.assert_called_once_with(3000)
+
     def test_freeze_unfreeze_never_plays_sidecars_when_native_active(self):
         """Verify freeze and unfreeze do not activate legacy QMediaPlayer sidecars when native audio is active."""
         from ui.utils.media_backend import MpvMediaPlayerBackend
@@ -460,8 +520,8 @@ class TestPreviewTransport(unittest.TestCase):
         warps = [{"time": 1.5, "duration": 0.5}]
 
         backend.set_time_warps(warps)
-        self.assertEqual(backend._video_time_warps, warps)
-        backend._native_audio_engine.set_warps.assert_called_once_with(warps)
+        self.assertEqual(backend._video_time_warps, TimeWarpService.normalize_warps(warps))
+        backend._native_audio_engine.set_warps.assert_called_once_with(TimeWarpService.normalize_warps(warps))
 
     def test_tracks_snapshot_cached_and_sent_on_sink_ready(self):
         """Verify tracks snapshot is cached if sink is not yet ready, then sent when sink becomes ready."""
@@ -913,7 +973,7 @@ class TestPreviewTransport(unittest.TestCase):
                 "id": "warp_slow_1",
                 "type": "slow",
                 "time": 3.0,
-                "duration": 1.0,
+                "duration": 0.5,
                 "speed": 0.8,
                 "media_start": 1.0,
                 "media_end": 3.0,
@@ -957,7 +1017,7 @@ class TestPreviewTransport(unittest.TestCase):
                 "id": "warp_slow_1",
                 "type": "slow",
                 "time": 3.0,
-                "duration": 1.0,
+                "duration": 0.5,
                 "speed": 0.8,
                 "media_start": 1.0,
                 "media_end": 3.0,
@@ -1032,25 +1092,25 @@ class TestPreviewTransport(unittest.TestCase):
             worker.run()
 
             # Window [2.0, 7.0] on timeline:
-            # Slow warp is at timeline [2.0, 8.0] at speed 0.5.
-            # 5.0s window on timeline running at 0.5x speed consumes 5.0 * 0.5 = 2.5s of media.
-            # So media_start = 2.0, media_dur = 2.5 (from 2.0 to 4.5).
+            # Slow warp is at timeline [2.0, 8.0] at exact speed 1/3 (ignore the stale saved speed).
+            # 5.0s window on timeline running at 0.5x speed consumes 5.0 / 3 = 1.6667s of media.
+            # So media_start = 2.0, media_dur = 5/3 (from 2.0 to 3.6667).
             mock_trim.assert_called_once()
             trim_args = mock_trim.call_args[0]
             self.assertEqual(trim_args[0], "input_vid.mp4")
             self.assertAlmostEqual(trim_args[2], 2.0)
-            self.assertAlmostEqual(trim_args[3], 2.5)
+            self.assertAlmostEqual(trim_args[3], 5 / 3)
 
             mock_timewarp.assert_called_once()
             tw_args = mock_timewarp.call_args[0]
             tw_kwargs = mock_timewarp.call_args[1]
-            self.assertAlmostEqual(tw_args[3], 2.5)
+            self.assertAlmostEqual(tw_args[3], 5 / 3)
             self.assertFalse(tw_kwargs.get("include_audio"))
             # Warp in clip coords should start at 0.0
             clip_warps = tw_args[2]
             self.assertEqual(len(clip_warps), 1)
             self.assertAlmostEqual(clip_warps[0]["media_start"], 0.0)
-            self.assertAlmostEqual(clip_warps[0]["media_end"], 2.0)
+            self.assertAlmostEqual(clip_warps[0]["media_end"], 5 / 3)
 
             # mux_audio_into_video_clip_for_preview should receive warped_clip and video_is_pretrimmed=True
             mock_mux.assert_called_once()

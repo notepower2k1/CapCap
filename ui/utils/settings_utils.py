@@ -159,6 +159,8 @@ def save_user_settings(gui):
         s.setValue("translation_batch_size", int(env_batch))
     s.setValue("translation_preset_id", os.getenv("CAPCAP_TRANSLATION_PRESET_ID", "general_default"))
     s.setValue("auto_translation_context", os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1"))
+    s.setValue("browser_ai_platform", os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini"))
+    s.setValue("browser_ai_temp_chat", os.getenv("CAPCAP_BROWSER_AI_TEMP_CHAT", "1"))
 
 
 def load_user_settings(gui):
@@ -214,13 +216,15 @@ def load_user_settings(gui):
     gui.bg_music_edit.setText(s.value("background_audio", gui.bg_music_edit.text()))
     gui.mixed_audio_edit.setText(s.value("mixed_audio", gui.mixed_audio_edit.text()))
     for env_k, s_k, def_v in (
-        ("CAPCUT_STT_CHUNK_SECONDS", "capcut_stt_chunk_seconds", "300"),
+        ("CAPCUT_STT_CHUNK_SECONDS", "capcut_stt_chunk_seconds", "600"),
         ("CAPCUT_STT_WORKERS", "capcut_stt_workers", "5"),
-        ("CAPCUT_TTS_BATCH_SIZE", "capcut_tts_batch_size", "60"),
+        ("CAPCUT_TTS_BATCH_SIZE", "capcut_tts_batch_size", "30"),
         ("CAPCUT_TTS_WORKERS", "capcut_tts_workers", "30"),
         ("CAPCAP_TRANSLATION_PRESET_ID", "translation_preset_id", "general_default"),
         ("CAPCAP_AI_TRANSLATION_MAX_SEGMENTS", "translation_batch_size", "80"),
         ("CAPCAP_AUTO_TRANSLATION_CONTEXT", "auto_translation_context", "1"),
+        ("CAPCAP_BROWSER_AI_PLATFORM", "browser_ai_platform", "gemini"),
+        ("CAPCAP_BROWSER_AI_TEMP_CHAT", "browser_ai_temp_chat", "1"),
     ):
         v = str(os.getenv(env_k) or s.value(s_k, def_v) or def_v).strip()
         os.environ[env_k] = v
@@ -230,6 +234,11 @@ def load_user_settings(gui):
         active_provider = "google_ai_studio"
     os.environ["OPENAI_PROVIDER"] = active_provider
     s.setValue("translation_provider", active_provider)
+    try:
+        from translation.providers.browser_bridge_provider import ensure_bridge_server_running
+        ensure_bridge_server_running()
+    except Exception:
+        pass
 
     saved_default_engine = str(s.value("default_transcription_engine", "") or "").strip().lower()
     if saved_default_engine in {"whisper", "sensevoice", "ocr", "capcut"}:

@@ -59,6 +59,8 @@ datas = [
     (str(project_root / "models" / "vieneu" / "README.txt"), "models/vieneu"),
     (str(project_root / "ui" / "views" / "editor"), "views/editor"),
 ]
+from app.utils.browser_extension_utils import collect_browser_extension_data
+datas += collect_browser_extension_data(project_root)
 datas += collect_data_files("piper")
 # The normalizer package ships its built-in CSV rules as package data.  Keep
 # them in the frozen build; project dictionaries are stored separately in

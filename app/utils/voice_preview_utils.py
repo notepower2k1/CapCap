@@ -45,6 +45,9 @@ def segment_cache_key(
     # subtitle text, voice, and speed remain identical. Include its stable
     # fingerprint so stale TTS cache entries cannot survive a dictionary edit.
     payload = f"{voice_name}|{provider_speed:.3f}|{normalizer_signature}|{text.strip()}"
+    if str(voice_name).startswith("omnivoice:"):
+        from engines.omnivoice_tts import voice_fingerprint
+        payload += "|omnivoice=" + voice_fingerprint(voice_name)
     if model_id or language_code:
         payload += f"|model={str(model_id or '').strip()}|language={str(language_code or '').strip().lower()}"
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()

@@ -95,6 +95,10 @@ class VoiceCatalogService:
             except Exception as e:
                 print(f"[VoiceCatalog] Failed to load VieNeu voices: {e}")
 
+            if not is_remote:
+                from engines.omnivoice_tts import list_voices
+                normalized_voices.extend(self._normalize_loaded_voice(v) for v in list_voices())
+
             # Include CapCut voices
             try:
                 try:

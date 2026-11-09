@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID, NAMESPACE_URL, uuid4, uuid5
 
 
 DEFAULT_STEP_STATUSES = {
@@ -37,11 +38,20 @@ class ProjectState:
     artifacts: dict[str, str] = field(default_factory=dict)
     created_at: str = field(default_factory=_utc_now_iso)
     updated_at: str = field(default_factory=_utc_now_iso)
+    # Portable identity, separate from the path-based project_id/folder name.
+    project_uuid: str = field(default_factory=lambda: str(uuid4()))
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectState":
         steps = dict(DEFAULT_STEP_STATUSES)
         steps.update(dict(data.get("steps", {}) or {}))
+        try:
+            project_uuid = str(UUID(str(data.get("project_uuid", ""))))
+        except ValueError:
+            # Stable migration for old projects, including read-only duplicate
+            # checks. Normal save/ensure_project persists the assigned value.
+            seed = f"capcap:legacy-project:{data.get('project_id', '')}:{data.get('created_at', '')}"
+            project_uuid = str(uuid5(NAMESPACE_URL, seed))
         return cls(
             project_id=str(data.get("project_id", "")),
             project_root=str(data.get("project_root", "")),
@@ -56,6 +66,7 @@ class ProjectState:
             artifacts=dict(data.get("artifacts", {}) or {}),
             created_at=str(data.get("created_at", data.get("created_at", _utc_now_iso()))),
             updated_at=str(data.get("updated_at", data.get("updated_at", _utc_now_iso()))),
+            project_uuid=project_uuid,
         )
 
     def touch(self) -> None:
@@ -76,6 +87,7 @@ class ProjectState:
     def to_dict(self) -> dict[str, Any]:
         return {
             "project_id": self.project_id,
+            "project_uuid": self.project_uuid,
             "project_root": self.project_root,
             "input_video": self.input_video,
             "input_language": self.input_language,

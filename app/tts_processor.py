@@ -376,6 +376,34 @@ def normalize_text_for_tts(
         return value
 
 
+def validate_voice_language(voice, language, *, model_id=None):
+    """Reject known incompatible selections before reusing audio or sending requests."""
+    from language_support import language_code, voice_matches_language, elevenlabs_supports_language
+    target = language_code(language)
+    if not target or target == "auto":
+        return
+    voice = str(voice or "")
+    if voice.startswith(("vieneu:", "vieneu_clone:")):
+        if target != "vi":
+            raise ValueError("VieNeu only supports Vietnamese. Choose a voice for the output language.")
+        return
+    if voice.startswith("omnivoice:"):
+        return
+    if voice.startswith("elevenlabs:"):
+        if not elevenlabs_supports_language(model_id, target):
+            raise ValueError("The ElevenLabs model does not support this language. Select Eleven v3 for Thai in Settings.")
+        return
+    if voice.startswith("capcut:"):
+        from capcut.tts import list_capcut_voices
+        voices = list_capcut_voices()
+    else:
+        with open(_voice_catalog_path(), encoding="utf-8-sig") as handle:
+            voices = _append_local_piper_manifest_voices(json.load(handle)).get("voices", [])
+    entry = next((entry for entry in voices if str(entry.get("id", "")) == voice), None)
+    if entry and not voice_matches_language(entry, target):
+        raise ValueError(f"Voice '{voice}' does not support '{target}'. Choose a matching voice, including speaker assignments.")
+
+
 def _subprocess_run_kwargs() -> dict:
     kwargs = {}
     if os.name == "nt":
@@ -606,6 +634,8 @@ def edge_tts_to_wav_16k_mono(
 def preload_tts_voice(voice: str, on_progress: callable = None) -> bool:
     voice_to_search = str(voice).strip()
     if voice_to_search.startswith(("vieneu:", "vieneu_clone:")):
+        if lang_to_use and str(lang_to_use).split("-")[0].lower() != "vi":
+            raise ValueError("VieNeu voices only support Vietnamese. Select a matching voice engine.")
         try:
             from vieneu_tts import get_cached_vieneu_model
             get_cached_vieneu_model(on_progress=on_progress)
@@ -670,6 +700,11 @@ def synthesize_text_to_wav_16k_mono(
     voice_to_search = str(voice).strip()
     model_to_use = str(model_id or os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5") or "eleven_turbo_v2_5").strip()
     lang_to_use = language_code or language
+
+    if voice_to_search.startswith("omnivoice:"):
+        from engines.omnivoice_tts import synthesize_omnivoice_wav_16k_mono
+        return synthesize_omnivoice_wav_16k_mono(text=text, wav_path=wav_path, voice=voice_to_search,
+            language=lang_to_use, speed=speed, on_progress=on_progress)
 
     # Fast path for VieNeu voices
     if voice_to_search.startswith(("vieneu:", "vieneu_clone:")):
@@ -761,6 +796,10 @@ def synthesize_text_to_wav_16k_mono(
     
     provider = voice_entry["provider"]
     provider_voice = voice_entry["provider_voice"]
+    if lang_to_use and provider in {"piper", "edge"}:
+        from language_support import voice_matches_language
+        if not voice_matches_language(voice_entry, lang_to_use):
+            raise ValueError(f"Voice '{voice_to_search}' does not support output language '{lang_to_use}'.")
     
     if provider == "piper":
         # Use Piper TTS with local model

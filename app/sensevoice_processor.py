@@ -25,8 +25,11 @@ def is_available() -> bool:
 def _lang_code(code: str) -> str:
     if not code or code in ("auto", ""):
         return "auto"
-    m = {"vi": "zh", "en": "en", "ja": "ja", "ko": "ko", "zh": "zh", "yue": "yue"}
-    return m.get(code.split("-")[0].strip().lower(), "auto")
+    from language_support import SENSEVOICE_LANGUAGES, language_code
+    normalized = language_code(code)
+    if normalized not in SENSEVOICE_LANGUAGES:
+        raise ValueError(f"SenseVoice does not support '{code}'. Select Whisper for this language.")
+    return normalized
 
 
 def load_model(model_dir: str, language: str = "auto"):

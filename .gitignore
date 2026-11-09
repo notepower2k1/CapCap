@@ -50,3 +50,8 @@ installer/*.exe
 *.zip
 bug*.png
 logs/*
+imported_packages/*
+.capcap-resource-import.lock
+processing_queue.json
+processing_queue.tmp
+processing_queue.invalid-*.json

@@ -1,11 +1,10 @@
 import os
 
-import os
-
 from PySide6 import QtCore
 from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFrame,
@@ -30,6 +29,22 @@ from runtime_paths import asset_path
 from widgets import MpvVideoView, VideoView
 from utils.icon_utils import load_icon
 from utils.media_backend import is_mpv_backend_available
+
+try:
+    import shiboken6
+except Exception:  # pragma: no cover
+    shiboken6 = None
+
+
+def _is_valid_qobject(obj) -> bool:
+    if obj is None:
+        return False
+    if shiboken6 is not None:
+        try:
+            return bool(shiboken6.isValid(obj))
+        except Exception:
+            return False
+    return True
 
 try:
     from i18n import current_source_text, t
@@ -162,10 +177,25 @@ class OcrRegionOverlay(QWidget):
         os.environ["OCR_CROP_RATIO"] = f"{r.height():.4f}"
 
     def attach_to_view(self, view):
+        if self._target_view is not None and _is_valid_qobject(self._target_view):
+            try:
+                self._target_view.destroyed.disconnect(self._on_target_view_destroyed)
+            except Exception:
+                pass
         self._target_view = view
-        if view and view.window():
-            self._main_window = view.window()
-            self._main_window.installEventFilter(self)
+        if view:
+            if hasattr(view, "destroyed"):
+                try:
+                    view.destroyed.connect(self._on_target_view_destroyed)
+                except Exception:
+                    pass
+            if view.window():
+                self._main_window = view.window()
+                self._main_window.installEventFilter(self)
+
+    def _on_target_view_destroyed(self):
+        self._target_view = None
+        self.hide()
 
     def set_editable(self, editable: bool):
         self._editable = editable
@@ -275,12 +305,8 @@ class OcrRegionOverlay(QWidget):
         super().hideEvent(event)
 
     def eventFilter(self, obj, event):
-        try:
-            import shiboken6
-            if not shiboken6.isValid(self):
-                return False
-        except Exception:
-            pass
+        if not _is_valid_qobject(self):
+            return False
         try:
             w = getattr(self, "_main_window", None)
             if w is not None and obj is w:
@@ -296,7 +322,11 @@ class OcrRegionOverlay(QWidget):
         return False
 
     def sync_to_view(self):
-        if not self._target_view:
+        if not _is_valid_qobject(self._target_view):
+            self.hide()
+            return
+        app = QApplication.instance()
+        if app is not None and (app.activePopupWidget() is not None or app.activeModalWidget() is not None):
             self.hide()
             return
         if self._main_window is None and self._target_view.window() is not None:
@@ -312,8 +342,13 @@ class OcrRegionOverlay(QWidget):
             self.hide()
             return
         self._load_rect()
-        top_left = self._target_view.mapToGlobal(QtCore.QPoint(0, 0))
-        self.setGeometry(QtCore.QRect(top_left, self._target_view.size()))
+        if self.isWindow():
+            top_left = self._target_view.mapToGlobal(QtCore.QPoint(0, 0))
+            self.setGeometry(QtCore.QRect(top_left, self._target_view.size()))
+        else:
+            # Performance uses an ordinary child over a still image, so its
+            # geometry is local to the preview, not desktop coordinates.
+            self.setGeometry(self._target_view.rect())
         self.show()
         self.raise_()
         self.update()
@@ -453,8 +488,12 @@ class OcrRegionOverlay(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setCompositionMode(QPainter.CompositionMode_Source)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 0))
+        # Only a separate native tool window owns a transparent backing store.
+        # A child overlay shares the still preview's backing store: clearing
+        # it in Source mode erases the video image and reveals black below.
+        if self.isWindow():
+            p.setCompositionMode(QPainter.CompositionMode_Source)
+            p.fillRect(self.rect(), QColor(0, 0, 0, 0))
         p.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
         color = QColor(110, 231, 214) if not self._editable else QColor(255, 180, 80)
@@ -508,11 +547,25 @@ class OcrTranslatorOverlay(QWidget):
         self.hide()
 
     def attach_to_view(self, view):
+        if self._target_view is not None and _is_valid_qobject(self._target_view):
+            try:
+                self._target_view.destroyed.disconnect(self._on_target_view_destroyed)
+            except Exception:
+                pass
         self._target_view = view
         if view:
+            if hasattr(view, "destroyed"):
+                try:
+                    view.destroyed.connect(self._on_target_view_destroyed)
+                except Exception:
+                    pass
             self._main_window = view.window()
         if self._main_window is not None:
             self._main_window.installEventFilter(self)
+
+    def _on_target_view_destroyed(self):
+        self._target_view = None
+        self.hide()
 
     def normalized_rect(self):
         r = self._norm
@@ -576,12 +629,8 @@ class OcrTranslatorOverlay(QWidget):
         super().show()
 
     def eventFilter(self, obj, event):
-        try:
-            import shiboken6
-            if not shiboken6.isValid(self):
-                return False
-        except Exception:
-            pass
+        if not _is_valid_qobject(self):
+            return False
         try:
             w = getattr(self, "_main_window", None)
             if w is not None and obj is w:
@@ -595,7 +644,11 @@ class OcrTranslatorOverlay(QWidget):
         return False
 
     def sync_to_view(self):
-        if not self._target_view:
+        if not _is_valid_qobject(self._target_view):
+            self.hide()
+            return
+        app = QApplication.instance()
+        if app is not None and (app.activePopupWidget() is not None or app.activeModalWidget() is not None):
             self.hide()
             return
         current_window = self._target_view.window()
@@ -1120,13 +1173,17 @@ def build_preview_panel(gui):
     gui.frame_preview_image_label = FramePreviewWidget()
     gui.frame_preview_image_label.hide()
 
-    gui.video_view = MpvVideoView() if is_mpv_backend_available() else VideoView()
+    if getattr(gui, "performance_mode", False):
+        from widgets.performance_preview import StaticVideoView
+        gui.video_view = StaticVideoView()
+    else:
+        gui.video_view = MpvVideoView() if is_mpv_backend_available() else VideoView()
     # The vertical workspace is splitter-resizable.  Keep a practical but
     # compact minimum so the transport row always has its own space when the
     # user gives more room to the timeline.
     gui.video_view.setMinimumHeight(270)
     gui.video_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    gui.timeline = _import_editor_timeline()()
+    gui.timeline = _import_editor_timeline()(data_only=True) if getattr(gui, "performance_mode", False) else _import_editor_timeline()()
     # The outer Timeline card owns the usable minimum height.  Do not give
     # the nested QGraphicsView the same large minimum: the card also contains
     # its title, toolbar, margins and progress strip, which otherwise causes
@@ -1141,7 +1198,7 @@ def build_preview_panel(gui):
     gui._scrub_was_playing = False
     gui._scrub_throttle_timer = QTimer(gui)
     gui._scrub_throttle_timer.setSingleShot(True)
-    gui._scrub_throttle_timer.setInterval(33)
+    gui._scrub_throttle_timer.setInterval(16)
 
     def _flush_scrub_seek():
         if getattr(gui, "_scrub_pending_pos_ms", None) is not None:
@@ -1938,7 +1995,7 @@ def build_preview_panel(gui):
     gui.blur_inspector_card = blur_inspector_card
     blur_layout = QVBoxLayout(blur_inspector_card)
     blur_layout.setContentsMargins(12, 10, 12, 10)
-    blur_layout.setSpacing(6)
+    blur_layout.setSpacing(8)
 
     gui.blur_inspector_track_name_label = QLabel("-")
     gui.blur_inspector_track_name_label.setObjectName("helperLabel")
@@ -1958,29 +2015,37 @@ def build_preview_panel(gui):
     _add_layer_timing_controls(blur_layout, "blur")
 
     # --- Blur Radius ---
-    radius_row = QHBoxLayout()
+    radius_header = QHBoxLayout()
     radius_label = QLabel("Blur radius")
     radius_label.setObjectName("sectionTitle")
-    radius_label.setFixedWidth(90)
-    radius_row.addWidget(radius_label)
+    radius_header.addWidget(radius_label)
+    radius_header.addStretch(1)
+    gui.blur_inspector_radius_value_label = QLabel("20")
+    gui.blur_inspector_radius_value_label.setMinimumWidth(40)
+    gui.blur_inspector_radius_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    radius_header.addWidget(gui.blur_inspector_radius_value_label)
+    blur_layout.addLayout(radius_header)
+
     gui.blur_inspector_radius_slider = QSlider(Qt.Horizontal)
     gui.blur_inspector_radius_slider.setRange(1, 20)
     gui.blur_inspector_radius_slider.setValue(20)
     gui.blur_inspector_radius_slider.setToolTip(
         "How strong the blur is (1 = light, 20 = heavy)."
     )
-    radius_row.addWidget(gui.blur_inspector_radius_slider, 1)
-    gui.blur_inspector_radius_value_label = QLabel("20")
-    gui.blur_inspector_radius_value_label.setFixedWidth(28)
-    radius_row.addWidget(gui.blur_inspector_radius_value_label)
-    blur_layout.addLayout(radius_row)
+    blur_layout.addWidget(gui.blur_inspector_radius_slider)
 
     # --- Blur Opacity ---
-    blur_opacity_row = QHBoxLayout()
+    blur_opacity_header = QHBoxLayout()
     blur_opacity_label = QLabel("Opacity")
     blur_opacity_label.setObjectName("sectionTitle")
-    blur_opacity_label.setFixedWidth(90)
-    blur_opacity_row.addWidget(blur_opacity_label)
+    blur_opacity_header.addWidget(blur_opacity_label)
+    blur_opacity_header.addStretch(1)
+    gui.blur_inspector_opacity_value_label = QLabel("100%")
+    gui.blur_inspector_opacity_value_label.setMinimumWidth(44)
+    gui.blur_inspector_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    blur_opacity_header.addWidget(gui.blur_inspector_opacity_value_label)
+    blur_layout.addLayout(blur_opacity_header)
+
     gui.blur_inspector_opacity_slider = QSlider(Qt.Horizontal)
     gui.blur_inspector_opacity_slider.setRange(0, 100)
     gui.blur_inspector_opacity_slider.setValue(100)
@@ -1988,17 +2053,13 @@ def build_preview_panel(gui):
         "Transparency of the blurred region (0% fully transparent, "
         "100% fully visible)."
     )
-    blur_opacity_row.addWidget(gui.blur_inspector_opacity_slider, 1)
-    gui.blur_inspector_opacity_value_label = QLabel("100%")
-    gui.blur_inspector_opacity_value_label.setFixedWidth(40)
-    blur_opacity_row.addWidget(gui.blur_inspector_opacity_value_label)
-    blur_layout.addLayout(blur_opacity_row)
+    blur_layout.addWidget(gui.blur_inspector_opacity_slider)
 
     # --- Pixelate toggle ---
     pixelate_row = QHBoxLayout()
+    pixelate_row.setSpacing(10)
     pixelate_label = QLabel("Pixelate")
     pixelate_label.setObjectName("sectionTitle")
-    pixelate_label.setFixedWidth(90)
     pixelate_row.addWidget(pixelate_label)
     gui.blur_inspector_pixelate_cb = QCheckBox("Enable pixelate (mosaic)")
     gui.blur_inspector_pixelate_cb.setChecked(False)
@@ -2010,22 +2071,24 @@ def build_preview_panel(gui):
     blur_layout.addLayout(pixelate_row)
 
     # --- Pixelate size ---
-    pixel_size_row = QHBoxLayout()
+    pixel_size_header = QHBoxLayout()
     pixel_size_label = QLabel("Pixel size")
     pixel_size_label.setObjectName("sectionTitle")
-    pixel_size_label.setFixedWidth(90)
-    pixel_size_row.addWidget(pixel_size_label)
+    pixel_size_header.addWidget(pixel_size_label)
+    pixel_size_header.addStretch(1)
+    gui.blur_inspector_pixel_size_value_label = QLabel("12")
+    gui.blur_inspector_pixel_size_value_label.setMinimumWidth(40)
+    gui.blur_inspector_pixel_size_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    pixel_size_header.addWidget(gui.blur_inspector_pixel_size_value_label)
+    blur_layout.addLayout(pixel_size_header)
+
     gui.blur_inspector_pixel_size_slider = QSlider(Qt.Horizontal)
     gui.blur_inspector_pixel_size_slider.setRange(2, 60)
     gui.blur_inspector_pixel_size_slider.setValue(12)
     gui.blur_inspector_pixel_size_slider.setToolTip(
         "Mosaic cell size in pixels (larger = chunkier pixels)."
     )
-    pixel_size_row.addWidget(gui.blur_inspector_pixel_size_slider, 1)
-    gui.blur_inspector_pixel_size_value_label = QLabel("12")
-    gui.blur_inspector_pixel_size_value_label.setFixedWidth(28)
-    pixel_size_row.addWidget(gui.blur_inspector_pixel_size_value_label)
-    blur_layout.addLayout(pixel_size_row)
+    blur_layout.addWidget(gui.blur_inspector_pixel_size_slider)
 
     gui.blur_inspector_tip_label = QLabel(
         "Each click of the 'Blur' button adds a new blur region to this "
@@ -2045,7 +2108,7 @@ def build_preview_panel(gui):
     gui.logo_inspector_card = logo_inspector_card
     logo_layout = QVBoxLayout(logo_inspector_card)
     logo_layout.setContentsMargins(12, 10, 12, 10)
-    logo_layout.setSpacing(6)
+    logo_layout.setSpacing(8)
 
     gui.logo_inspector_summary_label = QLabel(
         "Adjust the watermark image on the video. Drag the logo on the "
@@ -2058,40 +2121,44 @@ def build_preview_panel(gui):
     _add_layer_timing_controls(logo_layout, "logo")
 
     # --- Opacity ---
-    opacity_row = QHBoxLayout()
+    opacity_header = QHBoxLayout()
     opacity_label = QLabel("Opacity")
     opacity_label.setObjectName("sectionTitle")
-    opacity_label.setFixedWidth(90)
-    opacity_row.addWidget(opacity_label)
+    opacity_header.addWidget(opacity_label)
+    opacity_header.addStretch(1)
+    gui.logo_inspector_opacity_value_label = QLabel("100%")
+    gui.logo_inspector_opacity_value_label.setMinimumWidth(44)
+    gui.logo_inspector_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    opacity_header.addWidget(gui.logo_inspector_opacity_value_label)
+    logo_layout.addLayout(opacity_header)
+
     gui.logo_inspector_opacity_slider = QSlider(Qt.Horizontal)
     gui.logo_inspector_opacity_slider.setRange(0, 100)
     gui.logo_inspector_opacity_slider.setValue(100)
     gui.logo_inspector_opacity_slider.setToolTip(
         "Set the transparency of the logo (0% invisible, 100% fully visible)."
     )
-    opacity_row.addWidget(gui.logo_inspector_opacity_slider, 1)
-    gui.logo_inspector_opacity_value_label = QLabel("100%")
-    gui.logo_inspector_opacity_value_label.setFixedWidth(40)
-    opacity_row.addWidget(gui.logo_inspector_opacity_value_label)
-    logo_layout.addLayout(opacity_row)
+    logo_layout.addWidget(gui.logo_inspector_opacity_slider)
 
     # --- Rotation ---
-    rotation_row = QHBoxLayout()
+    rotation_header = QHBoxLayout()
     rotation_label = QLabel("Rotation")
     rotation_label.setObjectName("sectionTitle")
-    rotation_label.setFixedWidth(90)
-    rotation_row.addWidget(rotation_label)
+    rotation_header.addWidget(rotation_label)
+    rotation_header.addStretch(1)
+    gui.logo_inspector_rotation_value_label = QLabel("0°")
+    gui.logo_inspector_rotation_value_label.setMinimumWidth(40)
+    gui.logo_inspector_rotation_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    rotation_header.addWidget(gui.logo_inspector_rotation_value_label)
+    logo_layout.addLayout(rotation_header)
+
     gui.logo_inspector_rotation_slider = QSlider(Qt.Horizontal)
     gui.logo_inspector_rotation_slider.setRange(-180, 180)
     gui.logo_inspector_rotation_slider.setValue(0)
     gui.logo_inspector_rotation_slider.setToolTip(
         "Rotate the logo in degrees (-180 to 180)."
     )
-    rotation_row.addWidget(gui.logo_inspector_rotation_slider, 1)
-    gui.logo_inspector_rotation_value_label = QLabel("0°")
-    gui.logo_inspector_rotation_value_label.setFixedWidth(40)
-    rotation_row.addWidget(gui.logo_inspector_rotation_value_label)
-    logo_layout.addLayout(rotation_row)
+    logo_layout.addWidget(gui.logo_inspector_rotation_slider)
 
     gui.logo_inspector_tip_label = QLabel(
         "Tip: drag the logo on the video preview to reposition it; "
@@ -2117,7 +2184,7 @@ def build_preview_panel(gui):
     gui.mask_inspector_card = mask_inspector_card
     mask_layout = QVBoxLayout(mask_inspector_card)
     mask_layout.setContentsMargins(12, 10, 12, 10)
-    mask_layout.setSpacing(6)
+    mask_layout.setSpacing(8)
 
     gui.mask_inspector_summary_label = QLabel(
         "Drag the mask on the video to move it. Drag a corner to "
@@ -2133,7 +2200,6 @@ def build_preview_panel(gui):
     color_row = QHBoxLayout()
     color_label = QLabel("Colour")
     color_label.setObjectName("sectionTitle")
-    color_label.setFixedWidth(90)
     color_row.addWidget(color_label)
     gui.mask_inspector_color_btn = QPushButton("#000000")
     gui.mask_inspector_color_btn.setFixedWidth(110)
@@ -2146,22 +2212,24 @@ def build_preview_panel(gui):
     mask_layout.addLayout(color_row)
 
     # --- Opacity ---
-    m_opacity_row = QHBoxLayout()
+    m_opacity_header = QHBoxLayout()
     m_opacity_label = QLabel("Opacity")
     m_opacity_label.setObjectName("sectionTitle")
-    m_opacity_label.setFixedWidth(90)
-    m_opacity_row.addWidget(m_opacity_label)
+    m_opacity_header.addWidget(m_opacity_label)
+    m_opacity_header.addStretch(1)
+    gui.mask_inspector_opacity_value_label = QLabel("100%")
+    gui.mask_inspector_opacity_value_label.setMinimumWidth(44)
+    gui.mask_inspector_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    m_opacity_header.addWidget(gui.mask_inspector_opacity_value_label)
+    mask_layout.addLayout(m_opacity_header)
+
     gui.mask_inspector_opacity_slider = QSlider(Qt.Horizontal)
     gui.mask_inspector_opacity_slider.setRange(0, 100)
     gui.mask_inspector_opacity_slider.setValue(100)
     gui.mask_inspector_opacity_slider.setToolTip(
         "Mask transparency (0% invisible, 100% fully visible)."
     )
-    m_opacity_row.addWidget(gui.mask_inspector_opacity_slider, 1)
-    gui.mask_inspector_opacity_value_label = QLabel("100%")
-    gui.mask_inspector_opacity_value_label.setFixedWidth(40)
-    m_opacity_row.addWidget(gui.mask_inspector_opacity_value_label)
-    mask_layout.addLayout(m_opacity_row)
+    mask_layout.addWidget(gui.mask_inspector_opacity_slider)
 
     gui.mask_inspector_tip_label = QLabel(
         "Tip: position and resize the mask on the video preview. The "
@@ -2270,6 +2338,13 @@ def build_preview_panel(gui):
     gui.video_inspector_summary_label.setWordWrap(True)
     video_layout.addWidget(gui.video_inspector_summary_label)
 
+    gui.video_inspector_mirror_cb = QCheckBox("Mirror horizontally")
+    gui.video_inspector_mirror_cb.setObjectName("videoInspectorMirrorCheckBox")
+    gui.video_inspector_mirror_cb.setToolTip(
+        "Flip the source video left to right. Added subtitles, text and logos keep their direction."
+    )
+    video_layout.addWidget(gui.video_inspector_mirror_cb)
+
     # --- Preset ---
     preset_row = QHBoxLayout()
     preset_label = QLabel("Preset")
@@ -2310,7 +2385,7 @@ def build_preview_panel(gui):
         row = QHBoxLayout()
         lbl = QLabel(field_label)
         lbl.setObjectName("sectionTitle")
-        lbl.setFixedWidth(90)
+        lbl.setMinimumWidth(115)
         row.addWidget(lbl)
         slider = QSlider(Qt.Horizontal)
         slider.setRange(-100, 100)

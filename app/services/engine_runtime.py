@@ -287,6 +287,9 @@ class EngineRuntime:
             min_silence_duration=min_silence_duration,
         )
 
+    def trim_tts_boundary_silence(self, *, input_wav_path: str, output_wav_path: str) -> str:
+        return self.audio_mix.trim_tts_boundary_silence(input_wav_path=input_wav_path, output_wav_path=output_wav_path)
+
     def change_wav_speed(
         self,
         *,

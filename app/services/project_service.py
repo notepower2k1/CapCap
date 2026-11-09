@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 from typing import Any
 
 from core.models import Segment, coerce_segments
@@ -63,9 +64,24 @@ class ProjectService:
         self._ensure_project_dirs(state.project_root)
         state.touch()
         state_path = self.project_file(state.project_root)
-        with open(state_path, "w", encoding="utf-8") as handle:
-            json.dump(state.to_dict(), handle, ensure_ascii=False, indent=2)
+        self._write_json_atomically(state_path,state.to_dict())
         return state_path
+
+    @staticmethod
+    def _write_json_atomically(path, payload):
+        # Queue cancellation can terminate a worker between writes. Publish a
+        # complete JSON atomically so the previous saved project remains readable.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w",encoding="utf-8",dir=os.path.dirname(path),prefix=".project-",suffix=".tmp",delete=False) as handle:
+                temporary = handle.name
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary,path)
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
 
     def save_json_artifact(
         self,
@@ -76,8 +92,7 @@ class ProjectService:
     ) -> str:
         output_path = os.path.join(state.project_root, relative_path)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
+        self._write_json_atomically(output_path,payload)
         state.set_artifact(artifact_name, output_path)
         self.save_project(state)
         return output_path
@@ -210,6 +225,7 @@ class ProjectService:
         model_id: str | None = None,
         language_code: str | None = None,
     ) -> str:
+        from app.tts_audio_policy import BOUNDARY_TRIM_VERSION
         safe_voice_speed = max(0.5, min(2.0, float(voice_speed or 1.0)))
         segments = list(segments or [])
         def _segment_voice_text(seg) -> str:
@@ -222,6 +238,7 @@ class ProjectService:
             return subtitle_text
         payload = {
             "audio_handling_mode": str(audio_handling_mode or "fast").strip().lower(),
+            "tts_boundary_trim_version": BOUNDARY_TRIM_VERSION,
             "voice_name": str(voice_name or "").strip(),
             "voice_speed": round(safe_voice_speed, 3),
             "timing_sync_mode": str(timing_sync_mode or "off").strip().lower(),
@@ -254,6 +271,11 @@ class ProjectService:
             [str(voice_name or "").strip()]
             + [str((seg or {}).get("voice_name") or "").strip() for seg in segments]
         ))
+        omni_voices = [name for name in voice_names if name.startswith("omnivoice:")]
+        if omni_voices:
+            from engines.omnivoice_tts import voice_fingerprint
+            payload["omnivoice"] = {name: voice_fingerprint(name) for name in omni_voices}
+            payload["omnivoice_language"] = str(language_code or "").lower()
         if any(self._is_elevenlabs_voice(name) for name in voice_names if name):
             if model_id:
                 payload["elevenlabs_model_id"] = str(model_id).strip()

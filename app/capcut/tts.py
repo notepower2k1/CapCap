@@ -70,7 +70,8 @@ def list_capcut_voices() -> list[dict]:
         if "neural" in str(v_type).lower():
             continue
 
-        lan = str(item.get("lan", "vi")).strip().lower()
+        from language_support import language_code
+        lan = language_code(item.get("lan", "vi"))
         res_id = str(item.get("resource_id", "")).strip()
 
         # Simple gender heuristic from display name

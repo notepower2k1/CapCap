@@ -126,6 +126,14 @@ def get_preset_by_id(preset_id: str) -> dict | None:
 
 def render_preset_prompt(preset_id: str, **values) -> str:
     """Render a preset prompt template with source/target languages and style."""
+    # The bundled genre presets contain Vietnamese-specific names/address rules.
+    # Keep them for Vietnamese; use the language-neutral contract elsewhere.
+    target = str(values.get("target_lang", "vi")).lower().split("-")[0]
+    if target != "vi":
+        return render_prompt(
+            "subtitle_translation.system.md",
+            **{"source_lang": "auto", "target_lang": target, **values},
+        )
     preset = get_preset_by_id(preset_id)
     preset_file = f"presets/{preset.get('file', 'general_default.md')}" if preset else "presets/general_default.md"
     full_path = prompt_directory() / preset_file

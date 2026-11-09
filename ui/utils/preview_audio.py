@@ -115,6 +115,7 @@ class _PreviewAudioWorker(QObject):
         self._tempo_fifo: np.ndarray = np.empty(0, dtype=np.float32)
         self._tempo_in_pts: int = 0
         self._pending_write_bytes: bytes = b""
+        self._max_end_ms: int = 0
 
         # Resampling state for output sink
         self._sink_sr: int = 48000
@@ -222,7 +223,7 @@ class _PreviewAudioWorker(QObject):
     @Slot(list, list)
     def set_tracks(self, tracks: List[Dict[str, Any]], warps: Optional[List[Dict[str, Any]]] = None) -> None:
         """Update active audio tracks and timeline warp markers."""
-        self._warps = list(warps or [])
+        self._warps = TimeWarpService.normalize_warps(warps or [])
         new_tracks = []
         needed_paths = set()
 
@@ -245,9 +246,9 @@ class _PreviewAudioWorker(QObject):
             new_tracks.append({
                 "id": track_id,
                 "path": path,
-                "start_ms": max(0, int(float(raw.get("start", 0.0)) * 1000.0)),
-                "end_ms": max(0, int(float(raw.get("end", 0.0)) * 1000.0)),
-                "source_start_ms": max(0, int(float(raw.get("source_start", 0.0)) * 1000.0)),
+                "start_ms": max(0, int(float(raw.get("start", 0.0)) * 1000.0)) if raw.get("start") is not None else int(raw.get("start_ms", 0) or 0),
+                "end_ms": max(0, int(float(raw.get("end", 0.0)) * 1000.0)) if raw.get("end") is not None else int(raw.get("end_ms", 0) or 0),
+                "source_start_ms": max(0, int(float(raw.get("source_start", 0.0)) * 1000.0)) if raw.get("source_start") is not None else int(raw.get("source_start_ms", 0) or 0),
                 "volume": vol,
                 "muted": muted,
                 "target_gain": target_gain,
@@ -282,6 +283,7 @@ class _PreviewAudioWorker(QObject):
                 self.errorOccurred.emit(f"Failed to open AudioReader for {p}: {exc}")
 
         self._tracks = new_tracks
+        self._max_end_ms = max((int(t.get("end_ms", 0) or 0) for t in new_tracks), default=0)
         self._generation_id += 1
 
     @Slot(str, float, bool)
@@ -329,7 +331,8 @@ class _PreviewAudioWorker(QObject):
     def pause(self) -> None:
         """Pause audio playback."""
         if self._is_playing:
-            audible_pos = self._timeline_pos_ms
+            max_end_ms = getattr(self, "_max_end_ms", 0)
+            audible_pos = min(self._timeline_pos_ms, max_end_ms) if max_end_ms > 0 else self._timeline_pos_ms
             self._is_playing = False
             if self._timer and self._timer.isActive():
                 self._timer.stop()
@@ -381,7 +384,7 @@ class _PreviewAudioWorker(QObject):
     @Slot(list)
     def set_warps(self, warps: Optional[List[Dict[str, Any]]] = None) -> None:
         """Update timeline warp markers."""
-        self._warps = list(warps or [])
+        self._warps = TimeWarpService.normalize_warps(warps or [])
         self._generation_id += 1
 
     def _is_time_frozen(self, t_sec: float) -> bool:
@@ -514,6 +517,20 @@ class _PreviewAudioWorker(QObject):
 
         bytes_per_sample = 4 if self._sink_is_float else 2
         bytes_per_frame = bytes_per_sample * self._sink_channels
+        max_end_ms = getattr(self, "_max_end_ms", 0)
+
+        if max_end_ms > 0 and self._timeline_pos_exact_ms >= max_end_ms and not self._pending_write_bytes:
+            self._timeline_pos_exact_ms = float(max_end_ms)
+            if self._timeline_pos_ms >= max_end_ms:
+                self._is_playing = False
+                if self._timer and self._timer.isActive():
+                    self._timer.stop()
+                self.positionChanged.emit(max_end_ms)
+                self.stateChanged.emit(2)
+                return
+            else:
+                self.positionChanged.emit(min(self._timeline_pos_ms, max_end_ms))
+                return
 
         # 1. Flush any pending leftover bytes from previous tick first
         if self._pending_write_bytes:
@@ -529,7 +546,10 @@ class _PreviewAudioWorker(QObject):
                 frames_written = bytes_written // bytes_per_frame
                 ms_written = frames_written * 1000.0 / self._sink_sr
                 self._timeline_pos_exact_ms += ms_written * self._playback_rate
-                self.positionChanged.emit(self._timeline_pos_ms)
+                if max_end_ms > 0 and self._timeline_pos_exact_ms >= max_end_ms:
+                    self._timeline_pos_exact_ms = float(max_end_ms)
+                cur_pos = min(self._timeline_pos_ms, max_end_ms) if max_end_ms > 0 else self._timeline_pos_ms
+                self.positionChanged.emit(cur_pos)
                 self._pending_write_bytes = self._pending_write_bytes[bytes_written:]
             return
 
@@ -545,6 +565,9 @@ class _PreviewAudioWorker(QObject):
 
         blocks_written = 0
         while blocks_written < max_blocks_per_tick and self._is_playing:
+            if max_end_ms > 0 and self._timeline_pos_exact_ms >= max_end_ms:
+                self._timeline_pos_exact_ms = float(max_end_ms)
+                break
             free_bytes = self._sink.bytesFree()
             if free_bytes < out_bytes_per_block:
                 break
@@ -655,6 +678,9 @@ class _PreviewAudioWorker(QObject):
                 frames_written = bytes_written // bytes_per_frame
                 ms_written = frames_written * 1000.0 / self._sink_sr
                 self._timeline_pos_exact_ms += ms_written * self._playback_rate
+                if max_end_ms > 0 and self._timeline_pos_exact_ms >= max_end_ms:
+                    self._timeline_pos_exact_ms = float(max_end_ms)
+                    break
                 if bytes_written < len(data_bytes):
                     self._pending_write_bytes = data_bytes[bytes_written:]
                     break
@@ -664,7 +690,8 @@ class _PreviewAudioWorker(QObject):
 
             blocks_written += 1
 
-        self.positionChanged.emit(self._timeline_pos_ms)
+        cur_pos = min(self._timeline_pos_ms, max_end_ms) if max_end_ms > 0 else self._timeline_pos_ms
+        self.positionChanged.emit(cur_pos)
 
     @Slot()
     def close(self) -> None:

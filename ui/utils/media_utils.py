@@ -96,6 +96,11 @@ def _is_warped_preview(gui) -> bool:
     )
 
 
+def _normalized_time_warps(gui):
+    from app.services.time_warp_service import TimeWarpService
+    return TimeWarpService.normalize_warps(getattr(gui, "video_time_warps", []) or [])
+
+
 def _stop_freeze_timer(gui):
     timer = getattr(gui, "_freeze_playback_timer", None)
     if timer is not None and timer.isActive():
@@ -137,7 +142,7 @@ def _on_freeze_timer_tick(gui):
         elapsed = now - getattr(gui, "_freeze_start_mono", now)
     dur = float(getattr(gui, "_freeze_duration_s", 0.0))
 
-    warps = getattr(gui, "video_time_warps", [])
+    warps = _normalized_time_warps(gui)
     total_warps_dur = sum(float(wp.get("duration", 0.0)) for wp in warps)
     media_dur = int(gui.media_player.duration() or 0)
     total_duration = media_dur + int(round(total_warps_dur * 1000))
@@ -281,7 +286,7 @@ def toggle_play(gui):
 
             # If resuming playback from inside an unbaked freeze region:
             if not _is_warped_preview(gui) and getattr(gui, "video_time_warps", []):
-                warps = gui.video_time_warps
+                warps = _normalized_time_warps(gui)
                 current_tl_s = gui.timeline._playhead if hasattr(gui, "timeline") else (gui.media_player.position() / 1000.0)
                 sorted_warps = sorted(warps, key=lambda x: float(x.get("time", 0.0)))
                 accum = 0.0
@@ -375,7 +380,7 @@ def position_changed(gui, position):
     if getattr(gui, "_active_freeze_warp", None) is not None:
         return
 
-    warps = getattr(gui, "video_time_warps", [])
+    warps = _normalized_time_warps(gui)
     if warps:
         from app.services.time_warp_service import TimeWarpService
         is_playing = False
@@ -579,7 +584,7 @@ def duration_changed(gui, duration):
     if _is_warped_preview(gui):
         tl_duration = duration
     else:
-        warps = getattr(gui, "video_time_warps", [])
+        warps = _normalized_time_warps(gui)
         if warps:
             total_warps_dur = sum(float(w.get("duration", 0.0)) for w in warps)
             tl_duration = duration + int(round(total_warps_dur * 1000))
@@ -615,7 +620,7 @@ def set_position(gui, position, *, exact: bool = True):
             gui.media_player.setPosition(media_pos)
         gui.timeline.set_position(position)
     else:
-        warps = getattr(gui, "video_time_warps", [])
+        warps = _normalized_time_warps(gui)
         if warps:
             from app.services.time_warp_service import TimeWarpService
             target_tl_s = position / 1000.0

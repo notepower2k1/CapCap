@@ -1,6 +1,23 @@
 # How to Use CapCap
 
-## 🖥️ Workspace Layouts (16:9 Landscape & 9:16 Portrait)
+## Quality / Performance and the video queue
+
+Choose the work mode in the launcher independently of CPU/GPU mode and output encoding quality:
+
+- **Quality** opens the full editor with timeline and video playback. Full Pipeline prepares transcription, translation and TTS; click **Export** separately to render the final video.
+- **Performance** opens a still-frame editor with a virtual subtitle table and layer inspectors. It does not play video or draw a timeline. Add videos or a folder in the launcher, configure each video, then use **More → Back to Launcher** to save its settings and return.
+- Click **Process queue** to process pending videos sequentially and save their projects. **Automatically export video after processing** is off by default; enable it to render each video as part of processing. Otherwise, finished jobs show **Processed — not exported**.
+- Select one or more processed jobs with Ctrl/Shift and click **Export selected videos** to render from saved subtitles, TTS and layers without rerunning transcription, translation or voice generation. Pending, unselected videos are left alone.
+
+The still preview has Blur, Logo, Mask and Text shortcuts. Selecting OCR enables a draggable crop region; the crop is saved independently for each video and passed to its queue worker. OCR Translation is hidden in Performance. **Change frame** extracts an image at the entered time; clicking a subtitle changes its preview text without automatically seeking the image. Blur/Mask effects in the still are approximate; export uses the full renderer.
+
+Use **Stop after current video** or **Stop now** to stop the queue. **Process again** queues processing again; to retry only rendering, use **Export selected videos** when saved processing data is available. Editors cannot be opened while a queue job is running. Closing the editor with X saves and exits the app; **More → Back to Launcher** saves and returns instead.
+
+A video belongs to one launcher mode, including after the app restarts. Existing Quality projects cannot be added to Performance; Performance videos cannot be opened directly from Quality's recent-project list or file picker. Use **Open in Quality** in the queue to transfer a project for further editing; this removes its queue entry while retaining project data. **Clean Video Data** updates both lists after successful deletion and retains entries whose project data could not be removed.
+
+See [the detailed Performance guide (Vietnamese)](performance-mode.md).
+
+## 🖥️ Quality Workspace Layouts (16:9 Landscape & 9:16 Portrait)
 
 CapCap automatically optimizes its workspace layout based on the video's aspect ratio:
 
@@ -14,9 +31,9 @@ CapCap automatically optimizes its workspace layout based on the video's aspect 
 
 ---
 
-## Basic Workflow
+## Basic Workflow in Quality
 
-1. Open CapCap and select **CPU** or **GPU** mode in the launcher.
+1. Open CapCap, choose **Quality**, then select **CPU** or **GPU** mode in the launcher.
 2. Create or open a video project. **Prepare** completes once the video is analyzed and ready.
 3. In **Settings**, choose a Subtitle Source: **Audio** (SenseVoice or Faster-Whisper) or **Video** (RapidOCR). This choice is saved per-project.
 4. Set source and target languages, then select a translation provider.
@@ -26,7 +43,23 @@ CapCap automatically optimizes its workspace layout based on the video's aspect 
    - **Step-by-Step → Run to Transcript**: Choose **Auto Transcript** or **Import Transcript File…** to load an external original `.srt`. Imported cues and timestamps remain the transcript source until you explicitly choose **Re-transcript**.
 6. Review subtitles, speaker assignments, typography, and timed visual layers in the editor.
 7. Use **Fast Preview** to check a five-second rendered sample, or playback smoothly in real-time.
-8. Click **Export** to render the final localized video or export to **CapCut Draft**.
+8. Click **Export** to render the final localized video. For a **CapCut Draft**, use **More → Export Resources → Export to CapCut**.
+
+### Languages and voices
+
+The language selectors support Korean, Japanese, Thai, Russian, French and German
+in addition to Vietnamese and English. Chinese remains available as an input.
+For Thai, Russian, French, German or Vietnamese speech input, use Whisper;
+SenseVoice is hidden for languages it does not support.
+
+Voice engines are filtered by output language and the available voice catalog.
+Piper's offered packs are Vietnamese/English; VieNeu is Vietnamese only. CapCut
+is shown only when its catalog contains a matching voice. ElevenLabs remains
+available for configuration even before an API key is entered. For Thai with
+ElevenLabs, select **Eleven v3** in Settings; Turbo/Flash v2.5 do not support Thai.
+Korean and Russian currently require ElevenLabs unless a matching local voice is
+added. Preview speech uses the selected output language. Japanese, Korean and
+Thai subtitles require a font containing those characters on the rendering PC.
 
 ### Whisper transcript cleanup
 
@@ -42,6 +75,17 @@ Saving these settings does not change an imported transcript or start a new tran
 ---
 
 ## AI Translation, Presets & Pronoun Control
+
+### Gemini / ChatGPT browser translation (Version 9.0.0)
+
+1. Open **Settings → Translation**, select **Direct Browser AI**, and choose Gemini or ChatGPT.
+2. Click **Quick Install Extension**. In Chrome/Edge extension management, enable Developer mode and load the folder copied by CapCap. The installed application includes this folder; source checkouts use `browser_extension/`.
+3. Keep the browser running, sign in to the chosen AI service, and check that the extension is connected. There is no need to keep the extension popup open or open an AI tab beforehand.
+4. Translate normally. A separate window is the default; the extension's display-mode setting can switch to an existing tab. Character analysis, re-analysis and translation reuse the same window/tab.
+5. With Temporary Chat enabled, Gemini must confirm temporary mode before any prompt is sent. If it cannot, CapCap reports an error. Work/school accounts may not offer this mode; turn off the option only if you accept saved chats. Closing a normal chat window does not delete its history.
+6. After updating extension files, reload the extension and refresh existing AI tabs. See [extension setup and troubleshooting](../browser_extension/README.md).
+
+OmniVoice voice generation shows completed/total cues and percentage in the progress dialog. Cached cues count as completed; runtime status messages do not replace the cue counter.
 
 CapCap includes an advanced AI dialogue analysis and pronoun consistency framework:
 

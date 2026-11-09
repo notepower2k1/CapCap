@@ -2,6 +2,8 @@
 
 [English](README_en.md) | [Tiếng Việt](README.md)
 
+**Version 9.0.0** — Dịch qua Gemini/ChatGPT Web bằng [extension CapCap](browser_extension/README.md), OmniVoice và chế độ Quality/Performance. Xem [release note](release.md).
+
 | 🖥️ Giao diện Video Ngang (16:9) | 📱 Giao diện Video Dọc (9:16) |
 | :---: | :---: |
 | ![Giao diện CapCap 16:9](assets/preview_1.png) | ![Giao diện CapCap 9:16](assets/preview_2.png) |
@@ -26,6 +28,7 @@
 ## ✨ Điểm nổi bật
 
 * 🔄 **Quy trình 5 bước trực quan:** Chuẩn bị → Chép lời (STT / OCR) → Dịch AI → Lồng tiếng (TTS) → Xuất video.
+* 🗂️ **Quality / Performance:** Chọn editor đầy đủ hoặc giao diện frame tĩnh cho video dài. Performance có hàng đợi chạy tuần tự, lưu cấu hình từng video và cho phép xuất video riêng khi cần hoặc tự xuất sau xử lý.
 * 📱 **Giao diện tự thích ứng (16:9 & 9:16):** Tự động nhận diện và tối ưu bố cục chuyên biệt cho video ngang (YouTube, Phim) hoặc video dọc (TikTok, Shorts, Reels).
 * 🧠 **Dịch thuật AI chuẩn ngữ cảnh & xưng hô:** Tích hợp Gemini 2.5, GPT-4o, DeepSeek, Ollama (offline) cùng Google/Bing Dịch. Tự động phân tích quan hệ nhân vật và cho phép góp ý xưng hô bằng lời.
 * 🎙️ **Lồng tiếng & Tách nhạc nền thông minh:** Hỗ trợ ElevenLabs TTS (chất lượng phòng thu), Piper (offline), Edge TTS, CapCut TTS và VieNeu TTS (nhân bản giọng). Tự động tách giọng gốc và giữ trọn nhạc nền (BGM).
@@ -37,6 +40,7 @@
 ## 📚 Tài liệu chi tiết
 
 * 📖 [Hướng dẫn sử dụng](docs/how-to-use.md)
+* 🗂️ [Quality, Performance và hàng đợi video](docs/performance-mode.md)
 * 💻 [Yêu cầu hệ thống và tài nguyên](docs/requirements.md)
 * ⚙️ [Công nghệ sử dụng](docs/technical-stack.md)
 * 📁 [Cấu trúc dự án](docs/project-structure.md)
@@ -46,7 +50,7 @@
 
 ### 💡 Khắc phục sự cố trình phát xem trước video (MPV)
 
-CapCap mặc định sử dụng **libmpv** để xem trước video mượt mà và chuẩn xác từng khung hình:
+Chế độ **Quality** sử dụng **libmpv** để xem trước video mượt mà và chuẩn xác từng khung hình. **Performance** dùng frame tĩnh, không khởi tạo trình phát MPV:
 * **Yêu cầu Visual C++:** `libmpv-2.dll` yêu cầu **Microsoft Visual C++ 2015–2022 Redistributable (x64)** (phiên bản >= 14.20).
 * **Nếu MPV không khởi động được:** Chạy file cài đặt có sẵn tại `installer\vc_redist.x64.exe` hoặc tải trực tiếp từ [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 

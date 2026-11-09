@@ -1,3 +1,46 @@
+# RELEASE NOTES — Version 9.0.0
+
+**Cập nhật mã nguồn: 09/11/2026.** Cần build lại ứng dụng/installer để tạo bản cài 9.0.0; ghi chú này không đồng nghĩa bộ cài đã được phát hành.
+
+## Dịch qua trình duyệt
+
+- Thêm provider **Direct Browser AI** cho Gemini Web và ChatGPT Web qua extension Chrome/Edge, dùng tài khoản đã đăng nhập, không yêu cầu API key.
+- Mặc định mở cửa sổ riêng; có thể chọn dùng tab hiện tại. Phân tích nhân vật, phân tích lại và dịch dùng chung một tab/cửa sổ cho mỗi nền tảng.
+- Sửa thao tác điền/gửi prompt ChatGPT, chờ xác nhận gửi, đọc DOM mới (`data-markdown-text-style`, `data-dil-response`), ghép nhiều khối phản hồi và báo lỗi đọc DOM thay vì chờ im lặng.
+- Gemini bật và xác nhận Temporary Chat trước khi gửi khi tùy chọn chat tạm thời được bật. Không xác nhận được thì báo lỗi, không gửi vào chat thường; không coi đóng cửa sổ/tạo chat mới là xóa lịch sử.
+- Phân tích xưng hô hoạt động với đoạn dưới 3 câu; lỗi phân tích thủ công được chuyển đến giao diện thay vì trả kết quả rỗng.
+- Đóng gói các file chạy và icon của extension trong PyInstaller; sửa đường dẫn cài nhanh cho bản frozen. Icon thanh trình duyệt và popup dùng logo CapCap.
+- Bridge vẫn là công cụ cá nhân trên localhost, chưa thêm token xác thực.
+
+## OmniVoice, media và xuất video
+
+- Tích hợp OmniVoice gốc qua audio.cpp, hỗ trợ CUDA/CPU/Vulkan, các mức chất lượng và dùng lại mẫu clone VieNeu có audio/transcript. Xem [hướng dẫn OmniVoice](docs/omnivoice-audio-cpp.md).
+- Popup tạo giọng hiển thị cố định số câu hoàn thành/tổng số câu và phần trăm; tính cả cache và giữ số câu khi OmniVoice báo trạng thái runtime.
+- Thêm công cụ FFmpeg Media Tools với 4 tab; cải thiện overlay, timeline caching và đồng bộ playhead khi kết thúc video.
+- Tối ưu xuất FFmpeg với tăng tốc phần cứng, đa luồng và sao chép stream tạm khi phù hợp.
+- Hỗ trợ gói project di động, xuất CapCut Draft và lật ngang video.
+
+## Quality / Performance
+
+- Thêm chọn **Quality / Performance** trên launcher; Performance dùng frame tĩnh, bảng phụ đề gọn và inspector cho các layer.
+- Thêm hàng đợi video chạy tuần tự, cấu hình riêng từng video, dừng sau video hiện tại/dừng ngay và lưu trạng thái khi mở lại app.
+- Tách **Chạy xử lý** khỏi **Xuất video đã chọn**; tùy chọn tự xuất sau xử lý mặc định tắt. Xuất riêng dùng dữ liệu đã lưu, không chạy lại chép lời/dịch/TTS.
+- Hỗ trợ chọn và lưu vùng OCR riêng từng video trong Performance; sửa kéo/resize vùng chọn và lỗi lớp OCR làm đen frame.
+- Giữ menu **Thêm** với Cài đặt, Phản hồi, Dọn dẹp, Xuất tài nguyên và Quay về Launcher; phân biệt quay về launcher với đóng ứng dụng bằng X.
+- Tăng kích thước launcher; ngăn thêm trùng video giữa hai chế độ; hỗ trợ chuyển project Performance sang Quality để chỉnh tiếp.
+- Sửa xóa dữ liệu video bị lệch giữa file trên đĩa, lịch sử và hàng đợi khi gặp file đang dùng.
+
+Hướng dẫn: [Quality, Performance và hàng đợi video](docs/performance-mode.md).
+
+## Kiểm tra trước khi merge
+
+- Bộ test extension: 21 test pass, gồm DOM ChatGPT mới, gửi prompt, Temporary Chat Gemini và dùng chung cửa sổ phân tích/dịch.
+- Các bộ test Python cho bridge, đóng gói extension, xưng hô, OmniVoice, ngôn ngữ, i18n, lưu cấu hình, fallback dịch, chẩn đoán dịch, voice worker, Media Tools và timeline đều pass. Test riêng cập nhật tiến độ tạo giọng cũng pass.
+- Hai bộ hồi quy giao diện đầy đủ (`test_runtime_bugfixes`, `test_performance_queue`) bị treo trong lượt kiểm tra này và đã được dừng; chưa xác nhận toàn bộ hai bộ test. Log queue có callback Qt truy cập widget đã bị hủy.
+- Chưa build lại installer 9.0.0 và chưa chạy lại toàn bộ luồng trình duyệt thực tế sau lần cập nhật version.
+
+---
+
 # RELEASE NOTES — V8.0.6.1
 
 **Ngày phát hành: 20/10/2026**
