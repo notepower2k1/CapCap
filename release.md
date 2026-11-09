@@ -8,15 +8,21 @@
 - **Lồng tiếng OmniVoice ngoại tuyến**: Tích hợp OmniVoice qua audio.cpp, hỗ trợ CUDA, CPU và Vulkan. Có bốn mức chất lượng tạo giọng và dùng lại được mẫu clone VieNeu có audio cùng lời thoại.
 - **Chế độ Performance và hàng đợi video**: Thêm lựa chọn Quality / Performance trên launcher. Performance dùng khung hình tĩnh, bảng phụ đề gọn, cấu hình riêng cho từng video và xử lý hàng đợi tuần tự.
 - **Công cụ xử lý media độc lập**: Bổ sung cửa sổ FFmpeg Media Tools với bốn tab: Cắt video, Ghép video, Tách âm thanh/video và Ghép âm thanh vào video.
-- **Đóng gói và chuyển dự án**: Hỗ trợ nhập/xuất gói project di động và xuất CapCut Draft để tiếp tục chỉnh sửa phụ đề, âm thanh cùng các lớp phủ trong CapCut.
+- **Xuất / nhập project CapCap**: Xuất project thành gói di động để sao lưu hoặc chuyển máy qua **Thêm → Xuất tài nguyên → Xuất tài nguyên…**. Chọn kèm video gốc để nhập lại từ **Launcher → Nhập dự án → Nhập gói CapCap…**; giữ phụ đề, giọng đọc, timeline, layer và cấu hình chỉnh sửa đã chọn. Nhận diện project đã có để tránh nhập trùng.
+- **Xuất project CapCut Desktop (thử nghiệm)**: Thêm **Thêm → Xuất tài nguyên → Xuất sang CapCut…**, tạo draft mới để dựng tiếp trong CapCut. Giữ video, phụ đề sửa được, TTS, nhạc nền, các lớp chữ/logo, mask/blur, keyframe và thời lượng Fit Voice; một số hiệu ứng được chuyển gần tương đương.
+- **Xuất tài nguyên theo nhóm**: Chọn riêng transcript gốc, phụ đề đã dịch, file giọng từng câu, track âm thanh, video và dữ liệu chỉnh sửa. Hiển thị số file/dung lượng dự kiến, xuất tài nguyên đã có mà không chạy lại dịch, TTS hoặc render.
+- **Tùy chỉnh làm sạch bản chép lời Whisper**: Thêm hai lựa chọn giảm câu lặp và giảm phụ đề tự sinh trong khoảng im lặng, bật/tắt độc lập; có ngưỡng tương đồng văn bản và thời gian im lặng trong phần nâng cao.
 - **Lật ngang video**: Thêm tùy chọn lật ngang trong Video Inspector, áp dụng cho xem trước và xuất video.
 
 ## ⚡ 2. Cải tiến & Tối ưu hiệu năng
 
 - **Tối ưu xuất video FFmpeg**: Tận dụng tăng tốc phần cứng, đa luồng và sao chép luồng media tạm khi phù hợp để giảm xử lý mã hóa lại.
 - **Cải thiện độ mượt của trình xem trước và timeline**: Tối ưu lớp phủ cho cập nhật tần số cao, dùng cache timeline và cải thiện đồng bộ khi thay đổi tốc độ video.
+- **Đồng bộ Fit Voice giữa xem trước và xuất project**: Thống nhất cách quy đổi thời gian khi làm chậm hoặc giữ khung hình, giữ vị trí phụ đề, âm thanh và các layer khi xuất sang CapCut.
+- **Giảm khoảng lặng thừa ở đầu/cuối giọng TTS**: Cắt khoảng lặng đủ dài bằng bộ lọc bảo thủ trước khi tính tốc độ và Fit Voice, giữ khoảng nghỉ bên trong câu và file giọng gốc trong cache.
 - **Tách xử lý khỏi xuất video**: Có thể xử lý rồi lưu project trước, xuất video sau bằng phụ đề và giọng đọc đã tạo. Hàng đợi hỗ trợ dừng sau video hiện tại, dừng ngay và tùy chọn tự xuất sau xử lý.
 - **Mở rộng hỗ trợ ngôn ngữ**: Bổ sung lựa chọn Hàn, Nhật, Thái, Nga, Pháp và Đức; lọc engine nhận dạng/giọng đọc theo ngôn ngữ, đồng bộ ngôn ngữ nghe thử và quy tắc dịch.
+- **Điều chỉnh xử lý CapCut**: Mặc định TTS xử lý theo batch 30 câu và STT chia đoạn 10 phút, đồng thời chọn engine phù hợp với ngôn ngữ đầu vào/đầu ra.
 - **Tiến độ tạo giọng rõ ràng hơn**: Popup hiển thị số câu đã hoàn thành/tổng số câu và phần trăm, tính cả câu lấy từ cache; giữ bộ đếm khi OmniVoice đang tạo câu tiếp theo.
 - **Thuận tiện hơn khi cài extension**: Đóng gói extension cùng ứng dụng, thêm nút cài nhanh và đồng bộ logo CapCap. Cửa sổ riêng là mặc định; phân tích lại và dịch tiếp tục dùng chung phiên.
 - **Chẩn đoán GPU và nhận diện người nói**: Bổ sung hướng dẫn khắc phục lỗi NVIDIA/CUDA và hiển thị mã người nói gốc cạnh tên trên giao diện.
@@ -31,9 +37,11 @@
 - **Vùng OCR trong Performance bị lệch hoặc làm đen khung hình**: Sửa kéo/đổi kích thước, lưu vùng chọn riêng theo video và cách hiển thị lớp OCR.
 - **Dữ liệu video và hàng đợi không đồng bộ sau khi xóa**: Đối chiếu lại file còn trên đĩa, lịch sử và hàng đợi khi gặp file đang được sử dụng; ngăn thêm trùng video giữa Quality và Performance.
 - **Phát xem trước không dừng đúng cuối video**: Đồng bộ lại vị trí phát và trạng thái timeline khi video kết thúc.
+- **Tạo nhầm project khi nhập lại gói đã xuất**: Giữ mã nhận diện project qua các lần xuất/nhập, liên kết lại đường dẫn media và cho mở project đã có thay vì sao chép trùng dữ liệu.
+- **Thông tin GPU lỗi làm mất lựa chọn tăng tốc**: Sửa đọc dung lượng VRAM và giữ khả năng chọn GPU khi chỉ phần thông tin hiển thị bị lỗi; bổ sung thông báo hướng dẫn khắc phục.
 - **Nhãn phiên bản launcher còn hiển thị V8**: Cập nhật tiêu đề, hộp thông tin và dòng phiên bản sang CapCap V9 / Version 9.0.0.
 
-Hướng dẫn: [Dịch qua trình duyệt](browser_extension/README.md) · [OmniVoice](docs/omnivoice-audio-cpp.md) · [Quality / Performance](docs/performance-mode.md). [Ghi chú kiểm thử và tình trạng bản build](docs/release-validation-9.0.0.md).
+Hướng dẫn: [Xuất / nhập project CapCap](docs/resource-packages.md) · [Xuất project CapCut](docs/capcut-draft-export.md) · [Dịch qua trình duyệt](browser_extension/README.md) · [OmniVoice](docs/omnivoice-audio-cpp.md) · [Quality / Performance](docs/performance-mode.md). [Ghi chú kiểm thử và tình trạng bản build](docs/release-validation-9.0.0.md).
 
 ---
 
