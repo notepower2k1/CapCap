@@ -527,7 +527,9 @@ def _build_blur_filter_chain(blur_region, video_width, video_height):
         timing = f":enable='between(t,{start:.3f},{end:.3f})'" if end > start else ""
         overlay_parts.append(f"[{base_label}][blur{index}]overlay={x}:{y}{timing}{output_label}")
     split_outputs = "[main]" + "".join(f"[tmp{i}]" for i in range(len(regions)))
-    return f"split={len(regions) + 1}{split_outputs};" + ";".join(crop_parts + overlay_parts)
+    # Hardware decoding can supply NV12 (interleaved UV). boxblur must receive
+    # planar chroma: otherwise part of the cropped region can turn green.
+    return f"format=yuv420p,split={len(regions) + 1}{split_outputs};" + ";".join(crop_parts + overlay_parts)
 
 
 def _build_mask_filter_chain(mask_regions, video_width, video_height):
@@ -624,7 +626,7 @@ def _build_mask_filter_chain(mask_regions, video_width, video_height):
             luma_radius = max(1, min(20, int(min_dimension // 2)))
             chroma_radius = max(0, min(20, int(min_dimension // 4)))
             filter_statements.append(
-                f"{current_input}split=2[main{index}][tmp{index}];"
+                f"{current_input}format=yuv420p,split=2[main{index}][tmp{index}];"
                 f"[tmp{index}]crop=w={w}:h={h}:x={x}:y={y},boxblur={luma_radius}:3:{chroma_radius}:3[blur{index}];"
                 f"[main{index}][blur{index}]overlay={x}:{y}{timing}{output_label}"
             )
