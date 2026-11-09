@@ -50,14 +50,32 @@ class TestTranslationPromptDialogContextOption(unittest.TestCase):
         # By default auto context is True, review context is enabled
         self.assertTrue(dialog.auto_context_cb.isEnabled())
         self.assertTrue(dialog.review_context_cb.isEnabled())
+        self.assertTrue(dialog.review_context_cb.isChecked())
 
         # Unchecking auto context must disable review context
         dialog.auto_context_cb.setChecked(False)
         self.assertFalse(dialog.review_context_cb.isEnabled())
+        self.assertFalse(dialog.review_context_cb.isChecked())
 
         # Checking auto context re-enables review context
         dialog.auto_context_cb.setChecked(True)
         self.assertTrue(dialog.review_context_cb.isEnabled())
+        self.assertFalse(dialog.review_context_cb.isChecked())
+        dialog.review_context_cb.setChecked(True)
+        self.assertTrue(dialog.review_context_cb.isChecked())
+
+    def test_saved_review_is_unchecked_when_auto_context_is_off(self):
+        settings = QSettings("CapCap", "VideoTranslatorGUI")
+        original = settings.value("auto_translation_context", "1")
+        try:
+            settings.setValue("auto_translation_context", "0")
+            settings.setValue("review_translation_context", "1")
+            dialog = TranslationPromptDialog(None, src_lang="zh", target_lang="vi")
+            self.assertFalse(dialog.auto_context_cb.isChecked())
+            self.assertFalse(dialog.review_context_cb.isChecked())
+            self.assertFalse(dialog.review_context_cb.isEnabled())
+        finally:
+            settings.setValue("auto_translation_context", original)
 
     def test_save_prompts_stores_review_context_setting(self):
         dialog = TranslationPromptDialog(None, src_lang="zh", target_lang="vi")

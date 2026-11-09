@@ -29,6 +29,7 @@
 
 ## 🛠️ 3. Sửa lỗi quan trọng
 
+- **Ô kiểm tra xưng hô vẫn được tích khi tắt tự động phát hiện ngữ cảnh**: Tự bỏ chọn bước kiểm tra trước khi vô hiệu hóa; khi bật lại tự động phát hiện, người dùng có thể chọn lại bước kiểm tra.
 - **Một nửa vùng blur bị chuyển xanh khi xuất video**: Chuẩn hóa frame NV12 từ đường giải mã phần cứng sang YUV420P trước bộ lọc blur, áp dụng cho blur layer và mask chế độ blur. Bản sửa 10/11 đã được đối chiếu bằng video thực tế và kiểm thử màu pixel bằng FFmpeg.
 - **Dòng tiến độ OmniVoice nhấp nháy giữa số câu và thông báo tạo giọng**: Đưa bộ đếm câu về dòng tiến trình phía dưới, giữ hàng TTS hiển thị phần trăm. Thông báo runtime lặp lại của OmniVoice không ghi đè bộ đếm; không cập nhật lại dòng tiến trình khi nội dung không đổi.
 - **Tốc độ từng câu hiển thị lại 1.0x dù audio đã được đồng bộ**: Giữ hệ số tốc độ và cờ tự điều chỉnh khi đồng bộ phụ đề qua SRT; khôi phục thông tin bị mất từ đúng file giọng đã xử lý khi mở lại project, giữ nguyên tốc độ chỉnh tay.

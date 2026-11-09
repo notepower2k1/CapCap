@@ -174,12 +174,12 @@ class TranslationPromptDialog(QDialog):
         self.review_context_cb = QCheckBox(t("Review character & pronoun rules before translating"))
         saved_review = self.settings.value("review_translation_context", os.getenv("CAPCAP_REVIEW_TRANSLATION_CONTEXT", "1"))
         is_review_checked = str(saved_review).strip().lower() not in ("0", "false", "no")
-        self.review_context_cb.setChecked(is_review_checked)
+        self.review_context_cb.setChecked(is_review_checked and self.auto_context_cb.isChecked())
         self.review_context_cb.setEnabled(self.auto_context_cb.isChecked())
         self.review_context_cb.setToolTip(
             t("Pause after AI analyzes characters and pronouns to let you review and adjust them before translating batches.")
         )
-        self.auto_context_cb.toggled.connect(lambda checked: self.review_context_cb.setEnabled(checked))
+        self.auto_context_cb.toggled.connect(self._on_auto_context_toggled)
         layout.addWidget(self.review_context_cb)
 
         # Prompt editor
@@ -212,6 +212,11 @@ class TranslationPromptDialog(QDialog):
         btn_row.addWidget(translate_btn)
 
         layout.addLayout(btn_row)
+
+    def _on_auto_context_toggled(self, checked):
+        if not checked:
+            self.review_context_cb.setChecked(False)
+        self.review_context_cb.setEnabled(checked)
 
     def _on_provider_changed(self):
         provider = self.provider_combo.currentData() or "google_ai_studio"
