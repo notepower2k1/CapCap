@@ -7,7 +7,7 @@ import time
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QBitmap, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPalette, QPen, QPixmap, QRegion
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QMenu, QWidget
 
 try:
     import shiboken6
@@ -37,6 +37,21 @@ def _is_own_overlay_window(target_view, widget) -> bool:
     return False
 
 
+def _is_own_popup_menu(target_view, widget) -> bool:
+    if not isinstance(widget, QMenu) or not _is_valid_qobject(target_view):
+        return False
+    try:
+        owner = target_view.window()
+        parent = widget.parentWidget()
+        while parent is not None:
+            if parent is owner:
+                return True
+            parent = parent.parentWidget()
+    except (RuntimeError, ReferenceError):
+        pass
+    return False
+
+
 def _should_suppress_overlay(target_view) -> bool:
     if not _is_valid_qobject(target_view):
         return True
@@ -50,7 +65,10 @@ def _should_suppress_overlay(target_view) -> bool:
             return True
         app = QApplication.instance()
         if app is not None:
-            if app.activeModalWidget() is not None or app.activePopupWidget() is not None:
+            if app.activeModalWidget() is not None:
+                return True
+            popup = app.activePopupWidget()
+            if popup is not None and not _is_own_popup_menu(target_view, popup):
                 return True
             active_win = app.activeWindow()
             if (
@@ -61,6 +79,7 @@ def _should_suppress_overlay(target_view) -> bool:
                 and active_win is not win
                 and getattr(active_win, "window", lambda: None)() is not win
                 and not _is_own_overlay_window(target_view, active_win)
+                and not _is_own_popup_menu(target_view, active_win)
             ):
                 return True
     except Exception:
@@ -894,7 +913,9 @@ class _BlurRegionOverlayWindow(QWidget):
             if self._main_window is not None and watched is self._main_window:
                 event_type = event.type()
                 if event_type == QEvent.WindowDeactivate:
-                    if _is_own_overlay_window(self._target_view, QApplication.activeWindow()):
+                    if (_is_own_overlay_window(self._target_view, QApplication.activeWindow())
+                            or _is_own_popup_menu(self._target_view, QApplication.activeWindow())
+                            or _is_own_popup_menu(self._target_view, QApplication.activePopupWidget())):
                         return False
                     self._suspended = True
                     if self.isVisible():
@@ -1694,7 +1715,9 @@ class _TextLayerOverlayWindow(QWidget):
             if self._main_window is not None and watched is self._main_window:
                 event_type = event.type()
                 if event_type == QEvent.WindowDeactivate:
-                    if _is_own_overlay_window(self._target_view, QApplication.activeWindow()):
+                    if (_is_own_overlay_window(self._target_view, QApplication.activeWindow())
+                            or _is_own_popup_menu(self._target_view, QApplication.activeWindow())
+                            or _is_own_popup_menu(self._target_view, QApplication.activePopupWidget())):
                         return False
                     self._suppressed = True
                     if self.isVisible():
@@ -2074,6 +2097,10 @@ class MpvVideoView(QWidget):
             except Exception:
                 pass
 
+        popup = QApplication.activePopupWidget()
+        if _is_own_popup_menu(self, popup):
+            popup.raise_()
+
     def set_blur_region_editable(self, editable: bool):
         self.set_blur_edit_enabled(editable)
 
@@ -2238,7 +2265,9 @@ class MpvVideoView(QWidget):
                     blocked_type = getattr(QEvent.Type, "WindowBlocked", None)
                     if event_type != QEvent.WindowDeactivate and event_type != blocked_type:
                         return False
-                    if _is_own_overlay_window(self, QApplication.activeWindow()):
+                    if (_is_own_overlay_window(self, QApplication.activeWindow())
+                            or _is_own_popup_menu(self, QApplication.activeWindow())
+                            or _is_own_popup_menu(self, QApplication.activePopupWidget())):
                         return False
                     self.subtitle_item.hide()
                     if self.text_overlay is not None:

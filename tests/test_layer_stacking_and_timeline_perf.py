@@ -404,6 +404,52 @@ class TestLayerStackingAndTimelinePerf(unittest.TestCase):
         container.deleteLater()
         self.app.processEvents()
 
+    def test_editor_menu_keeps_logo_and_mask_visible_and_above_video(self):
+        from PySide6.QtWidgets import QMenu
+        container = QWidget()
+        container.resize(800, 600)
+        view = MpvVideoView(container, native_surface=False)
+        view.setGeometry(0, 0, 700, 500)
+        menu = QMenu(container)
+        submenu = menu.addMenu("Export Resources")
+        try:
+            with patch.object(QApplication, "activeWindow", return_value=container), \
+                 patch.object(QApplication, "activePopupWidget", return_value=None), \
+                 patch.object(QApplication, "activeModalWidget", return_value=None):
+                container.show()
+                view.show()
+                view.set_video_dimensions(1920, 1080)
+                view.set_logos([{"id": "logo", "source": "", "x": .1, "y": .1, "width": .2, "height": .2}])
+                view.set_mask_regions([{"x": .5, "y": .2, "width": .2, "height": .2}], active_index=0, editable=True)
+                self.app.processEvents()
+                for popup in (menu, submenu):
+                    with patch.object(QApplication, "activeWindow", return_value=popup), \
+                         patch.object(QApplication, "activePopupWidget", return_value=popup), \
+                         patch.object(popup, "raise_") as raise_menu:
+                        QApplication.sendEvent(container, QEvent(QEvent.WindowDeactivate))
+                        view.logo_overlay.sync_to_view()
+                        view.mask_overlay.sync_to_view()
+                        view._sync_overlay_stack_order()
+                        self.assertTrue(view.logo_overlay.isVisible())
+                        self.assertTrue(view.mask_overlay.isVisible())
+                        self.assertFalse(view.logo_overlay._suspended)
+                        self.assertFalse(view.mask_overlay._suspended)
+                        raise_menu.assert_called()
+                view._restore_subtitle_overlay()
+                self.assertTrue(view.logo_overlay.isVisible())
+                self.assertTrue(view.mask_overlay.isVisible())
+                # Actual dialogs still suppress floating preview windows.
+                with patch.object(QApplication, "activeModalWidget", return_value=QWidget()):
+                    view.logo_overlay.sync_to_view()
+                    view.mask_overlay.sync_to_view()
+                    self.assertFalse(view.logo_overlay.isVisible())
+                    self.assertFalse(view.mask_overlay.isVisible())
+        finally:
+            for widget in (view.logo_overlay, view.mask_overlay, view.blur_overlay, view.subtitle_item, view, container):
+                widget.close()
+                widget.deleteLater()
+            self.app.processEvents()
+
     def test_deterministic_overlay_stack_order_raises_editable_layer(self):
         """Attach blur_overlay, logo_overlay, text_overlay, and subtitle_item, mock raise_,
         enable set_blur_edit_enabled(True), and verify blur_overlay.raise_ is called last."""
