@@ -18169,12 +18169,7 @@ class VideoTranslatorGUI(QMainWindow):
                 if dlg and dlg.isVisible():
                     if "voiceover" in dlg.steps:
                         status_label = dlg.steps["voiceover"].status_label
-                        if cue_progress:
-                            status_label.setMinimumWidth(170)
-                            status_label.setMaximumWidth(16777215)
-                            status_label.setText(t("{done}/{total} cues ({percent}%)", done=cue_progress.group(1), total=cue_progress.group(2), percent=int(pct)))
-                        else:
-                            status_label.setText(f"{int(pct)}%")
+                        status_label.setText(f"{int(pct)}%")
                         status_label.setStyleSheet("color: #00E5FF; font-weight: bold;")
                     if getattr(dlg, "step_order", None) and "voiceover" in dlg.step_order:
                         total_stages = max(1, len(dlg.step_order))
@@ -18188,14 +18183,24 @@ class VideoTranslatorGUI(QMainWindow):
         if dlg and dlg.isVisible() and raw_msg:
             try:
                 disp_text = raw_msg
-                if raw_msg.startswith("Synthesizing with"):
+                if cue_progress and pct is not None:
+                    disp_text = t("Generating speech: {done}/{total} cues ({percent}%)", done=cue_progress.group(1), total=cue_progress.group(2), percent=int(pct))
+                    dlg._voiceover_cue_progress_text = disp_text
+                elif raw_msg == "Generating speech with OmniVoice (audio.cpp)..." and isinstance(getattr(dlg, "_voiceover_cue_progress_text", None), str):
+                    # Per-cue runtime notices must not replace the completed-cue
+                    # count or alternate with it every time another cue starts.
+                    disp_text = dlg._voiceover_cue_progress_text
+                elif raw_msg.startswith("Synthesizing with"):
                     disp_text = raw_msg.replace("Synthesizing with", t("Synthesizing with"))
                 elif raw_msg.startswith("Synthesizing "):
                     disp_text = raw_msg.replace("Synthesizing ", t("Synthesizing ") + " ").replace("subtitle segments", t("segments"))
                 else:
                     disp_text = t(raw_msg)
-                dlg.footer.setText(disp_text)
-                dlg.footer.setStyleSheet("color: #9fb7d5; font-size: 13px; margin-top: 15px;")
+                if dlg.footer.text() != disp_text:
+                    dlg.footer.setText(disp_text)
+                footer_style = "color: #9fb7d5; font-size: 13px; margin-top: 15px;"
+                if dlg.footer.styleSheet() != footer_style:
+                    dlg.footer.setStyleSheet(footer_style)
             except Exception:
                 pass
 

@@ -2393,14 +2393,16 @@ class TestRuntimeBugfixes(unittest.TestCase):
             # Case 2: Progress message with percent
             dlg.footer.setText.reset_mock()
             VideoTranslatorGUI._on_voiceover_progress(gui, "Synthesizing with voice 'Bao': 10/20 (50.0%)...")
-            step_mock.status_label.setText.assert_called_with("10/20 câu (50%)")
+            step_mock.status_label.setText.assert_called_with("50%")
+            dlg.footer.setText.assert_called_with("Đang tạo giọng: 10/20 câu (50%)")
             self.assertTrue(dlg.footer.setText.called)
 
             # OmniVoice emits runtime messages while generating the next cue.
-            # The completed-cue count must remain visible in the step row.
+            # The completed-cue count must remain visible in the footer.
             step_mock.status_label.setText.reset_mock()
             VideoTranslatorGUI._on_voiceover_progress(gui, "Generating speech with OmniVoice (audio.cpp)...")
             step_mock.status_label.setText.assert_not_called()
+            dlg.footer.setText.assert_called_with("Đang tạo giọng: 10/20 câu (50%)")
         finally:
             set_language(orig_lang)
 

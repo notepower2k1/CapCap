@@ -65,6 +65,7 @@ VI_TRANSLATIONS: dict[str, str] = {
     "Save configuration and return to queue": "Lưu cấu hình và về hàng đợi",
     "Subtitle preview": "Xem trước phụ đề",
     "{done}/{total} cues ({percent}%)": "{done}/{total} câu ({percent}%)",
+    "Generating speech: {done}/{total} cues ({percent}%)": "Đang tạo giọng: {done}/{total} câu ({percent}%)",
     "OmniVoice generation quality": "Chất lượng tạo giọng OmniVoice",
     "Quality (32 steps)": "Chất lượng (32 bước)",
     "Medium (24 steps)": "Trung bình (24 bước)",
