@@ -563,7 +563,7 @@ class LauncherWindow(QDialog):
         header = QHBoxLayout()
         title_box = QHBoxLayout()
         title_box.setSpacing(8)
-        self._title_label = QLabel("CapCap V8")
+        self._title_label = QLabel("CapCap V9")
         title = self._title_label
         title.setStyleSheet("font-size: 26px; font-weight: 800; color: #ffffff;")
         title_box.addWidget(title)
@@ -951,7 +951,7 @@ class LauncherWindow(QDialog):
         """Refresh launcher copy and cards after an immediate language change."""
         localize_widget_tree(self)
         self.setWindowTitle(t("CapCap - Video Translator"))
-        self._title_label.setText(t("CapCap V8"))
+        self._title_label.setText(t("CapCap V9"))
         self._subtitle_label.setText(t("Video Translation & Voiceover Studio"))
         self._language_label.setText(t("Language"))
         self.cpu_btn.setText(t("CPU"))
@@ -1420,7 +1420,7 @@ class LauncherWindow(QDialog):
         dialog.setMinimumSize(650, 650)
         dialog.setStyleSheet("QDialog { background: #0a101e; color: #d7e3f4; }")
         layout = QVBoxLayout(dialog)
-        title = QLabel(t("CapCap V8 — Tool Information"), dialog)
+        title = QLabel(t("CapCap V9 — Tool Information"), dialog)
         title.setStyleSheet("font-size: 18px; font-weight: 800; color: #ffffff;")
         layout.addWidget(title)
 
