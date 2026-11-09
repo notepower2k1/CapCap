@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 
 from services.segment_service import SegmentService
 
@@ -156,5 +157,30 @@ class GUIProjectBridge:
                 )
             context["current_translated_segment_models"] = translation_models
             context["current_translated_segments"] = [segment.to_subtitle_dict() for segment in translation_models]
+
+            # Older SRT/editor refreshes dropped speed metadata while keeping
+            # the processed WAV path. Recover only the exact same audio asset;
+            # never overwrite a saved manual speed or use unrelated old TTS.
+            voice_json = state.artifacts.get("voice_segments", "")
+            if voice_json and os.path.isfile(voice_json):
+                try:
+                    with open(voice_json, encoding="utf-8") as handle:
+                        voice_segments = json.load(handle)
+                    by_wav = {
+                        os.path.normcase(os.path.normpath(seg["_wav_path"])): seg
+                        for seg in voice_segments if isinstance(seg, dict) and seg.get("_wav_path")
+                    }
+                    for model, seg in zip(translation_models, context["current_translated_segments"]):
+                        wav = seg.get("_wav_path")
+                        voice = by_wav.get(os.path.normcase(os.path.normpath(wav))) if wav else None
+                        if not voice or "voice_speed" in seg:
+                            continue
+                        for key in ("voice_speed", "_auto_fit_applied"):
+                            if key not in seg and key in voice:
+                                seg[key] = voice[key]
+                                model.metadata[key] = voice[key]
+                except (OSError, ValueError, TypeError):
+                    # A missing/unreadable voice artifact must not block loading.
+                    pass
 
         return context

@@ -21,6 +21,46 @@ from ui.main_window import VideoTranslatorGUI
 
 
 class TestVoiceSpeedSync(unittest.TestCase):
+    def test_editor_srt_refresh_keeps_manual_and_automatic_speed(self):
+        for keep_timeline in (True, False):
+            for automatic in (True, False):
+                with self.subTest(keep_timeline=keep_timeline, automatic=automatic):
+                    gui = MagicMock()
+                    gui.keep_timeline_cb.isChecked.return_value = keep_timeline
+                    gui.extract_subtitle_text_entries.return_value = ["Xin chào"]
+                    gui.parse_srt_to_segments.return_value = [{"start": 0., "end": 2., "text": "Xin chào"}]
+                    base = [{"start": 0., "end": 2., "text": "Xin chào", "voice_speed": 1.232,
+                             "_auto_fit_applied": automatic, "_wav_path": "processed.wav"}]
+                    result = VideoTranslatorGUI._segments_from_editor_text(gui, "1\n00:00:00,000 --> 00:00:02,000\nXin chào", base)
+                    self.assertEqual(result[0]["voice_speed"], 1.232)
+                    self.assertEqual(result[0]["_auto_fit_applied"], automatic)
+
+    def test_project_load_recovers_speed_only_from_the_same_processed_audio(self):
+        import json
+        from types import SimpleNamespace
+        from services.gui_project_bridge import GUIProjectBridge
+        for manual_speed in (None, 1.27):
+            with tempfile.TemporaryDirectory() as folder:
+                translation_path = Path(folder) / "translation.json"
+                translation_path.write_text("[]")
+                voice_path = Path(folder) / "voice.json"
+                voice_path.write_text(json.dumps([
+                    {"_wav_path": "same.wav", "voice_speed": 1.232, "_auto_fit_applied": True},
+                    {"_wav_path": "old.wav", "voice_speed": 1.5, "_auto_fit_applied": True},
+                ]))
+                models = [Segment.from_dict({"text": "Xin chào", "start": 0, "end": 2, "_wav_path": "same.wav"}),
+                          Segment.from_dict({"text": "Other", "start": 2, "end": 4, "_wav_path": "new.wav"})]
+                if manual_speed is not None:
+                    models[0].metadata.update(voice_speed=manual_speed, _auto_fit_applied=False)
+                service = MagicMock()
+                service.load_segment_artifact.return_value = models
+                state = SimpleNamespace(artifacts={"translation_final": str(translation_path), "voice_segments": str(voice_path)})
+                context = GUIProjectBridge(service).load_context(state)
+                recovered, untouched = context["current_translated_segments"]
+                self.assertEqual(recovered["voice_speed"], manual_speed or 1.232)
+                self.assertEqual(recovered["_auto_fit_applied"], manual_speed is None)
+                self.assertNotIn("voice_speed", untouched)
+
     def test_automatic_speed_matches_audio_and_reaches_ui_and_saved_segment(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             workflow = VoiceWorkflow(tmp_dir)

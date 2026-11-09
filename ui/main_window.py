@@ -15028,6 +15028,9 @@ class VideoTranslatorGUI(QMainWindow):
                         d["time_warp_id"] = str(base.get("time_warp_id"))
                     if base.get("_wav_path"):
                         d["_wav_path"] = str(base.get("_wav_path"))
+                    for key in ("voice_speed", "_auto_fit_applied"):
+                        if key in base:
+                            d[key] = base[key]
                     out.append(d)
                 return out
 
@@ -15052,6 +15055,9 @@ class VideoTranslatorGUI(QMainWindow):
                     segment["_audio_end"] = base.get("_audio_end")
                 if base.get("_wav_path"):
                     segment["_wav_path"] = base.get("_wav_path")
+                for key in ("voice_speed", "_auto_fit_applied"):
+                    if key in base:
+                        segment[key] = base[key]
         return parsed_segments
 
     def _uses_exact_full_block_subtitle_background(self) -> bool:

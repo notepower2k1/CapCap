@@ -31,6 +31,7 @@
 
 - **Một nửa vùng blur bị chuyển xanh khi xuất video**: Chuẩn hóa frame NV12 từ đường giải mã phần cứng sang YUV420P trước bộ lọc blur, áp dụng cho blur layer và mask chế độ blur. Bản sửa 10/11 đã được đối chiếu bằng video thực tế và kiểm thử màu pixel bằng FFmpeg.
 - **Dòng tiến độ OmniVoice nhấp nháy giữa số câu và thông báo tạo giọng**: Đưa bộ đếm câu về dòng tiến trình phía dưới, giữ hàng TTS hiển thị phần trăm. Thông báo runtime lặp lại của OmniVoice không ghi đè bộ đếm; không cập nhật lại dòng tiến trình khi nội dung không đổi.
+- **Tốc độ từng câu hiển thị lại 1.0x dù audio đã được đồng bộ**: Giữ hệ số tốc độ và cờ tự điều chỉnh khi đồng bộ phụ đề qua SRT; khôi phục thông tin bị mất từ đúng file giọng đã xử lý khi mở lại project, giữ nguyên tốc độ chỉnh tay.
 - **ChatGPT trả lời nhưng ứng dụng không nhận được**: Cập nhật cách đọc giao diện ChatGPT mới, lấy đủ các khối phản hồi và báo lỗi khi không đọc được nội dung.
 - **Prompt ChatGPT chỉ được điền mà chưa gửi**: Chờ nút gửi sẵn sàng và xác nhận tin nhắn đã được trang tiếp nhận trước khi chờ kết quả.
 - **Mở thêm cửa sổ sau khi phân tích nhân vật**: Bước dịch tiếp quản cửa sổ phân tích, tránh tạo thêm cửa sổ cho mỗi bước hoặc mỗi lần phân tích lại.
