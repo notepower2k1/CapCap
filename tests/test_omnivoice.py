@@ -35,6 +35,30 @@ def write_wav(path, rate=16000):
 
 
 class OmniVoiceTests(unittest.TestCase):
+    def test_progress_reports_completed_cues_and_cache_hits(self):
+        with tempfile.TemporaryDirectory() as folder:
+            workflow = VoiceWorkflow(folder)
+            def generate(**kwargs):
+                if kwargs.get("on_progress"):
+                    kwargs["on_progress"]("Generating speech with OmniVoice (audio.cpp)...")
+                return write_wav(kwargs["wav_path"])
+            workflow.engine_runtime.synthesize_segment = MagicMock(side_effect=generate)
+            messages = []
+            args = dict(
+                segments=[dict(start=0, end=1, text="hello"), dict(start=1, end=2, text="world")],
+                tmp_dir=folder, voice_name="omnivoice:test-clone", language_code="ja", log=False,
+                on_progress=messages.append,
+            )
+            workflow._synthesize_segment_wavs(**args)
+            counts = [message for message in messages if message.startswith("Synthesizing with")]
+            self.assertIn("0/2 (0.0%)", counts[0])
+            self.assertIn("1/2 (50.0%)", counts[1])
+            self.assertIn("2/2 (100.0%)", counts[2])
+            messages.clear()
+            workflow._synthesize_segment_wavs(**args)
+            self.assertTrue(any("2/2 (100.0%)" in message for message in messages))
+            self.assertEqual(workflow.engine_runtime.synthesize_segment.call_count, 2)
+
     def test_quality_control_persists_steps_and_blocks_mid_run_change(self):
         from PySide6.QtWidgets import QApplication, QWidget, QComboBox, QLabel
         app = QApplication.instance() or QApplication([])

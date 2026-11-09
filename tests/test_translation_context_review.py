@@ -307,6 +307,41 @@ class TestCleanDialogueContext(unittest.TestCase):
 
 
 class TestLearnDialogueContextWithUserGuidance(unittest.TestCase):
+    def test_short_dialogue_is_analyzed(self):
+        from app.translation.context_analyzer import learn_dialogue_context
+        polisher = MagicMock()
+        polisher.generate_text.return_value = "A addresses B formally."
+        result = learn_dialogue_context(
+            source_segments=[{"text": "Hello, sir."}, {"text": "Hello."}],
+            polisher=polisher,
+        )
+        polisher.generate_text.assert_called_once()
+        self.assertEqual(result, "A addresses B formally.")
+
+    def test_explicit_analysis_reports_provider_failure(self):
+        from app.translation.errors import TranslationProviderError
+        polisher = MagicMock()
+        polisher.generate_text.side_effect = TranslationProviderError("ChatGPT send button unavailable")
+        orch = TranslationOrchestrator()
+        with patch.object(orch, "_resolve_ai_provider", return_value=("browser_ai", polisher)):
+            with self.assertRaisesRegex(TranslationProviderError, "send button unavailable"):
+                orch.extract_dialogue_context(segments=[{"text": "Hello."}], override_provider="browser_ai")
+
+    def test_explicit_analysis_reports_empty_response(self):
+        from app.translation.errors import TranslationProviderError
+        polisher = MagicMock()
+        polisher.generate_text.return_value = "   "
+        orch = TranslationOrchestrator()
+        with patch.object(orch, "_resolve_ai_provider", return_value=("browser_ai", polisher)):
+            with self.assertRaisesRegex(TranslationProviderError, "empty character profiles"):
+                orch.extract_dialogue_context(segments=[{"text": "Hello."}])
+
+    def test_optional_analysis_still_allows_translation_after_failure(self):
+        from app.translation.context_analyzer import learn_dialogue_context
+        polisher = MagicMock()
+        polisher.generate_text.side_effect = RuntimeError("offline")
+        self.assertEqual(learn_dialogue_context(source_segments=[{"text": "Hello."}], polisher=polisher), "")
+
     def test_user_guidance_injected_into_prompt(self):
         from app.translation.context_analyzer import learn_dialogue_context
 

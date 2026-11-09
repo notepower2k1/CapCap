@@ -76,6 +76,17 @@ Saving these settings does not change an imported transcript or start a new tran
 
 ## AI Translation, Presets & Pronoun Control
 
+### Gemini / ChatGPT browser translation (Version 9.0.0)
+
+1. Open **Settings → Translation**, select **Direct Browser AI**, and choose Gemini or ChatGPT.
+2. Click **Quick Install Extension**. In Chrome/Edge extension management, enable Developer mode and load the folder copied by CapCap. The installed application includes this folder; source checkouts use `browser_extension/`.
+3. Keep the browser running, sign in to the chosen AI service, and check that the extension is connected. There is no need to keep the extension popup open or open an AI tab beforehand.
+4. Translate normally. A separate window is the default; the extension's display-mode setting can switch to an existing tab. Character analysis, re-analysis and translation reuse the same window/tab.
+5. With Temporary Chat enabled, Gemini must confirm temporary mode before any prompt is sent. If it cannot, CapCap reports an error. Work/school accounts may not offer this mode; turn off the option only if you accept saved chats. Closing a normal chat window does not delete its history.
+6. After updating extension files, reload the extension and refresh existing AI tabs. See [extension setup and troubleshooting](../browser_extension/README.md).
+
+OmniVoice voice generation shows completed/total cues and percentage in the progress dialog. Cached cues count as completed; runtime status messages do not replace the cue counter.
+
 CapCap includes an advanced AI dialogue analysis and pronoun consistency framework:
 
 1. **Translation Settings & Presets**:

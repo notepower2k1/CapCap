@@ -20,6 +20,8 @@ Khi ở CPU mode, app dùng bộ chạy CPU. Khi ở GPU mode, ưu tiên **CUDA*
 
 ## Runtime, cache và chẩn đoán
 
+Từ **Version 9.0.0**, popup tạo giọng hiển thị số câu hoàn thành/tổng số câu và phần trăm. Số câu giữ nguyên khi runtime đang tạo câu tiếp theo; câu lấy từ cache cũng được tính, kể cả khi toàn bộ tác vụ dùng cache. Đây là tiến độ tạo giọng, không phải tiến độ dịch văn bản.
+
 - Pin audio.cpp `v0.9.3`; model `audio-cpp/audio.cpp-gguf`, revision `874fcb41ececda20bcbc0782d6b4ea7f7d069ea8`, file `OmniVoice-GGUF/omnivoice-q8_0.gguf`. Tải model kiểm tra kích thước và SHA-256 trước khi thay file đang dùng.
 - Binaries: `bin/audio_cpp/cpu`, `bin/audio_cpp/cuda` hoặc `bin/audio_cpp/vulkan`. Model: `models/omnivoice/omnivoice-q8_0.gguf`. Giọng clone: `models/omnivoice/voices`.
 - CUDA dùng một bộ thư viện đầy đủ gồm `cudart64_12.dll`, `cublas64_12.dll`, `cublasLt64_12.dll`, `cufft64_11.dll`; không ghép DLL rời từ nhiều bộ khác nhau. Giữ nguyên Acceleration Pack, thêm đường dẫn DLL vào môi trường của riêng tiến trình audio.cpp. `ggml-cuda.dll` vẫn thuộc audio.cpp, không thay bằng thư viện của Whisper. Nếu trước đó đã cài gói CUDA riêng, DLL cạnh executable được Windows ưu tiên; tải lại runtime khi đã có Acceleration Pack sẽ chuyển sang dùng pack chung.

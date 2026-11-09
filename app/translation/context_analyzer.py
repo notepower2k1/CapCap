@@ -163,6 +163,7 @@ def learn_dialogue_context(
     max_cues: int = 300,
     user_guidance: str = "",
     existing_context: str = "",
+    raise_on_error: bool = False,
 ) -> str:
     """Extract durable character profiles and strict two-way address rules (address_rules).
 
@@ -173,7 +174,7 @@ def learn_dialogue_context(
     - If user_guidance is provided, injects explicit user corrections and instructions into the prompt.
     - If existing_context is provided, provides the previous draft to let AI revise based on feedback.
     """
-    if not source_segments or len(source_segments) < 3 or not hasattr(polisher, "generate_text"):
+    if not source_segments or not hasattr(polisher, "generate_text"):
         return ""
 
     if len(source_segments) <= max_cues:
@@ -271,8 +272,16 @@ Return only concise character profiles and address rules in {target_lang}, under
             max_tokens=600,
             timeout=45,
         )
-        return clean_dialogue_context(context)
+        cleaned = clean_dialogue_context(context)
+        if not cleaned and raise_on_error:
+            from .errors import TranslationProviderError
+            raise TranslationProviderError("AI returned empty character profiles and address rules.")
+        return cleaned
+    except InterruptedError:
+        raise
     except Exception as e:
+        if raise_on_error:
+            raise
         print(f"[AI Translation] Warning: Dialogue learning failed ({e}), continuing with standard translation.")
         return ""
 

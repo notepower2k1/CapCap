@@ -29,6 +29,7 @@
   - Automatically switches between widescreen Landscape (16:9) and vertical Portrait (9:16) layouts without relying on disk cache.
   - In 9:16 mode, the preview video gets a dedicated full-width right column while the Subtitle Inspector controls collapse horizontally beside a compact 204px layer toolbar.
 - **AI Translation & Dialogue Context Orchestration**:
+  - Version 9.0.0 adds a localhost HTTP bridge and Manifest V3 extension for Gemini/ChatGPT Web. DOM automation submits prompts and returns numbered subtitles or character analysis; sequential batches share a session. Separate-window mode is the default. Gemini temporary mode is verified before sending when requested.
   - Employs a multi-pass pipeline: Pass 1 analyzes the dialogue cues to build a Character Profile and strict Two-Way Address Rules (`learn_dialogue_context`), supporting interactive user feedback and draft re-analysis.
   - Employs `RollingContextLedger` across sequential subtitle batches to ensure pronoun continuity and maintain preceding dialogue context without batch-boundary drift.
   - Supports Google AI Studio (Gemini 2.5/1.5), OpenAI (GPT-4o), DeepSeek, Ollama (local offline models), and free web providers (Google Translate, Bing Translate) with automated HTTP 429 failover.

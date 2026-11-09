@@ -93,6 +93,7 @@ class TranslationPromptDialog(QDialog):
         self.provider_combo.addItem("Google AI Studio (Gemini)", "google_ai_studio")
         self.provider_combo.addItem("OpenAI", "openai")
         self.provider_combo.addItem("Ollama (Local)", "ollama")
+        self.provider_combo.addItem(t("Direct Browser AI (Gemini / ChatGPT Web)"), "browser_ai")
         self.provider_combo.addItem("Google Translate (free, no key)", "google")
         self.provider_combo.addItem("Bing Translator (free, no key)", "bing")
 
@@ -100,11 +101,11 @@ class TranslationPromptDialog(QDialog):
         current_env = (os.getenv("OPENAI_PROVIDER") or os.getenv("AI_POLISHER_PROVIDER") or "").strip().lower()
         if current_env == "gemini":
             current_env = "google_ai_studio"
-        if current_env not in ("google_ai_studio", "openai", "ollama", "google", "bing"):
+        if current_env not in ("google_ai_studio", "openai", "ollama", "browser_ai", "google", "bing"):
             current_env = str(self.settings.value("translation_provider", "")).strip().lower()
             if current_env == "gemini":
                 current_env = "google_ai_studio"
-        if current_env not in ("google_ai_studio", "openai", "ollama", "google", "bing"):
+        if current_env not in ("google_ai_studio", "openai", "ollama", "browser_ai", "google", "bing"):
             current_env = "google_ai_studio"
 
         self.selected_provider = current_env
@@ -236,6 +237,17 @@ class TranslationPromptDialog(QDialog):
             self.resize(self.width(), 240)
         elif provider == "ollama":
             self.provider_hint.setText(t("⚠️ Ollama runs directly on your computer hardware (GPU/CPU/RAM). Translation speed depends on your specs; if it exceeds timeout, it will automatically fall back to Google Translate."))
+            self.prompt_edit.setEnabled(True)
+            self.preset_combo.setEnabled(True)
+            self.auto_context_cb.setEnabled(True)
+            self.review_context_cb.setEnabled(self.auto_context_cb.isChecked())
+            self.resize(self.width(), 620)
+        elif provider == "browser_ai":
+            plat = os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini").strip().lower()
+            plat_name = "ChatGPT Web" if plat == "chatgpt" else "Google Gemini Web"
+            temp_on = str(os.getenv("CAPCAP_BROWSER_AI_TEMP_CHAT", "1")).strip().lower() not in ("0", "false", "no")
+            temp_label = t("Temporary Chat: ON") if temp_on else t("Temporary Chat: OFF")
+            self.provider_hint.setText(t("🌐 Using {platform} via Browser Extension ({mode}). Make sure Chrome/Edge is open with the CapCap Extension enabled.", platform=plat_name, mode=temp_label))
             self.prompt_edit.setEnabled(True)
             self.preset_combo.setEnabled(True)
             self.auto_context_cb.setEnabled(True)
@@ -681,6 +693,9 @@ class SubtitleController:
                 "google-web": "Google Translate",
                 "bing": "Bing Translator",
                 "bing-web": "Bing Translator",
+                "browser_ai": "ChatGPT Web" if os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini").strip().lower() == "chatgpt" else "Gemini Web",
+                "gemini_web": "Gemini Web",
+                "chatgpt_web": "ChatGPT Web",
             }
             provider = provider_map.get(provider_name, provider_name)
         else:
@@ -1079,7 +1094,10 @@ class SubtitleController:
         self.gui.log(f"[Translation] Prompt: {prompt_label} | Provider: '{chosen_provider or 'default'}' | Speaker Diarization: {diarize_label}")
 
         model_path = None
-        enable_polish = False if chosen_provider == "google" else bool(self.gui.is_ai_polish_enabled())
+        enable_polish = False if chosen_provider in ("google", "bing") else (
+            True if chosen_provider in ("browser_ai", "gemini_web", "chatgpt_web", "google_ai_studio", "openai", "ollama")
+            else bool(self.gui.is_ai_polish_enabled())
+        )
         is_retranslation = bool(
             self.gui.current_translated_segments or self.gui.translated_text.toPlainText().strip()
         )
@@ -1226,6 +1244,9 @@ class SubtitleController:
             "google-web": "Google Translate",
             "bing": "Bing Translator",
             "bing-web": "Bing Translator",
+            "browser_ai": "ChatGPT Web" if os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini").strip().lower() == "chatgpt" else "Gemini Web",
+            "gemini_web": "Gemini Web",
+            "chatgpt_web": "ChatGPT Web",
         }
         display_provider = provider_map.get(provider, provider)
         dialog = getattr(self.gui, "_translation_progress_dialog", None)

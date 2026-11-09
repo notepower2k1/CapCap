@@ -4,12 +4,18 @@ __all__ = [
     "OpenAICompatiblePolisherProvider",
     "GoogleWebTranslatorProvider",
     "BingWebTranslatorProvider",
+    "BrowserBridgePolisherProvider",
+    "BrowserBridgeServer",
+    "RemoteBridgeClient",
 ]
 
 _MODULE_MAP = {
     "OpenAICompatiblePolisherProvider": ".gemini_polisher",
     "GoogleWebTranslatorProvider": ".google_web_translator",
     "BingWebTranslatorProvider": ".bing_web_translator",
+    "BrowserBridgePolisherProvider": ".browser_bridge_provider",
+    "BrowserBridgeServer": ".browser_bridge_provider",
+    "RemoteBridgeClient": ".browser_bridge_provider",
 }
 
 

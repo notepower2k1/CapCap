@@ -6457,7 +6457,7 @@ class VideoTranslatorGUI(QMainWindow):
         # bypasses the AI branch.  Keeping the legacy checkbox fallback makes
         # older embedded UI layouts harmless.
         provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
-        if provider in {"gemini", "google_ai_studio", "openai", "ollama"}:
+        if provider in {"gemini", "google_ai_studio", "openai", "ollama", "browser_ai", "gemini_web", "chatgpt_web"}:
             return True
         legacy_checkbox = getattr(self, "translator_ai_cb", None)
         return bool(legacy_checkbox and legacy_checkbox.isChecked())
@@ -6809,6 +6809,12 @@ class VideoTranslatorGUI(QMainWindow):
                 or (self.settings.value("translation_provider", "") if hasattr(self, "settings") else "")
                 or "google"
             ).strip().lower()
+
+        if provider in ("browser_ai", "gemini_web", "chatgpt_web"):
+            platform = str(os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini")).strip().lower()
+            if provider == "chatgpt_web" or "chatgpt" in platform:
+                return "ChatGPT Web"
+            return "Gemini Web"
 
         names = {
             "google-web": "Google Translate",
@@ -16640,19 +16646,33 @@ class VideoTranslatorGUI(QMainWindow):
         # =========================================================================
         trans2_scroll, trans2_content, trans2_layout = _make_tab_scroll_widget()
 
+        try:
+            from translation.providers.browser_bridge_provider import (
+                ensure_bridge_server_running,
+                get_bridge_status,
+                request_open_web_tab,
+            )
+            ensure_bridge_server_running()
+        except Exception:
+            get_bridge_status = lambda: {"ok": False, "extension_connected": False}
+            request_open_web_tab = lambda platform="gemini", temporary_chat=True: {"ok": False}
+
         provider_layout = QHBoxLayout()
         provider_label = QLabel(t("Translator Provider:"), trans2_content)
         provider_layout.addWidget(provider_label)
         provider_combo = QComboBox(trans2_content)
         provider_combo.addItem("Google Translate (free, no key)", "google")
         provider_combo.addItem("Bing Translator (free, no key)", "bing")
+        provider_combo.addItem(t("Direct Browser AI (Gemini / ChatGPT Web)"), "browser_ai")
         provider_combo.addItem("Google AI Studio", "google_ai_studio")
         provider_combo.addItem("OpenAI", "openai")
         provider_combo.addItem("Ollama (Local)", "ollama")
         current_provider = (os.getenv("OPENAI_PROVIDER") or os.getenv("AI_POLISHER_PROVIDER") or self.settings.value("translation_provider", "google")).strip().lower()
         if current_provider == "gemini":
             current_provider = "google_ai_studio"
-        if current_provider not in {"google", "bing", "google_ai_studio", "openai", "ollama"}:
+        elif current_provider in ("gemini_web", "chatgpt_web"):
+            current_provider = "browser_ai"
+        if current_provider not in {"google", "bing", "google_ai_studio", "openai", "ollama", "browser_ai"}:
             current_provider = "google"
         idx = provider_combo.findData(current_provider)
         if idx >= 0:
@@ -16708,6 +16728,101 @@ class VideoTranslatorGUI(QMainWindow):
         base_url_layout.addWidget(base_url_label)
         base_url_layout.addWidget(base_url_edit)
         trans2_layout.addLayout(base_url_layout)
+
+        browser_ai_widget = QWidget(trans2_content)
+        browser_ai_layout = QVBoxLayout(browser_ai_widget)
+        browser_ai_layout.setContentsMargins(0, 0, 0, 0)
+        browser_ai_layout.setSpacing(8)
+
+        browser_platform_layout = QHBoxLayout()
+        browser_platform_label = QLabel(t("Web AI Platform:"), browser_ai_widget)
+        browser_platform_combo = QComboBox(browser_ai_widget)
+        browser_platform_combo.addItem("Google Gemini Web (gemini.google.com)", "gemini")
+        browser_platform_combo.addItem("ChatGPT Web (chatgpt.com)", "chatgpt")
+        initial_browser_plat = str(os.getenv("CAPCAP_BROWSER_AI_PLATFORM") or self.settings.value("browser_ai_platform", "gemini") or "gemini").strip().lower()
+        idx_bp = browser_platform_combo.findData(initial_browser_plat)
+        if idx_bp >= 0:
+            browser_platform_combo.setCurrentIndex(idx_bp)
+        browser_platform_layout.addWidget(browser_platform_label)
+        browser_platform_layout.addWidget(browser_platform_combo, 1)
+        browser_ai_layout.addLayout(browser_platform_layout)
+
+        browser_temp_chat_cb = QCheckBox(t("Temporary chat / Do not save chat history (prevents chat clutter)"), browser_ai_widget)
+        initial_temp_chat = str(os.getenv("CAPCAP_BROWSER_AI_TEMP_CHAT", self.settings.value("browser_ai_temp_chat", "1"))).strip().lower() not in ("0", "false", "no")
+        browser_temp_chat_cb.setChecked(initial_temp_chat)
+        browser_temp_chat_cb.setToolTip(t("Uses Temporary Chat on ChatGPT and verifies Temporary Chat is enabled on Gemini before sending. If unavailable, translation stops with an error."))
+        browser_ai_layout.addWidget(browser_temp_chat_cb)
+
+        ext_status_label = QLabel(browser_ai_widget)
+        ext_status_label.setWordWrap(True)
+        browser_ai_layout.addWidget(ext_status_label)
+
+        def refresh_extension_status():
+            st = get_bridge_status()
+            if st.get("extension_connected"):
+                port = st.get("port", 18765)
+                ext_status_label.setText(t("🟢 Browser Extension Connected (Port {port}) — Synchronized with CapCap", port=port))
+                ext_status_label.setStyleSheet("color: #34d399; font-weight: 500;")
+            else:
+                ext_status_label.setText(t("⚪ Browser Extension Not Connected — Click 'Quick Install Extension' below"))
+                ext_status_label.setStyleSheet("color: #fbbf24; font-weight: 500;")
+
+        def _on_browser_settings_changed():
+            plat = browser_platform_combo.currentData() or "gemini"
+            temp_chat = browser_temp_chat_cb.isChecked()
+            os.environ["CAPCAP_BROWSER_AI_PLATFORM"] = plat
+            os.environ["CAPCAP_BROWSER_AI_TEMP_CHAT"] = "1" if temp_chat else "0"
+
+        browser_platform_combo.currentIndexChanged.connect(_on_browser_settings_changed)
+        browser_temp_chat_cb.toggled.connect(_on_browser_settings_changed)
+
+        def _install_extension():
+            from app.utils.browser_extension_utils import get_browser_extension_dir
+            try:
+                ext_dir = get_browser_extension_dir()
+            except FileNotFoundError as exc:
+                QMessageBox.warning(dialog, t("Quick Install Extension"), str(exc))
+                return
+            QApplication.clipboard().setText(ext_dir)
+            try:
+                os.startfile(ext_dir)
+            except Exception:
+                pass
+            QMessageBox.information(
+                dialog,
+                t("Quick Install Browser Extension (1-Time Setup)"),
+                t(
+                    "1. Open Chrome or Edge and navigate to chrome://extensions (or edge://extensions).\n"
+                    "2. Turn ON Developer mode in the top right.\n"
+                    "3. Click 'Load unpacked' and paste (Ctrl+V) the folder path already copied to your clipboard (or drag and drop the opened 'browser_extension' folder into the browser)."
+                ),
+            )
+
+        def _open_web_tab():
+            plat = browser_platform_combo.currentData() or "gemini"
+            temp_chat = browser_temp_chat_cb.isChecked()
+            os.environ["CAPCAP_BROWSER_AI_PLATFORM"] = plat
+            os.environ["CAPCAP_BROWSER_AI_TEMP_CHAT"] = "1" if temp_chat else "0"
+            request_open_web_tab(platform=plat, temporary_chat=temp_chat)
+
+        ext_btn_row = QHBoxLayout()
+        install_ext_btn = QPushButton(t("Quick Install Extension"), browser_ai_widget)
+        install_ext_btn.clicked.connect(_install_extension)
+        open_web_btn = QPushButton(t("Open Web AI Tab"), browser_ai_widget)
+        open_web_btn.clicked.connect(_open_web_tab)
+        ext_btn_row.addWidget(install_ext_btn)
+        ext_btn_row.addWidget(open_web_btn)
+        browser_ai_layout.addLayout(ext_btn_row)
+
+        ext_status_timer = QTimer(dialog)
+        def _poll_ext_status():
+            if provider_combo.currentData() == "browser_ai":
+                refresh_extension_status()
+        ext_status_timer.timeout.connect(_poll_ext_status)
+        ext_status_timer.start(1500)
+        dialog.finished.connect(ext_status_timer.stop)
+
+        trans2_layout.addWidget(browser_ai_widget)
 
         # Translation Prompt Preset Selector
         preset_layout = QVBoxLayout()
@@ -16819,20 +16934,22 @@ class VideoTranslatorGUI(QMainWindow):
         def update_provider_fields():
             p = provider_combo.currentData()
             model_edit.setPlaceholderText("")
+            is_browser_ai = p == "browser_ai"
             is_ai = p not in ("google", "bing")
             is_google_ai_studio = p == "google_ai_studio"
             is_openai = p == "openai"
             _toggle_visible(key_section_widget, is_google_ai_studio or is_openai)
-            _toggle_visible(base_url_label, is_ai)
-            _toggle_visible(base_url_edit, is_ai)
+            _toggle_visible(base_url_label, is_ai and not is_browser_ai)
+            _toggle_visible(base_url_edit, is_ai and not is_browser_ai)
             _toggle_visible(preset_label, is_ai)
             _toggle_visible(translation_preset_combo, is_ai)
             _toggle_visible(preset_desc_label, is_ai)
             _toggle_visible(auto_context_cb, is_ai)
-            _toggle_visible(test_btn, is_ai)
-            _toggle_visible(test_status, is_ai)
-            _toggle_visible(model_label, is_ai)
-            _toggle_visible(model_edit, is_ai)
+            _toggle_visible(test_btn, is_ai and not is_browser_ai)
+            _toggle_visible(test_status, is_ai and not is_browser_ai)
+            _toggle_visible(model_label, is_ai and not is_browser_ai)
+            _toggle_visible(model_edit, is_ai and not is_browser_ai)
+            _toggle_visible(browser_ai_widget, is_browser_ai)
             if p == "google":
                 provider_hint.setText(t("Free Google web translate, no API key needed. Lower quality than AI translation."))
                 key_edit.clear()
@@ -16843,6 +16960,9 @@ class VideoTranslatorGUI(QMainWindow):
                 key_edit.clear()
                 model_edit.clear()
                 base_url_edit.clear()
+            elif is_browser_ai:
+                provider_hint.setText(t("Translates directly using your logged-in Google Gemini or ChatGPT browser tab via the CapCap Extension. Free, no API key needed."))
+                refresh_extension_status()
             elif is_google_ai_studio:
                 model_label.setText(t("AI Model:"))
                 key, model, base_url = _provider_values(p)
@@ -17300,6 +17420,12 @@ class VideoTranslatorGUI(QMainWindow):
             }
         else:
             new_preset = str(translation_preset_combo.currentData() or "general_default").strip()
+            new_browser_platform = str(browser_platform_combo.currentData() or "gemini").strip().lower()
+            new_browser_temp_chat = "1" if browser_temp_chat_cb.isChecked() else "0"
+            self.settings.setValue("browser_ai_platform", new_browser_platform)
+            self.settings.setValue("browser_ai_temp_chat", new_browser_temp_chat)
+            os.environ["CAPCAP_BROWSER_AI_PLATFORM"] = new_browser_platform
+            os.environ["CAPCAP_BROWSER_AI_TEMP_CHAT"] = new_browser_temp_chat
             self.settings.setValue("translation_provider", new_provider)
             self.settings.setValue("translation_preset_id", new_preset)
             os.environ["OPENAI_PROVIDER"] = new_provider
@@ -17308,6 +17434,14 @@ class VideoTranslatorGUI(QMainWindow):
                 updates = {
                     "AI_POLISHER_PROVIDER": new_provider,
                     "OPENAI_PROVIDER": new_provider,
+                    "CAPCAP_TRANSLATION_PRESET_ID": new_preset,
+                }
+            elif new_provider == "browser_ai":
+                updates = {
+                    "AI_POLISHER_PROVIDER": "browser_ai",
+                    "OPENAI_PROVIDER": "browser_ai",
+                    "CAPCAP_BROWSER_AI_PLATFORM": new_browser_platform,
+                    "CAPCAP_BROWSER_AI_TEMP_CHAT": new_browser_temp_chat,
                     "CAPCAP_TRANSLATION_PRESET_ID": new_preset,
                 }
             elif new_provider == "google_ai_studio":
@@ -18018,6 +18152,7 @@ class VideoTranslatorGUI(QMainWindow):
         dlg = getattr(pipe_ctrl, "progress_dialog", None) if pipe_ctrl else None
 
         m = re.search(r"\((\d+(?:\.\d+)?)%\)", raw_msg)
+        cue_progress = re.search(r"^Synthesizing with .*?: (\d+)/(\d+)\s+\(", raw_msg)
         pct = None
         if m:
             try:
@@ -18033,8 +18168,14 @@ class VideoTranslatorGUI(QMainWindow):
 
                 if dlg and dlg.isVisible():
                     if "voiceover" in dlg.steps:
-                        dlg.steps["voiceover"].status_label.setText(f"{int(pct)}%")
-                        dlg.steps["voiceover"].status_label.setStyleSheet("color: #00E5FF; font-weight: bold;")
+                        status_label = dlg.steps["voiceover"].status_label
+                        if cue_progress:
+                            status_label.setMinimumWidth(170)
+                            status_label.setMaximumWidth(16777215)
+                            status_label.setText(t("{done}/{total} cues ({percent}%)", done=cue_progress.group(1), total=cue_progress.group(2), percent=int(pct)))
+                        else:
+                            status_label.setText(f"{int(pct)}%")
+                        status_label.setStyleSheet("color: #00E5FF; font-weight: bold;")
                     if getattr(dlg, "step_order", None) and "voiceover" in dlg.step_order:
                         total_stages = max(1, len(dlg.step_order))
                         stage_slice = 100.0 / total_stages

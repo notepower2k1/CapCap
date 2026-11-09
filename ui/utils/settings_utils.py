@@ -159,6 +159,8 @@ def save_user_settings(gui):
         s.setValue("translation_batch_size", int(env_batch))
     s.setValue("translation_preset_id", os.getenv("CAPCAP_TRANSLATION_PRESET_ID", "general_default"))
     s.setValue("auto_translation_context", os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1"))
+    s.setValue("browser_ai_platform", os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini"))
+    s.setValue("browser_ai_temp_chat", os.getenv("CAPCAP_BROWSER_AI_TEMP_CHAT", "1"))
 
 
 def load_user_settings(gui):
@@ -221,6 +223,8 @@ def load_user_settings(gui):
         ("CAPCAP_TRANSLATION_PRESET_ID", "translation_preset_id", "general_default"),
         ("CAPCAP_AI_TRANSLATION_MAX_SEGMENTS", "translation_batch_size", "80"),
         ("CAPCAP_AUTO_TRANSLATION_CONTEXT", "auto_translation_context", "1"),
+        ("CAPCAP_BROWSER_AI_PLATFORM", "browser_ai_platform", "gemini"),
+        ("CAPCAP_BROWSER_AI_TEMP_CHAT", "browser_ai_temp_chat", "1"),
     ):
         v = str(os.getenv(env_k) or s.value(s_k, def_v) or def_v).strip()
         os.environ[env_k] = v
@@ -230,6 +234,11 @@ def load_user_settings(gui):
         active_provider = "google_ai_studio"
     os.environ["OPENAI_PROVIDER"] = active_provider
     s.setValue("translation_provider", active_provider)
+    try:
+        from translation.providers.browser_bridge_provider import ensure_bridge_server_running
+        ensure_bridge_server_running()
+    except Exception:
+        pass
 
     saved_default_engine = str(s.value("default_transcription_engine", "") or "").strip().lower()
     if saved_default_engine in {"whisper", "sensevoice", "ocr", "capcut"}:

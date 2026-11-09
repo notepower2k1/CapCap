@@ -1,5 +1,7 @@
 # Project Structure
 
+Version 9.0.0 also includes `browser_extension/` (Manifest V3 worker, content script, popup, app-logo icons and DOM/session tests), `app/translation/providers/browser_bridge_provider.py` (localhost bridge and browser AI provider), and `app/utils/browser_extension_utils.py` (runtime file collection and frozen/source install paths). The canonical `CapCap.spec` packages only extension runtime files, excluding Node dependencies and tests.
+
 ```text
 CapCap/
 ├── ui/

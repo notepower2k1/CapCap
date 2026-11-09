@@ -1535,6 +1535,11 @@ class VoiceWorkflow:
         if _is_stopped():
             return wavs
 
+        if on_progress:
+            total_segments = len(segments)
+            pct = (cache_hits / max(1, total_segments)) * 100.0
+            on_progress(f"Synthesizing with TTS: {cache_hits}/{total_segments} ({pct:.1f}%)...")
+
         if not pending_jobs:
             if log:
                 print(f"[Voice Workflow] TTS synth jobs: pending=0, cache_hits={cache_hits}, workers=0, native_speed={provider_speed:.2f}")

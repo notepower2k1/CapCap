@@ -2,6 +2,8 @@
 
 ## System requirements
 
+Version **9.0.0** includes the browser extension runtime files in the installer. Browser AI translation needs Chrome/Edge running with the unpacked extension enabled and an authenticated Gemini/ChatGPT session; no API key is required for this provider. Node.js is needed only to run extension development tests, not to use the extension. See [setup](../browser_extension/README.md).
+
 - Windows 10 / Windows 11 (64-bit)
 - Python 3.11 when running from source
 - FFmpeg and libmpv are included in the application resources
@@ -47,7 +49,8 @@ Copy `.env_example` to `.env` only for manual setup. The active variables are:
 
 | Group | Variables |
 | --- | --- |
-| AI translation providers | `OPENAI_PROVIDER` (`google_ai_studio`, `openai`, `deepseek`, `ollama`, `google`, `bing`), `AI_POLISHER_PROVIDER` |
+| AI translation providers | `OPENAI_PROVIDER` (`google_ai_studio`, `openai`, `ollama`, `browser_ai`, `google`, `bing`), `AI_POLISHER_PROVIDER` |
+| Browser AI bridge | `CAPCAP_BROWSER_AI_PLATFORM` (`gemini` / `chatgpt`), `CAPCAP_BROWSER_AI_TEMP_CHAT` (`1` / `0`), `CAPCAP_BROWSER_BRIDGE_PORT` (default `18765`) |
 | Google AI Studio | `GOOGLE_AI_STUDIO_API_KEY`, `GOOGLE_AI_STUDIO_MODEL`, `GOOGLE_AI_STUDIO_BASE_URL` |
 | OpenAI / DeepSeek | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` |
 | Ollama (Offline Local) | `OLLAMA_BASE_URL` (default: `http://localhost:11434/v1`), `OLLAMA_MODEL` |
