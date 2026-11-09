@@ -2,8 +2,6 @@
 
 [English](README_en.md) | [Tiếng Việt](README.md)
 
-**Version 9.0.0** — Gemini/ChatGPT Web translation through the [CapCap extension](browser_extension/README.md), OmniVoice, and Quality/Performance workspaces. See the [release notes](release.md).
-
 | 🖥️ Landscape Layout (16:9) | 📱 Portrait Layout (9:16) |
 | :---: | :---: |
 | ![CapCap Landscape 16:9](assets/preview_1.png) | ![CapCap Portrait 9:16](assets/preview_2.png) |

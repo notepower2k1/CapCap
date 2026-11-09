@@ -2,8 +2,6 @@
 
 [English](README_en.md) | [Tiếng Việt](README.md)
 
-**Version 9.0.0** — Dịch qua Gemini/ChatGPT Web bằng [extension CapCap](browser_extension/README.md), OmniVoice và chế độ Quality/Performance. Xem [release note](release.md).
-
 | 🖥️ Giao diện Video Ngang (16:9) | 📱 Giao diện Video Dọc (9:16) |
 | :---: | :---: |
 | ![Giao diện CapCap 16:9](assets/preview_1.png) | ![Giao diện CapCap 9:16](assets/preview_2.png) |
