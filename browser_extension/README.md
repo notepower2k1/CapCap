@@ -4,7 +4,13 @@
 
 Nếu một batch dịch lỗi, CapCap giữ các batch AI đã hoàn thành hợp lệ và chỉ dùng Google Translate cho những câu chưa có kết quả. Nội dung không đủ/sai số câu của batch lỗi không được ghép vào bản dịch. Hủy tác vụ không tự chuyển provider.
 
-Trong bản cài, dùng **Cài đặt → Dịch thuật → Quick Install Extension** để lấy đúng thư mục được đóng gói (có thể nằm trong `_internal/browser_extension`). Đường dẫn `browser_extension/` bên dưới là thư mục tương đối khi chạy từ source. Sau khi cập nhật, Reload extension rồi tải lại các tab AI đã mở.
+Để dịch song song: trong **Cài đặt → Dịch thuật → Browser AI → Số batch chạy đồng thời**, chọn **2, 3 hoặc 4 — Song song, cuộc trò chuyện riêng**. CapCap xử lý tối đa bốn batch cùng lúc theo lựa chọn, mỗi batch dùng tab/cửa sổ riêng và tự đóng khi xong. Kết quả được ghép theo thứ tự phụ đề gốc; tiến độ đếm tổng số câu đã hoàn thành dù batch trả lời lệch thứ tự. Mặc định vẫn là **1 — Tuần tự**. Cần cập nhật cả ứng dụng và reload extension để dùng các mức mới.
+
+Các batch song song nhận cùng hướng dẫn ngữ cảnh/nhân vật đã phân tích; không truyền nối tiếp lịch sử của batch trước như chế độ tuần tự. Chạy hai batch có thể giảm thời gian chờ, nhưng tốc độ còn tùy dịch vụ và giới hạn tài khoản AI. Nếu bị giới hạn yêu cầu, chuyển về một batch.
+
+Thử trực tiếp ngày 10/11: GPT và Gemini đều hoàn tất mức 4 batch × 40 câu bằng bản thử nghiệm, chưa gặp giới hạn yêu cầu trong lượt đo. Gemini cần các cửa sổ hiện rõ: popup bị che có thể giữ trạng thái animation/đang trả lời dù dữ liệu đã có. Không thu nhỏ hoặc che kín cửa sổ dịch khi thử song song. Xem [báo cáo và giới hạn của phép thử](../docs/browser-parallel-live-test-2026-11-10.md). Sau lượt thử, đã mở lựa chọn 1–4 trong ứng dụng và nâng giới hạn extension lên 4; chưa tự bố trí cửa sổ, mặc định vẫn chạy tuần tự.
+
+Trong bản cài, dùng **Cài đặt → Dịch thuật → Quick Install Extension** để lấy đúng thư mục được đóng gói (có thể nằm trong `_internal/browser_extension`). Đường dẫn `browser_extension/` bên dưới là thư mục tương đối khi chạy từ source. **Sau khi cập nhật CapCap, vào `chrome://extensions` hoặc `edge://extensions`, bấm Reload tiện ích CapCap rồi tải lại các tab AI đã mở.** Nếu đã copy extension sang thư mục khác, cập nhật các file trong bản sao đó trước khi Reload. Nếu đường dẫn thư mục extension thay đổi, dùng Load unpacked từ thư mục mới; Reload thư mục chứa bản cũ sẽ vẫn chạy code cũ.
 
 Tiện ích mở rộng trình duyệt (Chrome & Edge) kết nối trực tiếp phần mềm **CapCap Video Translator** với giao diện web của **Google Gemini** và **ChatGPT**. Dịch phụ đề video hoàn toàn tự động, chất lượng cao, giữ ngữ cảnh và không lưu lại lịch sử chat rác.
 
@@ -55,7 +61,7 @@ Browser extension for Google Chrome & Microsoft Edge connecting **CapCap Video T
    - **Gemini**: Bật và xác nhận chế độ Temporary Chat trước khi gửi prompt, giữ chung phiên cho phân tích và dịch. Nếu không xác nhận được, báo lỗi và không gửi prompt vào chat thường. Việc đóng cửa sổ/tạo chat mới chỉ là dọn giao diện, không phải xóa lịch sử. Xem [hướng dẫn Google](https://support.google.com/gemini/answer/13275745?co=GENIE.Platform%3DDesktop&hl=en).
 
 2. **🧠 Giữ ngữ cảnh thông minh (Session Context Preservation)**:
-   - Các batch phụ đề thuộc cùng một video/phiên dịch được tự động đưa vào **cùng một tab và cuộc trò chuyện**.
+   - Ở chế độ tuần tự mặc định, các batch phụ đề thuộc cùng một video/phiên dịch được tự động đưa vào **cùng một tab và cuộc trò chuyện**. Khi chọn 2–4 batch đồng thời, mỗi batch dùng một phiên chat riêng.
    - AI ghi nhớ ngữ cảnh các câu trước, đảm bảo đại từ xưng hô, thuật ngữ đồng nhất xuyên suốt video.
 
 3. **🪟 Chạy trong cửa sổ riêng (Mặc định)**:

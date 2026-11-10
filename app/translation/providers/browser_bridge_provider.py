@@ -612,7 +612,12 @@ class BrowserBridgePolisherProvider:
         self.temporary_chat = temporary_chat
         self.display_name = "ChatGPT Web" if self.platform == "chatgpt" else "Gemini Web"
         self.model_name = f"{self.display_name} ({'Temp Chat' if self.temporary_chat else 'Standard'})"
-        self._session_id = f"sess-{int(time.time() * 1000)}-{os.getpid()}"
+        self._session_id = f"sess-{uuid.uuid4().hex}"
+        self.parallel_batches = False
+        self._pending_lock = threading.RLock()
+        self._pending_task_ids = set()
+        self._parallel_completed_cues = 0
+        self._parallel_stopping = False
         self._bridge_server = bridge_server
 
     def _get_server(self) -> BrowserBridgeServer | RemoteBridgeClient:
@@ -625,6 +630,7 @@ class BrowserBridgePolisherProvider:
         return True
 
     def finish_session(self):
+        self.cancel_pending()
         server = self._get_server()
         if self.temporary_chat:
             server.enqueue_fire_and_forget_task({
@@ -638,6 +644,19 @@ class BrowserBridgePolisherProvider:
             operation="completed",
             status_message="Hoàn tất phiên dịch.",
         )
+
+    def cancel_pending(self):
+        with self._pending_lock:
+            self._parallel_stopping = True
+            for task_id in list(self._pending_task_ids):
+                self._get_server().cancel_task(task_id)
+
+    def begin_batch_requests(self):
+        with self._pending_lock:
+            self._parallel_stopping = False
+            self._parallel_completed_cues = 0
+            if self.parallel_batches:
+                self._get_server().update_sync_state(completed_cues=0, progress_percent=0)
 
     def _execute_prompt_on_browser(
         self,
@@ -661,6 +680,8 @@ class BrowserBridgePolisherProvider:
         # Check if extension is connected; wait up to CONNECT_WAIT_SECONDS
         wait_start = time.monotonic()
         while not server.extension_connected:
+            if self.parallel_batches and self._parallel_stopping:
+                raise TranslationProviderError("Parallel browser translation was stopped.")
             if is_canceled and is_canceled():
                 raise InterruptedError("Translation canceled by user.")
             if time.monotonic() - wait_start >= self.CONNECT_WAIT_SECONDS:
@@ -669,28 +690,36 @@ class BrowserBridgePolisherProvider:
                 )
             time.sleep(0.2)
 
-        task_id, event = server.enqueue_task(
-            task_type="translate",
-            payload={
-                "platform": self.platform,
-                "temporary_chat": self.temporary_chat,
-                "session_id": self._session_id,
-                "prompt": prompt,
-                "operation": operation,
-            },
-            timeout=timeout,
-        )
-
-        task_wait_start = time.monotonic()
-        while not event.wait(timeout=0.2):
-            if is_canceled and is_canceled():
-                server.cancel_task(task_id)
-                raise InterruptedError("Translation canceled by user.")
-            if time.monotonic() - task_wait_start >= timeout:
-                server.cancel_task(task_id)
-                raise BrowserAITimeoutError(
-                    f"{self.display_name} timed out after {timeout}s waiting for browser response."
-                )
+        with self._pending_lock:
+            if self.parallel_batches and operation == "batch" and self._parallel_stopping:
+                raise TranslationProviderError("Parallel browser translation was stopped.")
+            task_id, event = server.enqueue_task(
+                task_type="translate",
+                payload={
+                    "platform": self.platform,
+                    "temporary_chat": self.temporary_chat,
+                    "session_id": f"batch-{uuid.uuid4().hex}" if self.parallel_batches and operation == "batch" else self._session_id,
+                    "isolated": self.parallel_batches and operation == "batch",
+                    "prompt": prompt,
+                    "operation": operation,
+                },
+                timeout=timeout,
+            )
+            self._pending_task_ids.add(task_id)
+        try:
+            task_wait_start = time.monotonic()
+            while not event.wait(timeout=0.2):
+                if is_canceled and is_canceled():
+                    server.cancel_task(task_id)
+                    raise InterruptedError("Translation canceled by user.")
+                if time.monotonic() - task_wait_start >= timeout:
+                    server.cancel_task(task_id)
+                    raise BrowserAITimeoutError(
+                        f"{self.display_name} timed out after {timeout}s waiting for browser response."
+                    )
+        finally:
+            with self._pending_lock:
+                self._pending_task_ids.discard(task_id)
 
         result = server.get_task_result(task_id)
         if not result:
@@ -777,7 +806,7 @@ class BrowserBridgePolisherProvider:
         total_cues_val = total_cues if total_cues > 0 else (start_offset + len(source_texts))
         progress_pct = int(((batch_number - 1) / max(1, total_batches)) * 100)
 
-        server.update_sync_state(
+        initial_state = dict(
             selected_provider="browser_ai",
             platform=self.platform,
             platform_label=self.display_name,
@@ -791,6 +820,13 @@ class BrowserBridgePolisherProvider:
             progress_percent=progress_pct,
             status_message=f"Đang dịch batch {batch_number}/{total_batches} ({len(source_texts)} câu) bằng {self.display_name}...",
         )
+        if self.parallel_batches:
+            initial_state.pop("completed_cues")
+            initial_state.pop("progress_percent")
+        with self._pending_lock:
+            if self.parallel_batches and self._parallel_stopping:
+                raise TranslationProviderError("Parallel browser translation was stopped.")
+            server.update_sync_state(**initial_state)
 
         system_msg, user_msg = self._build_messages(
             source_texts=source_texts,
@@ -841,11 +877,17 @@ class BrowserBridgePolisherProvider:
 
                 completed_cues_val = start_offset + expected
                 done_percent = int((batch_number / max(1, total_batches)) * 100)
-                server.update_sync_state(
-                    completed_cues=completed_cues_val,
-                    progress_percent=done_percent,
-                    status_message=f"Hoàn thành batch {batch_number}/{total_batches}.",
-                )
+                with self._pending_lock:
+                    if self.parallel_batches and self._parallel_stopping:
+                        raise TranslationProviderError("Parallel browser translation was stopped.")
+                    if self.parallel_batches:
+                        self._parallel_completed_cues += expected
+                        completed_cues_val = self._parallel_completed_cues
+                        done_percent = int(completed_cues_val / max(1, total_cues_val) * 100)
+                    server.update_sync_state(
+                        completed_cues=completed_cues_val, progress_percent=done_percent,
+                        status_message=f"Hoàn thành batch {batch_number}/{total_batches}.",
+                    )
                 return lines, [], self.provider_id
             except TranslationValidationError:
                 raise
@@ -856,6 +898,8 @@ class BrowserBridgePolisherProvider:
                 server.update_sync_state(is_translating=False, operation="error", status_message=f"Lỗi: {exc}")
                 raise TranslationProviderError(f"{self.display_name} failed: {exc}") from exc
             except Exception as exc:
+                if self.parallel_batches and self._parallel_stopping:
+                    raise TranslationProviderError("Parallel browser translation was stopped.") from exc
                 if is_canceled and is_canceled():
                     server.update_sync_state(is_translating=False, operation="idle", status_message="Đã hủy.")
                     raise InterruptedError("Translation canceled by user.")

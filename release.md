@@ -1,6 +1,8 @@
 # RELEASE NOTES — V9.0.0
 
-**Ngày cập nhật: 09/11/2026**
+**Ngày cập nhật: 10/11/2026**
+
+**Lưu ý sau cập nhật khi dùng GPT/Gemini Web:** Vào `chrome://extensions` hoặc `edge://extensions`, bấm **Reload (Tải lại)** tiện ích CapCap, rồi tải lại các tab GPT/Gemini đang mở. Nếu extension được copy sang thư mục khác, cần cập nhật các file trong thư mục đó trước khi Reload; nếu đường dẫn đã thay đổi, dùng **Load unpacked** từ thư mục mới. Cài đè cùng đường dẫn và extension đang load từ thư mục app thì không cần cài lại tiện ích từ đầu.
 
 ## 🌟 1. Tính năng mới nổi bật
 
@@ -16,6 +18,8 @@
 
 ## ⚡ 2. Cải tiến & Tối ưu hiệu năng
 
+- **Tăng tốc OCR mà giữ nguyên kết quả lấy mẫu**: Đọc thời lượng từ metadata thay cho quét hết video; đo và chọn giữa seek từng mẫu với đọc frame tiến tuần tự. Benchmark video 27 phút 31 giây bằng Windows Media OCR ở 2 FPS giảm từ 180,9 xuống 90,0 giây, giữ nguyên 3.303 ảnh crop và 824 đoạn phụ đề, SRT trùng từng byte. Chi tiết trong `docs/ocr-benchmark-2026-11-10.md`; mức tăng phụ thuộc video và backend.
+- **Dịch song song bằng GPT/Gemini Web**: Thêm lựa chọn 1–4 batch đồng thời trong Cài đặt → Dịch thuật → Browser AI, đồng bộ giới hạn với extension. Mỗi batch dùng một tab/cửa sổ riêng, nhận cùng ngữ cảnh đã phân tích; ghép kết quả đúng thứ tự và cộng tiến độ theo số câu thực sự hoàn thành. Tự đóng phiên riêng khi xong, hủy đúng từng tác vụ. Mặc định vẫn dịch tuần tự; tốc độ tùy giới hạn dịch vụ/tài khoản AI. Hiển thị lưu ý giữ cửa sổ Gemini không bị che kín.
 - **Tối ưu xuất video FFmpeg**: Tận dụng tăng tốc phần cứng, đa luồng và sao chép luồng media tạm khi phù hợp để giảm xử lý mã hóa lại.
 - **Cải thiện độ mượt của trình xem trước và timeline**: Tối ưu lớp phủ cho cập nhật tần số cao, dùng cache timeline và cải thiện đồng bộ khi thay đổi tốc độ video.
 - **Đồng bộ Fit Voice giữa xem trước và xuất project**: Thống nhất cách quy đổi thời gian khi làm chậm hoặc giữ khung hình, giữ vị trí phụ đề, âm thanh và các layer khi xuất sang CapCut.
@@ -30,6 +34,7 @@
 ## 🛠️ 3. Sửa lỗi quan trọng
 
 - **Nhận phản hồi GPT/Gemini khi AI mới tạm ngừng sinh chữ**: Bỏ điều kiện đứng yên 1,5 giây; yêu cầu dấu hiệu hoàn tất trong đúng lượt trả lời mới nhất và không còn trạng thái streaming. Gemini đọc toàn bộ khối trả lời; GPT xác nhận gửi theo cả DOM tin nhắn mới và thay đổi editor, tránh phụ thuộc duy nhất vào selector cũ. Timeout chỉ báo lỗi, không nhận bản dịch dở dang.
+  - Đối chiếu trực tiếp 10/11: tìm nút hoàn tất GPT ở phần bao ngoài khung DIL mà không lấy nhầm nút của tin nhắn khác; theo dõi trạng thái lượt trả lời ở phần tử cha. Nhận diện thêm nút dừng Gemini tiếng Việt. GPT/Gemini đã hoàn tất thử nghiệm 4 batch × 40 câu, nhưng Gemini có thể bị giữ ở trạng thái hiển thị khi popup bị che; xem báo cáo thử trực tiếp trong `docs`.
 - **Một batch AI lỗi làm dịch lại toàn bộ bằng Google Translate**: Giữ các batch AI đã hoàn thành hợp lệ, chỉ fallback những câu còn thiếu và giữ đúng vị trí, provider, tiến độ. Áp dụng cho dịch tuần tự, song song và các batch phục hồi sau khi dịch toàn ngữ cảnh thất bại; hủy tác vụ không kích hoạt fallback.
 - **Logo và mask biến mất khi mở menu “Thêm”**: Giữ các lớp preview hiển thị khi mở menu hoặc menu con của editor, đặt menu lên trên lớp phủ. Hộp thoại modal và chuyển sang cửa sổ khác vẫn tạm ẩn overlay như trước.
 - **Ô kiểm tra xưng hô vẫn được tích khi tắt tự động phát hiện ngữ cảnh**: Tự bỏ chọn bước kiểm tra trước khi vô hiệu hóa; khi bật lại tự động phát hiện, người dùng có thể chọn lại bước kiểm tra.

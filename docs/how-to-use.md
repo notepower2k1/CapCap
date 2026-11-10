@@ -35,7 +35,7 @@ CapCap automatically optimizes its workspace layout based on the video's aspect 
 
 1. Open CapCap, choose **Quality**, then select **CPU** or **GPU** mode in the launcher.
 2. Create or open a video project. **Prepare** completes once the video is analyzed and ready.
-3. In **Settings**, choose a Subtitle Source: **Audio** (SenseVoice or Faster-Whisper) or **Video** (RapidOCR). This choice is saved per-project.
+3. In **Settings**, choose a Subtitle Source: **Audio** (SenseVoice or Faster-Whisper) or **Video** (RapidOCR or Windows Media OCR). This choice is saved per-project. OCR reads duration metadata without decoding the whole video first, then measures whether seeking or sequential sampling is cheaper while preserving sample frame indices. See the [before/after benchmark](ocr-benchmark-2026-11-10.md).
 4. Set source and target languages, then select a translation provider.
 5. Use **Generate**:
    - **Full Pipeline**: Runs Transcript → Translate → TTS end-to-end automatically.
@@ -81,9 +81,9 @@ Saving these settings does not change an imported transcript or start a new tran
 1. Open **Settings → Translation**, select **Direct Browser AI**, and choose Gemini or ChatGPT.
 2. Click **Quick Install Extension**. In Chrome/Edge extension management, enable Developer mode and load the folder copied by CapCap. The installed application includes this folder; source checkouts use `browser_extension/`.
 3. Keep the browser running, sign in to the chosen AI service, and check that the extension is connected. There is no need to keep the extension popup open or open an AI tab beforehand.
-4. Translate normally. A separate window is the default; the extension's display-mode setting can switch to an existing tab. Character analysis, re-analysis and translation reuse the same window/tab.
+4. Translate normally. A separate window is the default; the extension's display-mode setting can switch to an existing tab. In the default sequential mode, character analysis, re-analysis and translation reuse the same window/tab. To run up to four batches at once, select **Settings → Translation → Browser AI → Concurrent batches → 2, 3, or 4**. Each parallel batch uses its own tab/window, closes when finished, and receives the same analyzed context. Results retain the original subtitle order. Keep Gemini windows visible and uncovered; the app does not arrange them automatically. Parallel chats do not carry forward the previous batch's conversation; speed depends on the AI service and account limits.
 5. With Temporary Chat enabled, Gemini must confirm temporary mode before any prompt is sent. If it cannot, CapCap reports an error. Work/school accounts may not offer this mode; turn off the option only if you accept saved chats. Closing a normal chat window does not delete its history.
-6. After updating extension files, reload the extension and refresh existing AI tabs. See [extension setup and troubleshooting](../browser_extension/README.md).
+6. After updating CapCap, open `chrome://extensions` or `edge://extensions`, click **Reload** for the CapCap extension, then refresh existing GPT/Gemini tabs. If you copied the extension to another folder, update that copy before reloading. If its path changed, use **Load unpacked** with the new folder. Installing over the same app folder only requires Reload when the extension is loaded from that folder. See [extension setup and troubleshooting](../browser_extension/README.md).
 
 OmniVoice voice generation shows completed/total cues and percentage in the progress dialog. Cached cues count as completed; runtime status messages do not replace the cue counter.
 

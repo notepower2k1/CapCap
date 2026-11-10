@@ -161,6 +161,7 @@ def save_user_settings(gui):
     s.setValue("auto_translation_context", os.getenv("CAPCAP_AUTO_TRANSLATION_CONTEXT", "1"))
     s.setValue("browser_ai_platform", os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini"))
     s.setValue("browser_ai_temp_chat", os.getenv("CAPCAP_BROWSER_AI_TEMP_CHAT", "1"))
+    s.setValue("browser_ai_workers", os.getenv("CAPCAP_BROWSER_AI_WORKERS", "1"))
 
 
 def load_user_settings(gui):
@@ -225,6 +226,7 @@ def load_user_settings(gui):
         ("CAPCAP_AUTO_TRANSLATION_CONTEXT", "auto_translation_context", "1"),
         ("CAPCAP_BROWSER_AI_PLATFORM", "browser_ai_platform", "gemini"),
         ("CAPCAP_BROWSER_AI_TEMP_CHAT", "browser_ai_temp_chat", "1"),
+        ("CAPCAP_BROWSER_AI_WORKERS", "browser_ai_workers", "1"),
     ):
         v = str(os.getenv(env_k) or s.value(s_k, def_v) or def_v).strip()
         os.environ[env_k] = v

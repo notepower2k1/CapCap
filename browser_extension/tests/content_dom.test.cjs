@@ -57,6 +57,33 @@ test('reads the DIL renderer observed on the live ChatGPT tab', () => {
   } finally { dom.window.close(); }
 });
 
+test('ChatGPT finds completion controls outside the DIL message selection wrapper', () => {
+  const { dom, chat } = load(`<main><div data-markdown-text-style="user-message">Translate</div>
+    <section><div data-chatgpt-selection-message-id="reply-1"><div data-markdown-text-style="assistant-message">
+    <div data-dil-response>1. Hello</div></div></div><div><button aria-label="Copy response"></button></div></section></main>`);
+  try {
+    visible(dom.window.document.querySelector('button'));
+    assert.equal(chat.isReplyComplete(), true);
+    const reply = dom.window.document.querySelector('[data-dil-response]');
+    reply.setAttribute('data-is-streaming', 'true');
+    assert.equal(chat.isReplyComplete(), false);
+    reply.removeAttribute('data-is-streaming');
+    const container = reply.closest('section');
+    container.parentElement.setAttribute('data-talvt-turn-state', 'in_progress');
+    assert.equal(chat.isReplyComplete(), false);
+    container.parentElement.setAttribute('data-talvt-turn-state', 'completed');
+    assert.equal(chat.isReplyComplete(), true);
+  } finally { dom.window.close(); }
+});
+
+test('Gemini recognizes the stop-generation label observed in Vietnamese UI', () => {
+  const { dom, gemini } = load('<button aria-label="Ngừng tạo câu trả lời"></button>');
+  try {
+    visible(dom.window.document.querySelector('button'));
+    assert.equal(gemini.isGenerating(), true);
+  } finally { dom.window.close(); }
+});
+
 test('Gemini enables the localized temporary chat control and verifies it', async () => {
   const { dom, gemini } = load('<button aria-label="Cuộc trò chuyện tạm thời" aria-pressed="false"></button><main></main>');
   try {

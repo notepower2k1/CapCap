@@ -16759,9 +16759,30 @@ class VideoTranslatorGUI(QMainWindow):
         browser_temp_chat_cb.setToolTip(t("Uses Temporary Chat on ChatGPT and verifies Temporary Chat is enabled on Gemini before sending. If unavailable, translation stops with an error."))
         browser_ai_layout.addWidget(browser_temp_chat_cb)
 
+        browser_workers_row = QHBoxLayout()
+        browser_workers_row.addWidget(QLabel(t("Concurrent batches:"), browser_ai_widget))
+        browser_workers_combo = QComboBox(browser_ai_widget)
+        browser_workers_combo.setObjectName("browserAIWorkersComboBox")
+        browser_workers_combo.addItem(t("1 — Sequential"), "1")
+        for browser_worker_count in (2, 3, 4):
+            browser_workers_combo.addItem(t("{count} — Parallel, separate chats", count=browser_worker_count), str(browser_worker_count))
+        browser_workers_combo.setToolTip(t("Each parallel batch uses a separate tab or window. Keep Gemini windows visible and uncovered. Speed depends on your AI account limits."))
+        initial_workers = str(os.getenv("CAPCAP_BROWSER_AI_WORKERS") or self.settings.value("browser_ai_workers", "1"))
+        browser_workers_combo.setCurrentIndex(max(0, browser_workers_combo.findData(initial_workers)))
+        browser_workers_row.addWidget(browser_workers_combo, 1)
+        browser_ai_layout.addLayout(browser_workers_row)
+        browser_workers_hint = QLabel(t("Gemini: keep translation windows visible and uncovered."), browser_ai_widget)
+        browser_workers_hint.setWordWrap(True)
+        browser_ai_layout.addWidget(browser_workers_hint)
+
         ext_status_label = QLabel(browser_ai_widget)
         ext_status_label.setWordWrap(True)
         browser_ai_layout.addWidget(ext_status_label)
+
+        extension_update_note = t(
+            "After updating CapCap, click Reload for the CapCap extension at chrome://extensions or edge://extensions, then refresh open GPT/Gemini tabs. "
+            "If the extension is in a different folder, update that copy or use Load unpacked with the new folder first."
+        )
 
         def refresh_extension_status():
             st = get_bridge_status()
@@ -16778,9 +16799,11 @@ class VideoTranslatorGUI(QMainWindow):
             temp_chat = browser_temp_chat_cb.isChecked()
             os.environ["CAPCAP_BROWSER_AI_PLATFORM"] = plat
             os.environ["CAPCAP_BROWSER_AI_TEMP_CHAT"] = "1" if temp_chat else "0"
+            os.environ["CAPCAP_BROWSER_AI_WORKERS"] = browser_workers_combo.currentData() or "1"
 
         browser_platform_combo.currentIndexChanged.connect(_on_browser_settings_changed)
         browser_temp_chat_cb.toggled.connect(_on_browser_settings_changed)
+        browser_workers_combo.currentIndexChanged.connect(_on_browser_settings_changed)
 
         def _install_extension():
             from app.utils.browser_extension_utils import get_browser_extension_dir
@@ -16801,7 +16824,7 @@ class VideoTranslatorGUI(QMainWindow):
                     "1. Open Chrome or Edge and navigate to chrome://extensions (or edge://extensions).\n"
                     "2. Turn ON Developer mode in the top right.\n"
                     "3. Click 'Load unpacked' and paste (Ctrl+V) the folder path already copied to your clipboard (or drag and drop the opened 'browser_extension' folder into the browser)."
-                ),
+                ) + "\n\n" + extension_update_note,
             )
 
         def _open_web_tab():
@@ -16819,6 +16842,11 @@ class VideoTranslatorGUI(QMainWindow):
         ext_btn_row.addWidget(install_ext_btn)
         ext_btn_row.addWidget(open_web_btn)
         browser_ai_layout.addLayout(ext_btn_row)
+
+        extension_update_hint = QLabel(extension_update_note, browser_ai_widget)
+        extension_update_hint.setWordWrap(True)
+        extension_update_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        browser_ai_layout.addWidget(extension_update_hint)
 
         ext_status_timer = QTimer(dialog)
         def _poll_ext_status():
@@ -17428,10 +17456,13 @@ class VideoTranslatorGUI(QMainWindow):
             new_preset = str(translation_preset_combo.currentData() or "general_default").strip()
             new_browser_platform = str(browser_platform_combo.currentData() or "gemini").strip().lower()
             new_browser_temp_chat = "1" if browser_temp_chat_cb.isChecked() else "0"
+            new_browser_workers = browser_workers_combo.currentData() or "1"
             self.settings.setValue("browser_ai_platform", new_browser_platform)
             self.settings.setValue("browser_ai_temp_chat", new_browser_temp_chat)
+            self.settings.setValue("browser_ai_workers", new_browser_workers)
             os.environ["CAPCAP_BROWSER_AI_PLATFORM"] = new_browser_platform
             os.environ["CAPCAP_BROWSER_AI_TEMP_CHAT"] = new_browser_temp_chat
+            os.environ["CAPCAP_BROWSER_AI_WORKERS"] = new_browser_workers
             self.settings.setValue("translation_provider", new_provider)
             self.settings.setValue("translation_preset_id", new_preset)
             os.environ["OPENAI_PROVIDER"] = new_provider
@@ -17448,6 +17479,7 @@ class VideoTranslatorGUI(QMainWindow):
                     "OPENAI_PROVIDER": "browser_ai",
                     "CAPCAP_BROWSER_AI_PLATFORM": new_browser_platform,
                     "CAPCAP_BROWSER_AI_TEMP_CHAT": new_browser_temp_chat,
+                    "CAPCAP_BROWSER_AI_WORKERS": new_browser_workers,
                     "CAPCAP_TRANSLATION_PRESET_ID": new_preset,
                 }
             elif new_provider == "google_ai_studio":

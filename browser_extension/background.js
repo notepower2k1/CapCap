@@ -18,16 +18,13 @@ const contextSessions = {};
 
 // Polling lock and state
 let isPolling = false;
-let isProcessingTask = false;
+const activeTasks = new Map();
+const MAX_ACTIVE_TASKS = 4;
 let pollTimerId = null;
 
 // Heartbeat lock and state
 let isHeartbeating = false;
 let heartbeatTimerId = null;
-
-// Current running task watchdog tracking: { id, tabId: null }
-let currentTask = null;
-let currentTaskCancel = null;
 
 // Clean up stale session tabs when closed
 chrome.tabs.onRemoved.addListener((closedTabId) => {
@@ -159,7 +156,7 @@ async function sendMessageWithInjection(tabId, message) {
 /**
  * Find or create a matching tab for platform
  */
-async function getOrCreateTabForPlatform(platform, sessionId, temporaryChat = true, foreground = false) {
+async function getOrCreateTabForPlatform(platform, sessionId, temporaryChat = true, foreground = false, isolated = false) {
   const isChatGPT = platform === "chatgpt";
   const targetDomainPattern = isChatGPT ? ["chatgpt.com", "chat.openai.com"] : ["gemini.google.com"];
   const chatgptTempUrl = "https://chatgpt.com/?temporary-chat=true";
@@ -200,7 +197,7 @@ async function getOrCreateTabForPlatform(platform, sessionId, temporaryChat = tr
     }
 
     // 2. Look for any existing tab matching the platform domains
-    const allTabs = await chrome.tabs.query({});
+    const allTabs = isolated ? [] : await chrome.tabs.query({});
     for (const tab of allTabs) {
       if (tab.url && targetDomainPattern.some((d) => tab.url.includes(d))) {
         sessionTabs[sessionId] = tab.id;
@@ -249,7 +246,7 @@ async function getOrCreateTabForPlatform(platform, sessionId, temporaryChat = tr
   }
 
   // (b) NEW: if pinnedWindows[platform] exists and its tab is still alive and matches the platform domain, reuse it WITHOUT focusing/activating anything, set sessionTabs[sessionId] = pinned tabId, and do NOT add it to sessionWindows (so it is not treated as extension-owned); apply the ChatGPT temp-chat navigation rule as today if the URL lacks temporary-chat=true (tabs.update url only, no active);
-  const pinned = pinnedWindows[platform];
+  const pinned = isolated ? null : pinnedWindows[platform];
   if (pinned && pinned.tabId) {
     try {
       const pinnedTab = await chrome.tabs.get(pinned.tabId);
@@ -335,20 +332,10 @@ async function postResult(taskId, success, text = "", error = "") {
  */
 function handleCanceledIds(ids) {
   if (!ids || !Array.isArray(ids)) return;
-  if (currentTask && ids.some((id) => String(id) === String(currentTask.id))) {
-    console.warn(`[CapCap Bridge] Task ${currentTask.id} was canceled by CapCap`);
-    if (currentTask.tabId) {
-      try {
-        chrome.tabs.sendMessage(currentTask.tabId, { action: "CAPCAP_ABORT" }).catch(() => {});
-      } catch (e) {
-        // best effort
-      }
-    }
-    if (typeof currentTaskCancel === "function") {
-      const cancelFn = currentTaskCancel;
-      currentTaskCancel = null;
-      cancelFn(new Error("Task canceled by CapCap"));
-    }
+  for (const task of activeTasks.values()) {
+    if (!ids.some(id => String(id) === String(task.id))) continue;
+    task.canceled = true;
+    task.cancel?.(new Error("Task canceled by CapCap"));
   }
 }
 
@@ -389,10 +376,46 @@ async function heartbeatCycle() {
 /**
  * Handle a received task from CapCap
  */
-async function handleTask(task) {
+async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
   console.log(`[CapCap Bridge] Handling task: id=${task.id}, type=${task.type}, platform=${task.platform}`);
 
   try {
+    if (task.type === "diagnose_tasks") {
+      // Read only the tabs already assigned to active bridge jobs.
+      const snapshots = [];
+      for (const execution of activeTasks.values()) {
+        if (!execution.tabId || execution.canceled) continue;
+        try {
+          const results = await chrome.scripting.executeScript({
+            target: { tabId: execution.tabId },
+            func: () => {
+              const selectors = '[data-markdown-text-style="assistant-message"], [data-dil-response], [data-message-author-role="assistant"], [data-turn="assistant"], div.agent-turn, model-response';
+              const reply = [...document.querySelectorAll(selectors)].at(-1);
+              const ancestors = [];
+              for (let node = reply, depth = 0; node && depth < 12 && node !== document.body; node = node.parentElement, depth++) {
+                ancestors.push({ tag: node.tagName, attributes: [...node.attributes].map(a => [a.name, a.value]),
+                  buttons: [...node.querySelectorAll('button, [role="button"]')].map(b => ({
+                    label: b.getAttribute('aria-label'), testid: b.getAttribute('data-testid') || b.getAttribute('data-test-id'),
+                    text: b.innerText?.slice(0, 120), width: b.offsetWidth, height: b.offsetHeight,
+                  })) });
+              }
+              const turn = reply?.closest('article, model-response') || reply?.closest('[data-chatgpt-selection-message-id]')?.parentElement?.parentElement || reply?.parentElement?.parentElement;
+              return { url: location.href, title: document.title.slice(0, 120), readyState: document.readyState,
+                visibility: document.visibilityState, has_focus: document.hasFocus(),
+                reply_chars: reply?.innerText?.length || 0, ancestors,
+                turn_html: turn?.outerHTML?.slice(0, 90000) || '',
+                alerts: [...document.querySelectorAll('[role="alert"]')].map(el => el.innerText?.slice(0, 500)),
+              };
+            }
+          });
+          snapshots.push({ task_id: execution.id, tab_id: execution.tabId, ...results[0]?.result });
+        } catch (error) {
+          snapshots.push({ task_id: execution.id, error: error.message });
+        }
+      }
+      await postResult(task.id, true, JSON.stringify(snapshots));
+      return;
+    }
     if (task.type === "open_tab") {
       const platform = task.platform;
       const isChatGPT = platform === "chatgpt";
@@ -568,6 +591,9 @@ async function handleTask(task) {
 
       const runTranslate = async () => {
         const context = contextSessions[task.platform];
+        // Claim synchronously before chrome.tabs.get yields, so two workers
+        // cannot take over the same analysis conversation.
+        if (context) delete contextSessions[task.platform];
         if (context && context.sessionId !== sessionId && context.temporaryChat === temporaryChat) {
           const contextTabId = sessionTabs[context.sessionId];
           if (contextTabId) {
@@ -577,7 +603,7 @@ async function handleTask(task) {
               const matches = task.platform === "chatgpt"
                 ? ["chatgpt.com", "chat.openai.com"].includes(hostname)
                 : hostname === "gemini.google.com";
-              if (matches) {
+              if (matches && (!task.isolated || sessionWindows[context.sessionId])) {
                 sessionTabs[sessionId] = contextTabId;
                 if (sessionWindows[context.sessionId]) {
                   sessionWindows[sessionId] = sessionWindows[context.sessionId];
@@ -591,10 +617,11 @@ async function handleTask(task) {
           }
           delete contextSessions[task.platform];
         }
-        const tabId = await getOrCreateTabForPlatform(task.platform, sessionId, temporaryChat);
+        const tabId = await getOrCreateTabForPlatform(task.platform, sessionId, temporaryChat, false, !!task.isolated);
         if (currentTask && currentTask.id === task.id) {
           currentTask.tabId = tabId;
         }
+        if (currentTask.canceled) throw new Error("Task canceled before submission");
 
         const resp = await sendMessageWithInjection(tabId, {
           action: "CAPCAP_TRANSLATE",
@@ -615,9 +642,10 @@ async function handleTask(task) {
         response = await runTranslate();
       } catch (firstErr) {
         const errMsg = firstErr?.message || String(firstErr);
-        if (DEAD_TAB_REGEX.test(errMsg)) {
+        if (!currentTask.canceled && DEAD_TAB_REGEX.test(errMsg)) {
           console.warn(`[CapCap Bridge] Tab communication failed ("${errMsg}"). Recreating tab and retrying translation once...`);
           const deadTabId = sessionTabs[sessionId] || (currentTask && currentTask.tabId);
+          if (task.isolated) await closeIsolatedSession(sessionId);
           delete sessionTabs[sessionId];
           delete sessionWindows[sessionId];
           if (pinnedWindows[task.platform] && pinnedWindows[task.platform].tabId === deadTabId) {
@@ -629,12 +657,13 @@ async function handleTask(task) {
         }
       }
 
+      if (currentTask.canceled) return;
       if (response.success && task.operation === "context") {
         contextSessions[task.platform] = { sessionId, temporaryChat };
       } else if (task.operation !== "context") {
         delete contextSessions[task.platform];
       }
-      await postResult(task.id, response.success, response.text, response.error);
+      if (!currentTask.canceled) await postResult(task.id, response.success, response.text, response.error);
       return;
     }
 
@@ -642,7 +671,47 @@ async function handleTask(task) {
     await postResult(task.id, false, "", `Unknown task type: ${task.type}`);
   } catch (err) {
     console.error(`[CapCap Bridge] Error executing task ${task.id}:`, err);
-    await postResult(task.id, false, "", err.message || String(err));
+    if (!currentTask.canceled) await postResult(task.id, false, "", err.message || String(err));
+  } finally {
+    if (task.isolated) await closeIsolatedSession(task.session_id);
+  }
+}
+
+async function closeIsolatedSession(sessionId) {
+  const winId = sessionWindows[sessionId];
+  const tabId = sessionTabs[sessionId];
+  delete sessionWindows[sessionId];
+  delete sessionTabs[sessionId];
+  try {
+    if (winId) await chrome.windows.remove(winId);
+    else if (tabId) await chrome.tabs.remove(tabId);
+  } catch (_) { /* User may have already closed it. */ }
+}
+
+async function executeTask(task) {
+  const execution = { id: task.id, tabId: null, canceled: false, cancel: null };
+  activeTasks.set(task.id, execution);
+  let timer;
+  const canceled = new Promise((_, reject) => { execution.cancel = reject; });
+  const timeoutMs = (Number(task.timeout) || 240) * 1000 + 15000;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Task timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  try {
+    await Promise.race([handleTask(task, execution), canceled, timeout]);
+  } catch (error) {
+    execution.canceled = true;
+    if (execution.tabId) {
+      await chrome.tabs.sendMessage(execution.tabId, { action: "CAPCAP_ABORT" }).catch(() => {});
+    }
+    if (task.isolated) await closeIsolatedSession(task.session_id);
+    await postResult(task.id, false, "", error.message || String(error));
+  } finally {
+    clearTimeout(timer);
+    activeTasks.delete(task.id);
+    if (activeTasks.size === 0) {
+      await chrome.storage.local.set({ task_progress: { phase: "idle", at: Date.now() } }).catch(() => {});
+    }
   }
 }
 
@@ -650,7 +719,7 @@ async function handleTask(task) {
  * Main polling cycle to fetch tasks and sync state from CapCap
  */
 async function pollCycle() {
-  if (isPolling || isProcessingTask) return;
+  if (isPolling || activeTasks.size >= MAX_ACTIVE_TASKS) return;
   isPolling = true;
 
   try {
@@ -672,52 +741,8 @@ async function pollCycle() {
       }
 
       if (data.has_task && data.task) {
-        isProcessingTask = true;
-        let timeoutTimer = null;
-        const cancelPromise = new Promise((_, reject) => {
-          currentTaskCancel = reject;
-        });
-
-        currentTask = {
-          id: data.task.id,
-          tabId: null
-        };
-
-        const timeoutMs = (Number(data.task.timeout) || 240) * 1000 + 15000;
-        const timeoutPromise = new Promise((_, reject) => {
-          timeoutTimer = setTimeout(() => {
-            reject(new Error(`Task timed out after ${timeoutMs}ms`));
-          }, timeoutMs);
-        });
-
-        try {
-          await Promise.race([
-            handleTask(data.task),
-            timeoutPromise,
-            cancelPromise
-          ]);
-        } catch (raceErr) {
-          const reason = raceErr?.message || String(raceErr);
-          console.warn(`[CapCap Bridge] Task ${data.task.id} ended with error: ${reason}`);
-          await postResult(data.task.id, false, "", reason);
-        } finally {
-          if (timeoutTimer) clearTimeout(timeoutTimer);
-          currentTaskCancel = null;
-          currentTask = null;
-          isProcessingTask = false;
-          try {
-            await chrome.storage.local.set({
-              task_progress: {
-                phase: "idle",
-                chars: 0,
-                generating: false,
-                platform: null,
-                task_id: null,
-                at: Date.now()
-              }
-            });
-          } catch (_) {}
-        }
+        // Release the poll lock immediately; another poll can fill the second slot.
+        void executeTask(data.task).catch(err => console.error("[CapCap Bridge] Task failed:", err));
       }
     } else {
       await updateStoredStatus(false);
@@ -765,13 +790,15 @@ chrome.runtime.onStartup.addListener(() => {
 // Runtime message listener for popup.js interactions and content script progress
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request && request.type === "CAPCAP_PROGRESS") {
+    const execution = [...activeTasks.values()].find(task => task.tabId === sender.tab?.id);
+    if (!execution || execution.canceled) return false;
     const progressData = {
       phase: request.phase || "idle",
       chars: typeof request.chars === "number" ? request.chars : 0,
       generating: !!request.generating,
       platform: request.platform || null,
       message: request.message || null,
-      task_id: currentTask?.id || null,
+      task_id: execution.id,
       at: Date.now()
     };
     chrome.storage.local.set({ task_progress: progressData }).catch(() => {});

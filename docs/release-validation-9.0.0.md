@@ -1,6 +1,16 @@
 # Kiểm tra Version 9.0.0
 
-Ngày cập nhật: 09/11/2026. Đây là ghi nhận kiểm tra mã nguồn; cần build lại ứng dụng/installer để tạo bộ cài 9.0.0. Release note không đồng nghĩa bộ cài đã được phát hành.
+Ngày cập nhật: 10/11/2026. Đây là ghi nhận kiểm tra mã nguồn; thay đổi dịch song song chưa được build vào installer. Release note không đồng nghĩa bộ cài đã được phát hành.
+
+Kiểm tra bổ sung 10/11 cho dịch song song GPT/Gemini Web:
+
+- 44 test extension pass: gồm các phiên độc lập trên cả hai nền tảng/chế độ hiển thị, giới hạn bốn tác vụ và chờ slot cho batch thứ năm, gắn tiến độ đúng tab, hủy từng tác vụ, bỏ phản hồi muộn, đóng cửa sổ cũ khi cần tạo lại tab, nhận diện nút hoàn tất bên ngoài DIL và chẩn đoán chỉ các tab thuộc tác vụ.
+- 83 test Python pass trong các bộ bridge, batch song song, cài đặt song song, partial fallback, web translators, translation diagnostics, đóng gói extension và i18n. Có kiểm tra phản hồi lệch thứ tự, giữ batch AI thành công khi fallback, hủy các batch đang chờ, đặt lại tiến độ và lưu/khôi phục tùy chọn trong dialog Qt thực.
+- Đã bổ sung [thử trực tiếp GPT/Gemini ở mức 2 và 4 batch](browser-parallel-live-test-2026-11-10.md). Cả hai nhận đủ câu trong các lượt hoàn thành; Gemini cần cửa sổ hiện rõ. Sau lượt đo, đã mở mức 1–4 trong ứng dụng/extension. Kiểm tra Qt xác nhận cả mức 2, 3, 4 được lưu/khôi phục; kiểm tra orchestrator xác nhận số worker tương ứng và giá trị ngoài khoảng trở về 1. Chưa build installer cho các sửa đổi này.
+
+Kiểm tra bổ sung OCR ngày 10/11: 27 test trong các bộ đọc video OCR, OCR enhancements, range transcription và transcript import pass. [Benchmark toàn bộ video mẫu](ocr-benchmark-2026-11-10.md) giảm thời gian từ 180,9 xuống 90,0 giây; chuỗi 3.303 ảnh crop, 824 đoạn phụ đề và SRT không đổi. Chưa build lại installer cho thay đổi này.
+
+Ghi nhận các lượt kiểm tra trước:
 
 - Bộ test extension: 21 test pass, gồm DOM ChatGPT mới, gửi prompt, Temporary Chat Gemini và dùng chung cửa sổ phân tích/dịch.
 - Các bộ test Python cho bridge, đóng gói extension, xưng hô, OmniVoice, ngôn ngữ, i18n, lưu cấu hình, fallback dịch, chẩn đoán dịch, voice worker, Media Tools, timeline, xuất video và gói project đều pass. Test riêng cập nhật tiến độ tạo giọng cũng pass.

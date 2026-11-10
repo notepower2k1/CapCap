@@ -23,6 +23,11 @@ _current_language: str | None = None
 # the catalog can be extended without changing callers.  Technical product
 # names and values entered by the user intentionally stay in English.
 VI_TRANSLATIONS: dict[str, str] = {
+    "Concurrent batches:": "Số batch chạy đồng thời:",
+    "1 — Sequential": "1 — Tuần tự",
+    "{count} — Parallel, separate chats": "{count} — Song song, cuộc trò chuyện riêng",
+    "Each parallel batch uses a separate tab or window. Keep Gemini windows visible and uncovered. Speed depends on your AI account limits.": "Mỗi batch song song dùng một tab hoặc cửa sổ riêng. Giữ các cửa sổ Gemini hiển thị và không bị che kín. Tốc độ phụ thuộc giới hạn tài khoản AI.",
+    "Gemini: keep translation windows visible and uncovered.": "Gemini: giữ các cửa sổ dịch hiển thị và không bị che kín.",
     "Status": "Trạng thái",
     "Subtitle": "Phụ đề",
     "Running": "Đang chạy",
@@ -1675,6 +1680,7 @@ VI_TRANSLATIONS: dict[str, str] = {
     "🟢 Browser Extension Connected (Port {port}) — Synchronized with CapCap": "🟢 Tiện ích trình duyệt đã kết nối (Cổng {port}) — Đồng bộ với CapCap",
     "⚪ Browser Extension Not Connected — Click 'Quick Install Extension' below": "⚪ Tiện ích trình duyệt chưa kết nối — Bấm 'Cài đặt nhanh tiện ích' bên dưới",
     "Quick Install Extension": "Cài đặt nhanh tiện ích",
+    "After updating CapCap, click Reload for the CapCap extension at chrome://extensions or edge://extensions, then refresh open GPT/Gemini tabs. If the extension is in a different folder, update that copy or use Load unpacked with the new folder first.": "Sau khi cập nhật CapCap, vào chrome://extensions hoặc edge://extensions, bấm Reload (Tải lại) tiện ích CapCap, rồi tải lại các tab GPT/Gemini đang mở. Nếu tiện ích nằm ở thư mục khác, cần cập nhật bản sao đó hoặc Load unpacked từ thư mục mới trước.",
     "Open Web AI Tab": "Mở tab Web AI",
     "Quick Install Browser Extension (1-Time Setup)": "Cài đặt nhanh tiện ích trình duyệt (Cài đặt 1 lần)",
     "1. Open Chrome or Edge and navigate to chrome://extensions (or edge://extensions).\n2. Turn ON Developer mode in the top right.\n3. Click 'Load unpacked' and paste (Ctrl+V) the folder path already copied to your clipboard (or drag and drop the opened 'browser_extension' folder into the browser).": "1. Mở trình duyệt Chrome hoặc Edge, truy cập chrome://extensions (hoặc edge://extensions).\n2. Bật công tắc Developer mode (Chế độ nhà phát triển) ở góc trên.\n3. Bấm Load unpacked (Tải tiện ích đã giải nén) và dán (Ctrl+V) đường dẫn thư mục vừa được copy sẵn (hoặc kéo thả thư mục browser_extension vừa mở vào trình duyệt).",

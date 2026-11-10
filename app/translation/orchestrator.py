@@ -700,8 +700,12 @@ class TranslationOrchestrator:
                 f"max_segments={max((len(source) for source, *_ in batches), default=0)}"
             )
         use_parallel = os.getenv("CAPCAP_TRANSLATION_PARALLEL_BATCHES", "0").strip().lower() in ("1", "true", "yes")
+        worker_limit = 4
         if (provider_type or "").strip().lower() in ("browser_ai", "gemini_web", "chatgpt_web"):
-            use_parallel = False
+            browser_workers = os.getenv("CAPCAP_BROWSER_AI_WORKERS", "1").strip()
+            worker_limit = int(browser_workers) if browser_workers in ("1", "2", "3", "4") else 1
+            use_parallel = worker_limit > 1
+            polisher.parallel_batches = use_parallel
         mode = "full_context" if full_context_request else ("parallel" if use_parallel else "sequential")
         print(
             f"[AI Translation] Batch plan: mode={mode}, "
@@ -719,7 +723,7 @@ class TranslationOrchestrator:
                     style_instruction=style_instruction,
                     custom_system_prompt=custom_system_prompt,
                     context_guidance=context_guidance,
-                    max_workers=1 if full_context_request else min(len(batches), 4),
+                    max_workers=1 if full_context_request else min(len(batches), worker_limit),
                     batch_callback=batch_callback,
                     base_segments=base_segments,
                     provider_type=provider_type,
@@ -768,7 +772,7 @@ class TranslationOrchestrator:
                         style_instruction=style_instruction,
                         custom_system_prompt=custom_system_prompt,
                         context_guidance=context_guidance,
-                        max_workers=min(len(fallback_batches), 4),
+                        max_workers=min(len(fallback_batches), worker_limit),
                         batch_callback=batch_callback,
                         base_segments=base_segments,
                         provider_type=provider_type,
@@ -821,6 +825,8 @@ class TranslationOrchestrator:
         warnings: list[str] = []
         providers_used: set[str] = set()
         translated_texts: list[str] = []
+        if hasattr(polisher, "begin_batch_requests"):
+            polisher.begin_batch_requests()
 
         is_ollama = (provider_type or "").strip().lower() == "ollama"
         try:
@@ -960,6 +966,8 @@ class TranslationOrchestrator:
         except (ValueError, TypeError):
             batch_timeout = 3600 if is_ollama else 300
         total_cues = sum(len(b[0]) for b in batches)
+        if hasattr(polisher, "begin_batch_requests"):
+            polisher.begin_batch_requests()
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_workers))
         try:
             future_to_idx = {}
@@ -1032,7 +1040,11 @@ class TranslationOrchestrator:
                 if batch_error is not None:
                     raise batch_error
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            try:
+                if hasattr(polisher, "cancel_pending"):
+                    polisher.cancel_pending()
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
 
         merged = []
         for idx in range(len(batches)):

@@ -1,4 +1,5 @@
 import difflib
+import math
 import os
 import re
 import subprocess
@@ -156,6 +157,93 @@ def _get_lock():
 
 def _ffmpeg_path():
     return os.path.join(bin_path("ffmpeg"), "ffmpeg.exe")
+
+
+def _probe_video_duration(video_path):
+    """Read container metadata without decoding the entire video first."""
+    try:
+        result = subprocess.run(
+            [os.path.join(bin_path("ffmpeg"), "ffprobe.exe"), "-v", "error",
+             "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
+            capture_output=True, timeout=10, **subprocess_text_kwargs(),
+        )
+        duration = float(result.stdout.strip())
+        if result.returncode == 0 and math.isfinite(duration) and duration > 0:
+            return duration
+    except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+        pass
+
+    # Source/portable installs may lack ffprobe. OpenCV reads header metadata;
+    # it does not need a full decoding pass either.
+    cap = _open_video(video_path)
+    try:
+        fps = float(cap.get(cv2.CAP_PROP_FPS))
+        frames = float(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if math.isfinite(fps) and math.isfinite(frames) and fps > 0 and frames > 0:
+            return frames / fps
+    finally:
+        cap.release()
+    return 60.0  # Retain the previous fallback when no duration metadata exists.
+
+
+class _OcrFrameReader:
+    """Sample the same frame indices using the cheaper measured decode path.
+
+    Random seeks can repeatedly decode the same GOP. grab() advances through
+    intervening frames without converting each one to a BGR image. A short
+    alternating calibration avoids forcing linear decoding on intra-frame
+    videos or sparse sampling, where seeking can be cheaper.
+    """
+
+    def __init__(self, cap, mode="auto"):
+        self.cap = cap
+        self.mode = mode if mode in ("auto", "seek", "sequential") else "auto"
+        self.next_frame = None
+        self.strategy = None
+        self.timings = {"seek": [], "sequential": []}
+        self.calibration_gap = None
+
+    def read(self, frame_index):
+        gap = frame_index - self.next_frame if self.next_frame is not None else None
+        calibrating = False
+        if gap is None or gap < 0:
+            method = "seek"
+        elif gap == 0:
+            method = "sequential"
+        elif self.mode != "auto":
+            method = self.mode
+        elif gap > 120:
+            method = "seek"
+        else:
+            if self.calibration_gap is None or abs(gap - self.calibration_gap) > 1:
+                self.calibration_gap = gap
+                self.timings = {"seek": [], "sequential": []}
+                self.strategy = None
+            if self.strategy is None:
+                calibrating = True
+                method = "seek" if len(self.timings["seek"]) <= len(self.timings["sequential"]) else "sequential"
+            else:
+                method = self.strategy
+
+        started = time.perf_counter()
+        if method == "seek":
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        else:
+            for _ in range(gap or 0):
+                if not self.cap.grab():
+                    return False, None
+                self.next_frame += 1
+        success, image = self.cap.read()
+        elapsed = time.perf_counter() - started
+        if success:
+            self.next_frame = frame_index + 1
+        if calibrating and success:
+            self.timings[method].append(elapsed)
+            if min(map(len, self.timings.values())) >= 3:
+                seek_time = float(np.median(self.timings["seek"]))
+                linear_time = float(np.median(self.timings["sequential"]))
+                self.strategy = "sequential" if linear_time < seek_time * 0.95 else "seek"
+        return success, image
 
 
 def _ocr_model_variant(model_dir):
@@ -605,6 +693,7 @@ def _texts_equal(current_texts, prev_texts):
 def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=None, start_seconds=0.0, end_seconds=None, on_progress=None, language="auto", **kwargs):
     workflow_started = time.perf_counter()
     profiling = {
+        "metadata_probe": 0.0,
         "engine_init": 0.0,
         "seek_decode": 0.0,
         "crop_preprocess": 0.0,
@@ -617,20 +706,9 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
     }
     duration = 0
     if fps is None:
-        try:
-            result = subprocess.run(
-                [_ffmpeg_path(), "-i", video_path, "-f", "null", "-"],
-                capture_output=True, **subprocess_text_kwargs(),
-            )
-            for line in (result.stderr or "").splitlines():
-                if "Duration:" in line:
-                    parts = line.split("Duration:")[1].strip().split(",")[0].strip().split(":")
-                    duration = float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
-                    break
-            else:
-                duration = 60
-        except Exception:
-            duration = 60
+        probe_started = time.perf_counter()
+        duration = _probe_video_duration(video_path)
+        profiling["metadata_probe"] = time.perf_counter() - probe_started
         configured_fps = str(os.getenv("OCR_SAMPLING_FPS", "auto") or "auto").strip().lower()
         if configured_fps not in {"", "auto", "default"}:
             try:
@@ -669,6 +747,7 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
     end_seconds = min(float(duration or 0.0), float(end_seconds)) if end_seconds is not None and duration else end_seconds
     frame_interval = 1.0 / fps
     cap = _open_video(video_path)
+    frame_reader = _OcrFrameReader(cap, mode=kwargs.get("frame_read_mode", "auto"))
     video_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
     effective_end = float(end_seconds) if end_seconds is not None else (duration if duration > 0 else (total_frames / video_fps if total_frames and video_fps else 0.0))
@@ -707,8 +786,7 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
             if total_frames and frame_idx >= total_frames:
                 break
             decode_started = time.perf_counter()
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            ret, img = cap.read()
+            ret, img = frame_reader.read(frame_idx)
             profiling["seek_decode"] += time.perf_counter() - decode_started
             if not ret or img is None:
                 break
@@ -823,6 +901,7 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
         if sampled_frames else 0.0
     )
     print("[OCR Profiling]")
+    print(f"Metadata probe: {profiling['metadata_probe']:.2f}s")
     print(f"Engine initialization: {profiling['engine_init']:.2f}s")
     print(f"Seek/decode: {profiling['seek_decode']:.2f}s")
     print(f"Crop/preprocess: {profiling['crop_preprocess']:.2f}s")
@@ -838,6 +917,7 @@ def transcribe_video_ocr(video_path, *, region="bottom", fps=None, ocr_engine=No
     )
     print(f"OCR inference: avg={inference_avg_ms:.0f}ms, p95={inference_p95_ms:.0f}ms")
     print(f"Frame decode/preprocess: avg={decode_preprocess_avg_ms:.0f}ms")
+    print(f"Frame reader: {frame_reader.strategy or frame_reader.mode}")
     print(f"[OCR Progress] 100% completed: {total_steps} frames scanned, {len(merged)} subtitles found", flush=True)
     if on_progress:
         try:

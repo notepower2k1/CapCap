@@ -39,7 +39,7 @@
       (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
   }
 
-  const STREAMING_SELECTOR = '[aria-busy="true"], [data-is-streaming="true"], [data-message-status="in_progress"], .result-streaming, .streaming';
+  const STREAMING_SELECTOR = '[aria-busy="true"], [data-is-streaming="true"], [data-message-status="in_progress"], [data-talvt-turn-state="in_progress"], .result-streaming, .streaming';
   const REPLY_ACTION_SELECTOR = [
     'button[data-testid="copy-turn-action-button"]', 'button[data-test-id="copy-button"]',
     'button[data-testid="good-response-turn-action-button"]',
@@ -55,6 +55,18 @@
     if (!reply || !turn || reply.matches(STREAMING_SELECTOR) ||
         turn.matches(STREAMING_SELECTOR) || turn.querySelector(STREAMING_SELECTOR)) return false;
     return Array.from(turn.querySelectorAll(REPLY_ACTION_SELECTOR)).some(isVisibleElement);
+  }
+
+  function ownReplyHasFinished(reply, replies, userSelector) {
+    if (!reply || reply.closest(STREAMING_SELECTOR)) return false;
+    // New renderers put action controls beside the message, outside its text
+    // wrapper. Walk outward, stopping before another turn or a user prompt.
+    for (let scope = reply; scope && scope !== document.body; scope = scope.parentElement) {
+      if (replies.some(other => other !== reply && scope.contains(other)) ||
+          scope.querySelector(userSelector)) return false;
+      if (replyHasFinished(reply, scope)) return true;
+    }
+    return false;
   }
 
   // Helper: Escape HTML
@@ -367,7 +379,7 @@
               subtree: true,
               characterData: true,
               attributes: true,
-              attributeFilter: ['class', 'aria-busy', 'aria-hidden', 'hidden', 'disabled', 'data-is-streaming', 'data-message-status']
+              attributeFilter: ['class', 'aria-busy', 'aria-hidden', 'hidden', 'disabled', 'data-is-streaming', 'data-message-status', 'data-talvt-turn-state']
             });
           } catch (e) {
             console.warn("[CapCap Content] Failed to attach MutationObserver:", e);
@@ -467,9 +479,8 @@
 
     isReplyComplete() {
       const reply = this.latestReply();
-      const turn = reply?.closest('article, [data-turn="assistant"], .agent-turn') ||
-        reply?.closest('[data-chatgpt-selection-message-id]') || reply;
-      return replyHasFinished(reply, turn);
+      return ownReplyHasFinished(reply, this.getAssistantMessages(),
+        '[data-message-author-role="user"], [data-markdown-text-style="user-message"], [data-turn="user"]');
     },
 
     async submitPrompt(composer) {
@@ -598,6 +609,7 @@
     stopButtonSelectors: [
       "button[aria-label*='Stop' i]",
       "button[aria-label*='Dừng' i]",
+      "button[aria-label*='Ngừng tạo' i]",
       "button[aria-label*='Stop response' i]",
       "button[data-test-id='stop-button']",
       ".stop-generating-button",

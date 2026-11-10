@@ -50,7 +50,7 @@ Copy `.env_example` to `.env` only for manual setup. The active variables are:
 | Group | Variables |
 | --- | --- |
 | AI translation providers | `OPENAI_PROVIDER` (`google_ai_studio`, `openai`, `ollama`, `browser_ai`, `google`, `bing`), `AI_POLISHER_PROVIDER` |
-| Browser AI bridge | `CAPCAP_BROWSER_AI_PLATFORM` (`gemini` / `chatgpt`), `CAPCAP_BROWSER_AI_TEMP_CHAT` (`1` / `0`), `CAPCAP_BROWSER_BRIDGE_PORT` (default `18765`) |
+| Browser AI bridge | `CAPCAP_BROWSER_AI_PLATFORM` (`gemini` / `chatgpt`), `CAPCAP_BROWSER_AI_TEMP_CHAT` (`1` / `0`), `CAPCAP_BROWSER_AI_WORKERS` (`1` sequential, default / `2`, `3`, `4` parallel isolated chats), `CAPCAP_BROWSER_BRIDGE_PORT` (default `18765`) |
 | Google AI Studio | `GOOGLE_AI_STUDIO_API_KEY`, `GOOGLE_AI_STUDIO_MODEL`, `GOOGLE_AI_STUDIO_BASE_URL` |
 | OpenAI / DeepSeek | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` |
 | Ollama (Offline Local) | `OLLAMA_BASE_URL` (default: `http://localhost:11434/v1`), `OLLAMA_MODEL` |
