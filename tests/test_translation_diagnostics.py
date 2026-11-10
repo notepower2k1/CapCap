@@ -187,7 +187,10 @@ class TestTranslationDiagnostics(unittest.TestCase):
                         self.assertTrue(google.called)
                         self.assertIn("Batch ERROR", log.getvalue())
                         self.assertIn("error_type=TranslationValidationError", log.getvalue())
-                        self.assertIn("fallback_scope=all 650 cues", log.getvalue())
+                        self.assertIn("fallback_scope=remaining 350 cues; kept_ai=300", log.getvalue())
+                        self.assertTrue(all(s["text"] != "FREE" for s in result.segments[:300]))
+                        self.assertTrue(all(s["text"] == "FREE" for s in result.segments[300:]))
+                        self.assertEqual(sum(len(call.args[0]) for call in google.call_args_list), 350)
                     else:
                         self.assertFalse(result.used_fallback)
                         google.assert_not_called()

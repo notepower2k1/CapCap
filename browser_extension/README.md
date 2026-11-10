@@ -2,6 +2,8 @@
 
 **Version 9.0.0.** Logo thanh trình duyệt và popup dùng logo app trong `assets/capcap.ico`.
 
+Nếu một batch dịch lỗi, CapCap giữ các batch AI đã hoàn thành hợp lệ và chỉ dùng Google Translate cho những câu chưa có kết quả. Nội dung không đủ/sai số câu của batch lỗi không được ghép vào bản dịch. Hủy tác vụ không tự chuyển provider.
+
 Trong bản cài, dùng **Cài đặt → Dịch thuật → Quick Install Extension** để lấy đúng thư mục được đóng gói (có thể nằm trong `_internal/browser_extension`). Đường dẫn `browser_extension/` bên dưới là thư mục tương đối khi chạy từ source. Sau khi cập nhật, Reload extension rồi tải lại các tab AI đã mở.
 
 Tiện ích mở rộng trình duyệt (Chrome & Edge) kết nối trực tiếp phần mềm **CapCap Video Translator** với giao diện web của **Google Gemini** và **ChatGPT**. Dịch phụ đề video hoàn toàn tự động, chất lượng cao, giữ ngữ cảnh và không lưu lại lịch sử chat rác.

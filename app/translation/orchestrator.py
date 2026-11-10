@@ -94,6 +94,14 @@ class TranslationOrchestrator:
                             status_callback(self._describe_ai_provider(provider_type), "")
                         except Exception:
                             pass
+                    completed_ai_segments = {}
+
+                    def remember_ai_batch(start, cues):
+                        for index, cue in enumerate(cues, start):
+                            completed_ai_segments[index] = dict(cue)
+                        if batch_callback:
+                            batch_callback(start, cues)
+
                     try:
                         mode_label = self._describe_ai_provider(provider_type)
                         merged_style = str(style_instruction or "")
@@ -176,7 +184,7 @@ class TranslationOrchestrator:
                             custom_system_prompt=custom_system_prompt,
                             context_guidance=context_guidance,
                             polish_batch_size=polish_batch_size or 0,
-                            batch_callback=batch_callback,
+                            batch_callback=remember_ai_batch,
                             base_segments=segments,
                             is_canceled=is_canceled,
                         )
@@ -203,13 +211,26 @@ class TranslationOrchestrator:
                         else:
                             msg = "AI Provider is unavailable. Falling back to Google Translate..."
                         msg = f"{translation_failure_reason(exc)}\n{msg}"
-                        print(f"[AI Translation] WARNING: {msg} (error_type={type(exc).__name__}, {exc}); fallback_scope=all {len(segments)} cues", flush=True)
+                        remaining = len(segments) - len(completed_ai_segments)
+                        if completed_ai_segments:
+                            msg += f" Kept {len(completed_ai_segments)} AI-translated cues; translating only {remaining} remaining cues."
+                        scope = f"remaining {remaining} cues; kept_ai={len(completed_ai_segments)}" if completed_ai_segments else f"all {len(segments)} cues"
+                        print(f"[AI Translation] WARNING: {msg} (error_type={type(exc).__name__}, {exc}); fallback_scope={scope}", flush=True)
                         warnings.append(msg)
                         if status_callback:
                             try:
                                 status_callback("Google Translate", msg)
                             except Exception:
                                 pass
+                        if completed_ai_segments:
+                            return self._fallback_untranslated_segments(
+                                segments=segments, source_texts=source_texts,
+                                completed=completed_ai_segments,
+                                normalized_src=normalized_src, target_lang=target_lang,
+                                ms_batch_size=ms_batch_size, batch_callback=batch_callback,
+                                warnings=warnings, status_callback=status_callback,
+                                is_canceled=is_canceled,
+                            )
                 else:
                     selected_provider = str(os.getenv("OPENAI_PROVIDER") or "google").strip().lower()
                     if selected_provider not in ("google", "bing"):
@@ -265,6 +286,44 @@ class TranslationOrchestrator:
             )
         except InterruptedError:
             return TranslationResult(success=False, errors=["canceled"], stage="translate")
+
+    def _fallback_untranslated_segments(
+        self, *, segments, source_texts, completed, normalized_src, target_lang,
+        ms_batch_size, batch_callback, warnings, status_callback, is_canceled,
+    ):
+        """Keep validated AI cues at their original indices; translate only gaps."""
+        merged = [completed.get(index) for index in range(len(segments))]
+        index = 0
+        while index < len(segments):
+            if is_canceled and is_canceled():
+                raise InterruptedError("Translation canceled by user.")
+            if merged[index] is not None:
+                index += 1
+                continue
+            start = index
+            while index < len(segments) and merged[index] is None:
+                index += 1
+
+            def forward_batch(offset, cues):
+                if batch_callback:
+                    batch_callback(start + offset, cues)
+
+            fallback = self._run_google_translate(
+                segments=segments[start:index], source_texts=source_texts[start:index],
+                normalized_src=normalized_src, target_lang=target_lang,
+                ms_batch_size=ms_batch_size, batch_callback=forward_batch,
+                warnings=warnings, status_callback=status_callback, is_canceled=is_canceled,
+            )
+            if not fallback.success:
+                return fallback
+            merged[start:index] = fallback.segments
+
+        providers = list(dict.fromkeys(cue.get("provider", "") for cue in merged))
+        return TranslationResult(
+            success=True, segments=merged, warnings=warnings, stage="translation",
+            primary_provider=" -> ".join(provider for provider in providers if provider),
+            used_fallback=True,
+        )
 
     def _run_google_translate(
         self,
@@ -859,6 +918,8 @@ class TranslationOrchestrator:
             except Exception:
                 pass
             result = polisher.polish_batch(**polish_kwargs)
+            if not validate_texts(result[0], len(kwargs["source_texts"])):
+                raise TranslationValidationError("AI batch returned incomplete or invalid subtitles.")
         except Exception as exc:
             print(
                 f"[AI Translation] Batch ERROR trace={trace} {label} "
@@ -937,6 +998,7 @@ class TranslationOrchestrator:
                 done, remaining = concurrent.futures.wait(
                     remaining, timeout=0.25, return_when=concurrent.futures.FIRST_COMPLETED
                 )
+                batch_error = None
                 for future in done:
                     if is_canceled and is_canceled():
                         for f in remaining:
@@ -960,12 +1022,15 @@ class TranslationOrchestrator:
                                 polished=True,
                             )
                     except Exception as exc:
-                        if isinstance(exc, (TranslationValidationError, InterruptedError)):
+                        if isinstance(exc, InterruptedError):
                             raise
-                        if batches[idx][1] is None:
-                            raise
+                        if isinstance(exc, TranslationValidationError) or batches[idx][1] is None:
+                            batch_error = batch_error or exc
+                            continue
                         warnings.append(f"Batch {idx + 1} AI polishing failed ({exc}); kept draft.")
                         translated_texts_map[idx] = batches[idx][1]
+                if batch_error is not None:
+                    raise batch_error
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 
