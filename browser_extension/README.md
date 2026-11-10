@@ -74,7 +74,7 @@ Browser extension for Google Chrome & Microsoft Edge connecting **CapCap Video T
 
 5. **⚡ Tự động hóa DOM bền bỉ (Resilient Automation)**:
    - Hỗ trợ cả `contenteditable` (ProseMirror, Quill) và `textarea`.
-   - Cơ chế phát hiện hoàn tất thông minh theo thời gian thực (kết hợp MutationObserver và kiểm tra độ ổn định văn bản trong 1500ms khi nút Stop biến mất, không lo timer bị throttle ở chế độ chạy nền).
+   - Chỉ nhận câu trả lời mới khi khối trả lời đó có dấu hiệu hoàn tất (nút sao chép/đánh giá hiện ra) và không còn trạng thái đang sinh nội dung. Theo dõi cả thay đổi nội dung và thuộc tính DOM; khoảng dừng sinh chữ không được coi là hoàn tất. Timeout chỉ báo lỗi, không trả nội dung dở dang.
 
 ---
 

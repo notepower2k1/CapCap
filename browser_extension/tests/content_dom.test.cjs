@@ -8,8 +8,9 @@ function load(html) {
   const dom = new JSDOM(html, { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
   dom.window.chrome = { runtime: { onMessage: { addListener() {} } } };
   const source = fs.readFileSync(path.join(__dirname, '../content.js'), 'utf8');
-  dom.window.eval(source.replace(/\}\)\(\);\s*$/, 'window.bridgeTest = { ChatGPT, Gemini }; })();'));
-  return { dom, chat: dom.window.bridgeTest.ChatGPT, gemini: dom.window.bridgeTest.Gemini };
+  dom.window.eval(source.replace(/\}\)\(\);\s*$/, 'window.bridgeTest = { ChatGPT, Gemini, waitForReplyComplete }; })();'));
+  return { dom, chat: dom.window.bridgeTest.ChatGPT, gemini: dom.window.bridgeTest.Gemini,
+    waitForReplyComplete: dom.window.bridgeTest.waitForReplyComplete };
 }
 
 test('latest agent turn is read even when older messages have role attributes', () => {
@@ -125,3 +126,85 @@ test('Gemini refuses to send if temporary mode cannot be verified', async () => 
     assert.equal(dom.window.document.querySelector('[contenteditable]').textContent, 'Existing draft');
   } finally { dom.window.close(); }
 });
+
+function visible(button) {
+  Object.defineProperty(button, 'offsetWidth', { value: 20 });
+}
+
+for (const platform of ['chatgpt', 'gemini']) {
+  test(`${platform}: old answer actions cannot finish the current streaming answer`, () => {
+    const old = platform === 'chatgpt'
+      ? '<article data-turn="assistant"><div data-markdown-text-style="assistant-message">Old</div><button aria-label="Copy response"></button></article>'
+      : '<model-response><message-content>Old</message-content><button aria-label="Copy response"></button></model-response>';
+    const current = platform === 'chatgpt'
+      ? '<article data-turn="assistant" id="current"><div data-markdown-text-style="assistant-message">Partial</div><button hidden aria-label="Copy response"></button></article>'
+      : '<model-response id="current"><message-content>Partial</message-content><button hidden aria-label="Copy response"></button></model-response>';
+    const { dom, chat, gemini } = load(old + current);
+    const api = platform === 'chatgpt' ? chat : gemini;
+    try {
+      const turn = dom.window.document.querySelector('#current');
+      dom.window.document.querySelectorAll('button').forEach(visible);
+      assert.equal(api.isReplyComplete(), false);
+      turn.querySelector('button').hidden = false;
+      turn.setAttribute('aria-busy', 'true');
+      assert.equal(api.isReplyComplete(), false);
+      turn.setAttribute('aria-busy', 'false');
+      assert.equal(api.isReplyComplete(), true);
+    } finally { dom.window.close(); }
+  });
+}
+
+test('ChatGPT confirms submission through the new user-message DOM', async () => {
+  const { dom, chat } = load('<form><div id="prompt-textarea" contenteditable="true">Prompt</div><button id="composer-submit-button"></button></form>');
+  try {
+    const button = dom.window.document.querySelector('button');
+    visible(button);
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      const user = dom.window.document.createElement('div');
+      user.setAttribute('data-markdown-text-style', 'user-message');
+      user.textContent = 'Prompt';
+      dom.window.document.body.append(user);
+    });
+    await chat.submitPrompt(dom.window.document.querySelector('#prompt-textarea'));
+  } finally { dom.window.close(); }
+});
+
+test('Gemini reads all content from the latest response turn, not a nested last block', () => {
+  const { dom, gemini } = load('<model-response><message-content><p>Old</p></message-content></model-response><model-response><message-content><p>1. First</p></message-content><message-content><p>2. Second</p></message-content></model-response>');
+  try {
+    assert.equal(gemini.getResponses().length, 2);
+    assert.equal(gemini.getResponseText(gemini.latestReply()), '1. First\n\n2. Second');
+  } finally { dom.window.close(); }
+});
+
+for (const platform of ['chatgpt', 'gemini']) {
+  test(`${platform}: DOM completion attributes finish the wait without a stability delay`, async () => {
+    const html = platform === 'chatgpt'
+      ? '<article data-turn="assistant" aria-busy="true"><div data-markdown-text-style="assistant-message"><p>1. Answer</p></div><button hidden aria-label="Copy response"></button></article>'
+      : '<model-response aria-busy="true"><message-content><p>1. Answer</p></message-content><button hidden aria-label="Copy response"></button></model-response>';
+    const { dom, chat, gemini, waitForReplyComplete } = load(html);
+    const api = platform === 'chatgpt' ? chat : gemini;
+    try {
+      const turn = dom.window.document.querySelector('[aria-busy]');
+      const button = turn.querySelector('button');
+      visible(button);
+      let settled = false;
+      const result = waitForReplyComplete({
+        getCount: () => 1, initialCount: 0,
+        getLatestNode: () => api.latestReply(),
+        getLatestText: () => platform === 'chatgpt'
+          ? chat.getAssistantText(api.latestReply()) : gemini.getResponseText(api.latestReply()),
+        isComplete: () => api.isReplyComplete(), isGenerating: () => api.isGenerating()
+      });
+      result.then(() => { settled = true; });
+      button.hidden = false;
+      await new Promise(resolve => dom.window.queueMicrotask(resolve));
+      assert.equal(settled, false);
+      turn.setAttribute('aria-busy', 'false');
+      // Only flush DOM mutation observers/microtasks, without advancing a timer.
+      await new Promise(resolve => dom.window.queueMicrotask(resolve));
+      assert.equal(await result, '1. Answer');
+    } finally { dom.window.close(); }
+  });
+}

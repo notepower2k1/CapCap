@@ -82,7 +82,7 @@ test('reads a new reply when the message container count stays unchanged', async
   const env = setup();
   const reply = env.waitForReplyComplete({
     getCount: () => 1, initialCount: 1, initialText: 'Old reply',
-    getLatestText: () => 'Character A calls B anh.', isGenerating: () => false
+    getLatestText: () => 'Character A calls B anh.', isGenerating: () => false, isComplete: () => true
   });
   env.tick(1600);
   assert.equal(await reply, 'Character A calls B anh.');
@@ -92,11 +92,11 @@ test('does not mistake the previous reply for new character analysis', async () 
   const env = setup();
   const reply = env.waitForReplyComplete({
     getCount: () => 1, initialCount: 1, initialText: 'Old reply',
-    getLatestText: () => 'Old reply', isGenerating: () => false
+    getLatestText: () => 'Old reply', isGenerating: () => false, isComplete: () => true
   });
   env.tick(1600);
-  env.tick(180001);
-  await assert.rejects(reply, /Timeout 180s/);
+  env.tick(600001);
+  await assert.rejects(reply, /Timeout 600s/);
 });
 
 test('waits until generation stops before returning character analysis', async () => {
@@ -105,7 +105,7 @@ test('waits until generation stops before returning character analysis', async (
   let settled = false;
   const reply = env.waitForReplyComplete({
     getCount: () => 1, initialCount: 0,
-    getLatestText: () => 'Character rules', isGenerating: () => generating
+    getLatestText: () => 'Character rules', isGenerating: () => generating, isComplete: () => true
   });
   reply.then(() => { settled = true; });
   env.tick(2000);
@@ -130,4 +130,33 @@ test('reports DOM extraction exceptions instead of waiting forever', async () =>
     getLatestText() { throw new Error('detached response'); },
     isGenerating: () => false
   }), /Cannot read AI reply: detached response/);
+});
+
+test('a long streaming pause never accepts output without completion UI', async () => {
+  const env = setup();
+  let complete = false;
+  let text = '1. Partial';
+  let settled = false;
+  const reply = env.waitForReplyComplete({
+    getCount: () => 1, initialCount: 0, getLatestText: () => text,
+    isGenerating: () => false, isComplete: () => complete
+  });
+  reply.then(() => { settled = true; });
+  env.tick(200000);
+  await Promise.resolve();
+  assert.equal(settled, false);
+  text = '1. Complete\n2. Second line';
+  complete = true;
+  env.tick(1);
+  assert.equal(await reply, text);
+});
+
+test('missing completion UI times out instead of returning partial subtitles', async () => {
+  const env = setup();
+  const reply = env.waitForReplyComplete({
+    getCount: () => 1, initialCount: 0, getLatestText: () => '1. Partial',
+    isGenerating: () => false
+  });
+  env.tick(600001);
+  await assert.rejects(reply, /Timeout 600s/);
 });

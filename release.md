@@ -29,6 +29,7 @@
 
 ## 🛠️ 3. Sửa lỗi quan trọng
 
+- **Nhận phản hồi GPT/Gemini khi AI mới tạm ngừng sinh chữ**: Bỏ điều kiện đứng yên 1,5 giây; yêu cầu dấu hiệu hoàn tất trong đúng lượt trả lời mới nhất và không còn trạng thái streaming. Gemini đọc toàn bộ khối trả lời; GPT xác nhận gửi theo cả DOM tin nhắn mới và thay đổi editor, tránh phụ thuộc duy nhất vào selector cũ. Timeout chỉ báo lỗi, không nhận bản dịch dở dang.
 - **Một batch AI lỗi làm dịch lại toàn bộ bằng Google Translate**: Giữ các batch AI đã hoàn thành hợp lệ, chỉ fallback những câu còn thiếu và giữ đúng vị trí, provider, tiến độ. Áp dụng cho dịch tuần tự, song song và các batch phục hồi sau khi dịch toàn ngữ cảnh thất bại; hủy tác vụ không kích hoạt fallback.
 - **Logo và mask biến mất khi mở menu “Thêm”**: Giữ các lớp preview hiển thị khi mở menu hoặc menu con của editor, đặt menu lên trên lớp phủ. Hộp thoại modal và chuyển sang cửa sổ khác vẫn tạm ẩn overlay như trước.
 - **Ô kiểm tra xưng hô vẫn được tích khi tắt tự động phát hiện ngữ cảnh**: Tự bỏ chọn bước kiểm tra trước khi vô hiệu hóa; khi bật lại tự động phát hiện, người dùng có thể chọn lại bước kiểm tra.

@@ -34,6 +34,29 @@
   // Helper: Sleep
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  function isVisibleElement(el) {
+    return !!el && !el.closest('[hidden], [aria-hidden="true"]') &&
+      (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
+  }
+
+  const STREAMING_SELECTOR = '[aria-busy="true"], [data-is-streaming="true"], [data-message-status="in_progress"], .result-streaming, .streaming';
+  const REPLY_ACTION_SELECTOR = [
+    'button[data-testid="copy-turn-action-button"]', 'button[data-test-id="copy-button"]',
+    'button[data-testid="good-response-turn-action-button"]',
+    'button[aria-label*="Copy" i]', 'button[aria-label*="Sao chép" i]',
+    'button[aria-label*="Good response" i]', 'button[aria-label*="Bad response" i]',
+    'button[aria-label*="Read aloud" i]', 'button[aria-label*="Đọc to" i]',
+    'button[aria-label*="Phản hồi hay" i]', 'button[aria-label*="Phản hồi không hay" i]'
+  ].join(', ');
+
+  // Only inspect the latest answer's own turn. Never use controls belonging to
+  // an earlier answer as proof that the current answer has finished.
+  function replyHasFinished(reply, turn) {
+    if (!reply || !turn || reply.matches(STREAMING_SELECTOR) ||
+        turn.matches(STREAMING_SELECTOR) || turn.querySelector(STREAMING_SELECTOR)) return false;
+    return Array.from(turn.querySelectorAll(REPLY_ACTION_SELECTOR)).some(isVisibleElement);
+  }
+
   // Helper: Escape HTML
   function escapeHtml(str) {
     return str
@@ -237,14 +260,15 @@
   }
 
   /**
-   * Shared helper: Wait for AI response to finish generating and stabilize.
-   * Uses time-based stability (unchanged text for >= 1500ms while !isGenerating)
-   * and dual polling (MutationObserver + 500ms fallback interval) to remain robust
-   * against browser timer throttling in background/unfocused windows.
+   * Wait for a new answer AND positive completion UI on that answer's turn.
+   * Timeouts only reject: elapsed time or a pause in text never means success.
    */
   async function waitForReplyComplete({
     getLatestText,
     isGenerating,
+    isComplete,
+    getLatestNode,
+    initialNode = null,
     getCount,
     initialCount,
     initialText = "",
@@ -252,12 +276,8 @@
     platform = "ai"
   }) {
     const startTime = Date.now();
-    let lastChangeAt = Date.now();
-    let previousText = "";
     let lastProgressReportAt = 0;
-    const INACTIVITY_TIMEOUT_MS = 180000; // 3 minutes without change
     const MAX_TOTAL_TIMEOUT_MS = 600000;  // 10 minutes max total
-    const STABILITY_DURATION_MS = 1500;
 
     let observer = null;
     let timerId = null;
@@ -290,22 +310,20 @@
 
           const now = Date.now();
 
-          // 1. Timeout checks: fail only if inactive for 180s or total time exceeds 600s
+          // Safeguard against a broken page. This never accepts partial output.
           if (now - startTime > MAX_TOTAL_TIMEOUT_MS) {
             done(reject, new Error(`Quá thời gian chờ phản hồi từ ${platformName} (Timeout 600s).`));
             return;
           }
-          if (now - lastChangeAt > INACTIVITY_TIMEOUT_MS) {
-            done(reject, new Error(`Quá thời gian chờ phản hồi từ ${platformName} (Timeout 180s).`));
-            return;
-          }
 
           // 2. Generation & stability checks
-          let count, text, generating;
+          let count, text, generating, complete, node;
           try {
             count = getCount ? getCount() : 0;
             text = (getLatestText ? getLatestText() : "") || "";
             generating = isGenerating ? isGenerating() : false;
+            complete = isComplete ? isComplete() : false;
+            node = getLatestNode ? getLatestNode() : null;
           } catch (error) {
             // Exceptions inside an observer/timer otherwise leave this promise
             // pending forever, with no error returned to the desktop.
@@ -325,14 +343,8 @@
 
           // SPA renderers can replace/reuse a message container without
           // increasing its count. Compare with the response BEFORE sending.
-          if (count > initialCount || (text.trim() && text !== initialText)) {
-            if (text !== previousText) {
-              previousText = text;
-              lastChangeAt = now;
-            }
-
-            // Complete when not generating, text non-empty, and text unchanged for >= 1500ms
-            if (!generating && text.trim().length > 0 && (now - lastChangeAt >= STABILITY_DURATION_MS)) {
+          if (count > initialCount || (node && node !== initialNode) || (text.trim() && text !== initialText)) {
+            if (!generating && complete && text.trim().length > 0) {
               console.log(`[CapCap Content] ${platformName} response received successfully (length: ${text.length})`);
               reportProgress("reply_received", {
                 platform,
@@ -353,7 +365,9 @@
             observer.observe(document.body, {
               childList: true,
               subtree: true,
-              characterData: true
+              characterData: true,
+              attributes: true,
+              attributeFilter: ['class', 'aria-busy', 'aria-hidden', 'hidden', 'disabled', 'data-is-streaming', 'data-message-status']
             });
           } catch (e) {
             console.warn("[CapCap Content] Failed to attach MutationObserver:", e);
@@ -400,6 +414,7 @@
     ],
 
     stopButtonSelectors: [
+      'button[data-testid="composer-stop-button"]',
       'button[data-testid="stop-button"]',
       'button[aria-label*="Stop" i]',
       'button[aria-label*="Dừng" i]'
@@ -416,8 +431,7 @@
 
     isGenerating() {
       for (const sel of this.stopButtonSelectors) {
-        const btn = document.querySelector(sel);
-        if (btn && (btn.offsetWidth > 0 || btn.offsetHeight > 0)) {
+        if (Array.from(document.querySelectorAll(sel)).some(isVisibleElement)) {
           return true;
         }
       }
@@ -447,10 +461,24 @@
       return text || extractTextWithListNumbers(el);
     },
 
+    latestReply() {
+      return Array.from(this.getAssistantMessages()).at(-1) || null;
+    },
+
+    isReplyComplete() {
+      const reply = this.latestReply();
+      const turn = reply?.closest('article, [data-turn="assistant"], .agent-turn') ||
+        reply?.closest('[data-chatgpt-selection-message-id]') || reply;
+      return replyHasFinished(reply, turn);
+    },
+
     async submitPrompt(composer) {
-      const userCount = () => document.querySelectorAll('[data-message-author-role="user"]').length;
+      const userCount = () => document.querySelectorAll('[data-message-author-role="user"], [data-markdown-text-style="user-message"], [data-turn="user"]').length;
       const initialUserCount = userCount();
       const initialAssistantCount = this.getAssistantMessages().length;
+      const initialReply = this.latestReply();
+      const initialReplyText = this.getAssistantText(initialReply);
+      const draft = (composer.value || composer.innerText || "").trim();
       const readyDeadline = Date.now() + 15000;
       let button = null;
       while (Date.now() < readyDeadline) {
@@ -471,11 +499,15 @@
       button.click();
       // A click is not proof of submission. Wait for the page to accept the
       // message; never retry a click here, which could submit a duplicate.
-      const acceptedDeadline = Date.now() + 10000;
+      const acceptedDeadline = Date.now() + 60000;
       while (Date.now() < acceptedDeadline) {
         if (abortRequested) throw new Error("ChatGPT submission canceled by CapCap.");
+        const reply = this.latestReply();
+        const currentDraft = document.querySelector('#prompt-textarea') || composer;
         if (userCount() > initialUserCount || this.isGenerating() ||
-            this.getAssistantMessages().length > initialAssistantCount) return;
+            this.getAssistantMessages().length > initialAssistantCount ||
+            (reply && (reply !== initialReply || this.getAssistantText(reply) !== initialReplyText)) ||
+            (draft && !(currentDraft.value || currentDraft.innerText || "").trim())) return;
         await sleep(200);
       }
       throw new Error("ChatGPT did not accept the prompt after clicking Send. Check the chat window and try again.");
@@ -523,13 +555,13 @@
 
       console.log("[CapCap Content] ChatGPT prompt submitted, waiting for response...");
 
-      // Allow a brief moment for the request to register
-      await sleep(1000);
-
       return await waitForReplyComplete({
         getCount: () => this.getAssistantMessages().length,
         initialCount: initialAssistantCount,
         initialText: initialAssistantText,
+        initialNode: initialMessages[initialMessages.length - 1] || null,
+        getLatestNode: () => this.latestReply(),
+        isComplete: () => this.isReplyComplete(),
         getLatestText: () => {
           const msgs = this.getAssistantMessages();
           return msgs.length > 0 ? this.getAssistantText(msgs[msgs.length - 1]) : "";
@@ -582,8 +614,7 @@
 
     isGenerating() {
       for (const sel of this.stopButtonSelectors) {
-        const btn = document.querySelector(sel);
-        if (btn && (btn.offsetWidth > 0 || btn.offsetHeight > 0)) {
+        if (Array.from(document.querySelectorAll(sel)).some(isVisibleElement)) {
           return true;
         }
       }
@@ -591,12 +622,24 @@
     },
 
     getResponses() {
-      return document.querySelectorAll("message-content, model-response, .model-response-text");
+      const turns = document.querySelectorAll('model-response');
+      if (turns.length) return turns;
+      const responses = Array.from(document.querySelectorAll('message-content, .model-response-text, div[data-test-id="model-response"]'));
+      return responses.filter(el => !responses.some(other => other !== el && other.contains(el)));
     },
 
     getResponseText(el) {
       if (!el) return "";
       return extractTextWithListNumbers(el);
+    },
+
+    latestReply() {
+      return Array.from(this.getResponses()).at(-1) || null;
+    },
+
+    isReplyComplete() {
+      const reply = this.latestReply();
+      return replyHasFinished(reply, reply?.closest('model-response') || reply);
     },
 
     temporaryChatButtons() {
@@ -728,13 +771,13 @@
 
       console.log("[CapCap Content] Gemini prompt submitted, waiting for response...");
 
-      // Allow a brief moment for the request to register
-      await sleep(1000);
-
       return await waitForReplyComplete({
         getCount: () => this.getResponses().length,
         initialCount: initialResponseCount,
         initialText: initialResponseText,
+        initialNode: initialResponses[initialResponses.length - 1] || null,
+        getLatestNode: () => this.latestReply(),
+        isComplete: () => this.isReplyComplete(),
         getLatestText: () => {
           const resps = this.getResponses();
           return resps.length > 0 ? this.getResponseText(resps[resps.length - 1]) : "";
