@@ -8,9 +8,9 @@ function load(html) {
   const dom = new JSDOM(html, { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
   dom.window.chrome = { runtime: { onMessage: { addListener() {} } } };
   const source = fs.readFileSync(path.join(__dirname, '../content.js'), 'utf8');
-  dom.window.eval(source.replace(/\}\)\(\);\s*$/, 'window.bridgeTest = { ChatGPT, Gemini, waitForReplyComplete }; })();'));
+  dom.window.eval(source.replace(/\}\)\(\);\s*$/, 'window.bridgeTest = { ChatGPT, Gemini, waitForReplyComplete, startFreshChat }; })();'));
   return { dom, chat: dom.window.bridgeTest.ChatGPT, gemini: dom.window.bridgeTest.Gemini,
-    waitForReplyComplete: dom.window.bridgeTest.waitForReplyComplete };
+    waitForReplyComplete: dom.window.bridgeTest.waitForReplyComplete, startFreshChat: dom.window.bridgeTest.startFreshChat };
 }
 
 test('latest agent turn is read even when older messages have role attributes', () => {
@@ -235,3 +235,33 @@ for (const platform of ['chatgpt', 'gemini']) {
     } finally { dom.window.close(); }
   });
 }
+
+for (const platform of ['chatgpt', 'gemini']) {
+  test(`${platform}: fresh-chat setup clears the old conversation before accepting a new batch`, async () => {
+    const old = platform === 'chatgpt'
+      ? '<div data-markdown-text-style="user-message">Old prompt</div><div data-markdown-text-style="assistant-message">Old reply</div>'
+      : '<user-query>Old prompt</user-query><model-response>Old reply</model-response>';
+    const composer = platform === 'chatgpt' ? '<div id="prompt-textarea" contenteditable="true"></div>' : '<rich-textarea><div class="ql-editor" contenteditable="true"></div></rich-textarea>';
+    const { dom, startFreshChat } = load(`<main>${old}</main><button aria-label="New chat"></button>${composer}`);
+    try {
+      if (platform === 'chatgpt') dom.window.history.replaceState({}, '', '/?temporary-chat=true');
+      dom.window.document.querySelectorAll('button, [contenteditable]').forEach(visible);
+      dom.window.document.querySelector('button').addEventListener('click', () => {
+        dom.window.document.querySelector('main').innerHTML = platform === 'gemini' ? '<chat-window class="is-temporary-chat"></chat-window>' : '';
+      });
+      await startFreshChat(platform, true);
+      assert.equal(dom.window.document.querySelector('main').textContent, '');
+    } finally { dom.window.close(); }
+  });
+}
+
+test('fresh-chat setup refuses an unchanged old conversation', async () => {
+  const { dom, startFreshChat } = load('<main><div data-markdown-text-style="assistant-message">Old answer</div></main><button aria-label="New chat"></button><div id="prompt-textarea" contenteditable="true"></div>');
+  try {
+    dom.window.document.querySelectorAll('button, [contenteditable]').forEach(visible);
+    let now = 0;
+    dom.window.Date.now = () => (now += 1000);
+    dom.window.setTimeout = fn => { queueMicrotask(fn); return 1; };
+    await assert.rejects(startFreshChat('chatgpt', false), /Cannot verify empty chat/);
+  } finally { dom.window.close(); }
+});

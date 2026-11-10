@@ -113,6 +113,7 @@ def probe_stage(server, platform, workers, cues, deadline_seconds, output_dir):
         stopping.set()
         provider.cancel_pending()
         pool.shutdown(wait=True, cancel_futures=True)
+        provider.finish_session()
 
     with server._lock:
         dispatched = [
@@ -181,6 +182,10 @@ def main():
     finally:
         # Let the extension receive cancellation IDs and close its own tabs.
         time.sleep(4)
+        drain_deadline = time.monotonic() + 12
+        while server.get_status()["pending_tasks"] and time.monotonic() < drain_deadline:
+            time.sleep(0.2)
+        time.sleep(1)
         server.stop()
         (args.output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 

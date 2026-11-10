@@ -618,6 +618,7 @@ class BrowserBridgePolisherProvider:
         self._pending_task_ids = set()
         self._parallel_completed_cues = 0
         self._parallel_stopping = False
+        self._worker_sessions = {}
         self._bridge_server = bridge_server
 
     def _get_server(self) -> BrowserBridgeServer | RemoteBridgeClient:
@@ -632,6 +633,14 @@ class BrowserBridgePolisherProvider:
     def finish_session(self):
         self.cancel_pending()
         server = self._get_server()
+        with self._pending_lock:
+            worker_sessions = list(self._worker_sessions.values())
+            self._worker_sessions.clear()
+        for session_id in worker_sessions:
+            server.enqueue_fire_and_forget_task({
+                "type": "cleanup_session", "platform": self.platform,
+                "session_id": session_id, "close_owned": True,
+            })
         if self.temporary_chat:
             server.enqueue_fire_and_forget_task({
                 "type": "cleanup_session",
@@ -693,13 +702,20 @@ class BrowserBridgePolisherProvider:
         with self._pending_lock:
             if self.parallel_batches and operation == "batch" and self._parallel_stopping:
                 raise TranslationProviderError("Parallel browser translation was stopped.")
+            pooled = self.parallel_batches and operation == "batch"
+            session_id = self._session_id
+            if pooled:
+                worker_id = threading.get_ident()
+                session_id = self._worker_sessions.setdefault(worker_id, f"worker-{uuid.uuid4().hex}")
             task_id, event = server.enqueue_task(
                 task_type="translate",
                 payload={
                     "platform": self.platform,
                     "temporary_chat": self.temporary_chat,
-                    "session_id": f"batch-{uuid.uuid4().hex}" if self.parallel_batches and operation == "batch" else self._session_id,
-                    "isolated": self.parallel_batches and operation == "batch",
+                    "session_id": session_id,
+                    "isolated": pooled,
+                    "keep_open": pooled,
+                    "new_chat": pooled,
                     "prompt": prompt,
                     "operation": operation,
                 },

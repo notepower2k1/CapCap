@@ -20,6 +20,7 @@ const contextSessions = {};
 let isPolling = false;
 const activeTasks = new Map();
 const MAX_ACTIVE_TASKS = 4;
+const closedSessions = new Set();
 let pollTimerId = null;
 
 // Heartbeat lock and state
@@ -127,6 +128,10 @@ function waitForTabLoad(tabId, timeoutMs = TAB_LOAD_TIMEOUT_MS) {
       }
       reject(new Error(`Timeout waiting for tab ${tabId} to load`));
     }, timeoutMs);
+    // The tab can finish before onUpdated was registered (especially on reuse).
+    chrome.tabs.get(tabId).then(tab => {
+      if (tab?.status === "complete") listener(tabId, { status: "complete" }, tab);
+    }).catch(() => {});
   });
 }
 
@@ -377,6 +382,7 @@ async function heartbeatCycle() {
  * Handle a received task from CapCap
  */
 async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
+  let retainSession = false;
   console.log(`[CapCap Bridge] Handling task: id=${task.id}, type=${task.type}, platform=${task.platform}`);
 
   try {
@@ -509,6 +515,17 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
 
     if (task.type === "cleanup_session") {
       const sessionId = task.session_id;
+      if (task.close_owned) {
+        closedSessions.add(sessionId);
+        // Worker sessions have unique IDs; retain only recent tombstones.
+        if (closedSessions.size > 1000) closedSessions.delete(closedSessions.values().next().value);
+        for (const execution of activeTasks.values()) {
+          if (execution.id !== task.id && execution.sessionId === sessionId) handleCanceledIds([execution.id]);
+        }
+        await closeIsolatedSession(sessionId);
+        await postResult(task.id, true, "cleaned");
+        return;
+      }
 
       // If dedicated window exists for this session, remove window and skip old reset logic
       if (sessionId && sessionWindows[sessionId]) {
@@ -590,6 +607,7 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
       const DEAD_TAB_REGEX = /No tab with id|Receiving end does not exist|tab was closed|Cannot access/i;
 
       const runTranslate = async () => {
+        if (currentTask.canceled || closedSessions.has(sessionId)) throw new Error("Task canceled before submission");
         const context = contextSessions[task.platform];
         // Claim synchronously before chrome.tabs.get yields, so two workers
         // cannot take over the same analysis conversation.
@@ -621,7 +639,27 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
         if (currentTask && currentTask.id === task.id) {
           currentTask.tabId = tabId;
         }
-        if (currentTask.canceled) throw new Error("Task canceled before submission");
+        if (currentTask.canceled || closedSessions.has(sessionId)) throw new Error("Task canceled before submission");
+
+        if (task.new_chat) {
+          let fresh = await sendMessageWithInjection(tabId, {
+            action: "CAPCAP_NEW_CHAT", platform: task.platform, temporary_chat: temporaryChat
+          });
+          if (!fresh?.success) {
+            // If the site's New chat control changed, navigate in the SAME tab.
+            // A verified empty chat is required before sending any prompt.
+            const url = task.platform === "chatgpt"
+              ? (temporaryChat ? "https://chatgpt.com/?temporary-chat=true" : "https://chatgpt.com/")
+              : "https://gemini.google.com/app";
+            await chrome.tabs.update(tabId, { url });
+            await waitForTabLoad(tabId);
+            fresh = await sendMessageWithInjection(tabId, {
+              action: "CAPCAP_NEW_CHAT", platform: task.platform, temporary_chat: temporaryChat
+            });
+          }
+          if (!fresh?.success) throw new Error(fresh?.error || "Cannot verify a fresh chat. No prompt was sent.");
+          if (currentTask.canceled || closedSessions.has(sessionId)) throw new Error("Task canceled before submission");
+        }
 
         const resp = await sendMessageWithInjection(tabId, {
           action: "CAPCAP_TRANSLATE",
@@ -658,6 +696,7 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
       }
 
       if (currentTask.canceled) return;
+      retainSession = !!task.keep_open && !!response.success;
       if (response.success && task.operation === "context") {
         contextSessions[task.platform] = { sessionId, temporaryChat };
       } else if (task.operation !== "context") {
@@ -673,7 +712,9 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
     console.error(`[CapCap Bridge] Error executing task ${task.id}:`, err);
     if (!currentTask.canceled) await postResult(task.id, false, "", err.message || String(err));
   } finally {
-    if (task.isolated) await closeIsolatedSession(task.session_id);
+    if (task.isolated && (!retainSession || currentTask.canceled || closedSessions.has(task.session_id))) {
+      await closeIsolatedSession(task.session_id);
+    }
   }
 }
 
@@ -689,7 +730,7 @@ async function closeIsolatedSession(sessionId) {
 }
 
 async function executeTask(task) {
-  const execution = { id: task.id, tabId: null, canceled: false, cancel: null };
+  const execution = { id: task.id, sessionId: task.session_id, tabId: null, canceled: false, cancel: null };
   activeTasks.set(task.id, execution);
   let timer;
   const canceled = new Promise((_, reject) => { execution.cancel = reject; });

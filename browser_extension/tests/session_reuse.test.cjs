@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedFirstTab = false } = {}) {
+function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedFirstTab = false, failNewChat = false } = {}) {
   const tabs = new Map();
   const sentTo = [];
   const closedWindows = [];
@@ -12,6 +12,7 @@ function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedF
   const replies = new Map();
   const results = [];
   const aborted = [];
+  const freshChats = [];
   const stored = {};
   let messageListener;
   let created = 0;
@@ -45,6 +46,10 @@ function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedF
         },
         remove: async id => { closedTabs.push(id); tabs.delete(id); },
         sendMessage: async (id, message) => {
+          if (message.action === 'CAPCAP_NEW_CHAT') {
+            freshChats.push(id);
+            return { success: !failNewChat, error: failNewChat ? 'Cannot verify fresh chat' : '' };
+          }
           if (message.action === 'CAPCAP_ABORT') aborted.push(id);
           if (message.action === 'CAPCAP_TRANSLATE') {
             if (disconnectedFirstTab && id === 1) throw Error('Receiving end does not exist');
@@ -78,7 +83,7 @@ function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedF
     id, type: 'translate', session_id: id, operation, platform, temporary_chat: true, prompt: 'Test'
   });
   return {
-    task, tabs, sentTo, closedWindows, closedTabs, replies, results, aborted, stored,
+    task, tabs, sentTo, closedWindows, closedTabs, replies, results, aborted, stored, freshChats,
     created: () => created, ...context.bridgeTest,
     progress: id => messageListener({ type: 'CAPCAP_PROGRESS', phase: 'generating', chars: 42 }, { tab: { id } }, () => {})
   };
@@ -144,6 +149,7 @@ for (const platform of ['chatgpt', 'gemini']) {
       assert.deepEqual(env.results.map(r => [r.task_id, r.text]), [['second', 'second answer'], ['first', 'first answer']]);
       assert.equal(env.tabs.size, 1);
       assert.ok(env.tabs.has(99));
+      assert.ok(env.results.filter(row => row.task_id.startsWith('cleanup-')).every(row => row.success));
       assert.deepEqual(mode === 'window' ? env.closedWindows : env.closedTabs, [2, 1]);
     });
   }
@@ -237,4 +243,60 @@ test('diagnostics inspect assigned tabs and leave unrelated tabs alone', async (
   assert.ok(env.tabs.has(99));
   env.replies.get(1)({ success: true, text: 'answer' });
   await running;
+});
+
+for (const platform of ['chatgpt', 'gemini']) {
+  for (const mode of ['window', 'foreground']) {
+    test(`${platform}/${mode}: four workers reuse windows over three waves with fresh chats`, async () => {
+      const env = setup({ mode, holdReplies: true });
+      env.tabs.set(99, { id: 99, url: 'https://chatgpt.com/' });
+      for (let wave = 0; wave < 3; wave++) {
+        const jobs = Array.from({length: 4}, (_, i) => env.executeTask({
+          ...batchTask(`wave-${wave}-${i}`, platform), session_id: `worker-${i}`,
+          keep_open: true, new_chat: true
+        }));
+        await flush();
+        assert.equal(env.created(), 4);
+        assert.equal(env.activeTasks.size, 4);
+        // Finish out of order. Each subsequent wave must use these same tabs.
+        for (const id of [4, 2, 1, 3]) env.replies.get(id)({ success: true, text: 'answer' });
+        await Promise.all(jobs);
+        assert.equal(env.tabs.size, 5);
+      }
+      assert.equal(env.freshChats.length, 12);
+      assert.equal(env.sentTo.length, 12);
+      assert.equal(env.closedWindows.length + env.closedTabs.length, 0);
+      for (let i = 0; i < 4; i++) await env.executeTask({
+        id: `cleanup-${i}`, type: 'cleanup_session', session_id: `worker-${i}`, close_owned: true
+      });
+      assert.equal(env.tabs.size, 1);
+      assert.ok(env.tabs.has(99));
+    });
+  }
+}
+
+test('a failed fresh-chat verification never sends the batch into old history', async () => {
+  const env = setup({ failNewChat: true });
+  await env.executeTask({ ...batchTask('first'), keep_open: true, new_chat: true });
+  assert.equal(env.created(), 1);
+  assert.equal(env.freshChats.length, 2); // UI attempt and same-tab navigation fallback.
+  assert.deepEqual(env.sentTo, []);
+  assert.equal(env.results[0].success, false);
+  assert.equal(env.tabs.size, 0);
+});
+
+test('session cleanup cancels a busy worker and prevents late reopening/submission', async () => {
+  const env = setup({ holdReplies: true });
+  const task = { ...batchTask('first'), keep_open: true, new_chat: true };
+  const running = env.executeTask(task);
+  await flush();
+  await env.executeTask({ id: 'cleanup', type: 'cleanup_session', session_id: task.session_id, close_owned: true });
+  await running;
+  env.replies.get(1)({ success: true, text: 'late' });
+  await flush();
+  assert.equal(env.tabs.size, 0);
+  assert.equal(env.results.filter(r => r.task_id === 'first' && r.success).length, 0);
+  await env.executeTask({ ...task, id: 'late-job' });
+  assert.equal(env.tabs.size, 0);
+  assert.equal(env.sentTo.length, 1);
 });

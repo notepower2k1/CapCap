@@ -804,7 +804,57 @@
   // ==========================================
   // Message Listener from Background Service
   // ==========================================
+  async function startFreshChat(platform, temporaryChat) {
+    const isGPT = platform === "chatgpt";
+    const api = isGPT ? ChatGPT : Gemini;
+    const replies = () => isGPT ? api.getAssistantMessages() : api.getResponses();
+    const userSelector = isGPT
+      ? '[data-message-author-role="user"], [data-markdown-text-style="user-message"], [data-turn="user"]'
+      : 'user-query';
+    const empty = () => replies().length === 0 && !document.querySelector(userSelector);
+    if (!empty()) {
+      const selectors = isGPT
+        ? ['button[data-testid="create-new-chat-button"]', 'a[data-testid="create-new-chat-button"]', 'button[aria-label*="New chat" i]', 'a[href="/"]', 'a[href="/?temporary-chat=true"]']
+        : ['button[aria-label*="New chat" i]', 'button[aria-label*="Cuộc trò chuyện mới" i]', 'a[href="/app"]', '.new-conversation-button'];
+      const button = selectors.flatMap(sel => [...document.querySelectorAll(sel)]).find(el =>
+        isVisibleElement(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true');
+      if (!button) throw new Error("New chat control unavailable.");
+      button.click();
+    }
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      if (abortRequested) throw new Error("Fresh chat setup canceled.");
+      const composer = api.composerSelectors.map(sel => document.querySelector(sel)).find(isVisibleElement);
+      if (empty() && composer) {
+        if (temporaryChat) {
+          if (isGPT) {
+            if (new URL(location.href).searchParams.get('temporary-chat') !== 'true') {
+              throw new Error("Temporary Chat URL must be restored before sending.");
+            }
+          } else {
+            await Gemini.ensureTemporaryChat();
+          }
+        }
+        if (empty()) return;
+      }
+      await sleep(200);
+    }
+    throw new Error("Cannot verify empty chat. No prompt was sent.");
+  }
+
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "CAPCAP_NEW_CHAT") {
+      abortRequested = false;
+      (async () => {
+        try {
+          await startFreshChat(request.platform, request.temporary_chat !== false);
+          sendResponse({ success: true });
+        } catch (error) {
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
+      return true;
+    }
     console.log("[CapCap Content] Message received:", request.action);
 
     if (request.action === "CAPCAP_ABORT") {

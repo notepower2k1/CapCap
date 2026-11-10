@@ -4,7 +4,9 @@
 
 Nếu một batch dịch lỗi, CapCap giữ các batch AI đã hoàn thành hợp lệ và chỉ dùng Google Translate cho những câu chưa có kết quả. Nội dung không đủ/sai số câu của batch lỗi không được ghép vào bản dịch. Hủy tác vụ không tự chuyển provider.
 
-Để dịch song song: trong **Cài đặt → Dịch thuật → Browser AI → Số batch chạy đồng thời**, chọn **2, 3 hoặc 4 — Song song, cuộc trò chuyện riêng**. CapCap xử lý tối đa bốn batch cùng lúc theo lựa chọn, mỗi batch dùng tab/cửa sổ riêng và tự đóng khi xong. Kết quả được ghép theo thứ tự phụ đề gốc; tiến độ đếm tổng số câu đã hoàn thành dù batch trả lời lệch thứ tự. Mặc định vẫn là **1 — Tuần tự**. Cần cập nhật cả ứng dụng và reload extension để dùng các mức mới.
+Để dịch song song: trong **Cài đặt → Dịch thuật → Browser AI → Số batch chạy đồng thời**, chọn **2, 3 hoặc 4 — Song song, cuộc trò chuyện riêng**. CapCap xử lý tối đa bốn batch cùng lúc theo lựa chọn. Mỗi luồng giữ một tab/cửa sổ để nhận các batch tiếp theo; trước mỗi batch tạo và xác nhận cuộc trò chuyện mới, bật Temporary Chat theo lựa chọn. Chỉ đóng các cửa sổ của luồng khi cả lượt dịch kết thúc hoặc bị hủy. Kết quả được ghép theo thứ tự phụ đề gốc; tiến độ đếm tổng số câu đã hoàn thành dù batch trả lời lệch thứ tự. Mặc định vẫn là **1 — Tuần tự**. Cần cập nhật cả ứng dụng và reload extension để dùng cách mới.
+
+Nếu nút tạo chat mới không hoạt động, tool điều hướng về chat mới trong chính tab đó rồi xác nhận lại trước khi gửi. Không gửi prompt vào hội thoại cũ khi bước xác nhận thất bại. Chưa benchmark tốc độ thực tế cho cách giữ cửa sổ và chưa xác nhận ảnh hưởng tới yêu cầu xác minh robot; nếu trang yêu cầu xác minh thì người dùng cần xử lý thủ công.
 
 Các batch song song nhận cùng hướng dẫn ngữ cảnh/nhân vật đã phân tích; không truyền nối tiếp lịch sử của batch trước như chế độ tuần tự. Chạy hai batch có thể giảm thời gian chờ, nhưng tốc độ còn tùy dịch vụ và giới hạn tài khoản AI. Nếu bị giới hạn yêu cầu, chuyển về một batch.
 
@@ -61,7 +63,7 @@ Browser extension for Google Chrome & Microsoft Edge connecting **CapCap Video T
    - **Gemini**: Bật và xác nhận chế độ Temporary Chat trước khi gửi prompt, giữ chung phiên cho phân tích và dịch. Nếu không xác nhận được, báo lỗi và không gửi prompt vào chat thường. Việc đóng cửa sổ/tạo chat mới chỉ là dọn giao diện, không phải xóa lịch sử. Xem [hướng dẫn Google](https://support.google.com/gemini/answer/13275745?co=GENIE.Platform%3DDesktop&hl=en).
 
 2. **🧠 Giữ ngữ cảnh thông minh (Session Context Preservation)**:
-   - Ở chế độ tuần tự mặc định, các batch phụ đề thuộc cùng một video/phiên dịch được tự động đưa vào **cùng một tab và cuộc trò chuyện**. Khi chọn 2–4 batch đồng thời, mỗi batch dùng một phiên chat riêng.
+   - Ở chế độ tuần tự mặc định, các batch phụ đề thuộc cùng một video/phiên dịch được tự động đưa vào **cùng một tab và cuộc trò chuyện**. Khi chọn 2–4 batch đồng thời, mỗi luồng giữ một tab/cửa sổ và tạo cuộc trò chuyện mới cho từng batch.
    - AI ghi nhớ ngữ cảnh các câu trước, đảm bảo đại từ xưng hô, thuật ngữ đồng nhất xuyên suốt video.
 
 3. **🪟 Chạy trong cửa sổ riêng (Mặc định)**:

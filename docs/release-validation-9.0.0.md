@@ -2,6 +2,8 @@
 
 Ngày cập nhật: 10/11/2026. Đây là ghi nhận kiểm tra mã nguồn; thay đổi dịch song song chưa được build vào installer. Release note không đồng nghĩa bộ cài đã được phát hành.
 
+Cập nhật 11/11: installer từ `be93234` đã build thành công. Bản mã nguồn sau đó bổ sung giữ cửa sổ giữa các batch song song và xác nhận chat mới trước mỗi batch; thay đổi mới này chưa build lại installer. Kiểm tra mô phỏng: 53 test extension, 41 test bridge/batch và 16 test fallback/diagnostics pass. Có kiểm tra dùng lại bốn cửa sổ qua ba đợt batch trên cả hai nền tảng/chế độ hiển thị, không gửi khi lịch sử cũ chưa được xóa, dọn các cửa sổ của luồng và bỏ phản hồi muộn. Chưa chạy benchmark thực tế cho cách giữ cửa sổ.
+
 Kiểm tra bổ sung 10/11 cho dịch song song GPT/Gemini Web:
 
 - 44 test extension pass: gồm các phiên độc lập trên cả hai nền tảng/chế độ hiển thị, giới hạn bốn tác vụ và chờ slot cho batch thứ năm, gắn tiến độ đúng tab, hủy từng tác vụ, bỏ phản hồi muộn, đóng cửa sổ cũ khi cần tạo lại tab, nhận diện nút hoàn tất bên ngoài DIL và chẩn đoán chỉ các tab thuộc tác vụ.

@@ -60,6 +60,9 @@ class TestBrowserParallelBatches(unittest.TestCase):
         self.assertEqual(self.server.get_sync_state()["completed_cues"], 1)
         third = self.pool.submit(self.batch, 3)
         third_task = self.next_task(third)
+        self.assertEqual(third_task["session_id"], second_task["session_id"])
+        self.assertTrue(third_task["keep_open"])
+        self.assertTrue(third_task["new_chat"])
         self.assertEqual(self.server.get_sync_state()["completed_cues"], 1)
         self.server.record_task_result(first_task["id"], True, text="1. first")
         self.assertEqual(first.result(timeout=3)[0], ["first"])
@@ -67,6 +70,18 @@ class TestBrowserParallelBatches(unittest.TestCase):
         self.server.record_task_result(third_task["id"], True, text="1. third")
         self.assertEqual(third.result(timeout=3)[0], ["third"])
         self.assertEqual(self.server.get_sync_state()["progress_percent"], 100)
+
+    def test_finish_closes_all_worker_sessions_even_for_saved_chats(self):
+        self.provider.temporary_chat = False
+        future = self.pool.submit(self.batch, 1)
+        task = self.next_task(future)
+        self.server.record_task_result(task["id"], True, text="1. translated")
+        future.result(timeout=3)
+        self.provider.finish_session()
+        cleanup = self.server.pop_pending_task()
+        self.assertEqual(cleanup["session_id"], task["session_id"])
+        self.assertTrue(cleanup["close_owned"])
+        self.assertEqual(cleanup["type"], "cleanup_session")
 
     def test_cancel_pending_stops_both_workers_without_retrying(self):
         futures = [self.pool.submit(self.batch, i, max_retries=2) for i in (1, 2)]

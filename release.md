@@ -4,6 +4,8 @@
 
 **Lưu ý sau cập nhật khi dùng GPT/Gemini Web:** Vào `chrome://extensions` hoặc `edge://extensions`, bấm **Reload (Tải lại)** tiện ích CapCap, rồi tải lại các tab GPT/Gemini đang mở. Nếu extension được copy sang thư mục khác, cần cập nhật các file trong thư mục đó trước khi Reload; nếu đường dẫn đã thay đổi, dùng **Load unpacked** từ thư mục mới. Cài đè cùng đường dẫn và extension đang load từ thư mục app thì không cần cài lại tiện ích từ đầu.
 
+**Cập nhật mã nguồn 11/11:** Dịch song song giữ cửa sổ theo từng luồng để nhận batch tiếp theo; tạo và xác nhận chat mới trước mỗi batch, vẫn bật Temporary Chat theo lựa chọn. Chỉ đóng các cửa sổ của luồng khi kết thúc/hủy cả lượt dịch. Nếu không tạo được chat mới bằng nút trên trang, tải lại trong chính tab đó rồi xác nhận lại. Chưa đo lại tốc độ thực tế hoặc xác nhận ảnh hưởng đến yêu cầu xác minh robot. Thay đổi này chưa có trong installer đã build từ commit `be93234`.
+
 ## 🌟 1. Tính năng mới nổi bật
 
 - **Dịch trực tiếp bằng Gemini / ChatGPT Web**: Thêm extension Chrome/Edge để dịch bằng tài khoản đã đăng nhập, không cần API key. Hỗ trợ phân tích nhân vật, góp ý xưng hô và dịch trong cùng một cửa sổ; có thể chọn dùng tab hiện tại.
