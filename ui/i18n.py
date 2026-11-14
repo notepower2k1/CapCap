@@ -23,6 +23,17 @@ _current_language: str | None = None
 # the catalog can be extended without changing callers.  Technical product
 # names and values entered by the user intentionally stay in English.
 VI_TRANSLATIONS: dict[str, str] = {
+    "For Vietnamese, English and other non-Chinese audio, select the source language explicitly. Auto Detect may recognize it incorrectly.": "Với tiếng Việt, tiếng Anh và các ngôn ngữ ngoài tiếng Trung, hãy chọn rõ ngôn ngữ đầu vào. Tự động phát hiện có thể nhận dạng sai.",
+    "CapCut connection:": "Kết nối CapCut:",
+    "CapCut Web (default)": "CapCut Web (mặc định)",
+    "CapCut PC (background, experimental)": "CapCut PC (chạy nền, thử nghiệm)",
+    "Shared with CapCut TTS. The PC installation folder can be set in the CapCut tab.": "Dùng chung với CapCut TTS. Có thể chọn thư mục cài bản PC trong tab CapCut.",
+    "Applies to both STT and TTS. Web uses the current API. PC uses an installed CapCut in the background without opening its interface. Both modes require internet access.": "Áp dụng cho STT và TTS. Web dùng API hiện tại. PC dùng CapCut đã cài để chạy nền, không mở giao diện. Cả hai chế độ đều cần internet.",
+    "CapCut PC folder (optional):": "Thư mục CapCut PC (tùy chọn):",
+    "Automatically detect the installed CapCut": "Tự tìm CapCut đã cài trên máy",
+    "CapCut PC detected: {path}": "Đã tìm thấy CapCut PC: {path}",
+    "CapCut PC was not found. Install CapCut PC or select its installation folder.": "Chưa tìm thấy CapCut PC. Hãy cài CapCut PC hoặc chọn thư mục cài đặt.",
+    "Select CapCut PC folder": "Chọn thư mục CapCut PC",
     "Concurrent batches:": "Số batch chạy đồng thời:",
     "1 — Sequential": "1 — Tuần tự",
     "{count} — Parallel, separate chats": "{count} — Song song, cuộc trò chuyện riêng",

@@ -1,5 +1,13 @@
 # CapCut STT timeout — feedback 14/11/2026
 
+## Runtime log bổ sung cùng ngày
+
+`temp/capcap_runtime.log` cho thấy một lỗi khác: audio 1.651,22 giây chia ba đoạn 600/600/455,22 giây. `chunk_0001` và `chunk_0002` đã nhận lần lượt 269 và 190 utterance; `chunk_0000` lỗi HTTP 504 Gateway Time-out ở **upload transfer**, trước khi submit nhận dạng. Retry cũ chỉ bao quanh submit/query nên upload không được retry.
+
+Đã bổ sung upload retry một lần sau 2 giây cho timeout, connection error và HTTP 408/429/500/502/503/504. Retry upload tạo upload mới từ file MP3 đã tách, không tách lại và không chạy lại các đoạn khác. Submit/query cũng dùng cùng phân loại HTTP tạm thời, dùng audio đã upload. HTTP 400/401/403 và lỗi API không retry. Upload thất bại lần hai báo lỗi, không chia đôi vì chưa tới bước nhận dạng. Log ghi riêng `Uploading`, `Upload failed`, chunk, attempt và HTTP status.
+
+15 test STT recovery/TTS pass, gồm hồi quy upload 504 thành công lần hai, lặp 504 thì dừng, upload 403 không retry, query 503 dùng lại upload và mô phỏng ba đoạn xác nhận chỉ upload lại đoạn đầu. Chưa gọi cloud thật hoặc build installer. Thay đổi `.gitignore` hiện có của người dùng được giữ nguyên.
+
 Log khách hàng `feedback/capcap_logs_20261113_031838.txt`: audio dài 313,93 giây, chia 2 đoạn theo cấu hình 300 giây. Kết nối cloud lúc 03:15:58, nhận kết quả 1/2 đoạn lúc 03:16:06, bước prepare thất bại lúc 03:18:02 với `CapCut STT query timed out after 120.0 seconds`.
 
 Lỗi phát sinh trong vòng poll kết quả STT sau upload/submit; không phải lỗi tách âm thanh, GPU hoặc dịch phụ đề. Không đủ dữ liệu cũ để xác định đoạn dài hay đoạn đuôi timeout: log chỉ đếm số đoạn hoàn thành, không ghi index hoặc job ID. Có thể job cloud chậm/kẹt hoặc trả kết quả rỗng; không có bằng chứng chia đoạn quá nhỏ hay bị rate limit. Bản hiện tại trong source mặc định 600 giây nhưng thiết lập 300 giây trong log có thể do cấu hình/bản cài cũ.

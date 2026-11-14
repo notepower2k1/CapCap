@@ -7,6 +7,7 @@ import concurrent.futures
 from difflib import SequenceMatcher
 import hashlib
 import json
+import math
 import os
 import platform
 import re
@@ -20,6 +21,9 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import requests
+from .transport import create_capcut_session, get_capcut_backend
+from .api import PENDING, SUCCEEDED, checked_json, check_task_failure, request_headers, request_query, task_status
+from .stt_common import normalize_language, query_common_stt
 
 from runtime_paths import bin_path, subprocess_hidden_kwargs
 try:
@@ -85,7 +89,12 @@ def _probe_duration_seconds(media_path: str) -> float:
     return 0.0
 
 
-def _build_stt_device() -> DeviceConfig:
+def _build_stt_device(language="auto") -> DeviceConfig:
+    if normalize_language(language).split("-")[0] not in {"auto", "zh"}:
+        values = dict(DEFAULT_DEVICE)
+        if get_capcut_backend() == "pc":
+            values.update(device_platform="windows", device_type="pc", device_brand="pc", channel="capcutpc_0", os_version=platform.version())
+        return _new_worker_identity(DeviceConfig.from_dict(values))
     device = {
         "aid": "3704",
         "app_name": "JianyingPro",
@@ -115,7 +124,7 @@ def _new_worker_identity(base_device: DeviceConfig) -> DeviceConfig:
     return DeviceConfig.from_dict(values)
 
 
-def _direct_upload_credentials(device: DeviceConfig, session: requests.Session) -> dict:
+def _direct_upload_credentials(device: DeviceConfig, session: requests.Session, *, common_task=False) -> dict:
     device_dict = device.to_dict()
     user_agent = JIANYING_USER_AGENT if device_dict["app_name"] == "JianyingPro" else REFERENCE_USER_AGENT
     sign_body = compact_json({"biz": "pc-recognition"})
@@ -151,23 +160,24 @@ def _direct_upload_credentials(device: DeviceConfig, session: requests.Session) 
         device_dict["tdid"],
         device_dict["pf"],
     )
+    if common_task:
+        sign_body = compact_json({"biz": "cc_pc_text_recognize", "key_version": "v5"})
+        sign_url = "https://editor-api-sg.capcutapi.com/lv/v1/upload_sign?" + urlencode(request_query(device_dict, False))
+        sign_headers = request_headers(device_dict, sign_url, sign_body)
     resp = session.post(sign_url, headers=sign_headers, data=sign_body.encode("utf-8"), timeout=60)
-    resp.raise_for_status()
-    data = resp.json()
-    if str(data.get("ret")) not in {"0", "None"}:
-        raise RuntimeError(f"CapCut upload_sign failed: {data.get('errmsg') or data.get('ret')}")
+    data = checked_json(resp, "upload_sign")
     credentials = dict(data.get("data") or {})
-    required = ("access_key_id", "secret_access_key", "session_token")
+    required = ("access_key_id", "secret_access_key", "session_token") + (("domain", "space_name") if common_task else ())
     if any(not credentials.get(key) for key in required):
         raise RuntimeError("CapCut upload_sign did not return temporary credentials")
     return {
         **credentials,
-        "domain": VOD_API_HOST,
-        "space_name": VOD_SPACE,
+        "domain": credentials["domain"] if common_task else VOD_API_HOST,
+        "space_name": credentials["space_name"] if common_task else VOD_SPACE,
     }
 
 
-def _direct_vod_upload(device: DeviceConfig, session: requests.Session, audio_path: Path, credentials: dict) -> str:
+def _direct_vod_upload(device: DeviceConfig, session: requests.Session, audio_path: Path, credentials: dict, *, common_task=False) -> str | dict:
     raw = audio_path.read_bytes()
     crc32 = f"{binascii.crc32(raw) & 0xFFFFFFFF:08x}"
 
@@ -192,7 +202,8 @@ def _direct_vod_upload(device: DeviceConfig, session: requests.Session, audio_pa
             "accept-encoding": "identity",
         }
 
-    apply_url = f"https://{VOD_API_HOST}/top/v1?{urlencode({'Action': 'ApplyUploadInner', 'SpaceName': VOD_SPACE, 'UseQuic': 'false', 'Version': '2020-11-19', 'device_platform': 'win'})}"
+    domain, space = credentials.get("domain", VOD_API_HOST), credentials.get("space_name", VOD_SPACE)
+    apply_url = f"https://{domain}/top/v1?{urlencode({'Action': 'ApplyUploadInner', 'SpaceName': space, 'UseQuic': 'false', 'Version': '2020-11-19', 'device_platform': 'win'})}"
     apply_resp = session.get(apply_url, headers=vod_headers("GET", apply_url, b""), timeout=60)
     apply_resp.raise_for_status()
     apply_data = apply_resp.json()
@@ -218,10 +229,20 @@ def _direct_vod_upload(device: DeviceConfig, session: requests.Session, audio_pa
     finish_headers.pop("X-Upload-Content-CRC32", None)
     finish_resp = session.post(finish_url, headers=finish_headers, data=finish_body, timeout=60)
     finish_resp.raise_for_status()
+    if common_task:
+        commit_url = f"https://{domain}/top/v1?" + urlencode({"Action": "CommitUploadInner", "SpaceName": space,
+                     "Version": "2020-11-19", "device_platform": "win"})
+        body = compact_json({"Functions": [{"Input": {"SnapshotTime": 0.0}, "Name": "Snapshot"}], "SessionKey": node["SessionKey"]}).encode("utf-8")
+        commit_resp = session.post(commit_url, headers=vod_headers("POST", commit_url, body), data=body, timeout=120)
+        result = checked_json(commit_resp, "STT upload commit")
+        rows = (result.get("Result") or {}).get("Results") or []
+        if not rows or not rows[0].get("Vid"):
+            raise RuntimeError("CapCut STT upload commit: no media VID")
+        return {"vid": rows[0]["Vid"], "md5": (rows[0].get("VideoMeta") or {}).get("Md5") or hashlib.md5(raw).hexdigest()}
     return store_uri
 
 
-def _direct_query(device: DeviceConfig, session: requests.Session, store_uri: str, duration_ms: int, timeout: float | None = None, poll_interval: float = 1.0) -> list[dict]:
+def _direct_query(device: DeviceConfig, session: requests.Session, store_uri: str, duration_ms: int, timeout: float | None = None, poll_interval: float = 1.0, *, language="auto") -> list[dict]:
     if timeout is None:
         timeout = min(600.0, max(120.0, duration_ms / 1000.0 * 1.5))
     device_dict = device.to_dict()
@@ -249,13 +270,15 @@ def _direct_query(device: DeviceConfig, session: requests.Session, store_uri: st
         "songs_info": [{"end_time": int(duration_ms), "id": "", "start_time": 0}],
         "words_per_line": 16,
     }
+    selected_language = normalize_language(language)
+    if selected_language != "auto":
+        submit["language"] = selected_language
     submit_text = compact_json(submit)
     submit_headers = dict(headers_base)
     submit_headers["x-ss-stub"] = make_x_ss_stub(submit_text)
     submit_url = f"{DIRECT_API_BASE}/lv/v1/audio_subtitle/submit?{urlencode(query)}"
     submit_resp = session.post(submit_url, headers=submit_headers, data=submit_text.encode("utf-8"), timeout=60)
-    submit_resp.raise_for_status()
-    submit_data = submit_resp.json()
+    submit_data = checked_json(submit_resp, "STT submit")
     query_id = ((submit_data.get("data") or {}).get("id"))
     if not query_id:
         raise RuntimeError(f"CapCut audio_subtitle submit returned no id: ret={submit_data.get('ret')}")
@@ -274,13 +297,17 @@ def _direct_query(device: DeviceConfig, session: requests.Session, store_uri: st
         if remaining <= 0:
             break
         resp = session.post(query_url, headers=query_headers, data=query_text.encode("utf-8"), timeout=min(60.0, remaining))
-        resp.raise_for_status()
-        data = resp.json()
+        data = checked_json(resp, "STT query")
         polls += 1
-        if str(data.get("ret")) not in {"0", "None"}:
-            raise RuntimeError(f"CapCut audio_subtitle query error: ret={data.get('ret')} msg={data.get('errmsg')}")
-        utterances = ((data.get("data") or {}).get("utterances")) or []
-        if utterances:
+        task = data.get("data") or {}
+        check_task_failure(task, "STT", query_id)
+        utterances = task.get("utterances")
+        if utterances is not None and (not isinstance(utterances, list) or any(not isinstance(item, dict) for item in utterances)):
+            raise RuntimeError(f"CapCut STT query: malformed utterances (job={query_id})")
+        status = task_status(task)
+        if status in SUCCEEDED or (utterances and status not in PENDING):
+            if utterances is None:
+                raise RuntimeError(f"CapCut STT query: completed task missing utterances (job={query_id})")
             print(f"[CapCut STT] Query completed job={query_id} elapsed={time.monotonic() - started:.2f}s polls={polls} utterances={len(utterances)}", flush=True)
             return utterances
         if polls == 1 or polls % 15 == 0:
@@ -291,20 +318,45 @@ def _direct_query(device: DeviceConfig, session: requests.Session, store_uri: st
     raise TimeoutError(f"CapCut STT query timed out after {timeout} seconds (job={query_id}, audio_seconds={duration_ms / 1000:.2f}, polls={polls})")
 
 
-def _recognize_chunk(audio_path, temp_dir, label, device, session, creds, start, duration, *, allow_split=True):
+def _is_transient_stt_error(exc):
+    if isinstance(exc, requests.HTTPError):
+        response = exc.response
+        return response is not None and response.status_code in {408, 429, 500, 502, 503, 504}
+    return isinstance(exc, (TimeoutError, requests.Timeout, requests.ConnectionError))
+
+
+def _recognize_chunk(audio_path, temp_dir, label, device, session, creds, start, duration, *, allow_split=True, language="auto"):
     print(f"[CapCut STT] Chunk start chunk={label} start={start:.2f}s duration={duration:.2f}s", flush=True)
     chunk_file = Path(temp_dir) / f"{label}.mp3"
     _extract_chunk_mp3(audio_path, str(chunk_file), start, duration)
-    store = _direct_vod_upload(device, session, chunk_file, creds)
+    common_task = normalize_language(language).split("-")[0] not in {"auto", "zh"}
+    for attempt in range(1, 3):
+        try:
+            print(f"[CapCut STT] Uploading chunk={label} attempt={attempt}/2 duration={duration:.2f}s", flush=True)
+            store = _direct_vod_upload(device, session, chunk_file, creds, **({"common_task": True} if common_task else {}))
+            break
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            status = response.status_code if response is not None else None
+            print(f"[CapCut STT] Upload failed chunk={label} attempt={attempt}/2 error_type={type(exc).__name__} http_status={status}", flush=True)
+            if attempt == 2 or not _is_transient_stt_error(exc):
+                raise
+            print(f"[CapCut STT] Retrying upload chunk={label} in 2s; completed chunks retained.", flush=True)
+            time.sleep(2.0)
     try:
         for attempt in range(1, 3):
             try:
                 print(f"[CapCut STT] Recognizing chunk={label} attempt={attempt}/2", flush=True)
-                utterances = _direct_query(device, session, store, int(duration * 1000))
+                if common_task:
+                    utterances = query_common_stt(device, session, store, int(duration * 1000), language)
+                else:
+                    utterances = _direct_query(device, session, store, int(duration * 1000), language=language)
                 break
-            except (TimeoutError, requests.Timeout, requests.ConnectionError) as exc:
-                print(f"[CapCut STT] Attempt failed chunk={label} attempt={attempt}/2 error_type={type(exc).__name__}", flush=True)
-                if attempt == 2:
+            except Exception as exc:
+                response = getattr(exc, "response", None)
+                status = response.status_code if response is not None else None
+                print(f"[CapCut STT] Attempt failed chunk={label} attempt={attempt}/2 error_type={type(exc).__name__} http_status={status}", flush=True)
+                if attempt == 2 or not _is_transient_stt_error(exc):
                     raise
                 print(f"[CapCut STT] Retrying chunk={label} in 2s using the uploaded audio; completed chunks retained.", flush=True)
                 time.sleep(2.0)
@@ -318,7 +370,7 @@ def _recognize_chunk(audio_path, temp_dir, label, device, session, creds, start,
         completed = []
         for index, (offset, length) in enumerate(parts):
             items = _recognize_chunk(audio_path, temp_dir, f"{label}_part{index}", device, session, creds,
-                                     start + offset, length, allow_split=False)
+                                     start + offset, length, allow_split=False, language=language)
             completed.append((index, items))
         return _merge_chunks(completed)
     except Exception as exc:
@@ -329,6 +381,8 @@ def _recognize_chunk(audio_path, temp_dir, label, device, session, creds, start,
         row = dict(item)
         row["start_time"] = int(item.get("start_time", 0)) + int(start * 1000)
         row["end_time"] = int(item.get("end_time", 0)) + int(start * 1000)
+        if "words" in item:
+            row["words"] = _word_timings(item.get("words"), offset_ms=start * 1000)
         adjusted.append(row)
     print(f"[CapCut STT] Chunk completed chunk={label} utterances={len(adjusted)}", flush=True)
     return adjusted
@@ -413,6 +467,35 @@ def _plan_silence_aware_chunks(
     return chunks
 
 
+def _word_timings(words, *, offset_ms=0, bounds=None):
+    """Copy valid service word timestamps; all values here remain milliseconds."""
+    normalized = []
+    if not isinstance(words, list):
+        return normalized
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        try:
+            start, end = float(word["start_time"]) + offset_ms, float(word["end_time"]) + offset_ms
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(start) or not math.isfinite(end) or end <= start:
+            continue
+        if bounds:
+            start, end = max(start, bounds[0]), min(end, bounds[1])
+        text = str(word.get("text") or word.get("word") or "").strip()
+        if text and end > start:
+            normalized.append(dict(word, text=text, start_time=start, end_time=end))
+    return sorted(normalized, key=lambda word: (word["start_time"], word["end_time"]))
+
+
+def _replace_transcript(target, source):
+    target["text"] = source["text"]
+    target.pop("words", None)
+    if "words" in source:
+        target["words"] = source["words"]
+
+
 def _merge_chunks(chunks: list[tuple[int, list[dict]]]) -> list[dict]:
     all_items = [item for _, items in chunks for item in items if str(item.get("text") or "").strip()]
     all_items.sort(key=lambda item: (int(item.get("start_time", 0)), int(item.get("end_time", 0))))
@@ -455,7 +538,7 @@ def _merge_chunks(chunks: list[tuple[int, list[dict]]]) -> list[dict]:
                 # Old is an incomplete fragment -> upgrade old with complete cur text
                 old["start_time"] = min(old_start, start)
                 old["end_time"] = end
-                old["text"] = text
+                _replace_transcript(old, item)
                 duplicate = True
                 break
             elif t_cur in t_old and (time_overlap > 250 or abs(old_start - start) < 1000):
@@ -469,7 +552,7 @@ def _merge_chunks(chunks: list[tuple[int, list[dict]]]) -> list[dict]:
                 if len(t_cur) > len(t_old):
                     old["start_time"] = min(old_start, start)
                     old["end_time"] = max(old_end, end)
-                    old["text"] = text
+                    _replace_transcript(old, item)
                 duplicate = True
                 break
 
@@ -479,7 +562,7 @@ def _merge_chunks(chunks: list[tuple[int, list[dict]]]) -> list[dict]:
                 if len(t_old) <= overlap_len + 1:
                     old["start_time"] = min(old_start, start)
                     old["end_time"] = end
-                    old["text"] = text
+                    _replace_transcript(old, item)
                     duplicate = True
                     break
                 else:
@@ -510,6 +593,8 @@ def _merge_chunks(chunks: list[tuple[int, list[dict]]]) -> list[dict]:
                 e = s + 120
         item["start_time"] = s
         item["end_time"] = e
+        if "words" in item:
+            item["words"] = _word_timings(item["words"], bounds=(s, e))
         normalized.append(item)
         prev_end = e
 
@@ -566,18 +651,21 @@ def transcribe_audio_capcut(
     if total_duration <= 0.0:
         total_duration = 3600.0
 
-    print("[CapCut STT] Connecting to CapCut Cloud Speech-to-Text...", flush=True)
+    backend = get_capcut_backend()
+    print(f"[CapCut STT] Connecting to CapCut Cloud Speech-to-Text (backend={backend})...", flush=True)
     _emit_progress(on_progress, 5, "CapCut STT: Connecting to cloud...", "[CapCut STT Progress] Connecting (5%)")
 
-    base_device = _build_stt_device()
-    session = requests.Session()
-    creds = _direct_upload_credentials(base_device, session)
-
+    language = normalize_language(language)
+    common_task = language.split("-")[0] not in {"auto", "zh"}
+    print(f"[CapCut STT] language={language} flow={'common_task' if common_task else 'direct'}", flush=True)
+    base_device = _build_stt_device(language)
+    session = create_capcut_session(base_device.to_dict())
     temp_dir = tempfile.mkdtemp(prefix="capcut_stt_")
     try:
+        creds = _direct_upload_credentials(base_device, session, **({"common_task": True} if common_task else {}))
         # Determine chunk plan
         if total_duration <= chunk_seconds + 5.0:
-            raw_items = _recognize_chunk(audio_path, temp_dir, "single_chunk", base_device, session, creds, 0.0, total_duration)
+            raw_items = _recognize_chunk(audio_path, temp_dir, "single_chunk", base_device, session, creds, 0.0, total_duration, language=language)
 
         else:
             # Multi-chunk parallel processing with silence-aware cut boundaries
@@ -606,10 +694,10 @@ def transcribe_audio_capcut(
 
             def _process_one_chunk(idx: int, s: float, d: float):
                 worker_device = _new_worker_identity(base_device)
-                w_session = requests.Session()
+                w_session = create_capcut_session(worker_device.to_dict())
                 try:
                     adjusted = _recognize_chunk(audio_path, temp_dir, f"chunk_{idx:04d}", worker_device,
-                                                w_session, creds, s, d)
+                                                w_session, creds, s, d, language=language)
                     for row in adjusted:
                         row["_chunk"] = idx
                     return idx, adjusted
@@ -644,11 +732,16 @@ def transcribe_audio_capcut(
             end_s = round(float(item.get("end_time", 0)) / 1000.0, 3)
             if end_s <= start_s:
                 end_s = start_s + 0.2
-            segments.append({
+            segment = {
                 "start": start_s,
                 "end": end_s,
                 "text": text,
-            })
+            }
+            words = _word_timings(item.get("words"), bounds=(start_s * 1000, end_s * 1000))
+            if words:
+                segment["words"] = [{"text": word["text"], "start": round(word["start_time"] / 1000, 3),
+                                     "end": round(word["end_time"] / 1000, 3)} for word in words]
+            segments.append(segment)
 
         log_line = f"[CapCut STT Progress] 100% completed: {len(segments)} subtitle lines"
         print(log_line, flush=True)

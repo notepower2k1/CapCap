@@ -120,7 +120,8 @@ class TestAlternateRangeTranscriptionWorker(unittest.TestCase):
         mock_engine = MagicMock()
         mock_engine_cls.return_value = mock_engine
         mock_engine.transcribe_audio_capcut.return_value = [
-            {"start": 0.5, "end": 2.0, "text": "CapCut text"},
+            {"start": 0.5, "end": 2.0, "text": "CapCut text", "words": [
+                {"text": "CapCut", "start": 0.5, "end": 1.2}, {"text": "text", "start": 1.2, "end": 2.0}]},
         ]
 
         worker = AlternateRangeTranscriptionWorker(
@@ -140,6 +141,8 @@ class TestAlternateRangeTranscriptionWorker(unittest.TestCase):
         self.assertEqual(len(results), 1)
         # Check offset by 12.0
         self.assertAlmostEqual(results[0][0][0]["start"], 12.5)
+        self.assertEqual(results[0][0][0]["words"], [{"text": "CapCut", "start": 12.5, "end": 13.2},
+                         {"text": "text", "start": 13.2, "end": 14.0}])
         self.assertAlmostEqual(results[0][0][0]["end"], 14.0)
 
 

@@ -1,5 +1,11 @@
 # RELEASE NOTES — V9.0.0
 
+**CapCut STT/TTS — cải thiện chất lượng và kiểm tra kết quả (chưa build):** Sửa STT bỏ qua ngôn ngữ đã chọn; tiếng Việt, Anh và các ngôn ngữ khác tiếng Trung dùng luồng có tham số ngôn ngữ, giữ luồng Trung/Auto hiện tại. Giữ timestamp từng từ qua chia đoạn, merge và nhận dạng một vùng. TTS kiểm tra đúng giọng/resource, nhận đủ audio mới báo thành công; lỗi API/trạng thái thất bại được báo sớm, thêm log job/poll. Tham khảo giao thức K07VN. [Chi tiết và kiểm chứng](docs/capcut-speech-quality.md).
+
+**CapCut Web / PC — tính năng mới (chưa build):** Thêm lựa chọn kết nối dùng chung cho STT/TTS trong Cài đặt → CapCut. Web giữ API hiện tại; PC dùng thư viện CapCut đã cài để chạy nền, không mở giao diện. Tự tìm phiên bản cài đặt, hỗ trợ chọn thư mục và thêm log tiến trình/API. Cả hai vẫn dùng cloud và cần internet; PC đang thử nghiệm. Chi tiết: [hướng dẫn Web / PC](docs/capcut-web-pc.md).
+
+**CapCut STT — bổ sung retry upload (chưa build):** Sửa trường hợp HTTP 504 khi upload audio chưa đi qua retry. Upload timeout/lỗi mạng/HTTP tạm thời được thử lại một lần trên đúng đoạn, không chạy lại đoạn đã hoàn tất. Thêm log upload attempt, chunk và HTTP status; lỗi xác thực không retry.
+
 **CapCut STT — mã nguồn 14/11 (chưa build):** Thời gian chờ kết quả cloud tính theo độ dài đoạn (120–600 giây); timeout/lỗi mạng tạm thời được retry một lần sau 2 giây bằng audio đã upload. Nếu vẫn timeout, chia đôi đoạn lỗi phục hồi một lần, giữ các đoạn đã hoàn tất. Thêm log từng đoạn/job, attempt, thời lượng và poll để điều tra. Lỗi xác thực/API không retry hoặc tự chia đoạn. Chi tiết trong `docs/capcut-stt-feedback-2026-11-14.md`.
 
 **Lưu ý khi dịch qua trình duyệt:** Giữ cửa sổ GPT/Gemini hiển thị và đủ lớn để thấy các nút thao tác. Không thu xuống taskbar hoặc che kín cửa sổ khi đang dịch vì có thể làm chậm gửi hoặc nhận phản hồi. Lưu ý cũng hiển thị trong Cài đặt và popup extension.

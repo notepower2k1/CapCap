@@ -227,6 +227,9 @@ class AlternateRangeTranscriptionWorker(QThread):
                 for segment in segments or []:
                     segment["start"] = float(segment.get("start", 0.0)) + self.start_time
                     segment["end"] = float(segment.get("end", 0.0)) + self.start_time
+                    for word in segment.get("words", []) or []:
+                        word["start"] = float(word.get("start", 0.0)) + self.start_time
+                        word["end"] = float(word.get("end", 0.0)) + self.start_time
             else:
                 try:
                     from asr_options import normalize_asr_options

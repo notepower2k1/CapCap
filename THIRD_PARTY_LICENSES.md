@@ -4,6 +4,8 @@ CapCap includes or can distribute third-party libraries, binaries, models, fonts
 
 ## Runtime libraries
 
+- CapCut speech request formats, voice metadata handling, and task response handling were compared with [K07VN/capcut-tts-api](https://github.com/K07VN/capcut-tts-api). CapCap implements the common-task STT protocol with its own existing transport/signing helpers; it does not install or bundle that SDK. CapCut cloud services remain subject to their own terms.
+- Optional CapCut PC integration loads `sscronet.dll` from the user's existing CapCut installation. This proprietary library is not included in CapCap's distribution and remains subject to CapCut's terms. CapCap's Python binding targets the [Chromium Cronet C API](https://github.com/chromium/chromium/blob/130.0.6723.58/components/cronet/native/cronet.idl); the headless integration approach was investigated using [capcut-tts-api-tn](https://github.com/thonguyeen/capcut-tts-api-tn). No helper binary or source from that repository is distributed.
 - [PySide6 / Qt](https://www.qt.io/licensing/)
 - [NumPy](https://github.com/numpy/numpy/blob/main/LICENSE.txt)
 - [SciPy](https://github.com/scipy/scipy/blob/main/LICENSE.txt)

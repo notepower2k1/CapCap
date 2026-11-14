@@ -217,6 +217,8 @@ def load_user_settings(gui):
     gui.bg_music_edit.setText(s.value("background_audio", gui.bg_music_edit.text()))
     gui.mixed_audio_edit.setText(s.value("mixed_audio", gui.mixed_audio_edit.text()))
     for env_k, s_k, def_v in (
+        ("CAPCUT_BACKEND", "capcut_backend", "web"),
+        ("CAPCUT_PC_PATH", "capcut_pc_path", ""),
         ("CAPCUT_STT_CHUNK_SECONDS", "capcut_stt_chunk_seconds", "600"),
         ("CAPCUT_STT_WORKERS", "capcut_stt_workers", "5"),
         ("CAPCUT_TTS_BATCH_SIZE", "capcut_tts_batch_size", "30"),

@@ -41,6 +41,7 @@
 * ⚙️ [Công nghệ sử dụng](docs/technical-stack.md)
 * 📁 [Cấu trúc dự án](docs/project-structure.md)
 * 📋 [Ghi chú phát hành (Release Notes)](release.md)
+* 🎙️ [Chọn CapCut Web / PC cho STT và TTS](docs/capcut-web-pc.md)
 
 ---
 

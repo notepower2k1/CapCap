@@ -17,6 +17,9 @@ from urllib.parse import urlencode
 
 import requests
 from requests.adapters import HTTPAdapter
+from .transport import create_capcut_session, get_capcut_backend
+from .api import (SUCCEEDED, checked_json, check_task_failure, matching_task, request_headers,
+                  request_query, task_payload, task_status)
 
 from runtime_paths import app_path, bin_path, bundle_root, subprocess_hidden_kwargs
 try:
@@ -64,7 +67,7 @@ def list_capcut_voices() -> list[dict]:
     for item in raw_list:
         v_type = item.get("voice_type")
         d_name = item.get("display_name")
-        if not v_type or not d_name:
+        if not v_type or not d_name or item.get("catalog_kind") == "digital_human_voice":
             continue
         # Exclude Microsoft Neural voices that CapCut API no longer proxies
         if "neural" in str(v_type).lower():
@@ -105,66 +108,51 @@ def list_capcut_voices() -> list[dict]:
     return result
 
 
-def _resolve_resource_id(voice_type: str) -> str:
+class CapCutVoiceError(ValueError):
+    """A voice cannot be mapped to a catalog entry with usable resource metadata."""
+
+
+def _resolve_voice(voice_type: str) -> dict:
     voices = list_capcut_voices()
     clean_type = voice_type.replace("capcut:", "").strip().lower()
-    for v in voices:
-        if v["provider_voice"].lower() == clean_type or v["id"].lower() == voice_type.lower():
-            return v.get("resource_id", "")
-    return "7252594014782755330" if "vivn" in clean_type else "7102355709945188865"
+    # Prefer service IDs, then exact display names / resource IDs. Never guess.
+    matches = [v for v in voices if v["provider_voice"].lower() == clean_type]
+    if not matches:
+        matches = [v for v in voices if clean_type in {str(v.get("resource_id", "")).lower(),
+                   v["name"].removesuffix(" (CapCut)").strip().lower()}]
+    identities = {(v["provider_voice"], str(v.get("resource_id") or "")) for v in matches}
+    if len(identities) != 1:
+        raise CapCutVoiceError(f"CapCut voice '{voice_type}' is unknown or ambiguous. Select a voice from the CapCut catalog.")
+    entry = matches[0]
+    if not str(entry.get("resource_id") or "").strip().isdigit():
+        raise CapCutVoiceError(f"CapCut voice '{voice_type}' has a missing or invalid resource_id. Update the voice catalog.")
+    return entry
+
+
+def _resolve_resource_id(voice_type: str) -> str:
+    return _resolve_voice(voice_type)["resource_id"]
 
 
 class CapCutTTSClient:
     def __init__(self, session: requests.Session | None = None):
         device_dict = dict(DEFAULT_DEVICE)
+        if get_capcut_backend() == "pc":
+            device_dict.update(device_platform="windows", device_type="pc", device_brand="pc",
+                               channel="capcutpc_0", os_version="10.0.19045")
         device_dict["device_id"] = str(secrets.randbelow(10**20)).zfill(20)
         device_dict["iid"] = str(secrets.randbelow(10**20)).zfill(20)
         device_dict["tdid"] = str(secrets.randbelow(10**20)).zfill(20)
         self.device = DeviceConfig.from_dict(device_dict).to_dict()
-        self.session = session or requests.Session()
+        self.session = session if session is not None else create_capcut_session(self.device)
         adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
 
     def _query(self, include_region=True, babi=None):
-        d = self.device
-        q = {
-            k: d[k]
-            for k in (
-                "app_name", "device_type", "os_version", "channel", "version_name",
-                "device_brand", "device_id", "iid", "version_code", "device_platform", "aid",
-            )
-        }
-        if include_region:
-            q["region"] = d["region"]
-        if babi is not None:
-            q["babi_param"] = signers.compact_json(babi)
-        return q
+        return request_query(self.device, include_region, babi)
 
     def _headers(self, url: str, body_text: str, appid: bool = True):
-        d = self.device
-        now = str(int(time.time()))
-        h = {
-            "content-type": "application/json",
-            "appvr": d["appvr"],
-            "ch": d["channel"],
-            "device-time": now,
-            "lan": d["lan"],
-            "loc": d["loc"],
-            "pf": d["pf"],
-            "sign-ver": "1",
-            "tdid": d["tdid"],
-            "x-ss-stub": signers.make_x_ss_stub(body_text),
-            "x-ss-dp": d["aid"],
-            "x-khronos": now,
-            "x-tt-trace-id": signers.make_trace_id(),
-            "user-agent": "Cronet/TTNetVersion:1d7cc3b1 2025-07-16 QuicVersion:52c2b40d 2025-04-03",
-            "accept-encoding": "gzip, deflate",
-        }
-        if appid:
-            h.update({"app-sdk-version": d["appvr"], "appid": d["aid"]})
-        h["sign"] = signers.make_sign_header(url, d["appvr"], now, d["tdid"], d["pf"])
-        return h
+        return request_headers(self.device, url, body_text, appid)
 
     def synthesize(
         self,
@@ -175,8 +163,9 @@ class CapCutTTSClient:
         poll: float = 1.0,
         is_cancelled: callable = None,
     ) -> list[dict]:
-        clean_voice = voice.replace("capcut:", "").strip()
-        resource_id = _resolve_resource_id(clean_voice)
+        voice_entry = _resolve_voice(voice)
+        clean_voice = voice_entry["provider_voice"]
+        resource_id = voice_entry["resource_id"]
         d = self.device
 
         babi = {
@@ -222,13 +211,10 @@ class CapCutTTSClient:
         if is_cancelled and is_cancelled():
             return []
         resp = self.session.post(url, headers=self._headers(url, body_text, True), data=body_text.encode("utf-8"), timeout=60)
-        resp.raise_for_status()
-        created = resp.json()
-        if str(created.get("ret")) not in {"0", "None"}:
-            raise RuntimeError(f"CapCut TTS create failed: ret={created.get('ret')} msg={created.get('errmsg')}")
+        created = checked_json(resp, "TTS create")
 
         tasks = (created.get("data") or {}).get("tasks") or []
-        if not tasks:
+        if not isinstance(tasks, list) or not tasks or not isinstance(tasks[0], dict):
             raise RuntimeError("CapCut TTS returned no task")
         task_id, token = tasks[0].get("id"), tasks[0].get("token")
         if not task_id or not token:
@@ -236,36 +222,40 @@ class CapCutTTSClient:
 
         started = time.monotonic()
         actual_timeout = max(float(timeout), len(texts) * 2.5)
+        bind_id = tasks[0].get("bind_id") or (created.get("data") or {}).get("bind_id") or ""
+        polls = 0
+        print(f"[CapCut TTS] Task started job={task_id} items={len(texts)} voice={clean_voice} timeout={actual_timeout:.0f}s", flush=True)
         while time.monotonic() - started < actual_timeout:
             if is_cancelled and is_cancelled():
                 return []
-            q_body = {"tasks": [{"bind_id": "", "id": task_id, "req_key": "sami_text_to_speech", "task_version": "v3", "token": token}]}
+            q_body = {"tasks": [{"bind_id": bind_id, "id": task_id, "req_key": "sami_text_to_speech", "task_version": "v3", "token": token}]}
             q_text = signers.compact_json(q_body)
             q_url = f"{CAPCUT_TTS_BASE_URL}/lv/v1/common_task/query?{urlencode(self._query(False))}"
-            q_resp = self.session.post(q_url, headers=self._headers(q_url, q_text, True), data=q_text.encode("utf-8"), timeout=60)
-            q_resp.raise_for_status()
-            q_data = q_resp.json()
-            q_tasks = (q_data.get("data") or {}).get("tasks") or []
-            cur = q_tasks[0] if q_tasks else {}
-            status = str(cur.get("status", "")).lower()
-            if status in {"succeed", "success"}:
-                payload_str = cur.get("payload") or "{}"
-                if isinstance(payload_str, str):
-                    payload_dict = json.loads(payload_str)
-                else:
-                    payload_dict = payload_str
-                results = payload_dict.get("audio_subtitles") or []
-                if not isinstance(results, list):
-                    raise RuntimeError("CapCut TTS response missing audio_subtitles")
+            remaining = actual_timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                break
+            q_resp = self.session.post(q_url, headers=self._headers(q_url, q_text, True), data=q_text.encode("utf-8"), timeout=min(60.0, remaining))
+            q_data = checked_json(q_resp, "TTS query")
+            polls += 1
+            cur = matching_task(q_data, task_id)
+            check_task_failure(cur, "TTS", task_id)
+            status = task_status(cur)
+            if status in SUCCEEDED:
+                results = task_payload(cur, "TTS").get("audio_subtitles")
+                if not isinstance(results, list) or len(results) != len(texts):
+                    raise RuntimeError(f"CapCut TTS incomplete result: job={task_id}, expected={len(texts)}, received={len(results) if isinstance(results, list) else 0}")
+                for index, item in enumerate(results):
+                    if not isinstance(item, dict) or not isinstance(item.get("speech_url"), str) or not item["speech_url"].strip():
+                        raise RuntimeError(f"CapCut TTS missing audio URL: job={task_id}, item={index + 1}")
+                    if item.get("code") not in (None, 0, "0", "") or item.get("invalid_input") is True:
+                        raise RuntimeError(f"CapCut TTS invalid audio result: job={task_id}, item={index + 1}, code={item.get('code')}")
+                print(f"[CapCut TTS] Task completed job={task_id} elapsed={time.monotonic() - started:.2f}s polls={polls} items={len(results)}", flush=True)
                 return results
-            if status in {"failed", "fail", "error"}:
-                err_code = cur.get("err_code")
-                err_msg = cur.get("err_msg") or cur.get("detail_info") or cur.get("status")
-                detail = f"{err_msg} (code {err_code})" if err_code is not None else f"{status}"
-                raise RuntimeError(f"CapCut TTS task failed: {detail}")
-            time.sleep(poll)
+            if polls == 1 or polls % 15 == 0:
+                print(f"[CapCut TTS] Task pending job={task_id} elapsed={time.monotonic() - started:.2f}s polls={polls} status={status or 'missing'}", flush=True)
+            time.sleep(min(max(0.05, poll), max(0.0, actual_timeout - (time.monotonic() - started))))
 
-        raise TimeoutError(f"CapCut TTS task timed out after {actual_timeout:.0f} seconds")
+        raise TimeoutError(f"CapCut TTS task timed out after {actual_timeout:.0f} seconds (job={task_id}, polls={polls}, items={len(texts)})")
 
 
 def synthesize_capcut_tts_wav_16k_mono(
@@ -307,35 +297,31 @@ def synthesize_capcut_tts_wav_16k_mono(
     if on_progress:
         on_progress(f"[CapCut TTS] Synthesizing '{clean_text[:40]}...'")
 
-    session = requests.Session()
-    client = CapCutTTSClient(session=session)
+    client = CapCutTTSClient()
+    session = client.session
     try:
-        results = client.synthesize([clean_text], voice=voice_id, rate=rate_str, is_cancelled=is_cancelled)
-    except RuntimeError as exc:
-        if "TTSInvalidSpeaker" in str(exc) or "40402004" in str(exc):
-            try:
-                from app.tts_processor import edge_tts_to_wav_16k_mono
-                rate_pct = f"{int(round((speed - 1.0) * 100)):+d}%"
-                return edge_tts_to_wav_16k_mono(
-                    text=clean_text,
-                    wav_path=wav_path,
-                    voice=clean_voice,
-                    rate=rate_pct,
-                    tmp_dir=tmp_dir,
-                )
-            except Exception:
-                pass
-        raise
-    if is_cancelled and is_cancelled():
-        session.close()
-        return ""
-    if not results or not results[0].get("speech_url"):
-        raise RuntimeError("CapCut TTS returned no audio url")
-
-    audio_url = results[0]["speech_url"]
-    try:
+        try:
+            results = client.synthesize([clean_text], voice=voice_id, rate=rate_str, is_cancelled=is_cancelled)
+        except RuntimeError as exc:
+            if "TTSInvalidSpeaker" in str(exc) or "40402004" in str(exc):
+                try:
+                    from app.tts_processor import edge_tts_to_wav_16k_mono
+                    rate_pct = f"{int(round((speed - 1.0) * 100)):+d}%"
+                    return edge_tts_to_wav_16k_mono(
+                        text=clean_text,
+                        wav_path=wav_path,
+                        voice=clean_voice,
+                        rate=rate_pct,
+                        tmp_dir=tmp_dir,
+                    )
+                except Exception:
+                    pass
+            raise
         if is_cancelled and is_cancelled():
             return ""
+        if not results or not results[0].get("speech_url"):
+            raise RuntimeError("CapCut TTS returned no audio url")
+        audio_url = results[0]["speech_url"]
         # Download MP3 directly in memory
         resp = session.get(audio_url, timeout=60)
         resp.raise_for_status()
@@ -463,11 +449,8 @@ def synthesize_capcut_tts_batch(
     texts = [str(j["text"]).strip() for j in valid_jobs]
 
     try:
-        session = requests.Session()
-        adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
-        session.mount("https://", adapter)
-        session.mount("http://", adapter)
-        client = CapCutTTSClient(session=session)
+        client = CapCutTTSClient()
+        session = client.session
         try:
             if on_progress:
                 on_progress(f"[CapCut TTS] Synthesizing batch of {len(valid_jobs)} segments...")
@@ -523,6 +506,8 @@ def synthesize_capcut_tts_batch(
 
         return valid_jobs
 
+    except CapCutVoiceError:
+        raise
     except Exception as exc:
         if is_cancelled and is_cancelled():
             return []
@@ -579,10 +564,12 @@ def synthesize_capcut_tts_batch(
                 )
             except Exception as single_err:
                 print(f"[CapCut TTS] Single segment failed ({job.get('text', '')[:30]}): {single_err}")
+                raise
 
         single_workers = max(1, min(4, len(valid_jobs)))
         with ThreadPoolExecutor(max_workers=single_workers) as single_executor:
             futures = [single_executor.submit(_synth_single, j) for j in valid_jobs]
+            errors = []
             for fut in futures:
                 if is_cancelled and is_cancelled():
                     try:
@@ -592,7 +579,9 @@ def synthesize_capcut_tts_batch(
                     return []
                 try:
                     fut.result()
-                except Exception:
-                    pass
+                except Exception as single_error:
+                    errors.append(single_error)
+            if errors:
+                raise RuntimeError(f"CapCut TTS failed for {len(errors)}/{len(valid_jobs)} segments; completed audio files retained") from errors[0]
 
         return valid_jobs

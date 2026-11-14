@@ -16588,6 +16588,25 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_stt_title.setObjectName("statusHeadline")
         capcut_stt_layout.addWidget(capcut_stt_title)
 
+        def _make_capcut_backend_combo(parent):
+            combo = QComboBox(parent)
+            combo.addItem(t("CapCut Web (default)"), "web")
+            combo.addItem(t("CapCut PC (background, experimental)"), "pc")
+            selected = str(os.getenv("CAPCUT_BACKEND") or self.settings.value("capcut_backend", "web")).strip().lower()
+            combo.setCurrentIndex(max(0, combo.findData(selected)))
+            return combo
+
+        capcut_stt_backend_row = QHBoxLayout()
+        capcut_stt_backend_row.addWidget(QLabel(t("CapCut connection:"), capcut_stt_widget))
+        capcut_stt_backend_combo = _make_capcut_backend_combo(capcut_stt_widget)
+        capcut_stt_backend_combo.setObjectName("capcut_stt_backend_combo")
+        capcut_stt_backend_row.addWidget(capcut_stt_backend_combo, 1)
+        capcut_stt_layout.addLayout(capcut_stt_backend_row)
+        capcut_stt_backend_hint = QLabel(t("Shared with CapCut TTS. The PC installation folder can be set in the CapCut tab."), capcut_stt_widget)
+        capcut_stt_backend_hint.setWordWrap(True)
+        capcut_stt_backend_hint.setObjectName("helperLabel")
+        capcut_stt_layout.addWidget(capcut_stt_backend_hint)
+
         capcut_chunk_row = QHBoxLayout()
         capcut_chunk_label = QLabel(t("STT Chunk duration:"), capcut_stt_widget)
         capcut_chunk_combo = QComboBox(capcut_stt_widget)
@@ -16620,6 +16639,10 @@ class VideoTranslatorGUI(QMainWindow):
         capcut_stt_hint.setObjectName("helperLabel")
         capcut_stt_hint.setWordWrap(True)
         capcut_stt_layout.addWidget(capcut_stt_hint)
+        capcut_language_hint = QLabel(t("For Vietnamese, English and other non-Chinese audio, select the source language explicitly. Auto Detect may recognize it incorrectly."), capcut_stt_widget)
+        capcut_language_hint.setObjectName("helperLabel")
+        capcut_language_hint.setWordWrap(True)
+        capcut_stt_layout.addWidget(capcut_language_hint)
 
         capcut_stt_widget.setVisible(is_capcut_stt)
         trans_layout.addWidget(capcut_stt_widget)
@@ -17254,6 +17277,61 @@ class VideoTranslatorGUI(QMainWindow):
         # =========================================================================
         capcut_scroll, capcut_content, capcut_layout = _make_tab_scroll_widget()
 
+        capcut_backend_row = QHBoxLayout()
+        capcut_backend_row.addWidget(QLabel(t("CapCut connection:"), capcut_content))
+        capcut_backend_combo = _make_capcut_backend_combo(capcut_content)
+        capcut_backend_combo.setObjectName("capcut_backend_combo")
+        capcut_backend_row.addWidget(capcut_backend_combo, 1)
+        capcut_layout.addLayout(capcut_backend_row)
+        capcut_stt_backend_combo.currentIndexChanged.connect(capcut_backend_combo.setCurrentIndex)
+        capcut_backend_combo.currentIndexChanged.connect(capcut_stt_backend_combo.setCurrentIndex)
+
+        capcut_backend_hint = QLabel(t("Applies to both STT and TTS. Web uses the current API. PC uses an installed CapCut in the background without opening its interface. Both modes require internet access."), capcut_content)
+        capcut_backend_hint.setWordWrap(True)
+        capcut_backend_hint.setObjectName("helperLabel")
+        capcut_layout.addWidget(capcut_backend_hint)
+
+        capcut_pc_widget = QWidget(capcut_content)
+        capcut_pc_layout = QVBoxLayout(capcut_pc_widget)
+        capcut_pc_layout.setContentsMargins(0, 0, 0, 0)
+        capcut_pc_layout.addWidget(QLabel(t("CapCut PC folder (optional):"), capcut_pc_widget))
+        capcut_pc_row = QHBoxLayout()
+        capcut_pc_path_edit = QLineEdit(capcut_pc_widget)
+        capcut_pc_path_edit.setObjectName("capcut_pc_path_edit")
+        capcut_pc_path_edit.setPlaceholderText(t("Automatically detect the installed CapCut"))
+        capcut_pc_path_edit.setText(str(os.getenv("CAPCUT_PC_PATH") or self.settings.value("capcut_pc_path", "") or ""))
+        capcut_pc_browse = QPushButton(t("Browse..."), capcut_pc_widget)
+        capcut_pc_row.addWidget(capcut_pc_path_edit, 1)
+        capcut_pc_row.addWidget(capcut_pc_browse)
+        capcut_pc_layout.addLayout(capcut_pc_row)
+        capcut_pc_status = QLabel(capcut_pc_widget)
+        capcut_pc_status.setWordWrap(True)
+        capcut_pc_status.setObjectName("helperLabel")
+        capcut_pc_layout.addWidget(capcut_pc_status)
+        capcut_layout.addWidget(capcut_pc_widget)
+
+        def _update_capcut_pc_status():
+            selected_pc = capcut_backend_combo.currentData() == "pc"
+            capcut_pc_widget.setVisible(selected_pc)
+            if not selected_pc:
+                return
+            try:
+                from app.capcut.transport import find_capcut_pc_dll
+                dll = find_capcut_pc_dll(capcut_pc_path_edit.text())
+                capcut_pc_status.setText(t("CapCut PC detected: {path}").format(path=str(dll.parent)))
+            except (OSError, RuntimeError):
+                capcut_pc_status.setText(t("CapCut PC was not found. Install CapCut PC or select its installation folder."))
+
+        def _browse_capcut_pc():
+            folder = QFileDialog.getExistingDirectory(dialog, t("Select CapCut PC folder"), capcut_pc_path_edit.text())
+            if folder:
+                capcut_pc_path_edit.setText(folder)
+
+        capcut_pc_browse.clicked.connect(_browse_capcut_pc)
+        capcut_backend_combo.currentIndexChanged.connect(_update_capcut_pc_status)
+        capcut_pc_path_edit.textChanged.connect(_update_capcut_pc_status)
+        _update_capcut_pc_status()
+
         capcut_tts_widget = QWidget(capcut_content)
         capcut_tts_layout = QVBoxLayout(capcut_tts_widget)
         capcut_tts_layout.setContentsMargins(0, 0, 0, 0)
@@ -17296,7 +17374,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         capcut_layout.addWidget(capcut_tts_widget)
         capcut_layout.addStretch(1)
-        tabs.addTab(capcut_scroll, t("CapCut TTS"))
+        tabs.addTab(capcut_scroll, t("CapCut"))
 
         # Hidden Remote API fields for backward-compatible save logic
         remote_url_edit = QLineEdit(dialog)
@@ -17384,13 +17462,19 @@ class VideoTranslatorGUI(QMainWindow):
         new_capcut_stt_workers = str(capcut_stt_workers_combo.currentData() or "5").strip()
         new_capcut_tts_batch = str(capcut_tts_batch_combo.currentData() or "30").strip()
         new_capcut_tts_workers = str(capcut_tts_workers_combo.currentData() or "30").strip()
+        new_capcut_backend = str(capcut_backend_combo.currentData() or "web")
+        new_capcut_pc_path = capcut_pc_path_edit.text().strip()
 
+        os.environ["CAPCUT_BACKEND"] = new_capcut_backend
+        os.environ["CAPCUT_PC_PATH"] = new_capcut_pc_path
         os.environ["CAPCUT_STT_CHUNK_SECONDS"] = new_capcut_chunk
         os.environ["CAPCUT_STT_WORKERS"] = new_capcut_stt_workers
         os.environ["CAPCUT_TTS_BATCH_SIZE"] = new_capcut_tts_batch
         os.environ["CAPCUT_TTS_WORKERS"] = new_capcut_tts_workers
 
         self.settings.setValue("capcut_stt_chunk_seconds", new_capcut_chunk)
+        self.settings.setValue("capcut_backend", new_capcut_backend)
+        self.settings.setValue("capcut_pc_path", new_capcut_pc_path)
         self.settings.setValue("capcut_stt_workers", new_capcut_stt_workers)
         self.settings.setValue("capcut_tts_batch_size", new_capcut_tts_batch)
         self.settings.setValue("capcut_tts_workers", new_capcut_tts_workers)
@@ -17433,6 +17517,8 @@ class VideoTranslatorGUI(QMainWindow):
             "OCR_SUBTITLE_REGION": new_ocr_region,
             "OCR_SAMPLING_FPS": new_ocr_sampling_fps,
             "CAPCUT_STT_CHUNK_SECONDS": new_capcut_chunk,
+            "CAPCUT_BACKEND": new_capcut_backend,
+            "CAPCUT_PC_PATH": new_capcut_pc_path,
             "CAPCUT_STT_WORKERS": new_capcut_stt_workers,
             "CAPCUT_TTS_BATCH_SIZE": new_capcut_tts_batch,
             "CAPCUT_TTS_WORKERS": new_capcut_tts_workers,
