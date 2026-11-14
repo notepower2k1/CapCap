@@ -1,5 +1,7 @@
 # RELEASE NOTES — V9.0.0
 
+**CapCut STT — mã nguồn 14/11 (chưa build):** Thời gian chờ kết quả cloud tính theo độ dài đoạn (120–600 giây); timeout/lỗi mạng tạm thời được retry một lần sau 2 giây bằng audio đã upload. Nếu vẫn timeout, chia đôi đoạn lỗi phục hồi một lần, giữ các đoạn đã hoàn tất. Thêm log từng đoạn/job, attempt, thời lượng và poll để điều tra. Lỗi xác thực/API không retry hoặc tự chia đoạn. Chi tiết trong `docs/capcut-stt-feedback-2026-11-14.md`.
+
 **Lưu ý khi dịch qua trình duyệt:** Giữ cửa sổ GPT/Gemini hiển thị và đủ lớn để thấy các nút thao tác. Không thu xuống taskbar hoặc che kín cửa sổ khi đang dịch vì có thể làm chậm gửi hoặc nhận phản hồi. Lưu ý cũng hiển thị trong Cài đặt và popup extension.
 
 **Cập nhật mã nguồn 14/11 (chưa build installer):** Phân loại phục hồi GPT/Gemini Web: đọc lại đúng phản hồi, chỉ retry và chia nhỏ có giới hạn khi sai định dạng/số câu. Lỗi không phản hồi, đóng tab hoặc bị chặn chuyển sang fallback; Hủy thì dừng. Bổ sung log tương quan task/session, ID thiếu/thừa, trạng thái trang; sửa chọn/chèn prompt khi mất focus. Chi tiết trong `docs/browser-feedback-2026-11-14.md`.

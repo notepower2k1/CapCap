@@ -221,7 +221,9 @@ def _direct_vod_upload(device: DeviceConfig, session: requests.Session, audio_pa
     return store_uri
 
 
-def _direct_query(device: DeviceConfig, session: requests.Session, store_uri: str, duration_ms: int, timeout: float = 120.0, poll_interval: float = 1.0) -> list[dict]:
+def _direct_query(device: DeviceConfig, session: requests.Session, store_uri: str, duration_ms: int, timeout: float | None = None, poll_interval: float = 1.0) -> list[dict]:
+    if timeout is None:
+        timeout = min(600.0, max(120.0, duration_ms / 1000.0 * 1.5))
     device_dict = device.to_dict()
     user_agent = JIANYING_USER_AGENT if device_dict["app_name"] == "JianyingPro" else REFERENCE_USER_AGENT
     query = {
@@ -265,17 +267,71 @@ def _direct_query(device: DeviceConfig, session: requests.Session, store_uri: st
     query_url = f"{DIRECT_API_BASE}/lv/v1/audio_subtitle/query?{urlencode(query)}"
 
     started = time.monotonic()
+    polls = 0
+    print(f"[CapCut STT] Query started job={query_id} audio_seconds={duration_ms / 1000:.2f} timeout={timeout:.0f}s", flush=True)
     while time.monotonic() - started < timeout:
-        resp = session.post(query_url, headers=query_headers, data=query_text.encode("utf-8"), timeout=60)
+        remaining = timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            break
+        resp = session.post(query_url, headers=query_headers, data=query_text.encode("utf-8"), timeout=min(60.0, remaining))
         resp.raise_for_status()
         data = resp.json()
-        utterances = ((data.get("data") or {}).get("utterances")) or []
-        if utterances:
-            return utterances
+        polls += 1
         if str(data.get("ret")) not in {"0", "None"}:
             raise RuntimeError(f"CapCut audio_subtitle query error: ret={data.get('ret')} msg={data.get('errmsg')}")
-        time.sleep(poll_interval)
-    raise TimeoutError(f"CapCut STT query timed out after {timeout} seconds")
+        utterances = ((data.get("data") or {}).get("utterances")) or []
+        if utterances:
+            print(f"[CapCut STT] Query completed job={query_id} elapsed={time.monotonic() - started:.2f}s polls={polls} utterances={len(utterances)}", flush=True)
+            return utterances
+        if polls == 1 or polls % 15 == 0:
+            payload = data.get("data") or {}
+            # Log response structure, not credentials/upload URLs or transcript.
+            print(f"[CapCut STT] Query pending job={query_id} elapsed={time.monotonic() - started:.2f}s polls={polls} ret={data.get('ret')} data_keys={sorted(payload)}", flush=True)
+        time.sleep(min(poll_interval, max(0.0, timeout - (time.monotonic() - started))))
+    raise TimeoutError(f"CapCut STT query timed out after {timeout} seconds (job={query_id}, audio_seconds={duration_ms / 1000:.2f}, polls={polls})")
+
+
+def _recognize_chunk(audio_path, temp_dir, label, device, session, creds, start, duration, *, allow_split=True):
+    print(f"[CapCut STT] Chunk start chunk={label} start={start:.2f}s duration={duration:.2f}s", flush=True)
+    chunk_file = Path(temp_dir) / f"{label}.mp3"
+    _extract_chunk_mp3(audio_path, str(chunk_file), start, duration)
+    store = _direct_vod_upload(device, session, chunk_file, creds)
+    try:
+        for attempt in range(1, 3):
+            try:
+                print(f"[CapCut STT] Recognizing chunk={label} attempt={attempt}/2", flush=True)
+                utterances = _direct_query(device, session, store, int(duration * 1000))
+                break
+            except (TimeoutError, requests.Timeout, requests.ConnectionError) as exc:
+                print(f"[CapCut STT] Attempt failed chunk={label} attempt={attempt}/2 error_type={type(exc).__name__}", flush=True)
+                if attempt == 2:
+                    raise
+                print(f"[CapCut STT] Retrying chunk={label} in 2s using the uploaded audio; completed chunks retained.", flush=True)
+                time.sleep(2.0)
+    except (TimeoutError, requests.Timeout):
+        if not allow_split or duration <= 30:
+            raise
+        print(f"[CapCut STT] Recovering timed-out chunk={label} by splitting into two parts; completed chunks retained.", flush=True)
+        midpoint = duration / 2
+        # One second on each side of the cut preserves words across the boundary.
+        parts = [(0.0, min(duration, midpoint + 1)), (max(0.0, midpoint - 1), duration - max(0.0, midpoint - 1))]
+        completed = []
+        for index, (offset, length) in enumerate(parts):
+            items = _recognize_chunk(audio_path, temp_dir, f"{label}_part{index}", device, session, creds,
+                                     start + offset, length, allow_split=False)
+            completed.append((index, items))
+        return _merge_chunks(completed)
+    except Exception as exc:
+        print(f"[CapCut STT] Chunk failed chunk={label} start={start:.2f}s duration={duration:.2f}s error_type={type(exc).__name__}", flush=True)
+        raise
+    adjusted = []
+    for item in utterances:
+        row = dict(item)
+        row["start_time"] = int(item.get("start_time", 0)) + int(start * 1000)
+        row["end_time"] = int(item.get("end_time", 0)) + int(start * 1000)
+        adjusted.append(row)
+    print(f"[CapCut STT] Chunk completed chunk={label} utterances={len(adjusted)}", flush=True)
+    return adjusted
 
 
 def _extract_chunk_mp3(source_audio: str, output_path: str, start: float, duration: float) -> None:
@@ -521,16 +577,8 @@ def transcribe_audio_capcut(
     try:
         # Determine chunk plan
         if total_duration <= chunk_seconds + 5.0:
-            # Single chunk
-            chunk_file = Path(temp_dir) / "single_chunk.mp3"
-            _extract_chunk_mp3(audio_path, str(chunk_file), 0.0, total_duration)
-            print("[CapCut STT] Uploading audio to cloud (30%)...", flush=True)
-            _emit_progress(on_progress, 30, "CapCut STT: Uploading audio...", "[CapCut STT Progress] Uploading (30%)")
-            store_uri = _direct_vod_upload(base_device, session, chunk_file, creds)
-            print("[CapCut STT] Recognizing speech on cloud (70%)...", flush=True)
-            _emit_progress(on_progress, 70, "CapCut STT: Recognizing speech...", "[CapCut STT Progress] Recognizing (70%)")
-            utterances = _direct_query(base_device, session, store_uri, int(total_duration * 1000))
-            raw_items = utterances
+            raw_items = _recognize_chunk(audio_path, temp_dir, "single_chunk", base_device, session, creds, 0.0, total_duration)
+
         else:
             # Multi-chunk parallel processing with silence-aware cut boundaries
             starts = _plan_silence_aware_chunks(
@@ -559,18 +607,11 @@ def transcribe_audio_capcut(
             def _process_one_chunk(idx: int, s: float, d: float):
                 worker_device = _new_worker_identity(base_device)
                 w_session = requests.Session()
-                chunk_file = Path(temp_dir) / f"chunk_{idx:04d}.mp3"
-                _extract_chunk_mp3(audio_path, str(chunk_file), s, d)
                 try:
-                    w_store_uri = _direct_vod_upload(worker_device, w_session, chunk_file, creds)
-                    w_utterances = _direct_query(worker_device, w_session, w_store_uri, int(d * 1000))
-                    adjusted = []
-                    for item in w_utterances:
-                        copy_item = dict(item)
-                        copy_item["start_time"] = int(item.get("start_time", 0)) + int(s * 1000)
-                        copy_item["end_time"] = int(item.get("end_time", 0)) + int(s * 1000)
-                        copy_item["_chunk"] = idx
-                        adjusted.append(copy_item)
+                    adjusted = _recognize_chunk(audio_path, temp_dir, f"chunk_{idx:04d}", worker_device,
+                                                w_session, creds, s, d)
+                    for row in adjusted:
+                        row["_chunk"] = idx
                     return idx, adjusted
                 finally:
                     w_session.close()
