@@ -1067,6 +1067,8 @@ def build_start_group(gui, left_layout):
     audio_tracks_layout.addWidget(gui.audio_music_volume_row)
 
     audio_mix_layout.addWidget(audio_tracks_card)
+    from ui.utils.audio_mix_settings import restore_mix
+    restore_mix(gui)
     audio_page.layout().addWidget(audio_mix_card)
 
     for page in pages:

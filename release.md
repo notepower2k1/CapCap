@@ -1,5 +1,7 @@
 # RELEASE NOTES — V9.0.0
 
+**Audio Mix — nhớ cấu hình (chưa build):** Tự lưu preset và âm lượng gốc/TTS/nhạc nền, khôi phục khi mở lại ứng dụng và dùng làm mặc định cho track mới. Khi mở project đã lưu, ưu tiên âm lượng riêng của project; việc mở project không ghi đè cấu hình mặc định đã nhớ.
+
 **CapCut STT/TTS — cải thiện chất lượng và kiểm tra kết quả (chưa build):** Sửa STT bỏ qua ngôn ngữ đã chọn; tiếng Việt, Anh và các ngôn ngữ khác tiếng Trung dùng luồng có tham số ngôn ngữ, giữ luồng Trung/Auto hiện tại. Giữ timestamp từng từ qua chia đoạn, merge và nhận dạng một vùng. TTS kiểm tra đúng giọng/resource, nhận đủ audio mới báo thành công; lỗi API/trạng thái thất bại được báo sớm, thêm log job/poll. Tham khảo giao thức K07VN. [Chi tiết và kiểm chứng](docs/capcut-speech-quality.md).
 
 **CapCut Web / PC — tính năng mới (chưa build):** Thêm lựa chọn kết nối dùng chung cho STT/TTS trong Cài đặt → CapCut. Web giữ API hiện tại; PC dùng thư viện CapCut đã cài để chạy nền, không mở giao diện. Tự tìm phiên bản cài đặt, hỗ trợ chọn thư mục và thêm log tiến trình/API. Cả hai vẫn dùng cloud và cần internet; PC đang thử nghiệm. Chi tiết: [hướng dẫn Web / PC](docs/capcut-web-pc.md).

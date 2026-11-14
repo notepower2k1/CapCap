@@ -3573,7 +3573,8 @@ class VideoTranslatorGUI(QMainWindow):
         if not isinstance(track.metadata, dict):
             track.metadata = {}
         track.metadata["_audio_role"] = "music"
-        track.metadata.setdefault("_volume", 30.0)
+        slider = getattr(self, "audio_music_volume_slider", None)
+        track.metadata.setdefault("_volume", float(slider.value()) if slider is not None else 30.0)
         track.metadata.setdefault("_muted", False)
         layer = AudioLayer(
             name=f"Music {len(track.layers) + 1}",
@@ -9771,12 +9772,16 @@ class VideoTranslatorGUI(QMainWindow):
             if hasattr(self, "audio_a2_volume_label"):
                 self.audio_a2_volume_label.setText(f"{int(a2_val)}%")
             self._apply_audio_mix_to_tracks(a1_val, a2_val)
+        from ui.utils.audio_mix_settings import save_mix
+        save_mix(self)
 
     def on_audio_a1_volume_changed(self, value: int):
         if hasattr(self, "audio_a1_volume_label"):
             self.audio_a1_volume_label.setText(f"{int(value)}%")
         self._sync_audio_track_volume("A1 Audio", int(value))
         self._set_audio_mix_preset_custom()
+        from ui.utils.audio_mix_settings import save_mix
+        save_mix(self)
 
     def on_audio_a2_volume_changed(self, value: int):
         if hasattr(self, "audio_a2_volume_label"):
@@ -9789,11 +9794,15 @@ class VideoTranslatorGUI(QMainWindow):
             if self._music_audio_tracks():
                 self._schedule_preview_audio_refresh(force=False)
         self._set_audio_mix_preset_custom()
+        from ui.utils.audio_mix_settings import save_mix
+        save_mix(self)
 
     def on_audio_music_volume_changed(self, value: int):
         if hasattr(self, "audio_music_volume_label"):
             self.audio_music_volume_label.setText(f"{int(value)}%")
         self._sync_audio_track_volume("A2 Music", int(value))
+        from ui.utils.audio_mix_settings import save_mix
+        save_mix(self)
         if not getattr(getattr(self, "media_player", None), "_native_audio_active", False):
             self._schedule_preview_audio_refresh(force=False)
 
@@ -9823,16 +9832,18 @@ class VideoTranslatorGUI(QMainWindow):
         """Load timeline track volumes into the Audio tab controls."""
         if not hasattr(self, "timeline") or not self.timeline._timeline:
             return
-        values = {
-            "A1 Audio": 50,
-            "TS1": 100,
-            "A2 Dub": 100,
-            "A2 Music": 30,
-        }
+        from ui.utils.audio_mix_settings import read_mix, PRESETS
+        defaults = read_mix(getattr(self, "settings", None))
+        values = {"A1 Audio": defaults["original"], "TS1": defaults["tts"],
+                  "A2 Dub": defaults["tts"], "A2 Music": defaults["music"]}
         for track in self.timeline._timeline.tracks:
             if track.name not in values:
                 continue
             meta = getattr(track, "metadata", {}) or {}
+            if not isinstance(meta, dict):
+                meta = {}
+            meta.setdefault("_volume", values[track.name])
+            track.metadata = meta
             try:
                 values[track.name] = int(round(float(meta.get("_volume", values[track.name]))))
             except (TypeError, ValueError):
@@ -9856,6 +9867,14 @@ class VideoTranslatorGUI(QMainWindow):
             self.audio_music_volume_slider.blockSignals(False)
             if hasattr(self, "audio_music_volume_label"):
                 self.audio_music_volume_label.setText(f"{values['A2 Music']}%")
+        combo = getattr(self, "audio_mix_preset_combo", None)
+        if combo is not None:
+            preset = next((key for key, pair in PRESETS.items() if pair == (values["A1 Audio"], tts_value)), "custom")
+            if (values["A1 Audio"], tts_value) == (defaults["original"], defaults["tts"]):
+                preset = defaults["preset"]
+            blocked = combo.blockSignals(True)
+            combo.setCurrentIndex(max(0, combo.findData(preset)))
+            combo.blockSignals(blocked)
         self._refresh_music_layer_summary()
 
     def _set_audio_mix_preset_custom(self):

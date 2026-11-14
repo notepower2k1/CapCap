@@ -367,7 +367,7 @@ def sync_blur_regions_to_layers(
         blur_track.layers.append(layer)
 
 
-def ensure_v1_a1_tracks(timeline: Timeline, video_path: str, duration: float) -> None:
+def ensure_v1_a1_tracks(timeline: Timeline, video_path: str, duration: float, *, original_volume: float = 50.0) -> None:
     """Ensure V1 (video) and A1 (audio) tracks exist after video import."""
     if duration <= 0:
         return
@@ -397,4 +397,4 @@ def ensure_v1_a1_tracks(timeline: Timeline, video_path: str, duration: float) ->
     ))
     if not isinstance(a1.metadata, dict):
         a1.metadata = {}
-    a1.metadata.setdefault("_volume", 50.0)
+    a1.metadata.setdefault("_volume", max(0.0, min(200.0, float(original_volume))))

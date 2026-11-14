@@ -508,7 +508,9 @@ class EditorTimeline(QGraphicsView):
         if duration_s <= 0:
             duration_s = self._probe_video_duration(path)
         if duration_s > 0:
-            ensure_v1_a1_tracks(self._timeline, path, duration_s)
+            slider = getattr(self.window(), "audio_a1_volume_slider", None)
+            ensure_v1_a1_tracks(self._timeline, path, duration_s,
+                                original_volume=slider.value() if slider is not None else 50.0)
             self._base_video_duration = float(duration_s)
             content_dur = 0.0
             if self._timeline:
