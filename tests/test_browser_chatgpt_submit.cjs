@@ -26,6 +26,7 @@ function setup({ readyAt = 0, accept = true, hidden = false, disabled = false } 
   };
   const operations = [];
   const document = {
+    createRange: () => ({ selectNodeContents(node) { assert.equal(node, composer); } }),
     querySelectorAll(selector) {
       return selector.includes('role="user"') ? Array(users).fill({}) : [];
     },
@@ -36,7 +37,7 @@ function setup({ readyAt = 0, accept = true, hidden = false, disabled = false } 
     }
   };
   const context = vm.createContext({
-    window: { location: { href: 'https://chatgpt.com/' } }, document,
+    window: { location: { href: 'https://chatgpt.com/' }, getSelection: () => ({ removeAllRanges() {}, addRange() {} }) }, document,
     chrome: { runtime: { onMessage: { addListener() {} } } },
     console: { log() {} }, Date: { now: () => now },
     setTimeout(fn, ms) { now += ms; fn(); },
@@ -76,6 +77,22 @@ test('inserts ChatGPT text through the editor editing operation', async () => {
   await env.insertPromptText(env.composer, 'line one\nline two', true);
   assert.ok(env.operations.includes('insertText'));
   assert.equal(env.composer.innerText, 'line one\nline two');
+  assert.ok(!env.operations.includes('selectAll'), 'must never select the whole conversation');
+});
+
+test('editor selection is restored after focus moves during the insertion delay', async () => {
+  const env = setup();
+  let target = null;
+  env.composer.focus = () => { target = null; };
+  env.document.createRange = () => ({ selectNodeContents(node) { target = node; } });
+  const original = env.document.execCommand;
+  env.document.execCommand = (command, unused, text) => {
+    assert.equal(target, env.composer, 'editing must stay inside the composer');
+    original(command, unused, text);
+    if (command === 'delete') target = null;
+  };
+  await env.insertPromptText(env.composer, 'The next subtitle batch', true);
+  assert.equal(env.composer.innerText, 'The next subtitle batch');
 });
 
 test('reads a new reply when the message container count stays unchanged', async () => {

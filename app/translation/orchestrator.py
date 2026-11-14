@@ -746,7 +746,7 @@ class TranslationOrchestrator:
         except InterruptedError:
             raise
         except TranslationValidationError as exc:
-            if not full_context_request:
+            if not full_context_request or (provider_type or "").strip().lower() in ("browser_ai", "gemini_web", "chatgpt_web"):
                 raise
             print("[AI Translation] Full-context response incomplete. Retrying with ordered batches.")
             fallback_batches, _unused_full_context = self._build_ai_batches(

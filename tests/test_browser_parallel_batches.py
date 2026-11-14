@@ -151,8 +151,8 @@ class TestBrowserParallelBatches(unittest.TestCase):
             self.server.record_task_result(b["id"], True, text="1. AI-1")
             c = self.next_task(future)
             self.assertIn("source-2", c["prompt"])
-            # Invalid output fails immediately without the transient-error retry.
-            self.server.record_task_result(a["id"], True, text="99. invalid numbering")
+            # Operational failures fall back immediately without retrying.
+            self.server.record_task_result(a["id"], False, error="Tab was closed")
             result = future.result(timeout=3)
         self.assertTrue(result.success)
         self.assertTrue(result.used_fallback)

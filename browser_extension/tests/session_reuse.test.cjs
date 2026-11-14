@@ -13,6 +13,7 @@ function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedF
   const results = [];
   const aborted = [];
   const freshChats = [];
+  const rereads = [];
   const stored = {};
   let messageListener;
   let created = 0;
@@ -46,6 +47,10 @@ function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedF
         },
         remove: async id => { closedTabs.push(id); tabs.delete(id); },
         sendMessage: async (id, message) => {
+          if (message.action === 'CAPCAP_READ_REPLY') {
+            rereads.push(message.task_id);
+            return { success: true, text: '1. First\n2. Second' };
+          }
           if (message.action === 'CAPCAP_NEW_CHAT') {
             freshChats.push(id);
             return { success: !failNewChat, error: failNewChat ? 'Cannot verify fresh chat' : '' };
@@ -83,7 +88,7 @@ function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedF
     id, type: 'translate', session_id: id, operation, platform, temporary_chat: true, prompt: 'Test'
   });
   return {
-    task, tabs, sentTo, closedWindows, closedTabs, replies, results, aborted, stored, freshChats,
+    task, tabs, sentTo, closedWindows, closedTabs, replies, results, aborted, stored, freshChats, rereads,
     created: () => created, ...context.bridgeTest,
     progress: id => messageListener({ type: 'CAPCAP_PROGRESS', phase: 'generating', chars: 42 }, { tab: { id } }, () => {})
   };
@@ -218,14 +223,14 @@ test('only one parallel worker can claim the dedicated analysis conversation', a
   assert.equal(env.tabs.size, 0);
 });
 
-test('replacing a disconnected isolated tab also closes its old window', async () => {
+test('a disconnected tab reports failure without recreating or resending', async () => {
   const env = setup({ disconnectedFirstTab: true });
   await env.executeTask(batchTask('first'));
-  assert.equal(env.created(), 2);
-  assert.deepEqual(env.closedWindows, [1, 2]);
+  assert.equal(env.created(), 1);
+  assert.deepEqual(env.closedWindows, [1]);
   assert.equal(env.tabs.size, 0);
   assert.equal(env.results.length, 1);
-  assert.equal(env.results[0].success, true);
+  assert.equal(env.results[0].success, false);
 });
 
 test('diagnostics inspect assigned tabs and leave unrelated tabs alone', async () => {
@@ -299,4 +304,12 @@ test('session cleanup cancels a busy worker and prevents late reopening/submissi
   await env.executeTask({ ...task, id: 'late-job' });
   assert.equal(env.tabs.size, 0);
   assert.equal(env.sentTo.length, 1);
+});
+
+test('malformed completed output is read again from the same task without resending', async () => {
+  const env = setup();
+  await env.executeTask({ ...batchTask('first'), expected_cues: 2 });
+  assert.deepEqual(env.sentTo, [1]);
+  assert.deepEqual(env.rereads, ['first']);
+  assert.equal(env.results[0].text, '1. First\n2. Second');
 });

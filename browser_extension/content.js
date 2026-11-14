@@ -12,6 +12,7 @@
 
   // Task abort state
   let abortRequested = false;
+  let completedReply = null;
 
   // Helper: Report progress back to background service for popup/debugging visibility
   function reportProgress(phase, details = {}) {
@@ -209,7 +210,14 @@
       composer.dispatchEvent(new Event("input", { bubbles: true }));
     } else {
       try {
-        document.execCommand("selectAll", false, null);
+        // Scope selection to this editor. Document-wide selectAll can select
+        // the conversation when another popup steals focus during the await.
+        composer.focus();
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(composer);
+        selection.removeAllRanges();
+        selection.addRange(range);
         document.execCommand("delete", false, null);
       } catch (e) {
         // ignore
@@ -221,9 +229,16 @@
     // back to DOM assignment, which can leave its internal document empty.
     if (useEditorInput && composer.isContentEditable) {
       try {
+        composer.focus();
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(composer);
+        selection.removeAllRanges();
+        selection.addRange(range);
         document.execCommand("insertText", false, prompt);
         await sleep(300);
-        if ((composer.innerText || "").trim()) return;
+        const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+        if (normalize(composer.innerText) === normalize(prompt)) return;
       } catch (_) {
         // Older editors may only support the paste fallback below.
       }
@@ -504,7 +519,9 @@
         await sleep(200);
       }
       if (!button) {
-        throw new Error("ChatGPT send button is unavailable or disabled. Check the chat window and try again.");
+        const editor = document.querySelector('#prompt-textarea') || composer;
+        const chars = (editor.value || editor.innerText || '').length;
+        throw new Error(`ChatGPT send button is unavailable or disabled. editor_chars=${chars}, generating=${this.isGenerating()}, visibility=${document.visibilityState}. Check the chat window and try again.`);
       }
 
       button.click();
@@ -843,6 +860,18 @@
   }
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "CAPCAP_READ_REPLY") {
+      const api = request.platform === 'chatgpt' ? ChatGPT : Gemini;
+      const node = api.latestReply();
+      if (!completedReply || completedReply.taskId !== request.task_id || completedReply.node !== node ||
+          api.isGenerating() || !api.isReplyComplete()) {
+        sendResponse({ success: false, error: `Cannot re-read same completed turn. visibility=${document.visibilityState}` });
+      } else {
+        const text = request.platform === 'chatgpt' ? api.getAssistantText(node) : api.getResponseText(node);
+        sendResponse({ success: true, text, diagnostics: `visibility=${document.visibilityState} focused=${document.hasFocus()} generating=false same_turn=true` });
+      }
+      return false;
+    }
     if (request.action === "CAPCAP_NEW_CHAT") {
       abortRequested = false;
       (async () => {
@@ -884,6 +913,7 @@
 
     if (request.action === "CAPCAP_TRANSLATE") {
       abortRequested = false;
+      completedReply = null;
       const isChatGPT =
         request.platform === "chatgpt" ||
         window.location.hostname.includes("chatgpt.com") ||
@@ -899,7 +929,8 @@
             resultText = await Gemini.typeAndSend(request.prompt, platform, request.temporary_chat !== false);
           }
 
-          sendResponse({ success: true, text: resultText });
+          completedReply = { taskId: request.task_id, node: isChatGPT ? ChatGPT.latestReply() : Gemini.latestReply() };
+          sendResponse({ success: true, text: resultText, diagnostics: `visibility=${document.visibilityState} focused=${document.hasFocus()} generating=false` });
         } catch (err) {
           console.error("[CapCap Content] Translation error:", err);
           reportProgress("error", {

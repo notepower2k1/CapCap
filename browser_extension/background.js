@@ -604,7 +604,6 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
     if (task.type === "translate") {
       const temporaryChat = task.temporary_chat !== false;
       const sessionId = task.session_id || "default";
-      const DEAD_TAB_REGEX = /No tab with id|Receiving end does not exist|tab was closed|Cannot access/i;
 
       const runTranslate = async () => {
         if (currentTask.canceled || closedSessions.has(sessionId)) throw new Error("Task canceled before submission");
@@ -666,7 +665,8 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
           prompt: task.prompt,
           platform: task.platform,
           temporary_chat: temporaryChat,
-          session_id: sessionId
+          session_id: sessionId,
+          task_id: task.id
         });
 
         if (!resp) {
@@ -675,23 +675,18 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
         return resp;
       };
 
-      let response;
-      try {
-        response = await runTranslate();
-      } catch (firstErr) {
-        const errMsg = firstErr?.message || String(firstErr);
-        if (!currentTask.canceled && DEAD_TAB_REGEX.test(errMsg)) {
-          console.warn(`[CapCap Bridge] Tab communication failed ("${errMsg}"). Recreating tab and retrying translation once...`);
-          const deadTabId = sessionTabs[sessionId] || (currentTask && currentTask.tabId);
-          if (task.isolated) await closeIsolatedSession(sessionId);
-          delete sessionTabs[sessionId];
-          delete sessionWindows[sessionId];
-          if (pinnedWindows[task.platform] && pinnedWindows[task.platform].tabId === deadTabId) {
-            delete pinnedWindows[task.platform];
-          }
-          response = await runTranslate();
-        } else {
-          throw firstErr;
+      let response = await runTranslate();
+      if (response.success && task.expected_cues > 0) {
+        const ids = [...String(response.text || '').matchAll(/^\s*(\d+)\.\s+/gm)].map(match => Number(match[1]));
+        const valid = ids.length === task.expected_cues && ids.every((id, index) => id === index + 1);
+        if (!valid) {
+          // Read the SAME completed turn once more, without resending a prompt.
+          const reread = await sendMessageWithInjection(currentTask.tabId, {
+            action: "CAPCAP_READ_REPLY", task_id: task.id, platform: task.platform
+          });
+          if (!reread?.success) throw new Error(reread?.error || "Cannot re-read completed reply");
+          reread.diagnostics = `reread=true initial_chars=${String(response.text || '').length} initial_numbered_lines=${ids.length} expected_cues=${task.expected_cues} ${reread.diagnostics || ''}`;
+          response = reread;
         }
       }
 
@@ -702,7 +697,7 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
       } else if (task.operation !== "context") {
         delete contextSessions[task.platform];
       }
-      if (!currentTask.canceled) await postResult(task.id, response.success, response.text, response.error);
+      if (!currentTask.canceled) await postResult(task.id, response.success, response.text, response.error || response.diagnostics);
       return;
     }
 

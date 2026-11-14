@@ -1,5 +1,9 @@
 # RELEASE NOTES — V9.0.0
 
+**Lưu ý khi dịch qua trình duyệt:** Giữ cửa sổ GPT/Gemini hiển thị và đủ lớn để thấy các nút thao tác. Không thu xuống taskbar hoặc che kín cửa sổ khi đang dịch vì có thể làm chậm gửi hoặc nhận phản hồi. Lưu ý cũng hiển thị trong Cài đặt và popup extension.
+
+**Cập nhật mã nguồn 14/11 (chưa build installer):** Phân loại phục hồi GPT/Gemini Web: đọc lại đúng phản hồi, chỉ retry và chia nhỏ có giới hạn khi sai định dạng/số câu. Lỗi không phản hồi, đóng tab hoặc bị chặn chuyển sang fallback; Hủy thì dừng. Bổ sung log tương quan task/session, ID thiếu/thừa, trạng thái trang; sửa chọn/chèn prompt khi mất focus. Chi tiết trong `docs/browser-feedback-2026-11-14.md`.
+
 **Ngày cập nhật: 10/11/2026**
 
 **Lưu ý sau cập nhật khi dùng GPT/Gemini Web:** Vào `chrome://extensions` hoặc `edge://extensions`, bấm **Reload (Tải lại)** tiện ích CapCap, rồi tải lại các tab GPT/Gemini đang mở. Nếu extension được copy sang thư mục khác, cần cập nhật các file trong thư mục đó trước khi Reload; nếu đường dẫn đã thay đổi, dùng **Load unpacked** từ thư mục mới. Cài đè cùng đường dẫn và extension đang load từ thư mục app thì không cần cài lại tiện ích từ đầu.

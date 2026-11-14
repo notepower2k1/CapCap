@@ -121,10 +121,10 @@ class TestPartialFallback(unittest.TestCase):
         segments = [dict(start=i,end=i+1,text=str(i)) for i in range(6)]
         ordered = [([str(i),str(i+1)],None,1024,None) for i in range(0,6,2)]
         polisher = MagicMock()
-        polisher.polish_batch.side_effect = [(["incomplete"],[],"browser_ai"),
-            (["AI-0","AI-1"],[],"browser_ai"),TranslationProviderError("failed retry")]
+        polisher.polish_batch.side_effect = [(["incomplete"],[],"openai"),
+            (["AI-0","AI-1"],[],"openai"),TranslationProviderError("failed retry")]
         with patch.dict(os.environ,{"CAPCAP_AUTO_TRANSLATION_CONTEXT":"0"}), \
-             patch.object(orch,"_resolve_ai_provider",return_value=("browser_ai",polisher)), \
+             patch.object(orch,"_resolve_ai_provider",return_value=("openai",polisher)), \
              patch.object(orch,"_build_ai_batches",side_effect=[([([s["text"] for s in segments],None,1024,None)],True),(ordered,False)]), \
              patch.object(orch.google_web,"translate_batch",side_effect=lambda texts,**_: ["G-"+t for t in texts]) as google, \
              patch("app.translation.orchestrator.time.sleep"):

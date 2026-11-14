@@ -16771,7 +16771,7 @@ class VideoTranslatorGUI(QMainWindow):
         browser_workers_combo.setCurrentIndex(max(0, browser_workers_combo.findData(initial_workers)))
         browser_workers_row.addWidget(browser_workers_combo, 1)
         browser_ai_layout.addLayout(browser_workers_row)
-        browser_workers_hint = QLabel(t("Gemini: keep translation windows visible and uncovered."), browser_ai_widget)
+        browser_workers_hint = QLabel(t("While translating, keep GPT/Gemini windows visible and large enough to show the chat controls. Do not minimize them to the taskbar or cover them completely; this may delay sending or reading replies."), browser_ai_widget)
         browser_workers_hint.setWordWrap(True)
         browser_ai_layout.addWidget(browser_workers_hint)
 

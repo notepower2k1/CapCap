@@ -675,6 +675,8 @@ class BrowserBridgePolisherProvider:
         operation: str = "batch",
         timeout: float = 240.0,
         is_canceled=None,
+        fresh_chat=False,
+        expected_cues=0,
     ) -> str:
         server = self._get_server()
         s_clean = (system_msg or "").strip()
@@ -715,13 +717,16 @@ class BrowserBridgePolisherProvider:
                     "session_id": session_id,
                     "isolated": pooled,
                     "keep_open": pooled,
-                    "new_chat": pooled,
+                    "new_chat": pooled or fresh_chat,
                     "prompt": prompt,
                     "operation": operation,
+                    "expected_cues": expected_cues,
                 },
                 timeout=timeout,
             )
             self._pending_task_ids.add(task_id)
+        print(f"[Browser AI] Dispatch task={task_id} session={session_id} platform={self.platform} "
+              f"operation={operation} fresh_chat={pooled or fresh_chat} expected_cues={expected_cues} timeout={timeout}s", flush=True)
         try:
             task_wait_start = time.monotonic()
             while not event.wait(timeout=0.2):
@@ -730,6 +735,7 @@ class BrowserBridgePolisherProvider:
                     raise InterruptedError("Translation canceled by user.")
                 if time.monotonic() - task_wait_start >= timeout:
                     server.cancel_task(task_id)
+                    print(f"[Browser AI] Timeout task={task_id} session={session_id} elapsed={time.monotonic() - task_wait_start:.2f}s", flush=True)
                     raise BrowserAITimeoutError(
                         f"{self.display_name} timed out after {timeout}s waiting for browser response."
                     )
@@ -739,12 +745,17 @@ class BrowserBridgePolisherProvider:
 
         result = server.get_task_result(task_id)
         if not result:
+            print(f"[Browser AI] No result task={task_id} session={session_id}", flush=True)
             raise TranslationProviderError(f"{self.display_name} returned no response.")
         if not result.get("success", False):
             error_msg = result.get("error") or "Unknown error"
+            print(f"[Browser AI] Failed task={task_id} session={session_id} error={error_msg}", flush=True)
             raise TranslationProviderError(f"{self.display_name} error: {error_msg}")
 
-        return result.get("text") or ""
+        text = result.get("text") or ""
+        print(f"[Browser AI] Reply task={task_id} session={session_id} chars={len(text)} "
+              f"elapsed={time.monotonic() - task_wait_start:.2f}s diagnostics={result.get('error', '')}", flush=True)
+        return text
 
     def generate_text(
         self,
@@ -790,9 +801,6 @@ class BrowserBridgePolisherProvider:
             except Exception as exc:
                 last_exc = exc
                 last_error = str(exc)
-                if attempt < max_retries:
-                    time.sleep(1.0)
-                    continue
                 server.update_sync_state(is_translating=False, operation="error", status_message=f"Lỗi: {last_error}")
                 raise TranslationProviderError(f"{self.display_name} generate_text failed: {last_error}") from last_exc
 
@@ -842,7 +850,8 @@ class BrowserBridgePolisherProvider:
         with self._pending_lock:
             if self.parallel_batches and self._parallel_stopping:
                 raise TranslationProviderError("Parallel browser translation was stopped.")
-            server.update_sync_state(**initial_state)
+            if not kwargs.get("_defer_progress"):
+                server.update_sync_state(**initial_state)
 
         system_msg, user_msg = self._build_messages(
             source_texts=source_texts,
@@ -868,6 +877,8 @@ class BrowserBridgePolisherProvider:
                     operation="batch",
                     timeout=effective_timeout,
                     is_canceled=is_canceled,
+                    fresh_chat=attempt > 1 or kwargs.get("_fresh_chat", False),
+                    expected_cues=len(source_texts),
                 )
                 if not text:
                     raise Exception("Empty response text")
@@ -882,8 +893,18 @@ class BrowserBridgePolisherProvider:
                 expected_ids = list(range(1, expected + 1))
                 actual_ids = [number for number, _line in numbered_items]
                 if actual_ids != expected_ids:
+                    missing_ids = sorted(set(expected_ids) - set(actual_ids))
+                    unexpected_ids = sorted(set(actual_ids) - set(expected_ids))
+                    print(
+                        f"[Browser AI] Invalid reply: platform={self.platform} batch={batch_number}/{total_batches} "
+                        f"expected={expected} parsed={len(actual_ids)} chars={len(text)} "
+                        f"missing_ids={missing_ids} unexpected_ids={unexpected_ids} "
+                        f"id_tail={actual_ids[-8:]}", flush=True,
+                    )
                     raise TranslationValidationError(
-                        f"Malformed or incomplete numbered output: expected IDs 1..{expected}, got {actual_ids[:8]}..."
+                        f"Malformed or incomplete numbered output: expected IDs 1..{expected}, "
+                        f"parsed={len(actual_ids)}, missing_ids={missing_ids}, unexpected_ids={unexpected_ids}, "
+                        f"id_tail={actual_ids[-8:]}"
                     )
                 lines = [line for _number, line in numbered_items]
                 if not validate_texts(lines, expected):
@@ -891,6 +912,8 @@ class BrowserBridgePolisherProvider:
                         f"Expected {expected} lines, got {len(lines)}"
                     )
 
+                if kwargs.get("_defer_progress"):
+                    return lines, [], self.provider_id
                 completed_cues_val = start_offset + expected
                 done_percent = int((batch_number / max(1, total_batches)) * 100)
                 with self._pending_lock:
@@ -905,8 +928,44 @@ class BrowserBridgePolisherProvider:
                         status_message=f"Hoàn thành batch {batch_number}/{total_batches}.",
                     )
                 return lines, [], self.provider_id
-            except TranslationValidationError:
-                raise
+            except TranslationValidationError as exc:
+                if is_canceled and is_canceled():
+                    raise InterruptedError("Translation canceled by user.") from exc
+                if self.parallel_batches and self._parallel_stopping:
+                    raise TranslationProviderError("Parallel browser translation was stopped.") from exc
+                if attempt >= max_retries:
+                    if max_retries > 1 and len(source_texts) > 1 and not kwargs.get("_no_split"):
+                        print(f"[Browser AI] Split recovery batch={batch_number}/{total_batches} cues={len(source_texts)} parts=2", flush=True)
+                        recovered = []
+                        midpoint = len(source_texts) // 2
+                        for lo, hi in ((0, midpoint), (midpoint, len(source_texts))):
+                            result, _, _ = self.polish_batch(
+                                source_texts=source_texts[lo:hi],
+                                translated_texts=translated_texts[lo:hi] if translated_texts is not None else None,
+                                source_speakers=source_speakers[lo:hi] if source_speakers is not None else None,
+                                src_lang=src_lang, target_lang=target_lang, style_instruction=style_instruction,
+                                custom_system_prompt=custom_system_prompt, context_guidance=context_guidance,
+                                timeout=timeout, max_retries=1, max_tokens=max_tokens, is_canceled=is_canceled,
+                                batch_number=batch_number, total_batches=total_batches,
+                                start_offset=start_offset + lo, total_cues=total_cues,
+                                _no_split=True, _fresh_chat=True, _defer_progress=True,
+                            )
+                            recovered.extend(result)
+                        with self._pending_lock:
+                            if self.parallel_batches:
+                                self._parallel_completed_cues += len(recovered)
+                                completed = self._parallel_completed_cues
+                            else:
+                                completed = start_offset + len(recovered)
+                            server.update_sync_state(completed_cues=completed,
+                                progress_percent=int(completed / max(1, total_cues_val) * 100))
+                        return recovered, [], self.provider_id
+                    raise
+                print(f"[Browser AI] Retrying malformed reply: batch={batch_number}/{total_batches} "
+                      f"attempt={attempt + 1}/{max_retries} fresh_chat=true reason={exc}", flush=True)
+                server.update_sync_state(status_message=f"Retrying batch {batch_number}/{total_batches}: invalid response format.")
+                # Keep the exact same source and approved character rules.
+                continue
             except InterruptedError:
                 server.update_sync_state(is_translating=False, operation="idle", status_message="Đã hủy.")
                 raise
@@ -921,9 +980,6 @@ class BrowserBridgePolisherProvider:
                     raise InterruptedError("Translation canceled by user.")
                 last_exc = exc
                 last_error = str(exc)
-                if attempt < max_retries:
-                    time.sleep(1.0)
-                    continue
                 server.update_sync_state(is_translating=False, operation="error", status_message=f"Lỗi: {last_error}")
                 raise TranslationProviderError(f"{self.display_name} failed: {last_error}") from last_exc
 

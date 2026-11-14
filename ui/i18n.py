@@ -28,6 +28,7 @@ VI_TRANSLATIONS: dict[str, str] = {
     "{count} — Parallel, separate chats": "{count} — Song song, cuộc trò chuyện riêng",
     "Each parallel batch uses a separate tab or window. Keep Gemini windows visible and uncovered. Speed depends on your AI account limits.": "Mỗi batch song song dùng một tab hoặc cửa sổ riêng. Giữ các cửa sổ Gemini hiển thị và không bị che kín. Tốc độ phụ thuộc giới hạn tài khoản AI.",
     "Gemini: keep translation windows visible and uncovered.": "Gemini: giữ các cửa sổ dịch hiển thị và không bị che kín.",
+    "While translating, keep GPT/Gemini windows visible and large enough to show the chat controls. Do not minimize them to the taskbar or cover them completely; this may delay sending or reading replies.": "Khi đang dịch, giữ cửa sổ GPT/Gemini hiển thị và đủ lớn để thấy các nút thao tác. Không thu xuống taskbar hoặc che kín cửa sổ; việc này có thể làm chậm gửi hoặc nhận phản hồi.",
     "Status": "Trạng thái",
     "Subtitle": "Phụ đề",
     "Running": "Đang chạy",
