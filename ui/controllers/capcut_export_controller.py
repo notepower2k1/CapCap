@@ -17,6 +17,25 @@ from i18n import t
 
 
 def capture_snapshot(gui):
+    presentation = getattr(gui, "subtitle_presentation_controller", None)
+    if presentation is None or presentation.role == "primary":
+        return _capture_snapshot(gui)
+    presentation.capture_style()
+    previous_role = presentation.role
+    presentation.role = "primary"
+    presentation.apply_controls(presentation.cfg["styles"]["primary"])
+    try:
+        return _capture_snapshot(gui)
+    finally:
+        presentation.role = previous_role
+        presentation.apply_controls(presentation.cfg["styles"][previous_role])
+
+
+def _capture_snapshot(gui):
+    presentation = getattr(gui, "subtitle_presentation_controller", None)
+    if presentation is not None:
+        presentation.validate_export()
+        presentation.sync_tracks()
     video = gui._resolve_preview_original_video_path() or gui.video_path_edit.text().strip()
     if not video or not Path(video).is_file():
         raise ValueError(t("Please choose a video first."))
@@ -49,6 +68,9 @@ def capture_snapshot(gui):
     music = []
     for track in timeline["tracks"]:
         name = track.get("name", "")
+        if presentation is not None and track.get("type") in {"subtitle", "dub_subtitle"}:
+            track["visible"] = bool(track.get("visible", True) and presentation.cfg["mode"] != "none"
+                                    and (name != "TS2" or presentation.cfg["mode"] == "bilingual"))
         visibility_flags = {"dub_subtitle": "_subtitle_track_preview_visible",
                             "subtitle": "_subtitle_track_preview_visible",
                             "text": "_text_track_preview_visible", "image": "_logo_track_preview_visible",
@@ -72,19 +94,26 @@ def capture_snapshot(gui):
                     if Path(cue_file).is_file():
                         layer["_voice_file"] = cue_file
             if layer.get("type") in ("subtitle", "dub_subtitle"):
+                layer_style = presentation.export_style([], "secondary") if presentation is not None and name == "TS2" else subtitle_style
                 for key in ("font_name", "outline_color", "outline_width", "shadow_color", "shadow_depth", "shadow_alpha",
                             "background_color", "background_alpha", "background_radius", "background_box", "background_width", "background_shape"):
-                    layer[key] = copy.deepcopy(subtitle_style.get(key))
-                layer["font_bold"] = bool(subtitle_style.get("bold", False))
-                layer["background_opacity"] = float(subtitle_style.get("background_alpha", 0))
+                    layer[key] = copy.deepcopy(layer_style.get(key))
+                layer["font_bold"] = bool(layer_style.get("bold", False))
+                layer["background_opacity"] = float(layer_style.get("background_alpha", 0))
                 # Native text uses horizontal alignment; ASS's 1..9 also
                 # includes the vertical anchor, which is already positioned.
-                layer["alignment"] = ("left", "center", "right")[(int(subtitle_style.get("alignment", 2))-1) % 3]
-                layer["font_size"] = int(gui.subtitle_font_size_spin.value())
+                layer["alignment"] = ("left", "center", "right")[(int(layer_style.get("alignment", 2))-1) % 3]
+                layer["font_size"] = int(layer_style.get("font_size", 60))
                 # The live subtitle colour may be selected per speaker; layer
                 # defaults can still be white after the UI colour changes.
                 segment = layer.get("metadata", {}).get("_seg_dict", {})
-                layer["font_color"] = gui._subtitle_color_for_segment(segment).name()
+                color = str(layer_style.get("font_color", "&H00FFFFFF"))
+                layer["font_color"] = "#" + color[-2:] + color[-4:-2] + color[-6:-4] if color.startswith("&H") else color
+                if name != "TS2":
+                    layer["font_color"] = gui._subtitle_color_for_segment(segment).name()
+                if name == "TS2":
+                    layer["position_x"] = layer_style.get("custom_position_x", 50)
+                    layer["position_y"] = layer_style.get("custom_position_y", 76)
         all_layers = {l["id"]: l for tr in timeline["tracks"] for l in tr.get("layers", []) if l.get("id")}
         for layer in DraftExporter._layers(track, all_layers):
             if layer.get("id") not in music_by_id:
@@ -108,7 +137,7 @@ def capture_snapshot(gui):
         "warps": copy.deepcopy(getattr(gui, "video_time_warps", []) or []),
         "mirror_horizontal": bool(getattr(gui, "_video_mirror_horizontal", False)),
         "framing": {"mode": gui.get_output_scale_mode_key(), "focus": gui.get_output_fill_focus()},
-        "subtitle_position": copy.deepcopy(gui.get_subtitle_position_config()),
+        "subtitle_position": {key: subtitle_style.get(key) for key in ("custom_position_enabled", "custom_position_x", "custom_position_y")},
     }
 
 

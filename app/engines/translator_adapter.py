@@ -49,6 +49,8 @@ class TranslatorAdapter:
         style_instruction: str = "",
         batch_callback=None,
         status_callback=None,
+        custom_system_prompt: str | None = None,
+        **translation_options,
     ):
         funcs = self._translator_module()
         return funcs["translate_segments"](
@@ -61,6 +63,8 @@ class TranslatorAdapter:
             style_instruction=style_instruction,
             batch_callback=batch_callback,
             status_callback=status_callback,
+            **({"custom_system_prompt": custom_system_prompt} if custom_system_prompt is not None else {}),
+            **translation_options,
         )
 
     def rewrite_segments(self, source_segments, translated_segments, *, model_path=None, src_lang: str = "auto", style_instruction: str = "", batch_callback=None):

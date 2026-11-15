@@ -38,6 +38,8 @@ def translate_segments(
     style_instruction="",
     batch_callback=None,
     status_callback=None,
+    custom_system_prompt=None,
+    **translation_options,
 ):
     from translation import TranslationOrchestrator
 
@@ -51,6 +53,8 @@ def translate_segments(
         style_instruction=style_instruction,
         batch_callback=batch_callback,
         status_callback=status_callback,
+        **({"custom_system_prompt": custom_system_prompt} if custom_system_prompt is not None else {}),
+        **translation_options,
     )
     if not result.success:
         raise TranslationError("; ".join(result.errors) or "Translation failed.")

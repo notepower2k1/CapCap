@@ -1,0 +1,40 @@
+"""Shared display-text and highlight controls for independent subtitle inspectors."""
+from PySide6.QtWidgets import QTextEdit, QPushButton, QHBoxLayout, QLabel, QWidget, QSizePolicy
+from i18n import t
+
+
+def add_subtitle_text_fields(layout, text, *, on_edit, on_selection, on_highlight, compact=False):
+    editor = QTextEdit()
+    editor.setObjectName("segmentInspectorEditor")
+    editor.setAcceptRichText(False)
+    editor.setPlainText(text)
+    editor.setMinimumHeight(64 if compact else 96)
+    editor.setMaximumHeight(72 if compact else 96)
+    editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    editor.setPlaceholderText(t("Text shown on screen."))
+    editor.textChanged.connect(lambda: on_edit(editor))
+    editor.selectionChanged.connect(lambda: on_selection(editor))
+    highlight = QPushButton(t("Add highlight from selection"))
+    highlight.setEnabled(False)
+    highlight.clicked.connect(lambda _=False: on_highlight(editor))
+    actions = QHBoxLayout()
+    actions.setContentsMargins(0, 0, 0, 0)
+    actions.setSpacing(8)
+    actions.addWidget(highlight)
+    actions.addStretch()
+    meta = QHBoxLayout()
+    meta.setContentsMargins(0, 0, 0, 0)
+    meta.setSpacing(6)
+    placeholder = QLabel("")
+    placeholder.setObjectName("helperLabel")
+    chips = QWidget()
+    chip_layout = QHBoxLayout(chips)
+    chip_layout.setContentsMargins(0, 0, 0, 0)
+    chip_layout.setSpacing(6)
+    meta.addWidget(placeholder)
+    meta.addWidget(chips, 1)
+    layout.addWidget(editor, 0)
+    layout.addLayout(actions)
+    layout.addLayout(meta)
+    return dict(translated_editor=editor, highlight_button=highlight,
+                highlight_placeholder=placeholder, highlight_chip_layout=chip_layout)

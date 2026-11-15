@@ -343,6 +343,7 @@ class PrepareWorkflow:
         force_transcription: bool = False,
         elevenlabs_model_id: str | None = None,
         asr_options: dict | None = None,
+        subtitle_presentation: dict | None = None,
     ) -> str:
         optimize_subtitles = False
 
@@ -1228,6 +1229,26 @@ class PrepareWorkflow:
         self.engine_runtime.generate_srt(segment_models, srt_translated_path)
         translated_subtitle_elapsed = time.perf_counter() - translated_subtitle_started
         project_state.set_artifact("subtitle_translated_srt", srt_translated_path)
+        from app.subtitle_presentation import KEY, build_secondary, config, read_srt
+        presentation = config(subtitle_presentation if subtitle_presentation is not None else project_state.settings.get(KEY))
+        if presentation["mode"] == "bilingual":
+            _report_step("secondary_subtitle", "Preparing secondary subtitles...")
+            project_state.set_step_status("secondary_subtitle", "running")
+            try:
+                presentation = build_secondary(presentation, read_srt(srt_original_path), engine=self.engine_runtime,
+                    source_language=source_language, translator_ai=translator_ai, translator_style=project_state.translator_style)
+                project_state.set_step_status("secondary_subtitle", "done")
+                from app.subtitle_presentation import text_signature
+                presentation["main_signature"] = text_signature(read_srt(srt_translated_path))
+            except Exception:
+                presentation["status"] = "failed"
+                project_state.set_setting(KEY, presentation)
+                project_state.set_step_status("secondary_subtitle", "failed")
+                self.project_service.save_project(project_state)
+                raise
+        project_state.set_setting(KEY, presentation)
+        from app.subtitle_presentation import save_secondary
+        save_secondary(project_state, self.project_service, presentation)
         self.project_service.save_project(project_state)
         workflow_elapsed = time.perf_counter() - workflow_started
         print(f"[Timing] Build translated subtitle: {translated_subtitle_elapsed:.2f}s")

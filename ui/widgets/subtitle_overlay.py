@@ -1,12 +1,14 @@
-from PySide6.QtCore import QRect, QRectF, Qt
+from PySide6.QtCore import QRect, QRectF, QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 
-class SubtitleOverlayItem(QGraphicsItem):
+class SubtitleOverlayItem(QGraphicsObject):
     """A draggable graphics item to represent the subtitle overlay on VideoView."""
     W, H = 640, 96
     LINE_HEIGHT_FACTOR = 1.35
+    positionDragStarted = Signal()
+    positionDragFinished = Signal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -16,6 +18,7 @@ class SubtitleOverlayItem(QGraphicsItem):
         self.current_lines: list[str] = []
         self.font_name = "Segoe UI"
         self.font_size = 20
+        self.bold = True
         self.font_color = QColor(255, 255, 255)
         self.outline_width = 2
         self.outline_color = QColor(0, 0, 0, 220)
@@ -31,6 +34,51 @@ class SubtitleOverlayItem(QGraphicsItem):
         # The libmpv overlay exposes this same switch.  Keep the Qt fallback
         # API-compatible so a machine that cannot load libmpv still starts.
         self._text_rendering_enabled = True
+        self._editable = False
+        self._drag_active = False
+        self._target_view = None
+        self.setAcceptedMouseButtons(Qt.NoButton)
+
+    def attach_to_view(self, view):
+        self._target_view = view
+
+    def set_editable(self, editable):
+        self._editable = bool(editable)
+        self.setAcceptedMouseButtons(Qt.LeftButton if editable else Qt.NoButton)
+        self.setCursor(Qt.OpenHandCursor if editable else Qt.ArrowCursor)
+        if not editable:
+            self._drag_active = False
+
+    def mousePressEvent(self, event):
+        if not self._editable or event.button() != Qt.LeftButton:
+            event.ignore()
+            return
+        self._drag_active = True
+        self._drag_grab_offset = event.scenePos() - self.pos()
+        self.positionDragStarted.emit()
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if not self._drag_active or self._target_view is None:
+            event.ignore()
+            return
+        rect = self._target_view.get_preview_canvas_rect()
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+        center = event.scenePos() - self._drag_grab_offset + QPointF(self.W / 2, self.H / 2)
+        self.custom_position_enabled = True
+        self.custom_x_percent = round(max(0, min(100, (center.x() - rect.left()) * 100 / rect.width())))
+        self.custom_y_percent = round(max(0, min(100, (center.y() - rect.top()) * 100 / rect.height())))
+        self._target_view.reposition_subtitle()
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if not self._drag_active or event.button() != Qt.LeftButton:
+            event.ignore()
+            return
+        self._drag_active = False
+        self.positionDragFinished.emit(self.custom_x_percent, self.custom_y_percent)
+        event.accept()
 
     def set_text_rendering(self, enabled: bool):
         """Enable/disable Qt text painting while retaining the drag item.
@@ -85,8 +133,12 @@ class SubtitleOverlayItem(QGraphicsItem):
         background_box=None,
         background_color=None,
         single_line=None,
+        bold=None,
     ):
         changed = False
+        if bold is not None and bool(bold) != self.bold:
+            self.bold = bool(bold)
+            changed = True
         if font_name and font_name != self.font_name:
             self.font_name = font_name
             changed = True
@@ -156,7 +208,7 @@ class SubtitleOverlayItem(QGraphicsItem):
         painter.setPen(self.font_color)
         font = QFont(self.font_name)
         font.setPixelSize(max(1, int(self.font_size)))
-        font.setBold(True)
+        font.setBold(self.bold)
         painter.setFont(font)
         line_height = max(24, int(self.font_size * self.LINE_HEIGHT_FACTOR))
         single_line_flags = Qt.AlignCenter

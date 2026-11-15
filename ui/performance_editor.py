@@ -413,6 +413,16 @@ class PerformanceEditor(VideoTranslatorGUI):
     def sync_live_subtitle_preview(self):
         if not hasattr(self,"video_view"):
             return
+        presentation = getattr(self,"subtitle_presentation_controller",None)
+        if presentation is not None and presentation.cfg["mode"] != "single":
+            if presentation.cfg["mode"] == "none":
+                self.video_view.subtitle_item.set_editable(False)
+                self.video_view.subtitle_item.hide()
+                presentation.hide_overlays()
+            else:
+                seconds=self._frame_time.value() if hasattr(self,"_frame_time") else 0
+                presentation.fallback_preview(self.current_translated_segments or self.current_segments,round(seconds*1000))
+            return
         if not bool(getattr(self,"_subtitle_track_preview_visible",True)):
             self.video_view.subtitle_item.hide()
             return

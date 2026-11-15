@@ -28,6 +28,19 @@ from app.translation.orchestrator import TranslationOrchestrator
 
 
 class TestTranslationPromptDialogContextOption(unittest.TestCase):
+    def test_secondary_dialog_keeps_main_preset_and_uses_own_initial_prompt(self):
+        with patch.dict(os.environ, {"CAPCAP_TRANSLATION_PRESET_ID": "main-sentinel"}):
+            dialog = TranslationPromptDialog(None, src_lang="en", target_lang="vi",
+                preset_id="general_default", custom_prompt="Translate secondary independently", persist_preset=False)
+            before = dialog.settings.value("translation_preset_id")
+            self.assertEqual(dialog.preset_combo.currentData(), "general_default")
+            self.assertEqual(dialog.prompt_edit.toPlainText(), "Translate secondary independently")
+            dialog._on_translate()
+            self.assertEqual(dialog.selected_prompt, "Translate secondary independently")
+            self.assertEqual(os.getenv("CAPCAP_TRANSLATION_PRESET_ID"), "main-sentinel")
+            self.assertEqual(dialog.settings.value("translation_preset_id"), before)
+            dialog.close()
+
     def setUp(self):
         for org, app_name in [("CapCap", "CapCap"), ("CapCap", "VideoTranslatorGUI")]:
             s = QSettings(org, app_name)
@@ -284,11 +297,7 @@ class TestSubtitleControllerIntegration(unittest.TestCase):
         self.gui._translation_progress_dialog = mock_dialog
 
         self.controller.on_translation_status_changed("bing", "Falling back to Bing...")
-        self.assertEqual(mock_dialog._provider, "Bing Translator")
-        actual_title = mock_dialog.setWindowTitle.call_args[0][0]
-        self.assertIn("Bing Translator", actual_title)
-        self.assertTrue("Subtitles" in actual_title or "Phụ đề" in actual_title)
-        mock_dialog.setLabelText.assert_called()
+        mock_dialog.set_status.assert_called_once_with("bing", "Falling back to Bing...")
 
     def test_on_translation_finished_reports_bing_fallback(self):
         self.gui.video_path_edit.text.return_value = ""

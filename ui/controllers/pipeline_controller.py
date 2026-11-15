@@ -505,6 +505,7 @@ class PipelineController:
             remote_api_token=self.local_worker_api_token,
             force_remote_api=True,
             force_transcription=self.target_stage == "transcript",
+            subtitle_presentation=self.gui.subtitle_presentation_controller.export_settings() if hasattr(self.gui, "subtitle_presentation_controller") else None,
         )
         
         # Connect signals
@@ -762,6 +763,7 @@ class PipelineController:
         self.gui._pipeline_step = ""
         self._stop_prepare_status_polling()
         self._stop_local_worker_server()
+        self.gui.snapshot_subtitle_timing()
         
         if hasattr(self.gui, "run_all_btn"):
             self.gui.run_all_btn.setEnabled(True)

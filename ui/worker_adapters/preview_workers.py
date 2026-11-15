@@ -384,6 +384,8 @@ class ExactFramePreviewWorker(QThread):
                 self.srt_path,
                 self.output_path,
                 self.timestamp_seconds,
+                subtitle_presentation=dict(self.subtitle_style.get("subtitle_presentation") or {},
+                    time_warps=self.subtitle_style.get("video_time_warps") or []),
                 alignment=self.subtitle_style.get("alignment", 2),
                 margin_v=self.subtitle_style.get("margin_v", 30),
                 font_name=self.subtitle_style.get("font_name", "Arial"),

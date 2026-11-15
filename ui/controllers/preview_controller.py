@@ -394,6 +394,9 @@ class PreviewController:
         try:
             self.gui.sync_live_subtitle_preview()
             live_ass_path = str(getattr(self.gui, "live_preview_ass_path", "") or "")
+            presentation = getattr(self.gui, "subtitle_presentation_controller", None)
+            if isinstance(getattr(presentation, "cfg", None), dict) and presentation.cfg["mode"] != "single":
+                live_ass_path = presentation.render_preview(self.gui.get_active_segments(), timeline=True)
             if not live_ass_path or not os.path.isfile(live_ass_path):
                 return ""
 
@@ -424,7 +427,7 @@ class PreviewController:
                     rebased_lines.append("Dialogue: " + ",".join(fields) + "\n")
                     event_count += 1
 
-            if not event_count:
+            if not event_count and not (isinstance(getattr(presentation, "cfg", None), dict) and presentation.cfg["mode"] == "none"):
                 return ""
             preview_dir = self.gui.get_project_temp_dir("preview")
             os.makedirs(preview_dir, exist_ok=True)
@@ -1099,6 +1102,13 @@ class PreviewController:
             return
 
         mode = self._effective_render_mode_without_tts(self.gui.get_output_mode_key())
+        presentation = getattr(self.gui, "subtitle_presentation_controller", None)
+        if presentation is not None:
+            try:
+                presentation.validate_export()
+            except ValueError as exc:
+                QMessageBox.warning(self.gui, t("Secondary subtitles"), str(exc))
+                return
         original_audio_gain_db = self._original_audio_gain_db_for_render(mode)
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         translated_srt_path = self.gui.last_translated_srt_path

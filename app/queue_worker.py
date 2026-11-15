@@ -78,6 +78,20 @@ def run_job(workspace, video, config, progress=print, *, task="full"):
     style["word_timings"] = [list(seg.get("words",[])) for seg in segments]
     style["manual_highlights"] = [list(seg.get("manual_highlights",[])) + list(seg.get("auto_highlights",[])) for seg in segments]
     warps = list(state.settings.get("video_time_warps", []))
+    if task != "export":
+        from app.subtitle_timing import capture
+        bridge = GUIProjectBridge(service)
+        capture(context["current_segments"], warps)
+        capture(context["current_translated_segments"], warps)
+        if context["current_segments"]:
+            context["current_segment_models"] = bridge.persist_transcription(state, context["current_segments"], context["last_original_srt_path"])
+        if context["current_translated_segments"]:
+            bridge.persist_translation(state, context["current_segment_models"], context["current_translated_segments"], context["last_translated_srt_path"])
+        from app.subtitle_presentation import KEY, config as presentation_config, save_secondary
+        presentation = presentation_config(state.settings.get(KEY))
+        if presentation["mode"] == "bilingual":
+            capture(presentation["secondary_segments"])
+        save_secondary(state, service, presentation)
     style["video_time_warps"] = warps
     duration = runtime.voice_workflow.engine_runtime.get_video_duration(video)
     from services.time_warp_plan import compile_plan

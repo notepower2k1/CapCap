@@ -55,6 +55,8 @@ def sync_segments_to_dub_subtitle_layers(
     """
     if not segments:
         for t in list(timeline.tracks):
+            if t.name == "TS2" or (getattr(t, "metadata", {}) or {}).get("secondary_subtitle"):
+                continue
             t_type = getattr(t, "type", None)
             name = str(getattr(t, "name", "") or "").strip().upper()
             if (

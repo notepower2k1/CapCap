@@ -8,6 +8,21 @@ from services.processing_queue import ENV_KEYS
 
 
 def capture(gui):
+    presentation = getattr(gui, "subtitle_presentation_controller", None)
+    if presentation is None or presentation.role == "primary":
+        return _capture(gui)
+    presentation.capture_style()
+    current_role = presentation.role
+    presentation.role = "primary"
+    presentation.apply_controls(presentation.cfg["styles"]["primary"])
+    try:
+        return _capture(gui)
+    finally:
+        presentation.role = current_role
+        presentation.apply_controls(presentation.cfg["styles"][current_role])
+
+
+def _capture(gui):
     controls = {}
     for name, widget in vars(gui).items():
         if name == "video_path_edit" or any(word in name.lower() for word in ("password", "api_key", "token", "secret")):
@@ -39,7 +54,8 @@ def capture(gui):
             translator_ai=gui.is_ai_polish_enabled(), translator_style=gui.get_ai_style_instruction(),
             whisper_model_name=gui.get_whisper_model_name(), transcription_engine=gui.get_transcription_engine(),
             speaker_diarization=gui.is_speaker_diarization_enabled(), speaker_diarization_num_speakers=gui.get_speaker_diarization_num_speakers(),
-            skip_translation=gui.is_skip_translation(), asr_options=get_asr_filter_settings(gui.settings)),
+            skip_translation=gui.is_skip_translation(), asr_options=get_asr_filter_settings(gui.settings),
+            subtitle_presentation=gui.subtitle_presentation_controller.export_settings() if hasattr(gui, "subtitle_presentation_controller") else None),
         voice=dict(voice_name=gui.get_active_voice_name(), voice_speed=gui._parse_voice_speed_value(),
             audio_handling_mode=gui.get_audio_handling_mode(), timing_sync_mode=current_source_text(gui.voice_timing_sync_combo),
             original_volume=gui.audio_a1_volume_slider.value(), dub_volume=gui.audio_a2_volume_slider.value(),

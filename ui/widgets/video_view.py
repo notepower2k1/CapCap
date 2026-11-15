@@ -10,6 +10,8 @@ class VideoView(QGraphicsView):
     """Hosts video and subtitle overlay in one scene."""
 
     framingChanged = Signal(float, float)
+    subtitleDragStarted = Signal()
+    subtitlePositionChanged = Signal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -26,10 +28,15 @@ class VideoView(QGraphicsView):
         self._scene.addItem(self.video_item)
 
         self.subtitle_item = SubtitleOverlayItem()
+        self.subtitle_item.attach_to_view(self)
+        self.subtitle_item.positionDragStarted.connect(self.subtitleDragStarted.emit)
+        self.subtitle_item.positionDragFinished.connect(self.subtitlePositionChanged.emit)
         self._scene.addItem(self.subtitle_item)
         self.subtitle_item.hide()
         self.video_source_width = 0
         self.video_source_height = 0
+        self.subtitle_render_width = 0
+        self.subtitle_render_height = 0
         self.preview_aspect_key = "source"
         self.preview_scale_mode = "fit"
         self.preview_fill_focus_x = 0.5
@@ -161,19 +168,23 @@ class VideoView(QGraphicsView):
                 offset_y = canvas_rect.top()
         return QRectF(offset_x, offset_y, content_w, content_h)
 
+    def set_subtitle_render_dimensions(self, width, height):
+        self.subtitle_render_width = max(1, int(width))
+        self.subtitle_render_height = max(1, int(height))
+
     def reposition_subtitle(self):
         item = self.subtitle_item
         rect = self.get_preview_canvas_rect()
         if rect.width() <= 0 or rect.height() <= 0:
             return
 
-        source_w = max(1, int(rect.width()))
-        source_h = max(1, int(rect.height()))
+        source_w = max(1, int(self.subtitle_render_width or self.video_source_width or rect.width()))
+        source_h = max(1, int(self.subtitle_render_height or self.video_source_height or rect.height()))
         scale_x = rect.width() / source_w
         scale_y = rect.height() / source_h
         side_margin_px = 60 * scale_x
 
-        desired_width = min(int(rect.width() - 2 * side_margin_px), max(160, int((source_w - 120) * scale_x)))
+        desired_width = max(1, min(int(rect.width() - 2 * side_margin_px), int((source_w - 120) * scale_x)))
         item.set_layout_width(desired_width)
 
         item_w, item_h = item.W, item.H

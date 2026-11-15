@@ -1,4 +1,4 @@
-import os
+from .prompt_context import active_translation_preset
 from .prompt_loader import extract_preset_rules, render_preset_prompt, render_prompt
 
 
@@ -56,7 +56,7 @@ def build_translation_messages(
         for k, v in values.items():
             system_message = system_message.replace(f"{{{{{k}}}}}", str(v))
     else:
-        preset_id = (os.getenv("CAPCAP_TRANSLATION_PRESET_ID") or "").strip()
+        preset_id = active_translation_preset()
         if preset_id and is_direct and not ocr_capture_mode:
             try:
                 system_message = render_preset_prompt(preset_id, **values)

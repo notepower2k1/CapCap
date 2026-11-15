@@ -42,6 +42,7 @@
 * 📁 [Cấu trúc dự án](docs/project-structure.md)
 * 📋 [Ghi chú phát hành (Release Notes)](release.md)
 * 🎙️ [Chọn CapCut Web / PC cho STT và TTS](docs/capcut-web-pc.md)
+* 💬 [Chế độ phụ đề video và song ngữ](docs/subtitle-presentation.md)
 
 ---
 

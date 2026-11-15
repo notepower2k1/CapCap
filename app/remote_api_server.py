@@ -295,15 +295,20 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
         _reload_env()
         segments = list(payload.get("segments") or [])
         status_updates = []
-        result = translate_segments(
-            segments,
-            src_lang=str(payload.get("src_lang", "auto") or "auto"),
-            target_lang=str(payload.get("target_lang", "vi") or "vi"),
-            enable_polish=bool(payload.get("enable_polish", True)),
-            optimize_subtitles=False,
-            style_instruction=str(payload.get("style_instruction", "") or ""),
-            status_callback=lambda provider, message: status_updates.append((provider, message)),
-        )
+        from contextlib import nullcontext
+        from translation.prompt_context import translation_prompt_scope
+        scope = translation_prompt_scope(payload["translation_preset_id"]) if payload.get("translation_preset_id") else nullcontext()
+        with scope:
+            result = translate_segments(
+                segments,
+                src_lang=str(payload.get("src_lang", "auto") or "auto"),
+                target_lang=str(payload.get("target_lang", "vi") or "vi"),
+                enable_polish=bool(payload.get("enable_polish", True)),
+                optimize_subtitles=False,
+                style_instruction=str(payload.get("style_instruction", "") or ""),
+                status_callback=lambda provider, message: status_updates.append((provider, message)),
+                **{key: payload[key] for key in ("custom_system_prompt", "override_provider", "polish_batch_size", "context_guidance") if payload.get(key) is not None},
+            )
         return {"ok": True, "segments": list(result or []), "translation_status": status_updates}
 
     def _handle_translate_srt(self, payload: dict) -> dict:
@@ -427,6 +432,8 @@ class CapCapRemoteHandler(BaseHTTPRequestHandler):
             )
             if "asr_options" in payload:
                 prepare_kwargs["asr_options"] = payload["asr_options"]
+            if "subtitle_presentation" in payload:
+                prepare_kwargs["subtitle_presentation"] = payload["subtitle_presentation"]
             model_id = str(payload.get("elevenlabs_model_id") or "").strip()
             if model_id:
                 prepare_kwargs["elevenlabs_model_id"] = model_id

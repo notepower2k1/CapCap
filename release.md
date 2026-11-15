@@ -1,24 +1,33 @@
+# RELEASE NOTES — V9.0.1
+
+## Tính năng mới
+
+- **Phụ đề trên video:** Chọn không hiển thị, một phụ đề hoặc song ngữ. Phụ đề phụ có thể lấy từ phụ đề gốc, nhập SRT hoặc dịch sang ngôn ngữ khác; có track, inspector, kiểu chữ và prompt riêng. Hỗ trợ preview, Fit Voice, xuất video và dự án CapCut.
+- **Khôi phục thời gian phụ đề:** Trả lại thời điểm bắt đầu và kết thúc của từng câu theo lần chạy luồng thành công gần nhất; hỗ trợ Undo/Redo và lưu theo project.
+- **CapCut Web / PC:** Chọn kết nối dùng chung cho STT và TTS; chế độ PC sử dụng thư viện CapCut đã cài, chạy nền và vẫn cần kết nối cloud.
+- **Audio Mix:** Ghi nhớ preset và âm lượng mặc định cho âm thanh gốc, giọng đọc và nhạc nền.
+
+## Cải tiến
+
+- **Dịch GPT/Gemini Web:** Cho phép tối đa bốn batch song song, tái sử dụng cửa sổ dịch và chờ tín hiệu hoàn tất của từng lượt. Khi fallback, giữ các batch đã dịch thành công. Nếu extension đã cài, hãy reload extension sau khi cập nhật.
+- **Phụ đề phụ:** Dùng lại màn chọn dịch vụ, kiểm tra prompt và popup tiến trình; hỗ trợ hủy và báo lý do fallback. Tối ưu inspector, timeline cho project lớn và phân biệt track phụ, layer bị khóa.
+- **OCR:** Tối ưu xử lý video để cải thiện tốc độ nhận dạng.
+- **CapCut:** Cải thiện lựa chọn ngôn ngữ STT, giữ timestamp từ, kiểm tra kết quả TTS và bổ sung log theo job/chunk.
+
+## Sửa lỗi
+
+- Retry có giới hạn khi GPT/Gemini trả định dạng sai; bổ sung log điều tra, xử lý focus và nhắc giữ cửa sổ dịch hiển thị.
+- Retry lỗi tạm thời khi upload hoặc chờ CapCut STT; chia nhỏ đoạn timeout khi cần và giữ kết quả đã hoàn tất.
+- Sửa blur export bị xanh, xác minh chế độ tạm thời Gemini, tiến độ OmniVoice và hiển thị tốc độ giọng đọc.
+- Sửa điều khiển nhận dạng xưng hô, giữ overlay khi mở menu và đồng bộ inspector theo câu đang phát.
+
+Chi tiết: [Phụ đề song ngữ](docs/subtitle-presentation.md) · [CapCut Web / PC](docs/capcut-web-pc.md) · [Dịch qua trình duyệt](browser_extension/README.md).
+
+---
+
 # RELEASE NOTES — V9.0.0
 
-**Audio Mix — nhớ cấu hình (chưa build):** Tự lưu preset và âm lượng gốc/TTS/nhạc nền, khôi phục khi mở lại ứng dụng và dùng làm mặc định cho track mới. Khi mở project đã lưu, ưu tiên âm lượng riêng của project; việc mở project không ghi đè cấu hình mặc định đã nhớ.
-
-**CapCut STT/TTS — cải thiện chất lượng và kiểm tra kết quả (chưa build):** Sửa STT bỏ qua ngôn ngữ đã chọn; tiếng Việt, Anh và các ngôn ngữ khác tiếng Trung dùng luồng có tham số ngôn ngữ, giữ luồng Trung/Auto hiện tại. Giữ timestamp từng từ qua chia đoạn, merge và nhận dạng một vùng. TTS kiểm tra đúng giọng/resource, nhận đủ audio mới báo thành công; lỗi API/trạng thái thất bại được báo sớm, thêm log job/poll. Tham khảo giao thức K07VN. [Chi tiết và kiểm chứng](docs/capcut-speech-quality.md).
-
-**CapCut Web / PC — tính năng mới (chưa build):** Thêm lựa chọn kết nối dùng chung cho STT/TTS trong Cài đặt → CapCut. Web giữ API hiện tại; PC dùng thư viện CapCut đã cài để chạy nền, không mở giao diện. Tự tìm phiên bản cài đặt, hỗ trợ chọn thư mục và thêm log tiến trình/API. Cả hai vẫn dùng cloud và cần internet; PC đang thử nghiệm. Chi tiết: [hướng dẫn Web / PC](docs/capcut-web-pc.md).
-
-**CapCut STT — bổ sung retry upload (chưa build):** Sửa trường hợp HTTP 504 khi upload audio chưa đi qua retry. Upload timeout/lỗi mạng/HTTP tạm thời được thử lại một lần trên đúng đoạn, không chạy lại đoạn đã hoàn tất. Thêm log upload attempt, chunk và HTTP status; lỗi xác thực không retry.
-
-**CapCut STT — mã nguồn 14/11 (chưa build):** Thời gian chờ kết quả cloud tính theo độ dài đoạn (120–600 giây); timeout/lỗi mạng tạm thời được retry một lần sau 2 giây bằng audio đã upload. Nếu vẫn timeout, chia đôi đoạn lỗi phục hồi một lần, giữ các đoạn đã hoàn tất. Thêm log từng đoạn/job, attempt, thời lượng và poll để điều tra. Lỗi xác thực/API không retry hoặc tự chia đoạn. Chi tiết trong `docs/capcut-stt-feedback-2026-11-14.md`.
-
-**Lưu ý khi dịch qua trình duyệt:** Giữ cửa sổ GPT/Gemini hiển thị và đủ lớn để thấy các nút thao tác. Không thu xuống taskbar hoặc che kín cửa sổ khi đang dịch vì có thể làm chậm gửi hoặc nhận phản hồi. Lưu ý cũng hiển thị trong Cài đặt và popup extension.
-
-**Cập nhật mã nguồn 14/11 (chưa build installer):** Phân loại phục hồi GPT/Gemini Web: đọc lại đúng phản hồi, chỉ retry và chia nhỏ có giới hạn khi sai định dạng/số câu. Lỗi không phản hồi, đóng tab hoặc bị chặn chuyển sang fallback; Hủy thì dừng. Bổ sung log tương quan task/session, ID thiếu/thừa, trạng thái trang; sửa chọn/chèn prompt khi mất focus. Chi tiết trong `docs/browser-feedback-2026-11-14.md`.
-
-**Ngày cập nhật: 10/11/2026**
-
-**Lưu ý sau cập nhật khi dùng GPT/Gemini Web:** Vào `chrome://extensions` hoặc `edge://extensions`, bấm **Reload (Tải lại)** tiện ích CapCap, rồi tải lại các tab GPT/Gemini đang mở. Nếu extension được copy sang thư mục khác, cần cập nhật các file trong thư mục đó trước khi Reload; nếu đường dẫn đã thay đổi, dùng **Load unpacked** từ thư mục mới. Cài đè cùng đường dẫn và extension đang load từ thư mục app thì không cần cài lại tiện ích từ đầu.
-
-**Cập nhật mã nguồn 11/11:** Dịch song song giữ cửa sổ theo từng luồng để nhận batch tiếp theo; tạo và xác nhận chat mới trước mỗi batch, vẫn bật Temporary Chat theo lựa chọn. Chỉ đóng các cửa sổ của luồng khi kết thúc/hủy cả lượt dịch. Nếu không tạo được chat mới bằng nút trên trang, tải lại trong chính tab đó rồi xác nhận lại. Chưa đo lại tốc độ thực tế hoặc xác nhận ảnh hưởng đến yêu cầu xác minh robot. Thay đổi này chưa có trong installer đã build từ commit `be93234`.
+**Ngày cập nhật: 09/11/2026**
 
 ## 🌟 1. Tính năng mới nổi bật
 
@@ -34,8 +43,6 @@
 
 ## ⚡ 2. Cải tiến & Tối ưu hiệu năng
 
-- **Tăng tốc OCR mà giữ nguyên kết quả lấy mẫu**: Đọc thời lượng từ metadata thay cho quét hết video; đo và chọn giữa seek từng mẫu với đọc frame tiến tuần tự. Benchmark video 27 phút 31 giây bằng Windows Media OCR ở 2 FPS giảm từ 180,9 xuống 90,0 giây, giữ nguyên 3.303 ảnh crop và 824 đoạn phụ đề, SRT trùng từng byte. Chi tiết trong `docs/ocr-benchmark-2026-11-10.md`; mức tăng phụ thuộc video và backend.
-- **Dịch song song bằng GPT/Gemini Web**: Thêm lựa chọn 1–4 batch đồng thời trong Cài đặt → Dịch thuật → Browser AI, đồng bộ giới hạn với extension. Mỗi batch dùng một tab/cửa sổ riêng, nhận cùng ngữ cảnh đã phân tích; ghép kết quả đúng thứ tự và cộng tiến độ theo số câu thực sự hoàn thành. Tự đóng phiên riêng khi xong, hủy đúng từng tác vụ. Mặc định vẫn dịch tuần tự; tốc độ tùy giới hạn dịch vụ/tài khoản AI. Hiển thị lưu ý giữ cửa sổ Gemini không bị che kín.
 - **Tối ưu xuất video FFmpeg**: Tận dụng tăng tốc phần cứng, đa luồng và sao chép luồng media tạm khi phù hợp để giảm xử lý mã hóa lại.
 - **Cải thiện độ mượt của trình xem trước và timeline**: Tối ưu lớp phủ cho cập nhật tần số cao, dùng cache timeline và cải thiện đồng bộ khi thay đổi tốc độ video.
 - **Đồng bộ Fit Voice giữa xem trước và xuất project**: Thống nhất cách quy đổi thời gian khi làm chậm hoặc giữ khung hình, giữ vị trí phụ đề, âm thanh và các layer khi xuất sang CapCut.
@@ -49,19 +56,10 @@
 
 ## 🛠️ 3. Sửa lỗi quan trọng
 
-- **Nhận phản hồi GPT/Gemini khi AI mới tạm ngừng sinh chữ**: Bỏ điều kiện đứng yên 1,5 giây; yêu cầu dấu hiệu hoàn tất trong đúng lượt trả lời mới nhất và không còn trạng thái streaming. Gemini đọc toàn bộ khối trả lời; GPT xác nhận gửi theo cả DOM tin nhắn mới và thay đổi editor, tránh phụ thuộc duy nhất vào selector cũ. Timeout chỉ báo lỗi, không nhận bản dịch dở dang.
-  - Đối chiếu trực tiếp 10/11: tìm nút hoàn tất GPT ở phần bao ngoài khung DIL mà không lấy nhầm nút của tin nhắn khác; theo dõi trạng thái lượt trả lời ở phần tử cha. Nhận diện thêm nút dừng Gemini tiếng Việt. GPT/Gemini đã hoàn tất thử nghiệm 4 batch × 40 câu, nhưng Gemini có thể bị giữ ở trạng thái hiển thị khi popup bị che; xem báo cáo thử trực tiếp trong `docs`.
-- **Một batch AI lỗi làm dịch lại toàn bộ bằng Google Translate**: Giữ các batch AI đã hoàn thành hợp lệ, chỉ fallback những câu còn thiếu và giữ đúng vị trí, provider, tiến độ. Áp dụng cho dịch tuần tự, song song và các batch phục hồi sau khi dịch toàn ngữ cảnh thất bại; hủy tác vụ không kích hoạt fallback.
-- **Logo và mask biến mất khi mở menu “Thêm”**: Giữ các lớp preview hiển thị khi mở menu hoặc menu con của editor, đặt menu lên trên lớp phủ. Hộp thoại modal và chuyển sang cửa sổ khác vẫn tạm ẩn overlay như trước.
-- **Ô kiểm tra xưng hô vẫn được tích khi tắt tự động phát hiện ngữ cảnh**: Tự bỏ chọn bước kiểm tra trước khi vô hiệu hóa; khi bật lại tự động phát hiện, người dùng có thể chọn lại bước kiểm tra.
-- **Một nửa vùng blur bị chuyển xanh khi xuất video**: Chuẩn hóa frame NV12 từ đường giải mã phần cứng sang YUV420P trước bộ lọc blur, áp dụng cho blur layer và mask chế độ blur. Bản sửa 10/11 đã được đối chiếu bằng video thực tế và kiểm thử màu pixel bằng FFmpeg.
-- **Dòng tiến độ OmniVoice nhấp nháy giữa số câu và thông báo tạo giọng**: Đưa bộ đếm câu về dòng tiến trình phía dưới, giữ hàng TTS hiển thị phần trăm. Thông báo runtime lặp lại của OmniVoice không ghi đè bộ đếm; không cập nhật lại dòng tiến trình khi nội dung không đổi.
-- **Tốc độ từng câu hiển thị lại 1.0x dù audio đã được đồng bộ**: Giữ hệ số tốc độ và cờ tự điều chỉnh khi đồng bộ phụ đề qua SRT; khôi phục thông tin bị mất từ đúng file giọng đã xử lý khi mở lại project, giữ nguyên tốc độ chỉnh tay.
 - **ChatGPT trả lời nhưng ứng dụng không nhận được**: Cập nhật cách đọc giao diện ChatGPT mới, lấy đủ các khối phản hồi và báo lỗi khi không đọc được nội dung.
 - **Prompt ChatGPT chỉ được điền mà chưa gửi**: Chờ nút gửi sẵn sàng và xác nhận tin nhắn đã được trang tiếp nhận trước khi chờ kết quả.
 - **Mở thêm cửa sổ sau khi phân tích nhân vật**: Bước dịch tiếp quản cửa sổ phân tích, tránh tạo thêm cửa sổ cho mỗi bước hoặc mỗi lần phân tích lại.
 - **Chat tạm thời Gemini chưa được bật đúng**: Bật và xác nhận Temporary Chat trước khi gửi. Nếu không xác nhận được, tác vụ báo lỗi thay vì gửi vào cuộc trò chuyện thường.
-  - Bản sửa 10/11: phân biệt nút mở chat tạm thời với trạng thái đang bật; giữ nhận diện sau khi có phản hồi để batch tiếp theo không bị lỗi xác nhận và chuyển sang Google Translate.
 - **Phân tích xưng hô không chạy với đoạn ngắn**: Bỏ việc bỏ qua đoạn dưới ba câu và hiển thị nguyên nhân khi phân tích thủ công thất bại.
 - **Vùng OCR trong Performance bị lệch hoặc làm đen khung hình**: Sửa kéo/đổi kích thước, lưu vùng chọn riêng theo video và cách hiển thị lớp OCR.
 - **Dữ liệu video và hàng đợi không đồng bộ sau khi xóa**: Đối chiếu lại file còn trên đĩa, lịch sử và hàng đợi khi gặp file đang được sử dụng; ngăn thêm trùng video giữa Quality và Performance.

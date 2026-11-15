@@ -1009,6 +1009,7 @@ class PrepareWorkflowWorker(QThread):
         force_remote_api=False,
         force_transcription=False,
         asr_options=None,
+        subtitle_presentation=None,
     ):
         super().__init__()
         self.workspace_root = workspace_root
@@ -1031,6 +1032,7 @@ class PrepareWorkflowWorker(QThread):
         self.remote_api_token = str(remote_api_token or "").strip()
         self.force_remote_api = bool(force_remote_api)
         self.force_transcription = bool(force_transcription)
+        self.subtitle_presentation = subtitle_presentation
         self.asr_options = dict(asr_options) if isinstance(asr_options, dict) else asr_options
 
     def run(self):
@@ -1085,6 +1087,8 @@ class PrepareWorkflowWorker(QThread):
                     }
                     if self.elevenlabs_model_id:
                         prepare_payload["elevenlabs_model_id"] = self.elevenlabs_model_id
+                    if self.subtitle_presentation is not None:
+                        prepare_payload["subtitle_presentation"] = self.subtitle_presentation
                     response = remote_api_post(
                         "/v1/prepare",
                         prepare_payload,
@@ -1106,6 +1110,7 @@ class PrepareWorkflowWorker(QThread):
                 workflow = PrepareWorkflow(self.workspace_root)
                 workflow_kwargs = dict(
                     source_language=self.source_language,
+                    **({"subtitle_presentation": self.subtitle_presentation} if self.subtitle_presentation is not None else {}),
                     target_language=self.target_language,
                     mode=self.mode,
                     audio_handling_mode=self.audio_handling_mode,

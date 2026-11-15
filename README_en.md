@@ -42,6 +42,7 @@
 * 📁 [Project Structure](docs/project-structure.md)
 * 📋 [Release Notes](release.md)
 * 🎙️ [CapCut Web / PC for STT and TTS (Vietnamese)](docs/capcut-web-pc.md)
+* 💬 [Subtitle display modes and bilingual subtitles (Vietnamese)](docs/subtitle-presentation.md)
 
 ---
 

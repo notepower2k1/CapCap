@@ -170,9 +170,21 @@ class GUIProjectBridge:
                         os.path.normcase(os.path.normpath(seg["_wav_path"])): seg
                         for seg in voice_segments if isinstance(seg, dict) and seg.get("_wav_path")
                     }
+                    from collections import Counter
+                    wav_counts = Counter(os.path.normcase(os.path.normpath(item["_wav_path"])) for item in voice_segments
+                                         if isinstance(item, dict) and item.get("_wav_path"))
                     for model, seg in zip(translation_models, context["current_translated_segments"]):
                         wav = seg.get("_wav_path")
                         voice = by_wav.get(os.path.normcase(os.path.normpath(wav))) if wav else None
+                        texts = {str(seg.get(key, "") or "").strip() for key in ("text", "tts_text", "dubbing_vi")} - {""}
+                        voice_texts = {str((voice or {}).get(key, "") or "").strip() for key in ("text", "tts_text", "dubbing_vi")} - {""}
+                        unique_voice = wav and wav_counts.get(os.path.normcase(os.path.normpath(wav))) == 1
+                        if voice and unique_voice and "_completed_timing" not in seg and "start" in voice and "end" in voice and texts.intersection(voice_texts):
+                            from app.subtitle_timing import capture, KEY
+                            checkpoint = dict(voice)
+                            capture([checkpoint], state.settings.get("video_time_warps") or [])
+                            seg[KEY] = checkpoint[KEY]
+                            model.metadata[KEY] = dict(checkpoint[KEY])
                         if not voice or "voice_speed" in seg:
                             continue
                         for key in ("voice_speed", "_auto_fit_applied"):

@@ -39,6 +39,7 @@ class WorkflowRuntime:
         force_transcription: bool = False,
         elevenlabs_model_id: str | None = None,
         asr_options: dict | None = None,
+        subtitle_presentation: dict | None = None,
     ) -> str:
         if step_callback: step_callback("prepare")
         prepare_kwargs = dict(
@@ -59,6 +60,7 @@ class WorkflowRuntime:
             step_callback=step_callback,
             force_transcription=force_transcription,
             asr_options=asr_options,
+            **({"subtitle_presentation": subtitle_presentation} if subtitle_presentation is not None else {}),
         )
         if elevenlabs_model_id:
             prepare_kwargs["elevenlabs_model_id"] = elevenlabs_model_id

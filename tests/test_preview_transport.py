@@ -934,6 +934,9 @@ class TestPreviewTransport(unittest.TestCase):
         gui.timeline._selected_layer_id = ""
         gui.timeline._segment_indices = {"layer_seg_0": 0}
 
+        gui._follow_playback_subtitle_selection.side_effect = lambda index: (
+            VideoTranslatorGUI._follow_playback_subtitle_selection(gui, index)
+        )
         VideoTranslatorGUI.update_playback_subtitle_highlight(gui, 3500)
         # on_timeline_layer_selected should NOT have been called with layer_seg_0
         gui.on_timeline_layer_selected.assert_not_called()
@@ -949,11 +952,14 @@ class TestPreviewTransport(unittest.TestCase):
         gui.audio_music_volume_label = MagicMock()
         gui._music_audio_tracks.return_value = [{"id": "m1"}]
 
-        VideoTranslatorGUI.on_audio_a2_volume_changed(gui, 75)
-        gui._schedule_preview_audio_refresh.assert_not_called()
+        # Exercise native audio updates without persisting mock widget values
+        # into the user's real Audio Mix settings.
+        with patch("ui.utils.audio_mix_settings.save_mix"):
+            VideoTranslatorGUI.on_audio_a2_volume_changed(gui, 75)
+            gui._schedule_preview_audio_refresh.assert_not_called()
 
-        VideoTranslatorGUI.on_audio_music_volume_changed(gui, 50)
-        gui._schedule_preview_audio_refresh.assert_not_called()
+            VideoTranslatorGUI.on_audio_music_volume_changed(gui, 50)
+            gui._schedule_preview_audio_refresh.assert_not_called()
 
     def test_mpv_backend_slow_motion_speed_control(self):
         """Verify MpvMediaPlayerBackend dynamically adjusts mpv speed during slow motion."""

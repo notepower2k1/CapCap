@@ -532,6 +532,15 @@ class ExportWorkflow:
         export.  Reusing that file would silently ignore changes made in the
         subtitle style UI (notably background box, color, and opacity).
         """
+        from app.subtitle_presentation import config, presentation_ass, map_to_timeline, read_srt
+        presentation = config((subtitle_style or {}).get("subtitle_presentation"))
+        if presentation["mode"] != "single":
+            primary = read_srt(srt_path) if presentation["mode"] != "none" and srt_path and os.path.isfile(srt_path) else []
+            secondary = presentation.get("secondary_segments", [])
+            secondary = map_to_timeline(secondary, (subtitle_style or {}).get("video_time_warps") or [])
+            width, height = self.engine_runtime.get_video_dimensions(video_path)
+            directory = os.path.join(os.path.dirname(srt_path or ass_path or video_path), "presentation_export")
+            return presentation_ass(presentation, primary, secondary, subtitle_style or {}, target_width or width, target_height or height, directory)
         # The editor's live preview ASS is generated from the current segment
         # list and style immediately before export. Reusing it makes the
         # libass event geometry byte-for-byte identical in MPV and FFmpeg.
@@ -597,6 +606,29 @@ class ExportWorkflow:
         video_quality: str = "medium",
     ) -> str:
         subtitle_style = subtitle_style or {}
+        from app.subtitle_presentation import KEY, config
+        state = self._load_state(project_state_path)
+        requested = subtitle_style.get(KEY)
+        saved = state.settings.get(KEY) if state else None
+        presentation = config(saved or requested)
+        if requested and saved and all(requested.get(key) == saved.get(key) for key in ("mode", "source", "language")):
+            # Queue exports capture styles before Prepare creates the secondary
+            # translation. Use the completed project data with those styles.
+            presentation["styles"] = requested.get("styles", presentation["styles"])
+            if requested.get("secondary_render_style"):
+                presentation["secondary_render_style"] = requested["secondary_render_style"]
+        if presentation["mode"] != "single":
+            subtitle_style = dict(subtitle_style, **{KEY: presentation})
+            if state:
+                presentation["original_srt"] = state.artifacts.get("subtitle_original_srt", "")
+                if presentation["original_srt"] and not os.path.isabs(presentation["original_srt"]):
+                    presentation["original_srt"] = os.path.join(state.project_root, presentation["original_srt"])
+                if presentation["mode"] == "bilingual":
+                    from app.subtitle_presentation import build_secondary, read_srt
+                    needs_original = presentation["source"] == "translate" or not presentation["secondary_segments"]
+                    original = read_srt(presentation["original_srt"]) if needs_original and presentation["original_srt"] else []
+                    presentation = build_secondary(presentation, original)
+                    subtitle_style[KEY] = presentation
         target_w, target_h = self._resolve_target_dimensions(video_path, output_quality, output_ratio)
         target_fps = self._resolve_target_fps(output_fps)
         # MPV renders the live ASS track on the source frame before its
@@ -605,6 +637,11 @@ class ExportWorkflow:
         # after the ASS pass so preview and export share one coordinate system.
         source_w, source_h = self.engine_runtime.get_video_dimensions(video_path)
         ass_style = dict(subtitle_style)
+        if presentation["mode"] == "bilingual":
+            from app.subtitle_presentation import canvas_to_source, secondary_style, style_from_controls
+            secondary = presentation.get("secondary_render_style") or style_from_controls(presentation["styles"].get("secondary", {}), secondary_style(subtitle_style))
+            presentation["secondary_render_style"] = canvas_to_source(secondary, (source_w, source_h),
+                (target_w or source_w, target_h or source_h), output_scale_mode, (output_fill_focus_x, output_fill_focus_y))
         if ass_style.get("custom_position_enabled") and target_w and target_h:
             try:
                 mode_key = str(output_scale_mode or "fit").strip().lower()

@@ -1,4 +1,5 @@
 import concurrent.futures
+from contextvars import copy_context
 import math
 import os
 import re
@@ -20,6 +21,7 @@ from .context_analyzer import (
 from .errors import TranslationConfigError, TranslationValidationError, translation_failure_reason
 from .models import TranslationResult
 from .prompt_loader import render_prompt
+from .prompt_context import active_translation_preset
 from .providers import (
     BingWebTranslatorProvider,
     BrowserBridgePolisherProvider,
@@ -105,7 +107,7 @@ class TranslationOrchestrator:
                     try:
                         mode_label = self._describe_ai_provider(provider_type)
                         merged_style = str(style_instruction or "")
-                        active_preset = os.getenv("CAPCAP_TRANSLATION_PRESET_ID") or "general_default"
+                        active_preset = active_translation_preset() or "general_default"
 
                         preset_info = active_preset
                         p_name = ""
@@ -977,6 +979,7 @@ class TranslationOrchestrator:
                 max_tokens = batch_item[2]
                 speaker_batch = batch_item[3] if len(batch_item) > 3 else None
                 future = executor.submit(
+                    copy_context().run,
                     self._translate_ai_batch,
                     polisher=polisher,
                     batch_number=idx + 1,

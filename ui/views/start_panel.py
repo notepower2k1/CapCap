@@ -492,6 +492,9 @@ def build_start_group(gui, left_layout):
     gui.lang_target_combo.currentIndexChanged.connect(gui.on_target_language_changed)
 
     language_page.layout().addWidget(language_card)
+    presentation_card, presentation_layout = _build_collapsible_section("Subtitles")
+    gui.subtitle_presentation_card = presentation_card
+    language_page.layout().addWidget(presentation_card)
 
     voice_card, voice_layout = _build_collapsible_section("Voice")
     gui.voice_section_card = voice_card
@@ -652,6 +655,7 @@ def build_start_group(gui, left_layout):
     voice_page.layout().addWidget(voice_card)
 
     subtitle_card, subtitle_layout = _build_collapsible_section("Subtitle Style", start_expanded=True)
+    gui.subtitle_style_card = subtitle_card
     base_style_label = QLabel("Presets")
     base_style_label.setObjectName("sectionTitle")
     subtitle_layout.addWidget(base_style_label)
@@ -1070,6 +1074,9 @@ def build_start_group(gui, left_layout):
     from ui.utils.audio_mix_settings import restore_mix
     restore_mix(gui)
     audio_page.layout().addWidget(audio_mix_card)
+
+    from ui.controllers.subtitle_presentation_controller import SubtitlePresentationController
+    gui.subtitle_presentation_controller = SubtitlePresentationController(gui, presentation_layout, subtitle_layout)
 
     for page in pages:
         page.layout().addStretch()

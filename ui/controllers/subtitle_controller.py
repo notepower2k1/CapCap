@@ -38,7 +38,8 @@ except ImportError:
 
 
 class TranslationPromptDialog(QDialog):
-    def __init__(self, parent, src_lang: str = "zh", target_lang: str = "vi", segment_count: int = 0):
+    def __init__(self, parent, src_lang: str = "zh", target_lang: str = "vi", segment_count: int = 0,
+                 *, preset_id=None, custom_prompt="", persist_preset=True):
         super().__init__(parent)
         self.settings = getattr(parent, "settings", None) or QSettings("CapCap", "VideoTranslatorGUI")
         self.setWindowTitle(t("Translation Settings & Prompt Review"))
@@ -47,6 +48,8 @@ class TranslationPromptDialog(QDialog):
         self.src_lang = str(src_lang or "zh").strip().lower()
         self.target_lang = str(target_lang or "vi").strip().lower()
         self._segment_count = int(segment_count or 0)
+        self._initial_preset_id = preset_id
+        self._persist_preset = persist_preset
 
         self.selected_provider = "google_ai_studio"
         self.selected_batch_size = 80
@@ -54,6 +57,8 @@ class TranslationPromptDialog(QDialog):
         self.selected_preset_id = "general_default"
 
         self._init_ui()
+        if custom_prompt:
+            self.prompt_edit.setPlainText(custom_prompt)
         self._apply_styles()
 
     def _init_ui(self):
@@ -150,7 +155,7 @@ class TranslationPromptDialog(QDialog):
             self.preset_combo.addItem(p_name, p_id)
 
         env_preset = str(os.getenv("CAPCAP_TRANSLATION_PRESET_ID", "")).strip()
-        saved_preset = env_preset or str(self.settings.value("translation_preset_id", "general_default")).strip()
+        saved_preset = self._initial_preset_id or env_preset or str(self.settings.value("translation_preset_id", "general_default")).strip()
         idx_preset = self.preset_combo.findData(saved_preset)
         if idx_preset >= 0:
             self.preset_combo.setCurrentIndex(idx_preset)
@@ -306,12 +311,14 @@ class TranslationPromptDialog(QDialog):
         self.selected_auto_context = bool(self.auto_context_cb.isChecked())
         self.selected_review_context = bool(self.review_context_cb.isChecked() and self.auto_context_cb.isChecked())
 
-        self.settings.setValue("translation_preset_id", self.selected_preset_id)
-        os.environ["CAPCAP_TRANSLATION_PRESET_ID"] = self.selected_preset_id
+        if self._persist_preset:
+            self.settings.setValue("translation_preset_id", self.selected_preset_id)
+            os.environ["CAPCAP_TRANSLATION_PRESET_ID"] = self.selected_preset_id
 
         # Mirror to legacy CapCap namespace for compatibility across controllers
         legacy_s = QSettings("CapCap", "CapCap")
-        legacy_s.setValue("translation_preset_id", self.selected_preset_id)
+        if self._persist_preset:
+            legacy_s.setValue("translation_preset_id", self.selected_preset_id)
         legacy_s.setValue("auto_translation_context", auto_val)
         legacy_s.setValue("review_translation_context", review_val)
 
@@ -687,81 +694,12 @@ class SubtitleController:
         self._translation_placeholder = ""
 
     def _show_translation_progress(self, *, is_retranslation: bool, provider_name: str = ""):
-        """Show elapsed time for both first-time and repeated translation."""
+        from widgets.translation_progress_dialog import TranslationProgressDialog
         self._close_translation_progress()
-        if provider_name:
-            provider_map = {
-                "google_ai_studio": "Google AI Studio",
-                "openai": "OpenAI",
-                "ollama": "Ollama",
-                "google": "Google Translate",
-                "google-web": "Google Translate",
-                "bing": "Bing Translator",
-                "bing-web": "Bing Translator",
-                "browser_ai": "ChatGPT Web" if os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini").strip().lower() == "chatgpt" else "Gemini Web",
-                "gemini_web": "Gemini Web",
-                "chatgpt_web": "ChatGPT Web",
-            }
-            provider = provider_map.get(provider_name, provider_name)
-        else:
-            provider = self.gui._selected_ai_provider_label() if hasattr(self.gui, "_selected_ai_provider_label") else "selected provider"
-        action = "Re-translating" if is_retranslation else "Translating"
-        action_text = t(action)
-        dialog = QProgressDialog(
-            f"{action_text} {t('subtitles with')} {provider}...\n{t('Elapsed')}: 00:00",
-            t("Cancel"),
-            0,
-            100,
-            self.gui,
-        )
+        dialog = TranslationProgressDialog(self.gui, provider=provider_name, is_retranslation=is_retranslation)
         dialog.canceled.connect(self._on_translation_canceled)
-        if hasattr(self.gui, "light_window_icon") and self.gui.light_window_icon and not self.gui.light_window_icon.isNull():
-            dialog.setWindowIcon(self.gui.light_window_icon)
-            dialog._has_contrasting_popup_icon = True
-        if hasattr(self.gui, "_register_progress_dialog"):
-            self.gui._register_progress_dialog(dialog)
-        dialog.setWindowTitle(f"{action_text} {t('Subtitles')}")
-        dialog.setWindowModality(Qt.NonModal)
-        dialog.setAutoClose(False)
-        dialog.setAutoReset(False)
-        dialog.setMinimumDuration(0)
-        dialog.setMinimumWidth(430)
-        label = dialog.findChild(QLabel)
-        if label is not None:
-            label.setWordWrap(True)
-        dialog.setValue(0)
-        dialog.setStyleSheet(
-            "QProgressDialog { background-color: #101826; color: #e6eef9; }"
-            "QLabel { color: #e6eef9; }"
-            "QPushButton { background: #22344c; color: #e6eef9; border: 1px solid #36516f; border-radius: 6px; padding: 5px 14px; }"
-        )
-        started = time.monotonic()
-        dialog._started_at = started
-        dialog._action = action
-        dialog._provider = provider
-        dialog._fallback_msg = ""
-        dialog._progress_str = ""
-        timer = QTimer(dialog)
-
-        def update_elapsed():
-            elapsed = int(time.monotonic() - started)
-            curr_action = getattr(dialog, "_action", action)
-            curr_provider = getattr(dialog, "_provider", provider)
-            fallback_msg = getattr(dialog, "_fallback_msg", "")
-            msg_line = f"\n{t(fallback_msg)}" if fallback_msg else ""
-            prog_line = f"{t('Progress')}: {t(dialog._progress_str)}\n" if getattr(dialog, "_progress_str", "") else ""
-            dialog.setLabelText(
-                f"{t(curr_action)} {t('subtitles with')} {curr_provider}...{msg_line}\n"
-                f"{prog_line}"
-                f"{t('Elapsed')}: {elapsed // 60:02d}:{elapsed % 60:02d}\n"
-                f"{t('Large subtitle projects can take a few minutes.')}"
-            )
-
-        timer.setInterval(1000)
-        timer.timeout.connect(update_elapsed)
-        timer.start()
         self.gui._translation_progress_dialog = dialog
-        self.gui._translation_progress_timer = timer
+        self.gui._translation_progress_timer = dialog.timer
         dialog.show()
 
     def _on_translation_canceled(self):
@@ -806,8 +744,7 @@ class SubtitleController:
         dialog = getattr(self.gui, "_translation_progress_dialog", None)
         self.gui._translation_progress_dialog = None
         if dialog is not None:
-            dialog.hide()
-            dialog.deleteLater()
+            dialog.dispose()
 
     def _show_transcription_progress(self, *, engine_name: str = "whisper"):
         self._close_transcription_progress()
@@ -974,6 +911,10 @@ class SubtitleController:
         self.gui._pipeline_advance("transcription")
 
     def run_translation(self, show_prompt_dialog: bool = True):
+        secondary = getattr(self.gui, "subtitle_presentation_controller", None)
+        if secondary is not None and getattr(secondary, "busy", False) is True:
+            self.gui.log("[Translation] Secondary subtitles are still being created.")
+            return
         existing = getattr(self.gui, "translation_thread", None)
         if existing is not None and existing.isRunning():
             self.gui.log("[Translation] A translation request is already running.")
@@ -1241,57 +1182,16 @@ class SubtitleController:
         return result
 
     def on_translation_status_changed(self, provider: str, message: str = ""):
-        provider_map = {
-            "google_ai_studio": "Google AI Studio",
-            "openai": "OpenAI",
-            "ollama": "Ollama",
-            "google": "Google Translate",
-            "google-web": "Google Translate",
-            "bing": "Bing Translator",
-            "bing-web": "Bing Translator",
-            "browser_ai": "ChatGPT Web" if os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini").strip().lower() == "chatgpt" else "Gemini Web",
-            "gemini_web": "Gemini Web",
-            "chatgpt_web": "ChatGPT Web",
-        }
-        display_provider = provider_map.get(provider, provider)
         dialog = getattr(self.gui, "_translation_progress_dialog", None)
         if dialog is not None:
-            dialog._provider = display_provider
-            if message:
-                dialog._fallback_msg = message
-            action = getattr(dialog, "_action", "Translating")
-            action_text = t(action)
-            dialog.setWindowTitle(f"{action_text} {t('Subtitles')} ({display_provider})")
-            elapsed = int(time.monotonic() - getattr(dialog, "_started_at", time.monotonic()))
-            fallback_msg = getattr(dialog, "_fallback_msg", "")
-            msg_line = f"\n{t(fallback_msg)}" if fallback_msg else ""
-            prog_line = f"{t('Progress')}: {t(dialog._progress_str)}\n" if getattr(dialog, "_progress_str", "") else ""
-            dialog.setLabelText(
-                f"{action_text} {t('subtitles with')} {display_provider}...{msg_line}\n"
-                f"{prog_line}"
-                f"{t('Elapsed')}: {elapsed // 60:02d}:{elapsed % 60:02d}\n"
-                f"{t('Large subtitle projects can take a few minutes.')}"
-            )
+            dialog.set_status(provider, message)
 
     def on_translation_progress(self, completed: int, total: int):
         if total <= 0:
             return
-        pct = max(0, min(100, int(completed * 100 / total)))
         dialog = getattr(self.gui, "_translation_progress_dialog", None)
         if dialog is not None:
-            dialog._progress_str = t("{completed}/{total} cues ({percent}%)", completed=completed, total=total, percent=pct)
-            dialog.setValue(pct)
-            elapsed = int(time.monotonic() - getattr(dialog, "_started_at", time.monotonic()))
-            action = getattr(dialog, "_action", "Translating")
-            provider = getattr(dialog, "_provider", "AI")
-            fallback_msg = getattr(dialog, "_fallback_msg", "")
-            msg_line = f"\n{t(fallback_msg)}" if fallback_msg else ""
-            dialog.setLabelText(
-                f"{t(action)} {t('subtitles with')} {provider}...{msg_line}\n"
-                f"{t('Progress')}: {t(dialog._progress_str)}\n"
-                f"{t('Elapsed')}: {elapsed // 60:02d}:{elapsed % 60:02d}\n"
-                f"{t('Large subtitle projects can take a few minutes.')}"
-            )
+            dialog.set_progress(completed, total)
         if hasattr(self.gui, "progress_bar"):
             scaled = 80 + int(completed * 20 / total)
             self.gui.progress_bar.setValue(min(99, scaled))

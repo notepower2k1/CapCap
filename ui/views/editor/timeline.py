@@ -1,5 +1,6 @@
 import math
 import os
+from contextlib import contextmanager
 from bisect import bisect_right
 from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
@@ -10,6 +11,11 @@ from app.layers.base import BaseLayer, LayerType
 from app.layers.timeline import Timeline, Track, Clip
 from app.layers.dub_subtitle import DubSubtitleLayer
 from app.runtime_paths import subprocess_hidden_kwargs
+from ui.views.editor.timeline_palette import SECONDARY_SUBTITLE_FILL, SECONDARY_SUBTITLE_BORDER, SECONDARY_SUBTITLE_ACCENT, SELECTED_LAYER_ACCENT, LOCK_ACCENT, speaker_timeline_hue
+try:
+    from i18n import t
+except ImportError:
+    from ui.i18n import t
 
 
 class EditorTimeline(QGraphicsView):
@@ -58,6 +64,8 @@ class EditorTimeline(QGraphicsView):
     def __init__(self, parent=None, *, data_only=False):
         super().__init__(parent)
         self._data_only = bool(data_only)
+        self._batch_depth = 0
+        self._redraw_pending = False
         self.setFrameShape(QFrame.NoFrame)
         self.setStyleSheet("background-color: #0d1220; border: none;")
         self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
@@ -78,6 +86,7 @@ class EditorTimeline(QGraphicsView):
         self._base_video_duration = 0.0
         self._playhead = 0.0
         self._last_playhead_px = None
+        self._last_active_request = None
         self._selection_range: tuple[float, float] | None = None
         self._selection_drag = None
         self._selection_mode = False
@@ -212,8 +221,15 @@ class EditorTimeline(QGraphicsView):
         self._redraw()
 
     def set_video_time_warps(self, warps: list[dict]) -> None:
-        self._video_time_warps = list(warps or [])
-        self._redraw()
+        updated = [dict(warp) for warp in warps or []]
+        if updated == self._video_time_warps:
+            return
+        self._video_time_warps = updated
+        self._waveform_pixmap_cache = None
+        self._thumbnails_pixmap_cache = None
+        # Time mapping changes the ribbons/media drawings; cue geometry is
+        # updated separately by set_segments. Preserve its overlap cache.
+        self.viewport().update()
 
     def get_video_time_warps(self) -> list[dict]:
         return list(self._video_time_warps)
@@ -244,6 +260,7 @@ class EditorTimeline(QGraphicsView):
             self._init_default_tracks()
 
         self._overlap_layout_cache.clear()
+        self._last_active_request = None
         # Preserve existing row assignments rather than clearing all of them,
         # so user-assigned rows are not reset when segments are refreshed.
 
@@ -266,6 +283,8 @@ class EditorTimeline(QGraphicsView):
             # track. Both subtitle track types use the same segment metadata.
             if self._is_subtitle_track(t):
                 for layer in t.layers:
+                    if (getattr(layer, "metadata", {}) or {}).get("secondary_subtitle"):
+                        continue
                     # Prefer the original segment index stored in metadata
                     # (set by sync_segments_to_dub_subtitle_layers). Falls
                     # back to z_index for layers created without metadata.
@@ -313,6 +332,8 @@ class EditorTimeline(QGraphicsView):
         correct while TS1 is being rebuilt after an edit or project restore.
         """
         track, layer = self._find_layer_by_id(str(layer_id or ""))
+        if layer is not None and (getattr(layer, "metadata", {}) or {}).get("secondary_subtitle"):
+            return -1
         if layer is not None and self._is_subtitle_track(track):
             metadata = getattr(layer, "metadata", {}) or {}
             try:
@@ -320,6 +341,26 @@ class EditorTimeline(QGraphicsView):
             except (TypeError, ValueError):
                 pass
         return int(self._segment_indices.get(str(layer_id or ""), -1))
+
+    def update_subtitle_segment(self, index: int, segment: dict) -> bool:
+        """Refresh one text/voice label without invalidating timing/layout."""
+        for track in self._timeline.tracks if self._timeline else []:
+            if not self._is_subtitle_track(track):
+                continue
+            for layer in track.layers:
+                meta = getattr(layer, "metadata", {}) or {}
+                if meta.get("secondary_subtitle") or meta.get("_seg_index") != index:
+                    continue
+                if float(segment.get("start", 0.)) != layer.start or float(segment.get("end", 0.)) != layer.end:
+                    return False
+                layer.text = str(segment.get("text", ""))
+                if hasattr(layer, "dub_text"):
+                    layer.dub_text = str(segment.get("dubbing_vi") or segment.get("tts_text") or layer.text)
+                layer.metadata["_seg_dict"] = {key: value for key, value in segment.items() if key != "text"}
+                layer.metadata["_tts_dirty"] = bool(segment.get("_tts_dirty", False))
+                self.viewport().update()
+                return True
+        return False
 
     def set_highlighted_speaker(self, speaker: str = "") -> None:
         self._highlighted_speaker = str(speaker or "").strip()
@@ -419,6 +460,10 @@ class EditorTimeline(QGraphicsView):
     def set_active_segment_index(self, index: int) -> None:
         if not self._timeline:
             return
+        request = (index, self._selected_layer_id, self._manual_subtitle_selection)
+        if request == self._last_active_request:
+            return
+        self._last_active_request = request
         # Do not override a user-selected non-subtitle layer. The auto-select
         # is only meant to highlight the currently playing subtitle. If the
         # user has selected an audio/video/blur layer, leave it alone.
@@ -446,11 +491,14 @@ class EditorTimeline(QGraphicsView):
                 return
             elif self._manual_subtitle_selection:
                 return
+            elif current_track.name == "TS2":
+                return
         for lid, idx in self._segment_indices.items():
             if idx == index:
                 if self._selected_layer_id == lid:
                     return
                 self._selected_layer_id = lid
+                self._last_active_request = (index, lid, self._manual_subtitle_selection)
                 self.viewport().update()
                 return
 
@@ -603,7 +651,7 @@ class EditorTimeline(QGraphicsView):
             scroll_x = self.horizontalScrollBar().value() if self.horizontalScrollBar() else 0
             cur_px = self.CONTENT_LEFT_PAD + int(seconds * self.pixels_per_second) - scroll_x
             last_px = getattr(self, "_last_playhead_px", None)
-            if not getattr(self, "_playing", False) or last_px is None or cur_px != last_px:
+            if last_px is None or cur_px != last_px:
                 self._last_playhead_px = cur_px
                 viewport.update()
         self.playheadMoved.emit(seconds)
@@ -798,13 +846,42 @@ class EditorTimeline(QGraphicsView):
         )
         self.viewport().update()
 
-    def _redraw(self) -> None:
+    @contextmanager
+    def batch_update(self):
+        """Finish related model updates before calculating layout once."""
+        self._batch_depth += 1
+        try:
+            yield
+        finally:
+            self._batch_depth -= 1
+            if not self._batch_depth and self._redraw_pending:
+                self._redraw_pending = False
+                self._redraw()
+
+    def refresh_track_appearance(self):
+        """Refresh badges/labels without discarding cue geometry."""
+        self.layoutChanged.emit()
+        self.viewport().update()
+
+    def redraw_track(self, track):
+        self._redraw(changed_tracks={track.id})
+
+    def _redraw(self, *, changed_tracks=None) -> None:
+        self._last_active_request = None
+        if self._batch_depth:
+            self._redraw_pending = True
+            return
         if self._data_only:
             return
         if not self._timeline:
             return
-        self._overlap_layout_cache.clear()
-        self._overlap_row_assignments.clear()
+        if changed_tracks is None:
+            self._overlap_layout_cache.clear()
+            self._overlap_row_assignments.clear()
+        else:
+            for track_id in changed_tracks:
+                self._overlap_layout_cache.pop(track_id, None)
+                self._overlap_row_assignments.pop(str(track_id), None)
         tl = self._timeline
         tracks = [t for t in tl.tracks if self.is_track_shown_on_timeline(t)]
         # Recompute each track's height based on its layer count so
@@ -857,8 +934,55 @@ class EditorTimeline(QGraphicsView):
     def _rebuild_track_heights(self) -> None:
         if not self._timeline:
             return
+        self._overlap_layout_cache.clear()
         for track in self._timeline.tracks:
             self._track_heights[track.id] = self._compute_track_height(track)
+
+    def _track_overlap_layout(self, track):
+        cached_layout = self._overlap_layout_cache.get(track.id)
+        if cached_layout is None:
+            visible_layers = [layer for layer in track.layers if layer.visible]
+            # Sort by start time for proper overlap detection. This is
+            # deliberately cached: doing it for a long TS1 on every
+            # playhead repaint was a major source of stutter.
+            visible_layers_sorted = sorted(
+                visible_layers, key=lambda layer: float(getattr(layer, "start", 0.0))
+            )
+            layer_rows, cached_num_rows = self._compute_overlap_rows(visible_layers_sorted, track_id=track.id)
+            # ``list.index(layer)`` inside the draw loop made subtitle-
+            # track painting quadratic. Precompute the assignment once.
+            layer_row_by_id = {
+                str(getattr(layer, "id", "")): row
+                for layer, row in zip(visible_layers_sorted, layer_rows)
+            }
+            sorted_starts = [float(getattr(layer, "start", 0.0) or 0.0)
+                             for layer in visible_layers_sorted]
+            prefix_max_ends: list[float] = []
+            max_end = float("-inf")
+            for layer in visible_layers_sorted:
+                try:
+                    layer_end = float(getattr(layer, "end", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    layer_end = 0.0
+                meta = getattr(layer, "metadata", None)
+                if isinstance(meta, dict):
+                    raw_ae = meta.get("_audio_end")
+                    if raw_ae is not None:
+                        try:
+                            layer_end = max(layer_end, float(raw_ae))
+                        except (TypeError, ValueError):
+                            pass
+                max_end = max(max_end, layer_end)
+                prefix_max_ends.append(max_end)
+            cached_layout = (
+                layer_row_by_id,
+                max(1, cached_num_rows),
+                visible_layers_sorted,
+                sorted_starts,
+                prefix_max_ends,
+            )
+            self._overlap_layout_cache[track.id] = cached_layout
+        return cached_layout
 
     def _compute_track_height(self, track) -> int:
         """Compute a track's height. Region tracks (Blur, Logo, Mask)
@@ -874,10 +998,7 @@ class EditorTimeline(QGraphicsView):
             # size. Older B1 projects may carry a 100px track height.
             return self.REGION_TRACK_ROW_H * num_layers
         if self._should_overlap_stack(track):
-            visible = [l for l in track.layers if l.visible]
-            # Sort by start time for proper overlap detection
-            visible_sorted = sorted(visible, key=lambda l: float(getattr(l, "start", 0.0)))
-            _, num_rows = self._compute_overlap_rows(visible_sorted, track_id=track.id)
+            num_rows = self._track_overlap_layout(track)[1]
             return self.CHILD_TRACK_H * max(1, num_rows)
         return base
 
@@ -898,6 +1019,8 @@ class EditorTimeline(QGraphicsView):
         full video too, so without the same layout the last painted clip
         hides every earlier logo/mask layer and they cannot be selected.
         """
+        if getattr(track, "type", None) in (LayerType.SUBTITLE, LayerType.DUB_SUBTITLE):
+            return False
         if cls._is_blur_track(track):
             return True
         name = (getattr(track, "name", "") or "").lower()
@@ -1378,10 +1501,12 @@ class EditorTimeline(QGraphicsView):
 
         y = self.RULER_HEIGHT - scroll_y
 
+        view_h = self.viewport().height()
         for track in tracks:
             th = self._track_heights.get(track.id, self.TRACK_DEFAULT_H)
-            self._draw_track_body(painter, track, scroll_x, y, th)
-            self._draw_track_layers(painter, track, scroll_x, y, th)
+            if y + th >= 0 and y <= view_h:
+                self._draw_track_body(painter, track, scroll_x, y, th)
+                self._draw_track_layers(painter, track, scroll_x, y, th)
             y += th
 
         # Draw magnetic snap visual guide line right before playhead
@@ -1555,49 +1680,7 @@ class EditorTimeline(QGraphicsView):
         # older project file).
         force_subtitle_color = self._is_subtitle_track(track)
         if overlap_stack:
-            cached_layout = self._overlap_layout_cache.get(track.id)
-            if cached_layout is None:
-                visible_layers = [layer for layer in track.layers if layer.visible]
-                # Sort by start time for proper overlap detection. This is
-                # deliberately cached: doing it for a long TS1 on every
-                # playhead repaint was a major source of stutter.
-                visible_layers_sorted = sorted(
-                    visible_layers, key=lambda layer: float(getattr(layer, "start", 0.0))
-                )
-                layer_rows, cached_num_rows = self._compute_overlap_rows(visible_layers_sorted, track_id=track.id)
-                # ``list.index(layer)`` inside the draw loop made subtitle-
-                # track painting quadratic. Precompute the assignment once.
-                layer_row_by_id = {
-                    str(getattr(layer, "id", "")): row
-                    for layer, row in zip(visible_layers_sorted, layer_rows)
-                }
-                sorted_starts = [float(getattr(layer, "start", 0.0) or 0.0)
-                                 for layer in visible_layers_sorted]
-                prefix_max_ends: list[float] = []
-                max_end = float("-inf")
-                for layer in visible_layers_sorted:
-                    try:
-                        layer_end = float(getattr(layer, "end", 0.0) or 0.0)
-                    except (TypeError, ValueError):
-                        layer_end = 0.0
-                    meta = getattr(layer, "metadata", None)
-                    if isinstance(meta, dict):
-                        raw_ae = meta.get("_audio_end")
-                        if raw_ae is not None:
-                            try:
-                                layer_end = max(layer_end, float(raw_ae))
-                            except (TypeError, ValueError):
-                                pass
-                    max_end = max(max_end, layer_end)
-                    prefix_max_ends.append(max_end)
-                cached_layout = (
-                    layer_row_by_id,
-                    max(1, cached_num_rows),
-                    visible_layers_sorted,
-                    sorted_starts,
-                    prefix_max_ends,
-                )
-                self._overlap_layout_cache[track.id] = cached_layout
+            cached_layout = self._track_overlap_layout(track)
             (
                 layer_row_by_id,
                 num_rows,
@@ -1686,16 +1769,18 @@ class EditorTimeline(QGraphicsView):
                 bar_y = y + margin
                 bar_h = h - margin * 2
             is_selected = layer.id == self._selected_layer_id
+            locked = bool(track.locked or getattr(layer, "locked", False))
             track_name = (getattr(track, "name", "") or "").split(" ")[0]
             is_subtitle_track_name = track_name in ("TS1", "S1")
             if layer.type == LayerType.BLUR:
-                self._draw_blur_layer_bar(painter, layer, x, bar_y, w, bar_h, is_selected)
+                self._draw_blur_layer_bar(painter, layer, x, bar_y, w, bar_h, is_selected, locked=locked)
             else:
                 self._draw_standard_layer_bar(
                     painter, layer, x, bar_y, w, bar_h, view_w,
                     is_selected, force_subtitle_color=force_subtitle_color,
                     force_subtitle_track=is_subtitle_track_name,
                     hide_label=(track.type == LayerType.AUDIO),
+                    force_secondary_track=(track_name == "TS2"), locked=locked,
                 )
             # V1/A1 visuals are precomputed when media is opened. Drawing
             # uses only the cached data and clips to the current viewport, so
@@ -1706,9 +1791,11 @@ class EditorTimeline(QGraphicsView):
             elif track.type == LayerType.AUDIO:
                 self._draw_waveform(painter, x, bar_y, w, bar_h, view_w)
             if is_selected and track.type in (LayerType.VIDEO, LayerType.AUDIO):
-                painter.setPen(QPen(QColor("#4a8cff"), 2))
+                painter.setPen(QPen(QColor(SELECTED_LAYER_ACCENT), 2))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRoundedRect(QRectF(x, bar_y, w, bar_h), 4, 4)
+            if locked:
+                self._draw_locked_layer(painter, x, bar_y, w, bar_h, view_w, is_selected)
             visible_row_index += 1
 
     def _draw_waveform(self, painter: QPainter, *args, **kwargs) -> None:
@@ -2030,7 +2117,7 @@ class EditorTimeline(QGraphicsView):
 
         painter.restore()
 
-    def _draw_standard_layer_bar(self, painter, layer, x, y, w, h, view_w, is_selected, is_overflow_row: bool = False, force_subtitle_color: bool = False, force_subtitle_track: bool = False, hide_label: bool = False):
+    def _draw_standard_layer_bar(self, painter, layer, x, y, w, h, view_w, is_selected, is_overflow_row: bool = False, force_subtitle_color: bool = False, force_subtitle_track: bool = False, hide_label: bool = False, force_secondary_track: bool = False, locked: bool = False):
         # Every subtitle bar (DubSubtitleLayer, SubtitleLayer, or any
         # layer drawn on the TS1 track) uses the exact same fill +
         # border constants so the track reads as one uniform subtitle
@@ -2049,6 +2136,8 @@ class EditorTimeline(QGraphicsView):
         layer_type = getattr(layer, "type", None)
         is_subtitle_type = layer_type in (LayerType.SUBTITLE, LayerType.DUB_SUBTITLE)
         layer_metadata = getattr(layer, "metadata", None) or {}
+        secondary = force_secondary_track or bool(isinstance(layer_metadata, dict) and layer_metadata.get("secondary_subtitle"))
+        selection_color = QColor(SECONDARY_SUBTITLE_ACCENT if secondary else SELECTED_LAYER_ACCENT)
         segment_metadata = layer_metadata.get("_seg_dict", {}) if isinstance(layer_metadata, dict) else {}
         is_tts_dirty = bool(
             (layer_metadata.get("_tts_dirty", False) if isinstance(layer_metadata, dict) else False)
@@ -2062,16 +2151,11 @@ class EditorTimeline(QGraphicsView):
         has_dub_marker = bool(
             getattr(layer, "dub_text", None) or getattr(layer, "_seg_dict", None)
         )
-        if speaker:
-            # Diarization can yield more than a handful of speakers.  A
-            # fixed palette repeats colors and makes distinct people look the
-            # same, so derive a stable, well-separated hue from each ID.
-            suffix = speaker.rsplit("_", 1)[-1]
-            try:
-                speaker_index = int(suffix)
-            except (TypeError, ValueError):
-                speaker_index = sum(ord(char) for char in speaker)
-            fill = QColor.fromHsv((speaker_index * 137 + 20) % 360, 155, 205)
+        if secondary:
+            fill = QColor(SECONDARY_SUBTITLE_FILL)
+            border = QColor(SECONDARY_SUBTITLE_BORDER)
+        elif speaker:
+            fill = QColor.fromHsv(speaker_timeline_hue(speaker), 155, 205)
             border = fill.darker(140)
         elif is_subtitle_type or force_subtitle_color or force_subtitle_track or has_dub_marker:
             fill = QColor(201, 107, 42)   # #c96b2a — exact RGB, no derivation
@@ -2087,7 +2171,7 @@ class EditorTimeline(QGraphicsView):
                 painter.setPen(QPen(QColor("#f59e0b"), 1, Qt.DashLine if not is_selected else Qt.SolidLine))
                 painter.drawRect(QRectF(x, y, max(1, w), h))
             elif is_selected:
-                painter.setPen(QPen(QColor("#4a8cff"), 1))
+                painter.setPen(QPen(selection_color, 1))
                 painter.drawRect(QRectF(x, y, max(1, w), h))
             elif speaker and speaker == self._highlighted_speaker:
                 painter.setPen(QPen(QColor("#ffe082"), 1))
@@ -2226,7 +2310,7 @@ class EditorTimeline(QGraphicsView):
             painter.setPen(QColor("#ffffff"))
             font = QFont("Segoe UI", 8)
             painter.setFont(font)
-            if getattr(layer, "type", None) == LayerType.DUB_SUBTITLE:
+            if getattr(layer, "type", None) in (LayerType.SUBTITLE, LayerType.DUB_SUBTITLE):
                 # Default: show dub_text (the voice-spoken text) on the
                 # timeline bar so the user sees what the dub voice is
                 # actually saying. Fall back to text, then layer name.
@@ -2237,10 +2321,12 @@ class EditorTimeline(QGraphicsView):
                 )
             else:
                 label = layer.name or layer.type.value.title()
-            short_label = os.path.basename(label) if os.path.sep in label else label
+            is_subtitle = getattr(layer, "type", None) in (LayerType.SUBTITLE, LayerType.DUB_SUBTITLE)
+            short_label = os.path.basename(label) if not is_subtitle and os.path.sep in label else label
             badge_space = 16 if (is_tts_dirty and w >= 28) else 0
             max_label_w = min(w_base - 8 - badge_space, view_w - x - 4) if w_ext > 4 else min(w - 8 - badge_space, view_w - x - 4)
-            text_rect = QRectF(x + 4, y, max(max_label_w, 10), h)
+            inset = self._lock_label_inset(x, w, h, view_w) if locked else 0
+            text_rect = QRectF(max(x, 0) + 4 + inset if locked else x + 4, y, max(max_label_w - inset, 1), h)
             elided = painter.fontMetrics().elidedText(short_label, Qt.ElideRight, int(text_rect.width()))
             painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, elided)
 
@@ -2274,7 +2360,7 @@ class EditorTimeline(QGraphicsView):
             painter.setBrush(Qt.NoBrush)
             painter.drawPath(path)
         elif is_selected:
-            painter.setPen(QPen(QColor("#4a8cff"), 2))
+            painter.setPen(QPen(selection_color, 2))
             painter.setBrush(Qt.NoBrush)
             painter.drawPath(path)
         elif speaker and speaker == self._highlighted_speaker:
@@ -2322,7 +2408,7 @@ class EditorTimeline(QGraphicsView):
             )
             painter.drawPath(wave)
 
-    def _draw_blur_layer_bar(self, painter, layer, x, y, w, h, is_selected):
+    def _draw_blur_layer_bar(self, painter, layer, x, y, w, h, is_selected, locked=False):
         color = QColor("#6b5b7b")
 
         # Each child layer fills the full track height (passed as h)
@@ -2338,12 +2424,53 @@ class EditorTimeline(QGraphicsView):
         font = QFont("Segoe UI", 8)
         painter.setFont(font)
         label = layer.name or "Blur"
-        painter.drawText(QRectF(x + 4, y, max(w - 8, 0), h),
+        inset = self._lock_label_inset(x, w, h, self.viewport().width()) if locked else 0
+        painter.drawText(QRectF(max(x, 0) + 4 + inset if locked else x + 4, y, max(w - 8 - inset, 0), h),
                          Qt.AlignVCenter | Qt.AlignLeft, label)
 
         if is_selected:
-            painter.setPen(QPen(QColor("#4a8cff"), 2, Qt.DashLine))
+            painter.setPen(QPen(QColor(SELECTED_LAYER_ACCENT), 2))
             painter.drawRect(rect)
+
+    @staticmethod
+    def _lock_label_inset(x, w, h, view_w):
+        visible = min(x + w, view_w) - max(0, x)
+        if visible < 22 or h < 16:
+            return 0
+        return 72 if visible >= 130 else 23
+
+    def _draw_locked_layer(self, painter, x, y, w, h, view_w, selected):
+        """Draw lock chrome after media thumbnails/waveforms on every layer."""
+        left, right = max(0, x), min(view_w, x + w)
+        if right <= left:
+            return
+        rect = QRectF(left, y, right - left, h)
+        if rect.width() <= 6:
+            # Overview mode may show thousands of tiny cues at once.
+            painter.fillRect(rect, QColor(255, 255, 255, 200) if selected else QColor(251, 191, 36, 85))
+            return
+        painter.save()
+        painter.setClipRect(rect, Qt.IntersectClip)
+        painter.fillRect(rect, QColor(8, 15, 26, 65))
+        painter.fillRect(rect, QBrush(QColor(251, 191, 36, 45), Qt.BDiagPattern))
+        painter.setPen(QPen(QColor("#ffffff" if selected else LOCK_ACCENT), 2 if selected else 1, Qt.SolidLine if selected else Qt.DashLine))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 3, 3)
+        inset = self._lock_label_inset(x, w, h, view_w)
+        if inset:
+            badge = QRectF(left + 4, y + (h - 18) / 2, inset - 4, 18)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#45371b"))
+            painter.drawRoundedRect(badge, 4, 4)
+            painter.setPen(QPen(QColor(LOCK_ACCENT), 1.5))
+            painter.setBrush(Qt.NoBrush)
+            gx, gy = badge.left() + 5, badge.center().y()
+            painter.drawArc(QRectF(gx + 1, gy - 6, 6, 8), 0, 180 * 16)
+            painter.drawRoundedRect(QRectF(gx, gy - 1, 8, 7), 1, 1)
+            if inset > 23:
+                painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+                painter.drawText(badge.adjusted(18, 0, -3, 0), Qt.AlignVCenter | Qt.AlignLeft, t("Locked"))
+        painter.restore()
 
     @staticmethod
     def _layer_color(layer_type: LayerType) -> QColor:

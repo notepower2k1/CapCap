@@ -1,6 +1,7 @@
 import os
+from ui.views.editor.timeline_palette import SECONDARY_SUBTITLE_FILL, SECONDARY_SUBTITLE_ACCENT, LOCK_ACCENT
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QMouseEvent, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QFrame, QSizePolicy
 
@@ -36,6 +37,7 @@ TRACK_ICONS: dict[str, str] = {
     "A1": "\u266b",
     "A2": "\u266b",
     "TS1": "T",
+    "TS2": "T",
     "S1": "T",
     "M1": "\u25a0",
 }
@@ -47,6 +49,18 @@ MASK_PREFIXES = {"M1"}
 TEXT_PREFIXES = {"T1"}
 SUBTITLE_PREFIXES = {"TS1", "S1"}
 MUTE_PREFIXES = {"A1", "A2", "TS1"}
+
+
+def display_track_name(name: str) -> str:
+    """Keep model IDs intact while showing only useful names in the UI."""
+    prefix = (name or "").split(" ")[0]
+    if prefix in {"TS1", "S1"} or name == "A2 Dub":
+        return t("Main subtitles")
+    if prefix == "TS2":
+        return t("Secondary subtitles")
+    labels = {"V1": "Video", "A1": "Original audio", "A2": "Background music",
+              "B1": "Blur", "L1": "Logo", "M1": "Mask", "T1": "Text"}
+    return t(labels[prefix]) if prefix in labels else name
 
 
 class TrackLabelBar(QFrame):
@@ -503,15 +517,12 @@ class TrackLabelBar(QFrame):
         # or shrink with the layer count.
         track_heights = self._get_track_heights()
 
-        def _icon(name: str) -> str:
-            prefix = name.split(" ")[0] if name else ""
-            return TRACK_ICONS.get(prefix, "?")
-
         def _color(name: str) -> QColor:
             prefix = name.split(" ")[0] if name else ""
             palette = {"V1": QColor("#2a6bcf"), "B1": QColor("#6b5b7b"),
                        "A1": QColor("#2a9d3f"), "A2": QColor("#2a9d3f"),
                        "TS1": QColor("#c96b2a"),
+                       "TS2": QColor(SECONDARY_SUBTITLE_FILL),
                        "S1": QColor("#c96b2a"),
                        "M1": QColor("#8c5a2a")}
             return palette.get(prefix, QColor("#6b8cb8"))
@@ -527,11 +538,11 @@ class TrackLabelBar(QFrame):
 
         for i, name in enumerate(self._track_names):
             h = track_heights[i] if i < len(track_heights) else 60
-            icon = _icon(name)
             c = _color(name)
             muted = self._track_muted[i] if i < len(self._track_muted) else False
             blur_on = self._track_blur_on[i] if i < len(self._track_blur_on) else False
             prefix = name.split(" ")[0] if name else ""
+            locked = bool(self._track_locked[i] if i < len(self._track_locked) else False)
 
             logo_hidden = (prefix in LOGO_PREFIXES
                            and i < len(self._track_logo_shown)
@@ -551,6 +562,8 @@ class TrackLabelBar(QFrame):
                 bg = QColor("#1a1a2e")  # dimmed when blur is off
             else:
                 bg = QColor("#142030")
+            if locked:
+                bg = QColor("#29251b")
             painter.fillRect(0, y, self.TRACK_HEADER_W, h, bg)
             painter.setPen(QPen(QColor("#1e2d42"), 1))
             painter.drawRect(0, y, self.TRACK_HEADER_W - 1, h - 1)
@@ -560,19 +573,24 @@ class TrackLabelBar(QFrame):
 
             dim_text = (muted or logo_hidden or mask_hidden or text_hidden or subtitle_hidden
                         or (prefix in BLUR_PREFIXES and not blur_on))
-            text_color = QColor("#555") if dim_text else QColor("#ffffff")
+            text_color = QColor("#555") if dim_text else QColor(SECONDARY_SUBTITLE_ACCENT if prefix == "TS2" else "#ffffff")
             painter.setPen(text_color)
-            lines = self._label_lines(name, text_w, fm)
+            display_name = display_track_name(name)
+            model = getattr(self._timeline_widget, "_timeline", None)
+            track = next((track for track in getattr(model, "tracks", []) if track.name == name), None)
+            if name in {"TS1", "S1", "A2 Dub"}:
+                if track is not None and (getattr(track, "metadata", {}) or {}).get("subtitle_hidden_on_video"):
+                    display_name += " · " + t("Hidden on video")
+            lines = self._label_lines(display_name, text_w, fm)
             if not lines:
                 lines = [name or ""]
             line_h = fm.height()
             total_h = line_h * len(lines)
             start_y = y + max(2, (h - total_h) // 2)
             for li, line in enumerate(lines):
-                display = f"{icon} {line}" if li == 0 else line
                 painter.drawText(text_x, start_y + li * line_h,
                                  text_w, line_h,
-                                 Qt.AlignLeft | Qt.AlignVCenter, display)
+                                 Qt.AlignLeft | Qt.AlignVCenter, line)
 
             # (ON/OFF label removed - blur state is shown by track dimming)
 
@@ -597,7 +615,9 @@ class TrackLabelBar(QFrame):
             # never preview visibility or export.
             if prefix:
                 locked = bool(self._track_locked[i] if i < len(self._track_locked) else False)
-                icon_color = QColor("#8e3030") if locked else QColor("#8394aa")
+                if locked:
+                    painter.fillRect(QRectF(self.TRACK_HEADER_W - 27, y + h / 2 - 12, 25, 24), QColor("#71531d"))
+                icon_color = QColor(LOCK_ACCENT) if locked else QColor("#8394aa")
                 if not self._controls_enabled:
                     icon_color = QColor("#4a5563")
                 self._draw_lock_icon(painter, self.TRACK_HEADER_W - 28, y + 4, h - 8, locked, icon_color)

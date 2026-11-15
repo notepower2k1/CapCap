@@ -27,6 +27,8 @@ class Segment:
         final_text = str(data.get("final_text", data.get("text", "")) or "")
         tts_text = str(data.get("tts_text", "") or "")
         metadata = dict(data.get("metadata", {}) or {})
+        if isinstance(data.get("_completed_timing"), dict):
+            metadata["_completed_timing"] = dict(data["_completed_timing"])
         for key in ("voice_speed", "_auto_fit_applied"):
             if key in data:
                 metadata[key] = data[key]
@@ -83,6 +85,9 @@ class Segment:
     def from_transcript_dict(cls, data: dict[str, Any], segment_id: int) -> "Segment":
         text = str(data.get("text", "") or "").strip()
         metadata = {"words": list(data.get("words") or [])}
+        timing = data.get("_completed_timing") or (data.get("metadata") or {}).get("_completed_timing")
+        if isinstance(timing, dict):
+            metadata["_completed_timing"] = dict(timing)
         speaker = str(data.get("speaker", "") or "").strip()
         if speaker:
             metadata["speaker"] = speaker
@@ -148,6 +153,8 @@ class Segment:
             "end": self.end,
             "text": self.subtitle_text,
         }
+        if isinstance(self.metadata.get("_completed_timing"), dict):
+            payload["_completed_timing"] = dict(self.metadata["_completed_timing"])
         for key in ("tts_group_id", "tts_group_start", "tts_group_end"):
             if key in self.metadata:
                 payload[key] = self.metadata.get(key)
@@ -191,6 +198,8 @@ class Segment:
             "end": self.end,
             "text": self.original_text,
         }
+        if isinstance(self.metadata.get("_completed_timing"), dict):
+            payload["_completed_timing"] = dict(self.metadata["_completed_timing"])
         if self.metadata.get("words"):
             payload["words"] = list(self.metadata.get("words") or [])
         if self.metadata.get("speaker"):

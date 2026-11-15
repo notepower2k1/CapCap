@@ -40,7 +40,13 @@ class RemoteTranslatorAdapter:
         style_instruction: str = "",
         batch_callback=None,
         status_callback=None,
+        custom_system_prompt=None,
+        is_canceled=None,
+        **translation_options,
     ):
+        if is_canceled and is_canceled():
+            raise InterruptedError("canceled")
+        from translation.prompt_context import active_translation_preset
         response = remote_api_post(
             "/v1/translate-segments",
             {
@@ -50,8 +56,13 @@ class RemoteTranslatorAdapter:
                 "enable_polish": bool(enable_polish),
                 "optimize_subtitles": bool(optimize_subtitles),
                 "style_instruction": style_instruction,
+                "custom_system_prompt": custom_system_prompt,
+                "translation_preset_id": active_translation_preset(),
+                **{key: translation_options[key] for key in ("override_provider", "polish_batch_size", "context_guidance") if key in translation_options},
             },
         )
+        if is_canceled and is_canceled():
+            raise InterruptedError("canceled")
         if status_callback:
             for update in response.get("translation_status", []) or []:
                 if not isinstance(update, (list, tuple)) or len(update) != 2:
@@ -63,7 +74,10 @@ class RemoteTranslatorAdapter:
                     status_callback(provider, message)
                 except Exception:
                     pass
-        return list(response.get("segments") or [])
+        rows = list(response.get("segments") or [])
+        if batch_callback and rows:
+            batch_callback(0, rows)
+        return rows
 
     def rewrite_segments(self, source_segments, translated_segments, *, model_path=None, src_lang: str = "auto", style_instruction: str = ""):
         response = remote_api_post(

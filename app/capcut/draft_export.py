@@ -220,7 +220,7 @@ class DraftExporter:
                                 "segments": lane, "attribute": 0, "flag": 0, "is_default_name": False})
 
     def _text(self, layer, start, duration):
-        if layer.get("type") in ("subtitle", "dub_subtitle") and self.subtitle_position.get("custom_position_enabled"):
+        if layer.get("type") in ("subtitle", "dub_subtitle") and not layer.get("metadata", {}).get("secondary_subtitle") and self.subtitle_position.get("custom_position_enabled"):
             layer = dict(layer, position_x=float(self.subtitle_position.get("custom_position_x", 50)),
                          position_y=float(self.subtitle_position.get("custom_position_y", 86)))
         text = str(layer.get("text", ""))

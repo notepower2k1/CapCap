@@ -513,6 +513,7 @@ def render_subtitle_frame_preview(
     focus_x: float = 0.5,
     focus_y: float = 0.5,
     video_filter_state=None,
+    subtitle_presentation=None,
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -537,7 +538,32 @@ def render_subtitle_frame_preview(
         _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y),
         _build_video_filter_vf(video_filter_state),
     ]
-    if srt_path:
+    from app.subtitle_presentation import config
+    presentation = config(subtitle_presentation)
+    if presentation["mode"] != "single":
+        from app.subtitle_presentation import render_ass, read_srt, compose_ass, secondary_style, style_from_controls
+        from app.services.time_warp_service import TimeWarpService
+        from video_processor import _ass_filter_expression
+        primary = read_srt(srt_path) if presentation["mode"] == "bilingual" and srt_path else []
+        primary = TimeWarpService.map_segments_to_media_time(primary, presentation.get("time_warps") or [])
+        secondary = presentation.get("secondary_segments") or []
+        if presentation["mode"] == "bilingual" and not secondary:
+            raise ValueError("Secondary subtitles are missing. Create or import them first.")
+        def active(rows):
+            return [dict(row, start=0., end=1.) for row in rows if row["start"] <= timestamp_seconds < row["end"]]
+        style = {key: value for key, value in locals().copy().items() if key in {
+            "alignment", "margin_v", "font_name", "font_size", "font_color", "background_box", "highlight_color",
+            "outline_color", "outline_width", "shadow_color", "shadow_depth", "background_color", "background_alpha",
+            "bold", "preset_key", "animation_duration", "custom_position_enabled", "custom_position_x", "custom_position_y", "single_line"}}
+        style["animation"] = animation_style
+        directory = os.path.splitext(output_image_path)[0] + "_subtitles"
+        ass_path = render_ass(active(primary), style, video_w, video_h, os.path.join(directory, "main.srt"))
+        if presentation["mode"] == "bilingual":
+            second_style = presentation.get("secondary_render_style") or style_from_controls(presentation["styles"].get("secondary", {}), secondary_style(style))
+            other = render_ass(active(secondary), second_style, video_w, video_h, os.path.join(directory, "secondary.srt"))
+            ass_path = compose_ass(ass_path, other, os.path.join(directory, "frame.ass"))
+        vf_parts.append(_ass_filter_expression(ass_path))
+    elif srt_path:
         if not os.path.exists(srt_path):
             raise FileNotFoundError(f"SRT not found: {srt_path}")
         ass_path = srt_to_ass(

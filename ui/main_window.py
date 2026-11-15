@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 import sys
 import os
 import re
@@ -1161,7 +1162,7 @@ class VideoTranslatorGUI(QMainWindow):
         )
         self._responsive_inspector_width = inspector_width
         for attr in (
-            "subtitle_inspector_card", "audio_inspector_card", "blur_inspector_card",
+            "subtitle_inspector_card", "secondary_subtitle_inspector_card", "audio_inspector_card", "blur_inspector_card",
             "logo_inspector_card", "mask_inspector_card", "text_inspector_card",
             "default_inspector_card", "video_inspector_card",
         ):
@@ -2372,6 +2373,11 @@ class VideoTranslatorGUI(QMainWindow):
             index = sum(ord(char) for char in value)
         return QColor.fromHsv((index * 137 + 20) % 360, 155, 205).name()
 
+    @staticmethod
+    def _speaker_timeline_color_hex(speaker: str) -> str:
+        from ui.views.editor.timeline_palette import speaker_timeline_hue
+        return QColor.fromHsv(speaker_timeline_hue(speaker), 155, 205).name()
+
     def _uses_speaker_subtitle_colors(self) -> bool:
         checkbox = getattr(self, "subtitle_speaker_colors_cb", None)
         return bool(checkbox and checkbox.isChecked())
@@ -2570,7 +2576,7 @@ class VideoTranslatorGUI(QMainWindow):
             indicator = QLabel()
             indicator.setFixedSize(12, 12)
             indicator.setStyleSheet(
-                f"background: {self._speaker_color_hex(speaker)}; border-radius: 6px; border: 1px solid #dcecff;"
+                f"background: {self._speaker_timeline_color_hex(speaker)}; border-radius: 6px; border: 1px solid #dcecff;"
             )
             header.addWidget(indicator)
             speaker_label = QLabel(display_name)
@@ -4725,6 +4731,11 @@ class VideoTranslatorGUI(QMainWindow):
 
     def load_user_settings(self):
         load_user_settings_impl(self)
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None:
+            presentation.initialize()
+            if presentation.cfg["styles"].get(presentation.role):
+                presentation.apply_controls(presentation.cfg["styles"][presentation.role])
         if hasattr(self, "use_premium_voice_radio"):
             try:
                 self.use_premium_voice_radio.setChecked(False)
@@ -4798,7 +4809,7 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "subtitle_bottom_offset_spin"):
             self.subtitle_bottom_offset_spin.setVisible(not is_custom)
         self.update_subtitle_preview_style()
-        if getattr(self, "current_project_state", None) is not None:
+        if getattr(self, "current_project_state", None) is not None and not getattr(getattr(self, "subtitle_presentation_controller", None), "switching", False):
             self.schedule_timeline_project_persist()
 
     def _set_subtitle_item_text_rendering(self, enabled: bool) -> None:
@@ -4813,6 +4824,10 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_subtitle_drag_started(self):
         """Swap to the Qt layer only while dragging for immediate feedback."""
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None and isinstance(getattr(presentation, "cfg", None), dict) and presentation.cfg["mode"] == "bilingual":
+            presentation.begin_drag()
+            return
         if self._preview_is_playing():
             return
         if getattr(self, "_preview_video_has_burned_subtitles", False):
@@ -4823,6 +4838,10 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_subtitle_position_dragged(self, x_percent: int, y_percent: int):
         """Commit a drag from the live subtitle overlay to style controls."""
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None and isinstance(getattr(presentation, "cfg", None), dict) and presentation.cfg["mode"] == "bilingual":
+            presentation.finish_drag(x_percent, y_percent)
+            return
         if self._preview_is_playing():
             return
         x_percent = max(0, min(100, int(x_percent)))
@@ -5159,11 +5178,11 @@ class VideoTranslatorGUI(QMainWindow):
         self.persist_current_timeline_project_data()
         state=self.ensure_current_project()
         if state:
-            state.set_setting("subtitle_style_controls",self._current_subtitle_style_controls_state())
+            state.set_setting("subtitle_style_controls",self.subtitle_presentation_controller.primary_controls() if hasattr(self, "subtitle_presentation_controller") else self._current_subtitle_style_controls_state())
             state.set_setting("processing_profile",capture(self))
             self.project_service.save_project(state)
 
-    def ensure_current_project(self):
+    def ensure_current_project(self, *, persist_presentation=True):
         video_path = self.video_path_edit.text().strip()
         state = self.project_bridge.ensure_project(
             video_path=video_path,
@@ -5179,6 +5198,12 @@ class VideoTranslatorGUI(QMainWindow):
             state.set_setting("audio_handling_mode", audio_handling_mode)
             self.project_service.save_project(state)
         self.current_project_state = state
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None and persist_presentation:
+            from app.subtitle_presentation import KEY
+            presentation.capture_style()
+            state.set_setting(KEY, copy.deepcopy(presentation.cfg))
+            self.project_service.save_project(state)
         self.processed_artifacts.update(state.artifacts)
         return state
 
@@ -5318,7 +5343,7 @@ class VideoTranslatorGUI(QMainWindow):
             "M1": bool(getattr(self, "_mask_track_preview_visible", True)),
             "B1": bool(self._blur_effect_enabled()),
         })
-        state.set_setting("subtitle_style_controls", self._current_subtitle_style_controls_state())
+        state.set_setting("subtitle_style_controls", self.subtitle_presentation_controller.primary_controls() if hasattr(self, "subtitle_presentation_controller") else self._current_subtitle_style_controls_state())
         state.set_setting("video_time_warps", list(getattr(self, "video_time_warps", [])))
         
         # Save timeline data (includes mask and logo layers)
@@ -5514,6 +5539,9 @@ class VideoTranslatorGUI(QMainWindow):
         if saved_subtitle_style:
             self._apply_subtitle_style_controls_state(saved_subtitle_style)
             self._subtitle_custom_style_state = dict(saved_subtitle_style)
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None:
+            presentation.restore(state)
         if hasattr(self, "video_view") and hasattr(self.video_view, "set_subtitle_track_visible"):
             self.video_view.set_subtitle_track_visible(self._subtitle_track_preview_visible)
         if hasattr(self, "video_view") and hasattr(self.video_view, "set_logo_track_visible"):
@@ -5619,6 +5647,10 @@ class VideoTranslatorGUI(QMainWindow):
                 self.audio_tab_btn.setEnabled(True)
         self._sync_timeline_mute_to_gui()
         self._sync_audio_mix_controls_from_tracks()
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None:
+            presentation.refresh_widgets()
+            presentation.sync_tracks()
         # OCR geometry is project-scoped.  For a reopened OCR project that has
         # not produced a transcript yet, keep the crop editor visible so the
         # user can configure the region before running Transcript.  Completed
@@ -7106,6 +7138,11 @@ class VideoTranslatorGUI(QMainWindow):
             return requested_font
 
     def update_subtitle_preview_style(self):
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None:
+            if presentation.switching:
+                return
+            presentation.style_changed()
         if not hasattr(self, "video_view"):
             return
         if getattr(self, "_subtitle_preset_apply_in_progress", False):
@@ -7249,6 +7286,14 @@ class VideoTranslatorGUI(QMainWindow):
             self._single_line_split_cache = split
 
     def get_subtitle_export_style(self, segments=None):
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is None:
+            return self._get_primary_subtitle_export_style(segments)
+        style = presentation.export_style(segments)
+        style["subtitle_presentation"] = presentation.export_settings()
+        return style
+
+    def _get_primary_subtitle_export_style(self, segments=None):
         preset = self.get_subtitle_preset_config()
         # Export-only glyph calibration. ASS ScaleX/ScaleY enlarges glyphs
         # without changing font-size-derived line spacing or row placement.
@@ -7314,7 +7359,7 @@ class VideoTranslatorGUI(QMainWindow):
             "word_timings": [list(seg.get("words", [])) for seg in (style_segments or [])],
             "blur_region": (
                 self.video_view.get_blur_region_normalized()
-                if hasattr(self, "video_view") and self._blur_effect_enabled()
+                if hasattr(getattr(self, "video_view", None), "get_blur_region_normalized") and self._blur_effect_enabled()
                 else None
             ),
             "video_time_warps": list(getattr(self, "video_time_warps", [])),
@@ -7791,6 +7836,8 @@ class VideoTranslatorGUI(QMainWindow):
             self._selected_segment_index = valid_indexes[0]
         if sync_ui:
             self.sync_segment_editor_rows()
+        if hasattr(self, "restore_subtitle_timing_btn"):
+            self._update_subtitle_inspector_summary(rows)
         if hasattr(self, "_refresh_audio_inspector_dub_voice_buttons"):
             try:
                 self._refresh_audio_inspector_dub_voice_buttons()
@@ -8136,7 +8183,7 @@ class VideoTranslatorGUI(QMainWindow):
                 end = max(end, start + float(getattr(self.timeline, "MIN_DUR", 0.1)))
             layer.start, layer.end = start, end
             self._set_layer_timing_controls(prefix, layer)
-            self.timeline._redraw()
+            self.timeline.redraw_track(track)
             self.persist_current_timeline_project_data()
             self._timed_layer_preview_signature = None
             self.refresh_timed_layer_preview()
@@ -8159,6 +8206,9 @@ class VideoTranslatorGUI(QMainWindow):
                 if layer.id != layer_id:
                     continue
                 if bool(getattr(layer, "locked", False)):
+                    return
+                presentation = getattr(self, "subtitle_presentation_controller", None)
+                if presentation is not None and presentation.move_layer(layer, start, end):
                     return
                 layer_type = str(getattr(getattr(layer, "type", ""), "value", getattr(layer, "type", ""))).lower()
                 is_logo = layer_type == "image" and str(getattr(track, "name", "")) == "L1 Logo"
@@ -8191,6 +8241,10 @@ class VideoTranslatorGUI(QMainWindow):
                     break
             if layer:
                 break
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        is_secondary = bool(layer and (getattr(layer, "metadata", {}) or {}).get("secondary_subtitle"))
+        if presentation is not None and not is_secondary and layer is not None and str(getattr(getattr(layer, "type", None), "value", "")) in {"subtitle", "dub_subtitle"} and presentation.role != "primary":
+            presentation.style_role.setCurrentIndex(0)
         # The subtitle overlay should only capture the mouse when a concrete
         # subtitle segment (TS1/S1) is selected in the timeline.  Otherwise
         # it stays click-through, preventing accidental moves while editing
@@ -8221,6 +8275,8 @@ class VideoTranslatorGUI(QMainWindow):
             # rendered layer content remain visible in the preview.
             self._timed_layer_preview_signature = None
             self.refresh_timed_layer_preview()
+            if presentation is not None and presentation.cfg["mode"] == "bilingual":
+                self.sync_live_subtitle_preview()
             return
         # A selection must respect timing immediately, including before the
         # next playback positionChanged signal is emitted.
@@ -8236,7 +8292,9 @@ class VideoTranslatorGUI(QMainWindow):
             )
         if hasattr(self, "timeline_delete_btn"):
             self.timeline_delete_btn.setEnabled(not is_review_mode and can_modify_layer)
-        if layer_type == "subtitle":
+        if is_secondary and presentation is not None:
+            presentation.select_layer(layer)
+        elif layer_type == "subtitle":
             self._show_subtitle_inspector_for_layer(layer_id)
         elif layer_type == "dub_subtitle":
             self._show_dub_subtitle_inspector_for_layer(layer_id, layer)
@@ -8263,6 +8321,9 @@ class VideoTranslatorGUI(QMainWindow):
             # panels. Their effects are independent of selection.
             self._timed_layer_preview_signature = None
             self.refresh_timed_layer_preview()
+
+        if presentation is not None and presentation.cfg["mode"] == "bilingual":
+            self.sync_live_subtitle_preview()
 
     def _show_logo_overlay(self, track, layer, *, editable=True):
         """Show the draggable logo overlay for the selected logo layer."""
@@ -9160,7 +9221,7 @@ class VideoTranslatorGUI(QMainWindow):
                 layer.text = text
                 first_line = next((line.strip() for line in text.splitlines() if line.strip()), "Text")
                 layer.name = first_line[:24] or "Text"
-                self.timeline._redraw(); changed()
+                self.timeline.viewport().update(); changed()
         def size_changed(_index):
             layer = selected()
             if layer:
@@ -10144,7 +10205,7 @@ class VideoTranslatorGUI(QMainWindow):
             for track in timeline._timeline.tracks:
                 if track.name == track_name:
                     self._text_track_preview_visible = bool(is_shown)
-                    timeline._redraw()
+                    timeline.refresh_track_appearance()
                     self._refresh_text_layer_preview(getattr(timeline, "_selected_layer_id", ""))
                     if hasattr(self, "track_label_bar"):
                         self.track_label_bar.set_text_shown(track_name, bool(is_shown))
@@ -10637,9 +10698,63 @@ class VideoTranslatorGUI(QMainWindow):
             segment["tts_group_start"] = float(start)
             segment["tts_group_end"] = float(end)
 
+    def snapshot_subtitle_timing(self):
+        """Checkpoint successful processing, never called for manual edits."""
+        from app.subtitle_timing import capture
+        warps = getattr(self, "video_time_warps", []) or []
+        capture(self.current_segments or [], warps)
+        capture(self.current_translated_segments or [], warps)
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None and presentation.cfg["mode"] == "bilingual":
+            rows = presentation.secondary_rows()
+            capture(rows)
+            presentation.cfg["secondary_segments"] = rows
+            presentation._timeline_cache_key = None
+        self.persist_current_timeline_project_data()
+        self.sync_segment_editor_rows()
+        if presentation is not None and hasattr(presentation, "inspector"):
+            presentation.inspector.refresh(presentation.selected_secondary_index)
+
+    def can_restore_subtitle_timing(self, index=None):
+        from app.subtitle_timing import restored
+        index = int(getattr(self, "_selected_segment_index", -1) if index is None else index)
+        rows = self.current_translated_segments or self.current_segments or []
+        if self._preview_is_playing() or not 0 <= index < len(rows):
+            return False
+        times = restored(rows[index], getattr(self, "video_time_warps", []) or [])
+        if times is None or (abs(times[0] - rows[index]["start"]) < .001 and abs(times[1] - rows[index]["end"]) < .001):
+            return False
+        for track in getattr(getattr(self.timeline, "_timeline", None), "tracks", []):
+            for layer in track.layers:
+                meta = getattr(layer, "metadata", {}) or {}
+                if not meta.get("secondary_subtitle") and meta.get("_seg_index") == index:
+                    return not (track.locked or layer.locked)
+        return True
+
+    def restore_subtitle_timing(self, index=None):
+        from app.subtitle_timing import restored
+        index = int(getattr(self, "_selected_segment_index", -1) if index is None else index)
+        if not self.can_restore_subtitle_timing(index):
+            return False
+        entry = dict(type="batch_timing", index=index, selected_before=index, selected_after=index)
+        for prefix, rows in (("current", self.current_segments or []), ("translated", self.current_translated_segments or [])):
+            before = [copy.deepcopy(rows[index])] if index < len(rows) else []
+            after = copy.deepcopy(before)
+            if after:
+                times = restored(after[0], getattr(self, "video_time_warps", []) or [])
+                if times:
+                    self._apply_segment_timing(after[0], *times)
+            entry[prefix + "_before"], entry[prefix + "_after"] = before, after
+        self._push_timeline_undo_entry(entry)
+        self._single_line_split_cache = None
+        self._apply_timeline_structure_history_entry(entry, use_after=True)
+        return True
+
     def _build_split_segment_pair(self, segment: dict, split_time: float):
         first = dict(segment or {})
         second = dict(segment or {})
+        first.pop("_completed_timing", None)
+        second.pop("_completed_timing", None)
 
         first["start"] = float(segment.get("start", 0.0))
         first["end"] = float(split_time)
@@ -10827,6 +10942,9 @@ class VideoTranslatorGUI(QMainWindow):
         if self._preview_is_playing():
             return
         selection = getattr(self.timeline, "selection_range", lambda: None)() if hasattr(self, "timeline") else None
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None and presentation.edit_selected_structure("split", selection):
+            return
         # A selected overlay always owns Split. The selection supplies cut
         # times only; it must never redirect the command to TS1.
         if self._split_selected_overlay_layer(selection):
@@ -11483,7 +11601,7 @@ class VideoTranslatorGUI(QMainWindow):
         for track in timeline._timeline.tracks:
             if track.name == track_name:
                 track.locked = bool(locked)
-                timeline._redraw()
+                timeline.refresh_track_appearance()
                 self.persist_current_timeline_project_data()
                 self.refresh_ui_state()
                 self.log(f"[Timeline] {'Locked' if locked else 'Unlocked'} track: {track.name}")
@@ -11498,13 +11616,16 @@ class VideoTranslatorGUI(QMainWindow):
             for layer in track.layers:
                 if layer.id == selected_id:
                     layer.locked = not bool(getattr(layer, "locked", False))
-                    timeline._redraw()
+                    timeline.refresh_track_appearance()
                     self.persist_current_timeline_project_data()
                     self.log(f"[Timeline] {'Locked' if layer.locked else 'Unlocked'} layer: {layer.name or layer.id}")
                     return
 
     def delete_selected_timeline_segment(self):
         if self._preview_is_playing():
+            return
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None and presentation.edit_selected_structure("delete"):
             return
         # If a layer is currently selected in the timeline, remove it
         # from its track. Handles blur (with overlay sync), image/logo,
@@ -11846,6 +11967,10 @@ class VideoTranslatorGUI(QMainWindow):
         if not self._timeline_timing_undo_stack:
             return False
         entry = self._timeline_timing_undo_stack.pop()
+        if entry.get("type") == "secondary_subtitle":
+            self.subtitle_presentation_controller.apply_history(entry, use_after=False)
+            self._push_timeline_redo_entry(entry)
+            return True
         if str(entry.get("type", "")) == "range_split":
             self._apply_range_split_history(entry, use_after=False)
             self._push_timeline_redo_entry(entry)
@@ -11888,6 +12013,10 @@ class VideoTranslatorGUI(QMainWindow):
         if not self._timeline_timing_redo_stack:
             return False
         entry = self._timeline_timing_redo_stack.pop()
+        if entry.get("type") == "secondary_subtitle":
+            self.subtitle_presentation_controller.apply_history(entry, use_after=True)
+            self._push_timeline_undo_repush(entry)
+            return True
         if str(entry.get("type", "")) == "range_split":
             self._apply_range_split_history(entry, use_after=True)
             self._push_timeline_undo_repush(entry)
@@ -12034,6 +12163,13 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _update_subtitle_inspector_summary(self, rows=None):
         rows = rows if rows is not None else self._segment_editor_display_rows()
+        if hasattr(self, "restore_subtitle_timing_btn"):
+            self.restore_subtitle_timing_btn.setEnabled(self.can_restore_subtitle_timing())
+            from app.subtitle_timing import baseline
+            source = self.current_translated_segments or self.current_segments or []
+            index = int(getattr(self, "_selected_segment_index", -1))
+            available = 0 <= index < len(source) and baseline(source[index]) is not None
+            self.restore_subtitle_timing_btn.setToolTip(t("Restore start and end from the last completed processing run.") if available else t("No completed-run timing is available for this cue yet."))
         count = len(rows or [])
         translation_ready = self._translation_phase_complete()
         if not count:
@@ -12044,6 +12180,8 @@ class VideoTranslatorGUI(QMainWindow):
             if hasattr(self, "subtitle_inspector_tts_status_label"):
                 self.subtitle_inspector_tts_status_label.setText("")
                 self.subtitle_inspector_tts_status_label.setVisible(False)
+            if hasattr(self, "subtitle_inspector_duration_label"):
+                self.subtitle_inspector_duration_label.setVisible(False)
             if hasattr(self, "rewrite_selected_segment_btn"):
                 self.rewrite_selected_segment_btn.setEnabled(False)
             if hasattr(self, "audio_inspector_regenerate_voice_btn"):
@@ -12059,6 +12197,11 @@ class VideoTranslatorGUI(QMainWindow):
             lbl = self.subtitle_inspector_summary_label
             lbl.setText(f"#{selected_index + 1} / {count}")
             lbl.setVisible(True)
+        if hasattr(self, "subtitle_inspector_duration_label"):
+            selected_row = next((row for idx, row in enumerate(rows) if int(row.get("segment_index", idx)) == selected_index), {})
+            duration = max(0., float(selected_row.get("end", 0.)) - float(selected_row.get("start", 0.)))
+            self.subtitle_inspector_duration_label.setText(t("Duration") + f"  {duration:.3f}s")
+            self.subtitle_inspector_duration_label.setVisible(True)
         if hasattr(self, "rewrite_selected_segment_btn"):
             self.rewrite_selected_segment_btn.setEnabled(translation_ready)
 
@@ -12305,7 +12448,7 @@ class VideoTranslatorGUI(QMainWindow):
                     speaker_indicator.setFixedSize(10, 10)
                     speaker_indicator.setStyleSheet(
                         "background: %s; border-radius: 5px; border: 1px solid #dcecff;"
-                        % (self._speaker_color_hex(selected_speaker) if selected_speaker else "#53657d")
+                        % (self._speaker_timeline_color_hex(selected_speaker) if selected_speaker else "#53657d")
                     )
                     speaker_speed_row.addWidget(speaker_indicator)
                     speaker_speed_row.addWidget(QLabel(t("Speaker:")))
@@ -12511,51 +12654,16 @@ class VideoTranslatorGUI(QMainWindow):
                 # and the horizontal tab bar / "hr" beneath it) has been
                 # removed. The translated editor + highlight actions are
                 # placed directly in the card layout.
-                translated_editor = QTextEdit()
-                translated_editor.setObjectName("segmentInspectorEditor")
-                translated_editor.setAcceptRichText(False)
-                translated_editor.setPlainText(row["translated"])
-                if is_portrait:
-                    translated_editor.setMinimumHeight(64)
-                    translated_editor.setMaximumHeight(72)
-                else:
-                    translated_editor.setMinimumHeight(96)
-                    translated_editor.setMaximumHeight(96)
-                translated_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-                translated_editor.setPlaceholderText(t("Text shown on screen."))
-                translated_editor.textChanged.connect(
-                    lambda idx=idx, editor=translated_editor: self.on_segment_translation_edited(idx, editor)
-                )
-                translated_editor.selectionChanged.connect(
-                    lambda idx=idx, editor=translated_editor: self._update_segment_highlight_button_state(idx, editor)
-                )
-                highlight_btn = QPushButton(t("Add highlight from selection"))
-                highlight_btn.setEnabled(False)
-                highlight_btn.clicked.connect(
-                    lambda _=False, idx=idx, editor=translated_editor: self.add_segment_manual_highlight(idx, editor)
-                )
-
-                highlight_action_layout = QHBoxLayout()
-                highlight_action_layout.setContentsMargins(0, 0, 0, 0)
-                highlight_action_layout.setSpacing(8)
-                highlight_action_layout.addWidget(highlight_btn)
-                highlight_action_layout.addStretch()
-
-                highlight_meta_layout = QHBoxLayout()
-                highlight_meta_layout.setContentsMargins(0, 0, 0, 0)
-                highlight_meta_layout.setSpacing(6)
-                highlight_placeholder = QLabel("")
-                highlight_placeholder.setObjectName("helperLabel")
-                highlight_chip_container = QWidget()
-                highlight_chip_layout = QHBoxLayout(highlight_chip_container)
-                highlight_chip_layout.setContentsMargins(0, 0, 0, 0)
-                highlight_chip_layout.setSpacing(6)
-                highlight_meta_layout.addWidget(highlight_placeholder)
-                highlight_meta_layout.addWidget(highlight_chip_container, 1)
-
-                card_layout.addWidget(translated_editor, 0)
-                card_layout.addLayout(highlight_action_layout)
-                card_layout.addLayout(highlight_meta_layout)
+                from ui.widgets.subtitle_text_fields import add_subtitle_text_fields
+                fields = add_subtitle_text_fields(card_layout, row["translated"],
+                    on_edit=lambda editor, idx=idx: self.on_segment_translation_edited(idx, editor),
+                    on_selection=lambda editor, idx=idx: self._update_segment_highlight_button_state(idx, editor),
+                    on_highlight=lambda editor, idx=idx: self.add_segment_manual_highlight(idx, editor),
+                    compact=is_portrait)
+                translated_editor = fields["translated_editor"]
+                highlight_btn = fields["highlight_button"]
+                highlight_placeholder = fields["highlight_placeholder"]
+                highlight_chip_layout = fields["highlight_chip_layout"]
 
                 self.segment_editor_layout.addWidget(card, 0)
                 self._segment_editor_rows.append(
@@ -12659,7 +12767,10 @@ class VideoTranslatorGUI(QMainWindow):
         self._sync_segment_highlight_chip_row(index)
         self._sync_hidden_translated_text_from_segments()
         self.schedule_live_subtitle_preview_refresh()
-        self.apply_segments_to_timeline()
+        single_line = bool(getattr(self, "subtitle_single_line_cb", None) and self.subtitle_single_line_cb.isChecked())
+        update_segment = getattr(self.timeline, "update_subtitle_segment", None)
+        if single_line or not callable(update_segment) or not update_segment(index, target_seg):
+            self.apply_segments_to_timeline()
         self._update_subtitle_inspector_summary()
         self.refresh_ui_state()
 
@@ -14990,17 +15101,21 @@ class VideoTranslatorGUI(QMainWindow):
                     segs,
                     normalizer_dictionary=dict(settings.get("normalizer_dictionary", {}) or {}),
                 )
-        self.timeline.set_segments(segs if segs else [])
-        if hasattr(self, "video_time_warps") and hasattr(self.timeline, "set_video_time_warps"):
-            self.timeline.set_video_time_warps(self.video_time_warps)
-        if hasattr(self, "timeline") and hasattr(self.timeline, "sync_tts_track"):
-            voice_path = (
-                getattr(self, "last_voice_vi_path", "")
-                or getattr(self, "processed_artifacts", {}).get("voice_vi", "")
-                or (getattr(self.current_project_state, "artifacts", {}).get("voice_vi", "") if getattr(self, "current_project_state", None) else "")
-            )
-            if voice_path and os.path.exists(voice_path):
-                self.timeline.sync_tts_track(voice_path, segments=segs)
+        with self.timeline.batch_update() if hasattr(self.timeline, "batch_update") else nullcontext():
+            self.timeline.set_segments(segs if segs else [])
+            presentation = getattr(self, "subtitle_presentation_controller", None)
+            if presentation is not None:
+                presentation.sync_tracks()
+            if hasattr(self, "video_time_warps") and hasattr(self.timeline, "set_video_time_warps"):
+                self.timeline.set_video_time_warps(self.video_time_warps)
+            if hasattr(self, "timeline") and hasattr(self.timeline, "sync_tts_track"):
+                voice_path = (
+                    getattr(self, "last_voice_vi_path", "")
+                    or getattr(self, "processed_artifacts", {}).get("voice_vi", "")
+                    or (getattr(self.current_project_state, "artifacts", {}).get("voice_vi", "") if getattr(self, "current_project_state", None) else "")
+                )
+                if voice_path and os.path.exists(voice_path):
+                    self.timeline.sync_tts_track(voice_path, segments=segs)
         self.schedule_timeline_visual_refresh(waveform=True, thumbnails=True)
         # Configure the Qt subtitle overlay before showing its drag target.
         # Otherwise it can briefly use the default size until the first drag.
@@ -15029,6 +15144,8 @@ class VideoTranslatorGUI(QMainWindow):
                         "words": list(base.get("words", [])),
                         "manual_highlights": list(base.get("manual_highlights", [])),
                     }
+                    if isinstance(base.get("_completed_timing"), dict):
+                        d["_completed_timing"] = dict(base["_completed_timing"])
                     if base.get("speaker"):
                         d["speaker"] = str(base.get("speaker", "") or "")
                     raw = base.get("_audio_end")
@@ -15057,6 +15174,8 @@ class VideoTranslatorGUI(QMainWindow):
         if base_segments and len(parsed_segments) == len(base_segments):
             for idx, segment in enumerate(parsed_segments):
                 base = base_segments[idx]
+                if isinstance(base.get("_completed_timing"), dict):
+                    segment["_completed_timing"] = dict(base["_completed_timing"])
                 segment["words"] = list(base.get("words", []))
                 segment["manual_highlights"] = list(base.get("manual_highlights", []))
                 if base.get("speaker"):
@@ -15212,6 +15331,16 @@ class VideoTranslatorGUI(QMainWindow):
             self.runtime_log_received.emit(f"[Subtitle Background] Could not apply exact layout: {exc}")
 
     def _write_live_preview_assets(self, segments):
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if isinstance(getattr(presentation, "cfg", None), dict) and presentation.cfg["mode"] != "single":
+            from app.services.time_warp_service import TimeWarpService
+            from ui.utils.media_utils import _is_warped_preview
+            warps = getattr(self, "video_time_warps", []) or []
+            rows = TimeWarpService.map_segments_to_media_time(segments, warps) if warps and not _is_warped_preview(self) else segments
+            ass = presentation.render_preview(rows)
+            self.live_preview_ass_path = ass
+            self._live_preview_signature = presentation.preview_key
+            return "", ass
         if not segments:
             self.live_preview_subtitle_path = ""
             self.live_preview_ass_path = ""
@@ -15463,8 +15592,41 @@ class VideoTranslatorGUI(QMainWindow):
 
         editor.setExtraSelections(selections)
 
+    def _follow_playback_subtitle_selection(self, active_index, *, presentation=None, position_ms=0):
+        """Follow the inspected subtitle track only while playback is running."""
+        if not self._preview_is_playing():
+            return
+        if (presentation is not None and presentation.cfg["mode"] == "bilingual"
+                and getattr(presentation, "inspector_scroll", None) is not None
+                and self.inspector_stack.currentWidget() is presentation.inspector_scroll):
+            index = self._find_active_segment_index(position_ms, presentation.timeline_rows(copy_rows=False))
+            if index >= 0 and index != presentation.selected_secondary_index:
+                presentation.select_secondary(index)
+            return
+        if active_index < 0:
+            return
+        subtitle_layer_id = next((str(layer_id) for layer_id, index in
+                                  getattr(self.timeline, "_segment_indices", {}).items()
+                                  if int(index) == int(active_index)), "")
+        if subtitle_layer_id and self.timeline._selected_layer_id != subtitle_layer_id:
+            self.timeline._selected_layer_id = subtitle_layer_id
+            self.on_timeline_layer_selected(subtitle_layer_id)
+        if active_index != getattr(self, "_selected_segment_index", -1):
+            self.set_selected_segment_index(active_index, sync_ui=True)
+
     def update_playback_subtitle_highlight(self, position_ms: int):
         try:
+            presentation = getattr(self, "subtitle_presentation_controller", None)
+            if presentation is not None and isinstance(getattr(presentation, "cfg", None), dict) and presentation.cfg["mode"] != "single":
+                segments = self.live_preview_segments or self.get_active_segments()
+                active_index = self._find_active_segment_index(position_ms, segments)
+                self.timeline.set_active_segment_index(active_index)
+                self._follow_playback_subtitle_selection(active_index, presentation=presentation, position_ms=position_ms)
+                if getattr(self, "performance_mode", False) or not hasattr(self.media_player, "_sub_track_id"):
+                    presentation.fallback_preview(self.get_active_segments(), position_ms)
+                else:
+                    presentation.sync_drag_target(segments)
+                return
             if not bool(getattr(self, "_subtitle_track_preview_visible", True)):
                 self.timeline.set_active_segment_index(-1)
                 if hasattr(self, "video_view"):
@@ -15474,32 +15636,7 @@ class VideoTranslatorGUI(QMainWindow):
             active_index = self._find_active_segment_index(position_ms, segments)
             self.timeline.set_active_segment_index(active_index)
             inspector_visible = self._is_subtitle_inspector_details_visible()
-            # Playback may update its last position even while paused.  Do
-            # not let that stale position overwrite a subtitle the user has
-            # just selected on TS1 (which commonly reset the inspector to
-            # segment 1 at position 0).  Follow playback only while it is
-            # actually running.
-            is_playing = self._preview_is_playing()
-            if is_playing and hasattr(self.timeline, "_timeline") and self.timeline._timeline:
-                # Review Mode follows the active subtitle track so the
-                # Subtitle Inspector can refresh with the cue under the
-                # playhead. This intentionally overrides a paused edit
-                # selection only while playback is running.
-                subtitle_layer_id = ""
-                if active_index >= 0:
-                    for layer_id, segment_index in getattr(self.timeline, "_segment_indices", {}).items():
-                        if int(segment_index) == int(active_index):
-                            subtitle_layer_id = str(layer_id)
-                            break
-                if subtitle_layer_id and str(getattr(self.timeline, "_selected_layer_id", "") or "") != subtitle_layer_id:
-                    self.timeline._selected_layer_id = subtitle_layer_id
-                    self.on_timeline_layer_selected(subtitle_layer_id)
-            # Keep the selected TS1 cue synchronized with the playhead during
-            # review playback even when the inspector was previously focused
-            # on another panel.  set_selected_segment_index() updates the
-            # inspector when it is visible and remains harmless otherwise.
-            if is_playing and active_index >= 0 and active_index != getattr(self, "_selected_segment_index", -1):
-                self.set_selected_segment_index(active_index, sync_ui=True)
+            self._follow_playback_subtitle_selection(active_index)
 
             if inspector_visible:
                 target_editor = None
@@ -15551,6 +15688,11 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _show_subtitle_drag_layer(self, segments=None):
         """Show a representative live subtitle as the paused drag target."""
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None and isinstance(getattr(presentation, "cfg", None), dict) and presentation.cfg["mode"] != "single":
+            if presentation.cfg["mode"] == "bilingual":
+                presentation.sync_drag_target(segments)
+            return
         if not hasattr(self, "video_view") or getattr(self, "_preview_video_has_burned_subtitles", False):
             return
         if getattr(self, "_project_loading_in_progress", False):
@@ -15576,6 +15718,25 @@ class VideoTranslatorGUI(QMainWindow):
     def sync_live_subtitle_preview(self):
         """Synchronize the live subtitle renderer and draggable Qt target."""
         if not hasattr(self, "media_player"):
+            return
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None and isinstance(getattr(presentation, "cfg", None), dict) and presentation.cfg["mode"] != "single":
+            if presentation.cfg["mode"] == "none" or not getattr(self, "_subtitle_track_preview_visible", True):
+                self.video_view.subtitle_item.set_text("")
+                self.video_view.subtitle_item.hide()
+                self.media_player.clear_subtitle()
+                presentation.hide_overlays()
+                return
+            segments, _ = self._resolve_live_preview_segments()
+            if getattr(self, "performance_mode", False) or not hasattr(self.media_player, "_sub_track_id"):
+                presentation.fallback_preview(segments)
+                return
+            _, ass = self._write_live_preview_assets(segments)
+            if hasattr(self.media_player, "set_subtitle_file") and (ass != getattr(self, "_loaded_live_ass_path", "") or self._live_preview_signature != getattr(self, "_loaded_live_ass_signature", None)):
+                self.media_player.set_subtitle_file(ass)
+                self._loaded_live_ass_path = ass
+                self._loaded_live_ass_signature = self._live_preview_signature
+            presentation.sync_drag_target(segments)
             return
         if not bool(getattr(self, "_subtitle_track_preview_visible", True)):
             self.media_player.clear_subtitle()
@@ -19047,6 +19208,18 @@ class VideoTranslatorGUI(QMainWindow):
         QTimer.singleShot(50, lambda: _relaunch_launcher(existing_window=self))
 
     def _terminate_workers(self, close_media: bool = True):
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None:
+            if presentation.timer.isActive():
+                presentation.commit_style()
+            presentation.timer.stop()
+            presentation.hide_overlays()
+            worker = presentation.worker
+            if worker is not None and worker.isRunning():
+                # Shared translation cannot be safely terminated inside Python.
+                # Keep ownership until its network call returns.
+                worker.requestInterruption()
+                worker.wait()
         # Paused/finished QMediaPlayers can still hold the last WAV open on
         # Windows. Release those sources before launcher data cleanup.
         self.stop_audio_preview()
@@ -19099,6 +19272,7 @@ class VideoTranslatorGUI(QMainWindow):
             "transcription_thread",
             "_alternate_range_transcription_worker",
             "translation_thread",
+            "_secondary_subtitle_worker",
             "rewrite_translation_thread",
             "prepare_workflow_thread",
             "export_thread",
@@ -19466,7 +19640,7 @@ class VideoTranslatorGUI(QMainWindow):
                         restore_imported_project_languages(self, imported_state)
                 except Exception as exc:
                     self.log(f"[Resources] Could not restore imported project preferences: {exc}")
-            self.current_project_state = self.ensure_current_project()
+            self.current_project_state = self.ensure_current_project(persist_presentation=False)
             self.current_project_state.set_setting("ui_work_mode","performance" if getattr(self,"performance_mode",False) else "quality")
             self.project_service.save_project(self.current_project_state)
             self.load_project_context(self.current_project_state)
