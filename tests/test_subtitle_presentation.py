@@ -121,8 +121,10 @@ class SubtitlePresentationTests(unittest.TestCase):
         engine.translate_segments.assert_called_once()
         changed = copy.deepcopy(self.rows)
         changed[0]["text"] = "New source"
-        with self.assertRaises(ValueError):
-            build_secondary(cfg, changed)
+        self.assertEqual(build_secondary(cfg, changed)["secondary_segments"], cfg["secondary_segments"])
+        self.assertEqual(build_secondary(cfg, [])["secondary_segments"], cfg["secondary_segments"])
+        build_secondary(cfg, changed, engine=engine)
+        self.assertEqual(engine.translate_segments.call_count, 2)
 
     def test_missing_or_partial_secondary_stops_export(self):
         with self.assertRaises(ValueError):
@@ -168,8 +170,7 @@ class SubtitlePresentationTests(unittest.TestCase):
             self.assertEqual(active_translation_preset(), "main_only")
             self.assertEqual(os.environ["CAPCAP_TRANSLATION_PRESET_ID"], "main_only")
             built["secondary_prompt"] = "Different prompt"
-            with self.assertRaises(ValueError):
-                build_secondary(built, self.rows)
+            self.assertEqual(build_secondary(built, self.rows)["secondary_segments"], built["secondary_segments"])
 
     def test_parallel_batches_receive_secondary_preset_and_restore_main_context(self):
         from app.translation.prompt_context import active_translation_preset, translation_prompt_scope

@@ -625,7 +625,7 @@ class ExportWorkflow:
                     presentation["original_srt"] = os.path.join(state.project_root, presentation["original_srt"])
                 if presentation["mode"] == "bilingual":
                     from app.subtitle_presentation import build_secondary, read_srt
-                    needs_original = presentation["source"] == "translate" or not presentation["secondary_segments"]
+                    needs_original = not presentation["secondary_segments"]
                     original = read_srt(presentation["original_srt"]) if needs_original and presentation["original_srt"] else []
                     presentation = build_secondary(presentation, original)
                     subtitle_style[KEY] = presentation

@@ -20,6 +20,7 @@
 - Retry lỗi tạm thời khi upload hoặc chờ CapCut STT; chia nhỏ đoạn timeout khi cần và giữ kết quả đã hoàn tất.
 - Sửa blur export bị xanh, xác minh chế độ tạm thời Gemini, tiến độ OmniVoice và hiển thị tốc độ giọng đọc.
 - Sửa điều khiển nhận dạng xưng hô, giữ overlay khi mở menu và đồng bộ inspector theo câu đang phát.
+- Sửa lỗi export từ chối phụ đề phụ đã dịch khi phụ đề gốc thay đổi hoặc được tạo lại; export sử dụng bản phụ đề phụ đã lưu.
 
 Chi tiết: [Phụ đề song ngữ](docs/subtitle-presentation.md) · [CapCut Web / PC](docs/capcut-web-pc.md) · [Dịch qua trình duyệt](browser_extension/README.md).
 

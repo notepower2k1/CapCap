@@ -249,8 +249,7 @@ class SubtitlePresentationUiTests(unittest.TestCase):
         self.assertEqual(controller.inspector.editor.toPlainText(), "Extra translation")
         controller.validate_export()
         gui.current_segments[0]["text"] = "Updated original"
-        with self.assertRaises(ValueError):
-            controller.validate_export()
+        controller.validate_export()
 
     def test_secondary_settings_reuses_dialog_with_own_prompt_and_target(self):
         from unittest.mock import MagicMock

@@ -24,7 +24,7 @@ Nguồn **Dịch sang ngôn ngữ khác** giữ ngôn ngữ đích và nút Tạ
 
 Prompt và chỉ dẫn phong cách của phụ đề chính không tự áp dụng cho bản phụ. Provider/model vẫn dùng chung; prompt chỉ có hiệu lực với dịch AI, không thay đổi cách Google/Bing dịch web. Danh sách có đầy đủ preset giống phụ đề chính và không tự đổi preset khi chuyển ngôn ngữ. Các mẫu thể loại có quy tắc tiếng Việt áp dụng khi đích là tiếng Việt; với đích khác, bộ render prompt hiện có dùng hợp đồng dịch trung tính, hoặc có thể nhập prompt riêng.
 
-Lựa chọn prompt phụ được lưu theo project và đi cùng cấu hình hàng đợi. Prompt được truyền theo tác vụ, kể cả các batch song song, không sửa biến môi trường/prompt chính. Đổi prompt sẽ làm bản dịch phụ cũ cần cập nhật trước khi xuất; chỉ đổi lựa chọn không tự gọi AI hoặc ghi đè nội dung đã có.
+Lựa chọn prompt phụ được lưu theo project và đi cùng cấu hình hàng đợi. Prompt được truyền theo tác vụ, kể cả các batch song song, không sửa biến môi trường/prompt chính. Khi nguồn hoặc prompt thay đổi, giao diện nhắc cập nhật bản dịch; xuất vẫn dùng bản phụ đề phụ đã lưu, và không tự gọi AI hoặc ghi đè nội dung đã có.
 
 Khi chạy toàn bộ luồng hoặc hàng đợi Performance, việc chuẩn bị phụ đề phụ tự thực hiện sau khi đã có STT/OCR/bản dịch chính. Chỉ thêm song ngữ sau khi xử lý xong video thì dùng nút tạo/cập nhật; không phải chạy lại TTS hoặc toàn bộ luồng.
 

@@ -111,24 +111,26 @@ def build_secondary(settings, original, *, engine=None, source_language="auto", 
             cfg["secondary_segments"] = read_srt(cfg.get("srt_path", ""))
             newly_prepared = True
     else:
-        if not original:
-            raise ValueError("Original subtitles are required before secondary translation.")
-        key = secondary_signature(original, cfg)
-        if cfg.get("source_signature") != key or not cfg["secondary_segments"]:
-            if engine is None:
-                raise ValueError("Secondary subtitles need translation or an update.")
-            from .translation.prompt_context import translation_prompt_scope
-            with translation_prompt_scope(cfg["secondary_preset_id"]):
-                translated = engine.translate_segments(copy.deepcopy(original), src_lang=source_language,
-                    target_lang=cfg["language"], enable_polish=translator_ai, optimize_subtitles=False,
-                    style_instruction="", custom_system_prompt=secondary_prompt(cfg, source_language),
-                    **(translation_options or {}))
-            if len(translated) != len(original):
-                raise RuntimeError("Secondary translation returned an incomplete set of subtitles.")
-            cfg["secondary_segments"] = [dict(start=source["start"], end=source["end"], text=row["text"], source_text=source["text"])
-                for source, row in zip(original, translated)]
-            cfg["source_signature"] = key
-            newly_prepared = True
+        # Export the saved snapshot even if the original SRT was regenerated.
+        if engine is not None or not cfg["secondary_segments"]:
+            if not original:
+                raise ValueError("Original subtitles are required before secondary translation.")
+            key = secondary_signature(original, cfg)
+            if cfg.get("source_signature") != key or not cfg["secondary_segments"]:
+                if engine is None:
+                    raise ValueError("Secondary subtitles need translation or an update.")
+                from .translation.prompt_context import translation_prompt_scope
+                with translation_prompt_scope(cfg["secondary_preset_id"]):
+                    translated = engine.translate_segments(copy.deepcopy(original), src_lang=source_language,
+                        target_lang=cfg["language"], enable_polish=translator_ai, optimize_subtitles=False,
+                        style_instruction="", custom_system_prompt=secondary_prompt(cfg, source_language),
+                        **(translation_options or {}))
+                if len(translated) != len(original):
+                    raise RuntimeError("Secondary translation returned an incomplete set of subtitles.")
+                cfg["secondary_segments"] = [dict(start=source["start"], end=source["end"], text=row["text"], source_text=source["text"])
+                    for source, row in zip(original, translated)]
+                cfg["source_signature"] = key
+                newly_prepared = True
     cfg["secondary_segments"] = valid_segments(cfg["secondary_segments"])
     if not cfg["secondary_segments"]:
         raise ValueError("Bilingual subtitles require a non-empty secondary subtitle track.")
