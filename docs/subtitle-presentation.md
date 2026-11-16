@@ -65,6 +65,8 @@ Popup dịch chính và phụ dùng chung `TranslationProgressDialog`, hiện d�
 
 ## Khôi phục thời gian sau khi chạy luồng
 
+Popup dịch có thư viện preset cá nhân: chỉnh prompt rồi chọn **Lưu preset**, đặt tên; chọn preset đã lưu để dùng lại hoặc **Xóa preset** khi không cần. Thư viện dùng chung cho phụ đề chính/phụ và lưu trong cài đặt ứng dụng; áp dụng vào project khi xác nhận dịch. Prompt mẫu chưa chỉnh được lưu dưới dạng lựa chọn preset để tự dựng lại theo ngôn ngữ mới, custom prompt giữ nguyên nội dung và hỗ trợ placeholder ngôn ngữ. Mỗi yêu cầu AI đều được bổ sung ngôn ngữ đích, định dạng dòng đánh số và yêu cầu giữ đủ câu, kể cả khi custom prompt không viết các phần này.
+
 Hai inspector có nút **Khôi phục thời gian**. Chọn câu rồi bấm để trả lại **cả bắt đầu và kết thúc** như sau lần chạy luồng thành công gần nhất, giữ nội dung và kiểu chữ đã chỉnh. Mốc được cập nhật khi luồng hoàn tất thành công và lưu cùng project; chỉnh tay, Undo/Redo hoặc chạy lỗi không ghi đè mốc đó. Hàng đợi Performance cũng lưu mốc sau khi xử lý xong; chỉ export lại không đổi mốc.
 
 Khôi phục câu chính không đổi TS2; khôi phục TS2 không đổi câu chính. Thao tác có Undo/Redo, không chạy khi đang phát video hoặc khi layer/track bị khóa. Khi video còn cùng cấu hình Auto Fit thì khôi phục đúng timestamp đã lưu; nếu sau đó đổi time warp, mốc nguồn được ánh xạ sang timeline hiện tại, không tự hủy các chỉnh sửa video. Câu mới sinh ra do tách thủ công không nhận nhầm toàn bộ thời lượng của câu cha.

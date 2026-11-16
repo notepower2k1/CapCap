@@ -2,6 +2,8 @@
 
 ## Tính năng mới
 
+- **Preset cá nhân:** Lưu nhiều custom prompt và Audio Mix có tên, chọn lại hoặc xóa khi cần. Thư viện prompt dùng chung cho dịch chính/phụ; Audio Mix lưu cả âm lượng gốc, TTS và nhạc nền. Tự bổ sung ngôn ngữ và hợp đồng định dạng vào prompt gửi AI.
+
 - **Phụ đề trên video:** Chọn không hiển thị, một phụ đề hoặc song ngữ. Phụ đề phụ có thể lấy từ phụ đề gốc, nhập SRT hoặc dịch sang ngôn ngữ khác; có track, inspector, kiểu chữ và prompt riêng. Hỗ trợ preview, Fit Voice, xuất video và dự án CapCut.
 - **Khôi phục thời gian phụ đề:** Trả lại thời điểm bắt đầu và kết thúc của từng câu theo lần chạy luồng thành công gần nhất; hỗ trợ Undo/Redo và lưu theo project.
 - **CapCut Web / PC:** Chọn kết nối dùng chung cho STT và TTS; chế độ PC sử dụng thư viện CapCut đã cài, chạy nền và vẫn cần kết nối cloud.

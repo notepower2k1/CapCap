@@ -998,6 +998,11 @@ def build_start_group(gui, left_layout):
     gui.audio_mix_preset_combo.addItem("Custom", "custom")
     gui.audio_mix_preset_combo.setCurrentIndex(2)
     audio_mix_inner_layout.addWidget(gui.audio_mix_preset_combo)
+    from widgets.named_presets import NamedPresets
+    from ui.utils.audio_mix_settings import capture_preset, apply_preset
+    gui.saved_audio_mix_presets = NamedPresets(gui, settings=gui.settings, key="custom_audio_mix_presets",
+        capture=lambda: capture_preset(gui), apply=lambda value: apply_preset(gui, value))
+    audio_mix_inner_layout.addWidget(gui.saved_audio_mix_presets)
     gui.audio_mix_preset_hint_label = QLabel("Optional shortcut for Original/TTS. Track Volumes below remain authoritative; Music is independent.", gui)
     gui.audio_mix_preset_hint_label.setObjectName("helperLabel")
     gui.audio_mix_preset_hint_label.setWordWrap(True)

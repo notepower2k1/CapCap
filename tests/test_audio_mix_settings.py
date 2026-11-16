@@ -65,6 +65,18 @@ class AudioMixSettingsTests(unittest.TestCase):
         self.assertEqual(again.audio_a1_volume_slider.value(), 100)
         self.assertEqual(again.audio_a2_volume_slider.value(), 100)
 
+    def test_named_mix_applies_all_three_volumes_and_remembers_them(self):
+        from ui.utils.audio_mix_settings import apply_preset, capture_preset
+        host = self.host()
+        for method in ("on_audio_a1_volume_changed", "on_audio_a2_volume_changed", "on_audio_music_volume_changed"):
+            setattr(host, method, MethodType(getattr(VideoTranslatorGUI, method), host))
+        apply_preset(host, dict(original=23, tts=140, music=12))
+        self.assertEqual(capture_preset(host), dict(original=23, tts=140, music=12))
+        host._sync_audio_track_volume.assert_any_call("A1 Audio", 23)
+        host._sync_audio_track_volume.assert_any_call("TS1", 140)
+        host._sync_audio_track_volume.assert_any_call("A2 Music", 12)
+        self.assertEqual(read_mix(host.settings), dict(original=23, tts=140, music=12, preset="custom"))
+
     def test_project_mix_takes_priority_without_replacing_last_user_defaults(self):
         host = self.host()
         host.audio_a1_volume_slider.setValue(25)

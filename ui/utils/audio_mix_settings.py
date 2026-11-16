@@ -58,3 +58,26 @@ def restore_mix(gui):
         blocked = combo.blockSignals(True)
         combo.setCurrentIndex(max(0, combo.findData(data["preset"])))
         combo.blockSignals(blocked)
+
+
+def capture_preset(gui):
+    return {key: getattr(gui, prefix + "_slider").value() for key, prefix in CONTROLS.items()}
+
+
+def apply_preset(gui, data):
+    values = {}
+    for key in CONTROLS:
+        value = float(data[key])
+        if not math.isfinite(value) or not 0 <= value <= 200:
+            raise ValueError("Invalid Audio Mix volume.")
+        values[key] = round(value)
+    for key, prefix in CONTROLS.items():
+        slider = getattr(gui, prefix + "_slider")
+        blocked = slider.blockSignals(True)
+        slider.setValue(values[key])
+        slider.blockSignals(blocked)
+    # Reuse normal edits so native playback, project tracks and remembered
+    # defaults receive the same values as the sliders.
+    gui.on_audio_a1_volume_changed(values["original"])
+    gui.on_audio_a2_volume_changed(values["tts"])
+    gui.on_audio_music_volume_changed(values["music"])

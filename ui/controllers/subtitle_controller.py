@@ -43,7 +43,7 @@ class TranslationPromptDialog(QDialog):
         super().__init__(parent)
         self.settings = getattr(parent, "settings", None) or QSettings("CapCap", "VideoTranslatorGUI")
         self.setWindowTitle(t("Translation Settings & Prompt Review"))
-        self.setMinimumWidth(680)
+        self.setMinimumWidth(min(800, max(480, self.screen().availableGeometry().width() - 80)))
         self.setMinimumHeight(240)
         self.src_lang = str(src_lang or "zh").strip().lower()
         self.target_lang = str(target_lang or "vi").strip().lower()
@@ -195,6 +195,11 @@ class TranslationPromptDialog(QDialog):
         self.prompt_edit = QPlainTextEdit()
         layout.addWidget(self.prompt_edit, stretch=1)
 
+        from widgets.named_presets import NamedPresets
+        self.saved_prompts = NamedPresets(self, settings=self.settings, key="custom_translation_prompts",
+            capture=self._capture_saved_prompt, apply=self._apply_saved_prompt)
+        layout.addWidget(self.saved_prompts)
+
         # Connect signals
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         self.preset_combo.currentIndexChanged.connect(self._on_preset_changed)
@@ -223,9 +228,28 @@ class TranslationPromptDialog(QDialog):
             self.review_context_cb.setChecked(False)
         self.review_context_cb.setEnabled(checked)
 
+    def _capture_saved_prompt(self):
+        text = self.prompt_edit.toPlainText().strip()
+        return dict(preset=self.preset_combo.currentData() or "general_default",
+                    prompt="" if text == getattr(self, "_rendered_preset_text", "").strip() else text)
+
+    def _apply_saved_prompt(self, value):
+        preset, prompt = value.get("preset", "general_default"), value.get("prompt", "")
+        if not isinstance(preset, str) or not isinstance(prompt, str):
+            raise ValueError(t("Invalid preset data."))
+        self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(preset)))
+        self._on_preset_changed()
+        if prompt:
+            self.prompt_edit.setPlainText(prompt)
+
     def _on_provider_changed(self):
         provider = self.provider_combo.currentData() or "google_ai_studio"
         is_free_provider = provider in ("google", "bing")
+        available_height = max(400, self.screen().availableGeometry().height() - 80)
+        self.setMinimumHeight(240 if is_free_provider else min(650, available_height))
+        self.prompt_edit.setMinimumHeight(min(220, available_height // 3))
+        if hasattr(self, "saved_prompts"):
+            self.saved_prompts.setVisible(not is_free_provider)
         if hasattr(self, "preset_label"):
             self.preset_label.setVisible(not is_free_provider)
         if hasattr(self, "preset_combo"):
@@ -251,7 +275,7 @@ class TranslationPromptDialog(QDialog):
             self.preset_combo.setEnabled(True)
             self.auto_context_cb.setEnabled(True)
             self.review_context_cb.setEnabled(self.auto_context_cb.isChecked())
-            self.resize(self.width(), 620)
+            self._resize_for_prompt()
         elif provider == "browser_ai":
             plat = os.getenv("CAPCAP_BROWSER_AI_PLATFORM", "gemini").strip().lower()
             plat_name = "ChatGPT Web" if plat == "chatgpt" else "Google Gemini Web"
@@ -262,14 +286,18 @@ class TranslationPromptDialog(QDialog):
             self.preset_combo.setEnabled(True)
             self.auto_context_cb.setEnabled(True)
             self.review_context_cb.setEnabled(self.auto_context_cb.isChecked())
-            self.resize(self.width(), 620)
+            self._resize_for_prompt()
         else:
             self.provider_hint.setText("")
             self.prompt_edit.setEnabled(True)
             self.preset_combo.setEnabled(True)
             self.auto_context_cb.setEnabled(True)
             self.review_context_cb.setEnabled(self.auto_context_cb.isChecked())
-            self.resize(self.width(), 600)
+            self._resize_for_prompt()
+
+    def _resize_for_prompt(self):
+        available = self.screen().availableGeometry()
+        self.resize(min(900, available.width() - 80), min(820, available.height() - 80))
 
     def _on_preset_changed(self):
         preset_id = self.preset_combo.currentData() or "general_default"

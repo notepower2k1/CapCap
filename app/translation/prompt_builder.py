@@ -95,6 +95,18 @@ def build_translation_messages(
         if "Speaker Tags Instruction" not in system_message:
             system_message += speaker_instruction
 
+    # Keep the parser contract outside editable instructions. All AI providers
+    # consume this builder, including browser translation and custom prompts.
+    system_message += (
+        "\n\n### Required subtitle output contract\n"
+        f"Source language: {values['source_lang']} (auto means detect from input). "
+        f"Output language: {values['target_lang']}.\n"
+        f"Return exactly {len(source_texts)} numbered lines, numbered 1 through {len(source_texts)}, "
+        "one translated cue per input cue, in the same order. Format: N. translated text\n"
+        "Do not merge, omit, reorder, or split cue numbers. Return only translated lines; "
+        "no explanations, greetings, analysis, markdown fences, or speaker tags. "
+        "These language and output requirements take precedence over conflicting style instructions."
+    )
     user_message = "\n".join(lines)
     return system_message, user_message
 
