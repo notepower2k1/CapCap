@@ -15,7 +15,9 @@
   <a href="https://github.com/notepower2k1/CapCap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/notepower2k1/CapCap?style=flat-square" alt="License"></a>
 </p>
 
-### [🎬 Demo & Hướng dẫn sử dụng](https://www.tiktok.com/@nguyenthach617/video/7674305087023369493)
+![Demo CapCap](assets/demo_gif.gif)
+
+### [🎬 Video hướng dẫn sử dụng](https://www.tiktok.com/@nguyenthach617)
 
 **CapCap** là ứng dụng biên tập và bản địa hóa video tất-cả-trong-một dành cho Windows. Giúp tự động hóa toàn bộ quy trình: nhận diện giọng nói, dịch thuật AI, lồng tiếng tự nhiên, chỉnh sửa lớp phủ và xuất video hoàn chỉnh.
 

@@ -15,7 +15,9 @@
   <a href="https://github.com/notepower2k1/CapCap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/notepower2k1/CapCap?style=flat-square" alt="License"></a>
 </p>
 
-### [🎬 Demo & Tutorial](https://www.tiktok.com/@nguyenthach617/video/7674305087023369493)
+![CapCap demo](assets/demo_gif.gif)
+
+### [🎬 Video tutorials](https://www.tiktok.com/@nguyenthach617)
 
 **CapCap** is an all-in-one Windows desktop application for video localization and editing. It automates speech recognition, AI translation, voice-over generation, timed visual layer editing, and final video rendering.
 
