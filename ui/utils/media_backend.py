@@ -1425,7 +1425,8 @@ class MpvMediaPlayerBackend(QObject):
         mask_body = self._build_mask_body(
             input_label=("b_last" if blur_body else ("color_main" if color_body else None))
         )
-        if not color_body and not blur_body and not mask_body:
+        layout = self._color_filter_state.get("video_layout")
+        if not color_body and not blur_body and not mask_body and not layout:
             if getattr(self, "_last_applied_vf_combined", None) == "":
                 return
             self._last_applied_vf_combined = ""
@@ -1450,16 +1451,28 @@ class MpvMediaPlayerBackend(QObject):
             combined = mask_body
         if color_body:
             combined = f"{color_body};{combined}" if combined else color_body
+        if layout:
+            from app.video_layout import filter_chain
+            body = filter_chain(layout, layout["_canvas_width"], layout["_canvas_height"],
+                layout["_source_width"], layout["_source_height"], layout["_mode"], layout["_focus"])
+            if combined:
+                if mask_body:
+                    combined += "," + body
+                else:
+                    combined += ";" + ("[b_last]" if blur_body else "[color_main]") + body
+            else:
+                combined = body
         if getattr(self, "_last_applied_vf_combined", None) == combined:
             return
-        self._last_applied_vf_combined = combined
         try:
             self._player.command("vf", "set", f"@{self._managed_vf_label}:lavfi=[{combined}]")
-        except Exception:
+        except Exception as first_error:
             try:
                 self._player.vf = f"lavfi=[{combined}]"
-            except Exception:
-                pass
+            except Exception as fallback_error:
+                self.log(f"[Preview] Visual filter failed: {first_error}; fallback: {fallback_error}; layout_image={(layout or {}).get('image', '')!r}")
+                return
+        self._last_applied_vf_combined = combined
 
     def set_color_filter_state(self, state=None):
         """Update realtime Brightness/Contrast/Saturation state."""

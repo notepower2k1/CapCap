@@ -2476,6 +2476,7 @@ class EditorTimeline(QGraphicsView):
     def _layer_color(layer_type: LayerType) -> QColor:
         colors = {
             LayerType.VIDEO: QColor("#2a6bcf"),
+            LayerType.BACKGROUND: QColor("#405a70"),
             LayerType.AUDIO: QColor("#2a9d3f"),
             LayerType.SUBTITLE: QColor("#c96b2a"),
             LayerType.DUB_SUBTITLE: QColor("#c96b2a"),
@@ -2665,7 +2666,7 @@ class EditorTimeline(QGraphicsView):
                     if bool(getattr(track, "locked", False)):
                         event.accept()
                         return
-                    if bool(getattr(layer, "locked", False)):
+                    if bool(getattr(layer, "locked", False)) or layer.type == LayerType.BACKGROUND:
                         self._selected_layer_id = lid
                         self.layerSelected.emit(lid)
                         self.viewport().update()
@@ -2698,7 +2699,7 @@ class EditorTimeline(QGraphicsView):
                 if bool(getattr(track, "locked", False)):
                     event.accept()
                     return
-                if bool(getattr(layer, "locked", False)):
+                if bool(getattr(layer, "locked", False)) or layer.type == LayerType.BACKGROUND:
                     self._selected_layer_id = lid
                     self.layerSelected.emit(lid)
                     self.viewport().update()

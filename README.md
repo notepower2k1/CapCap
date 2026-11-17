@@ -25,6 +25,8 @@
 
 ## ✨ Điểm nổi bật
 
+* **[Bố cục video](docs/video-layout.md):** Hook + phụ đề, tiêu đề + part, khung điện ảnh; nền màu/ảnh/nền mờ, bo góc và đổ bóng, lưu theo project.
+
 * 🔄 **Quy trình 5 bước trực quan:** Chuẩn bị → Chép lời (STT / OCR) → Dịch AI → Lồng tiếng (TTS) → Xuất video.
 * 🗂️ **Quality / Performance:** Chọn editor đầy đủ hoặc giao diện frame tĩnh cho video dài. Performance có hàng đợi chạy tuần tự, lưu cấu hình từng video và cho phép xuất video riêng khi cần hoặc tự xuất sau xử lý.
 * 📱 **Giao diện tự thích ứng (16:9 & 9:16):** Tự động nhận diện và tối ưu bố cục chuyên biệt cho video ngang (YouTube, Phim) hoặc video dọc (TikTok, Shorts, Reels).

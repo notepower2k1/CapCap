@@ -129,7 +129,13 @@ def _run_ffmpeg_with_h264_fallback(
             raise RuntimeError(fallback_exc.stderr or fallback_exc.output or error_message) from fallback_exc
 
 
-def _build_canvas_vf(target_width=None, target_height=None, scale_mode: str = "fit", focus_x: float = 0.5, focus_y: float = 0.5) -> str:
+def _build_canvas_vf(target_width=None, target_height=None, scale_mode: str = "fit", focus_x: float = 0.5, focus_y: float = 0.5, video_filter_state=None, video_path=None) -> str:
+    layout = (video_filter_state or {}).get("video_layout")
+    if layout:
+        from video_processor import get_video_dimensions
+        from app.video_layout import filter_chain
+        sw, sh = get_video_dimensions(video_path)
+        return filter_chain(layout, target_width or sw, target_height or sh, sw, sh, scale_mode, (focus_x, focus_y))
     try:
         if target_width and target_height:
             tw = int(target_width)
@@ -163,6 +169,14 @@ def _build_video_filter_vf(video_filter_state=None) -> str:
 
 def _merge_video_filter_chain(*parts) -> str:
     return ",".join(str(part).strip() for part in parts if str(part or "").strip())
+
+
+def _canvas_and_color_vf(video_path, width, height, mode, fx, fy, state):
+    canvas = _build_canvas_vf(width, height, mode, fx, fy, state, video_path)
+    color = _build_video_filter_vf(state)
+    # Layout backgrounds should not inherit source colour adjustments. This
+    # matches native preview and the final export's source -> layout ordering.
+    return _merge_video_filter_chain(color, canvas) if (state or {}).get('video_layout') else _merge_video_filter_chain(canvas, color)
 
 
 def trim_video_clip(video_path: str, output_video_path: str, start_seconds: float, duration_seconds: float) -> str:
@@ -309,10 +323,7 @@ def mux_audio_into_video_for_preview(
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
 
-    vf = _merge_video_filter_chain(
-        _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y),
-        _build_video_filter_vf(video_filter_state),
-    )
+    vf = _canvas_and_color_vf(video_path, target_width, target_height, scale_mode, focus_x, focus_y, video_filter_state)
     fps_value = None
     try:
         if output_fps:
@@ -418,10 +429,7 @@ def mux_audio_into_video_clip_for_preview(
 
     os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
 
-    vf = _merge_video_filter_chain(
-        _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y),
-        _build_video_filter_vf(video_filter_state),
-    )
+    vf = _canvas_and_color_vf(video_path, target_width, target_height, scale_mode, focus_x, focus_y, video_filter_state)
 
     cmd = [
         ffmpeg,
@@ -535,8 +543,7 @@ def render_subtitle_frame_preview(
 
     ass_path = ""
     vf_parts = [
-        _build_canvas_vf(target_width, target_height, scale_mode, focus_x, focus_y),
-        _build_video_filter_vf(video_filter_state),
+        _canvas_and_color_vf(video_path, target_width, target_height, scale_mode, focus_x, focus_y, video_filter_state),
     ]
     from app.subtitle_presentation import config
     presentation = config(subtitle_presentation)

@@ -27,16 +27,16 @@ from app.translation.srt_utils import to_srt, parse_srt
 FORMAT = "capcap-resource-package"
 MANIFEST = "capcap_package.json"
 MISSING_VIDEO = "This package is missing the source video. Export it again with Source video selected to import it into CapCap."
-PATH_KEYS = {"source", "audio_path", "voice_file", "_wav_path", "_voice_file", "path"}
+PATH_KEYS = {"source", "audio_path", "voice_file", "_wav_path", "_voice_file", "path", "image"}
 SEGMENT_KEYS = {"id", "start", "end", "text", "original_text", "source_text", "tts_text", "voice_edited",
                 "voice_name", "voice_speed", "_auto_fit_applied", "_audio_end", "extended_duration", "time_warp_id",
                 "speaker", "words", "manual_highlights", "auto_highlights", "_wav_path", "voice_file",
                 "tts_group_id", "tts_group_start", "tts_group_end"}
 META_KEYS = {"_seg_index", "_audio_end", "_wav_path", "_tts_dirty", "speaker", "voice_name", "voice_speed",
-             "_auto_fit_applied", "words", "manual_highlights", "auto_highlights", "extended_duration", "time_warp_id"}
-TRACK_META = {"_volume", "_gain_db", "_fade_in", "_fade_out", "_pan", "_muted", "_solo", "_audio_role"}
+             "_auto_fit_applied", "words", "manual_highlights", "auto_highlights", "extended_duration", "time_warp_id", "layout_role"}
+TRACK_META = {"_volume", "_gain_db", "_fade_in", "_fade_out", "_pan", "_muted", "_solo", "_audio_role", "layout_owned"}
 SETTINGS_KEYS = {"video_time_warps", "subtitle_style_controls", "preview_track_visibility", "video_mirror_horizontal",
-                 "audio_handling_mode", "speaker_voice_assignments", "transcript_imported", "transcription_engine", "blur_state", "package_output_controls"}
+                 "audio_handling_mode", "speaker_voice_assignments", "transcript_imported", "transcription_engine", "blur_state", "package_output_controls", "video_layout", "video_layout_original_styles"}
 
 
 def _windows_lock_error(exc):

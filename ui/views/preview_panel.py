@@ -1360,10 +1360,17 @@ def build_preview_panel(gui):
     gui.add_text_btn.clicked.connect(
         lambda: gui.on_add_timeline_layer("text") if hasattr(gui, "on_add_timeline_layer") else None
     )
+    gui.add_background_btn = QPushButton(t('Background'))
+    gui.add_background_btn.setFixedSize(84,38)
+    gui.add_background_btn.setEnabled(False)
+    gui.add_background_btn.setStyleSheet('QPushButton { color: #9ec9ef; font-weight: bold; font-size: 11px; padding: 0; }')
+    gui.add_background_btn.setToolTip(t('Add a background behind the video'))
+    gui.add_background_btn.clicked.connect(lambda: gui.on_add_timeline_layer('background'))
     blur_group.addWidget(gui.blur_add_btn)
     blur_group.addWidget(gui.add_logo_btn)
     blur_group.addWidget(gui.add_mask_btn)
     blur_group.addWidget(gui.add_text_btn)
+    blur_group.addWidget(gui.add_background_btn)
     blur_group.addWidget(gui.ocr_region_btn)
     blur_group.addWidget(gui.ocr_translator_btn)
 
@@ -1385,6 +1392,8 @@ def build_preview_panel(gui):
     gui.vertical_logo_btn = _make_vertical_layer_btn("Logo", "#6ee7d6", "Add a logo or watermark image to the video")
     gui.vertical_blur_btn = _make_vertical_layer_btn("Blur", "#ffc15e", "Add a blur region")
     gui.vertical_mask_btn = _make_vertical_layer_btn("Mask", "#c98c5a", "Add a rectangular mask to the video")
+    gui.vertical_background_btn = _make_vertical_layer_btn('BG','#9ec9ef',t('Add a background behind the video'))
+    gui.vertical_background_btn.clicked.connect(lambda: gui.add_background_btn.click())
     gui.vertical_ocr_btn = _make_vertical_layer_btn("OCR", "#d8b4fe", "Capture and translate visual text from the current video frame", checkable=True)
 
     gui.vertical_text_btn.clicked.connect(lambda: gui.add_text_btn.click() if hasattr(gui, "add_text_btn") else None)
@@ -1397,6 +1406,7 @@ def build_preview_panel(gui):
     _sync_button_state(gui.add_logo_btn, gui.vertical_logo_btn)
     _sync_button_state(gui.blur_add_btn, gui.vertical_blur_btn)
     _sync_button_state(gui.add_mask_btn, gui.vertical_mask_btn)
+    _sync_button_state(gui.add_background_btn, gui.vertical_background_btn)
     _sync_button_state(gui.ocr_translator_btn, gui.vertical_ocr_btn)
 
     if hasattr(gui, "ocr_translator_btn"):
@@ -1406,6 +1416,7 @@ def build_preview_panel(gui):
     v_toolbar_layout.addWidget(gui.vertical_logo_btn)
     v_toolbar_layout.addWidget(gui.vertical_blur_btn)
     v_toolbar_layout.addWidget(gui.vertical_mask_btn)
+    v_toolbar_layout.addWidget(gui.vertical_background_btn)
     v_toolbar_layout.addWidget(gui.vertical_ocr_btn)
     v_toolbar_layout.addStretch(1)
 
@@ -1683,6 +1694,7 @@ def build_preview_panel(gui):
     gui._layer_menu.addAction("Logo / Watermark", lambda: gui.on_add_timeline_layer("logo"))
     gui._layer_menu.addAction("Blur", lambda: gui.on_add_timeline_layer("blur"))
     gui._layer_menu.addAction("Mask", lambda: gui.on_add_timeline_layer("mask"))
+    gui._layer_menu.addAction(t('Background'),lambda:gui.on_add_timeline_layer('background'))
     gui.add_layer_btn.setMenu(gui._layer_menu)
     edit_group.addWidget(_make_sep())
     edit_group.addWidget(gui.add_layer_btn)

@@ -315,7 +315,8 @@ def build_start_group(gui, left_layout):
     style_page, style_layout = _make_page("style")
     advanced_page, advanced_layout = _make_page("advanced")
     gui.workflow_advanced_layout = advanced_layout
-    pages.extend([media_page, audio_page, language_page, voice_page, style_page, advanced_page])
+    layout_page, video_layout = _make_page("layout")
+    pages.extend([media_page, audio_page, language_page, voice_page, style_page, advanced_page, layout_page])
 
     def _add_tab(label: str, page_index: int, page_key: str, checked: bool = False):
         btn = QPushButton(label)
@@ -340,6 +341,7 @@ def build_start_group(gui, left_layout):
     _add_tab("Voice", 3, "voice")
     _add_tab("Style", 4, "style")
     _add_tab("Advanced", 5, "advanced")
+    _add_tab(t("Video Layout"), 6, "layout")
     gui.show_progress_btn = QPushButton("Show Progress")
     gui.show_progress_btn.clicked.connect(gui.show_active_progress_dialog)
     gui.show_progress_btn.setVisible(False)
@@ -348,7 +350,7 @@ def build_start_group(gui, left_layout):
     gui.show_progress_btn.setMinimumHeight(34)
     gui.show_progress_btn.setMinimumWidth(0)
     gui.show_progress_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    tab_bar_layout.addWidget(gui.show_progress_btn, 3, 0, 1, 2)
+    tab_bar_layout.addWidget(gui.show_progress_btn, 4, 0, 1, 2)
     workflow_shell_layout.addWidget(tab_bar)
 
     upload_card, upload_layout = _build_collapsible_section("Video")
@@ -1087,6 +1089,8 @@ def build_start_group(gui, left_layout):
 
     from ui.controllers.subtitle_presentation_controller import SubtitlePresentationController
     gui.subtitle_presentation_controller = SubtitlePresentationController(gui, presentation_layout, subtitle_layout)
+    from ui.controllers.video_layout_controller import VideoLayoutController
+    gui.video_layout_controller = VideoLayoutController(gui, video_layout)
 
     for page in pages:
         page.layout().addStretch()

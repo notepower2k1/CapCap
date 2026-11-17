@@ -951,6 +951,13 @@ class _BlurRegionOverlayWindow(QWidget):
     def _visible_canvas_rect(self) -> QRectF:
         """The selected output canvas actually visible in the preview."""
         if self._target_view is not None:
+            if getattr(self._target_view, 'video_layout', None):
+                from app.video_layout import geometry
+                view = self._target_view
+                canvas = view.get_preview_canvas_rect()
+                slot, displayed = geometry(view.video_layout, canvas.width(), canvas.height(),
+                    view.video_source_width, view.video_source_height, view.preview_scale_mode, view.get_preview_fill_focus())
+                return QRectF(canvas.left()+slot[0], canvas.top()+slot[1], slot[2], slot[3])
             rect = self._target_view.get_preview_canvas_rect()
             if rect.width() > 0 and rect.height() > 0:
                 return QRectF(rect)
@@ -2420,7 +2427,7 @@ class MpvVideoView(QWidget):
         Blur/Mask/Text/Logo remain aligned with the visible source area.
         """
         is_fill = str(getattr(self, "preview_scale_mode", "fit") or "fit").strip().lower() == "fill"
-        if is_fill:
+        if is_fill or getattr(self, "video_layout", None):
             rect = self.get_preview_canvas_rect().toRect()
         else:
             rect = self.get_video_content_rect().toRect()
@@ -2488,6 +2495,11 @@ class MpvVideoView(QWidget):
         if not self.video_source_width or not self.video_source_height:
             return canvas_rect
 
+        if getattr(self, "video_layout", None):
+            from app.video_layout import geometry
+            _, (x, y, w, h) = geometry(self.video_layout, canvas_rect.width(), canvas_rect.height(),
+                self.video_source_width, self.video_source_height, self.preview_scale_mode, self.get_preview_fill_focus())
+            return QRectF(canvas_rect.left()+x, canvas_rect.top()+y, w, h)
         source_ratio = self.video_source_width / self.video_source_height
         canvas_ratio = canvas_rect.width() / canvas_rect.height() if canvas_rect.height() else source_ratio
         scale_mode = str(getattr(self, "preview_scale_mode", "fit") or "fit").strip().lower()

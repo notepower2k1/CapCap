@@ -5,7 +5,10 @@ import re
 SOURCE_KEYS = {"", "source", "same", "original", "auto"}
 
 
-def source_point_to_canvas(x, y, source_size, canvas_size, mode="fit", focus=(.5, .5)):
+def source_point_to_canvas(x, y, source_size, canvas_size, mode="fit", focus=(.5, .5), video_layout=None):
+    if video_layout:
+        from app.video_layout import map_point
+        return map_point(x, y, video_layout, source_size, canvas_size, mode, focus)
     sw, sh = source_size
     cw, ch = canvas_size
     scale = (max if mode == "fill" else min)(cw / sw, ch / sh)

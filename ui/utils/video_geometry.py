@@ -20,7 +20,7 @@ def has_letterbox(view, tolerance=.5):
 
 
 def native_subtitle_preview(view):
-    return not has_letterbox(view)
+    return not getattr(view, 'video_layout', None) and not has_letterbox(view)
 
 
 def source_to_canvas(view, x, y):

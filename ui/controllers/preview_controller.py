@@ -491,7 +491,7 @@ class PreviewController:
         print(f"[Preview] Added {len(events)} TextLayer event(s) to {ass_path}")
         return ass_path
 
-    def _build_fast_preview_text_images(self, text_layers, start_seconds, duration_seconds, width, height, temp_dir, *, source_size=None, scale_mode="fit", focus=(.5, .5)):
+    def _build_fast_preview_text_images(self, text_layers, start_seconds, duration_seconds, width, height, temp_dir, *, source_size=None, scale_mode="fit", focus=(.5, .5), video_layout=None):
         """Render editor TEXT layers with the shared Qt renderer for Fast Preview."""
         if not text_layers:
             return []
@@ -511,7 +511,7 @@ class PreviewController:
                 if source_size:
                     from app.output_geometry import source_point_to_canvas
                     payload["x"], payload["y"] = source_point_to_canvas(
-                        layer.get("x", .5), layer.get("y", .5), source_size, (width, height), scale_mode, focus)
+                        layer.get("x", .5), layer.get("y", .5), source_size, (width, height), scale_mode, focus, video_layout)
 
                 payload["font_size"] = max(1, int(round(float(layer["font_size"]) * 0.85)))
                 payload["padding_scale"] = 1.0
@@ -1256,6 +1256,7 @@ class PreviewController:
             self.gui.get_project_temp_dir("preview"),
             source_size=self._source_video_dimensions(video_path),
             scale_mode=self.gui.get_output_scale_mode_key(), focus=(fill_focus_x, fill_focus_y),
+            video_layout=self.gui.get_video_filter_state().get("video_layout"),
         )
 
         if mode in ("subtitle", "both"):

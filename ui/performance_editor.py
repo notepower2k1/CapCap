@@ -156,7 +156,7 @@ class PerformanceEditor(VideoTranslatorGUI):
         self.preview_card.layout().addWidget(self.preview_blur_group_widget)
         self.preview_blur_group_widget.layout().addStretch(1)
         self.preview_blur_group_widget.show()
-        for button in (self.blur_add_btn,self.add_logo_btn,self.add_mask_btn,self.add_text_btn):
+        for button in (self.blur_add_btn,self.add_logo_btn,self.add_mask_btn,self.add_text_btn,self.add_background_btn):
             button.show()
         self.ocr_translator_btn.hide()
         # The still has no native MPV surface to cover child widgets. Do not

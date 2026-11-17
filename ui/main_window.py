@@ -1163,7 +1163,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._responsive_inspector_width = inspector_width
         for attr in (
             "subtitle_inspector_card", "secondary_subtitle_inspector_card", "audio_inspector_card", "blur_inspector_card",
-            "logo_inspector_card", "mask_inspector_card", "text_inspector_card",
+            "logo_inspector_card", "mask_inspector_card", "text_inspector_card", "background_inspector_card",
             "default_inspector_card", "video_inspector_card",
         ):
             card = getattr(self, attr, None)
@@ -5652,6 +5652,9 @@ class VideoTranslatorGUI(QMainWindow):
         if presentation is not None:
             presentation.refresh_widgets()
             presentation.sync_tracks()
+        layout_controller = getattr(self, "video_layout_controller", None)
+        if layout_controller is not None:
+            layout_controller.restore(state)
         # OCR geometry is project-scoped.  For a reopened OCR project that has
         # not produced a transcript yet, keep the crop editor visible so the
         # user can configure the region before running Transcript.  Completed
@@ -6330,6 +6333,8 @@ class VideoTranslatorGUI(QMainWindow):
         lut_strength = 0.0
         if lut_path:
             lut_strength = max(0.0, min(1.0, float(self._video_filter_intensity) / 100.0))
+        layout_controller = getattr(self, "video_layout_controller", None)
+        layout = layout_controller.current() if layout_controller else None
         mirror = getattr(self, "_video_mirror_horizontal", False) is True
         active = mirror or any(abs(int(value)) > 0 for value in effective_values.values()) or bool(
             lut_path and lut_strength > 0.001
@@ -6345,7 +6350,8 @@ class VideoTranslatorGUI(QMainWindow):
             "final": effective_values,
             "lut_path": lut_path,
             "lut_strength": lut_strength,
-            "active": active,
+            "active": active or bool(layout),
+            "video_layout": layout,
         }
 
     def has_active_video_filters(self):
@@ -6392,6 +6398,10 @@ class VideoTranslatorGUI(QMainWindow):
         # previous Ratio's height/scale payload.
         self._refresh_text_layer_preview(getattr(getattr(self, "timeline", None), "_selected_layer_id", ""))
         self.apply_preview_blur_region()
+        layout = getattr(self, "video_layout_controller", None)
+        if layout is not None and layout.current():
+            layout.refresh()
+            layout.diagram.update()
         self.refresh_ui_state()
 
     def on_output_scale_mode_changed(self, *_args):
@@ -6404,12 +6414,20 @@ class VideoTranslatorGUI(QMainWindow):
         self.update_subtitle_preview_style()
         self._refresh_text_layer_preview(getattr(getattr(self, "timeline", None), "_selected_layer_id", ""))
         self.apply_preview_blur_region()
+        layout = getattr(self, "video_layout_controller", None)
+        if layout is not None and layout.current():
+            layout.refresh()
+            layout.diagram.update()
         self.refresh_ui_state()
 
     def on_preview_framing_changed(self, *_args):
         self._sync_preview_framing_to_player()
         self._refresh_text_layer_preview(getattr(getattr(self, "timeline", None), "_selected_layer_id", ""))
         self.apply_preview_blur_region()
+        layout = getattr(self, "video_layout_controller", None)
+        if layout is not None and layout.current():
+            layout.refresh()
+            layout.diagram.update()
         self.refresh_ui_state()
 
     def _capture_layer_framing(self):
@@ -6426,6 +6444,9 @@ class VideoTranslatorGUI(QMainWindow):
         key = (str(getattr(view, "preview_aspect_key", "source")),
                str(getattr(view, "preview_scale_mode", "fit")), *dimensions,
                False)
+        if getattr(view, 'video_layout', None) and view.video_layout.get('template') != 'free':
+            from app.video_layout import cache_key
+            key += (cache_key(view.video_layout),)
         from ui.utils.video_geometry import layer_bounds_rect
         return source, layer_bounds_rect(view), dimensions, key
 
@@ -6459,6 +6480,9 @@ class VideoTranslatorGUI(QMainWindow):
         # with whole-canvas layouts, even when resolution/Fit match.
         old_key = json.dumps(("canvas-v2", *old_layout))
         new_key = json.dumps(("canvas-v2", str(getattr(self.video_view, "preview_scale_mode", "fit")), width, height, limited))
+        if getattr(self.video_view, 'video_layout', None) and self.video_view.video_layout.get('template') != 'free':
+            from app.video_layout import cache_key
+            new_key = json.dumps((*json.loads(new_key), cache_key(self.video_view.video_layout)))
         factor = min(width / max(1, old_dimensions[0]), height / max(1, old_dimensions[1]))
         changed = reframe_layers(model.tracks, old_source, old_visible, source, visible,
             font_scale=factor, pixel_scale=self.video_view.get_preview_canvas_rect().height() / max(1, height),
@@ -6645,12 +6669,13 @@ class VideoTranslatorGUI(QMainWindow):
             "style": {"enabled": has_video, "reason": "Select a video first to style subtitle output."},
             "filter": {"enabled": has_video, "reason": "Select a video first to preview and apply filters."},
             "advanced": {"enabled": True, "reason": ""},
+            "layout": {"enabled": has_video, "reason": "Select a video first to style subtitle output."},
         }
 
     def update_workflow_availability(self):
         states = self._workflow_dependency_state()
         current_index = int(self.left_panel_stack.currentIndex()) if hasattr(self, "left_panel_stack") else 0
-        page_order = ["media", "language", "voice", "style", "filter", "advanced"]
+        page_order = ["media", "audio", "language", "voice", "style", "advanced", "layout"]
 
         for page_key, state in states.items():
             container = getattr(self, "workflow_page_containers", {}).get(page_key) if hasattr(self, "workflow_page_containers") else None
@@ -8348,6 +8373,12 @@ class VideoTranslatorGUI(QMainWindow):
         self._timed_layer_preview_signature = None
         self.refresh_timed_layer_preview()
         layer_type = str(getattr(layer.type, "value", layer.type)).lower()
+        if layer_type == "background":
+            from ui.controllers.background_controller import controller
+            if hasattr(self,'timeline_split_btn'):self.timeline_split_btn.setEnabled(False)
+            if hasattr(self,'timeline_delete_btn'):self.timeline_delete_btn.setEnabled(not is_review_mode and not track.locked and not layer.locked)
+            controller(self).show(layer)
+            return
         can_modify_layer = not bool(getattr(track, "locked", False)) and not bool(getattr(layer, "locked", False))
         if hasattr(self, "timeline_split_btn"):
             self.timeline_split_btn.setEnabled(
@@ -8679,7 +8710,6 @@ class VideoTranslatorGUI(QMainWindow):
         try:
             self._timed_layer_preview_signature = None
             self.refresh_timed_layer_preview()
-            self._apply_mask_to_preview()
             self._sync_blur_controls()
         except Exception:
             pass
@@ -8689,11 +8719,9 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _on_mask_overlay_changed(self, track, layer):
         """Read the current overlay region and update the layer
-        position. The mpv filter is NOT re-applied here — it is
-        only applied while the video is playing, to avoid lag
-        during the drag. When the user presses play, the latest
-        layer position is pushed to mpv via `_apply_mask_to_preview`
-        (called from `toggle_play` and the stateChanged handler).
+        position. The selected effect is deferred while dragging;
+        the other effects remain rendered. Play commits the latest
+        geometry before native playback resumes.
         """
         if self._preview_is_playing() or not hasattr(self, "video_view"):
             return
@@ -10395,7 +10423,7 @@ class VideoTranslatorGUI(QMainWindow):
 
         video_path = self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
         v_ok = bool(video_path and os.path.exists(video_path))
-        if layer_type in {"blur", "logo", "mask", "text", "image", "sticker"} and not v_ok:
+        if layer_type in {"blur", "logo", "mask", "text", "image", "sticker", "background"} and not v_ok:
             QMessageBox.warning(
                 self,
                 t("Error"),
@@ -10419,6 +10447,11 @@ class VideoTranslatorGUI(QMainWindow):
 
         from app.layers.base import LayerType
         from app.layers.sync_bridge import find_or_create_track
+
+        if layer_type == 'background':
+            from ui.controllers.background_controller import controller
+            controller(self).add()
+            return
 
         if layer_type == "subtitle":
             # TS1 is driven from the segment lists, not the legacy Subtitle
@@ -11108,7 +11141,7 @@ class VideoTranslatorGUI(QMainWindow):
             player.set_preview_framing(
                 source_ratio,
                 canvas_ratio,
-                self.get_output_scale_mode_key(),
+                "fit" if getattr(view, "video_layout", None) else self.get_output_scale_mode_key(),
                 focus_x,
                 focus_y,
             )
@@ -11767,6 +11800,10 @@ class VideoTranslatorGUI(QMainWindow):
                     # preview state.  The Delete timeline button therefore
                     # removes the selected layer rather than merely deleting
                     # a timeline bar and leaving a stale overlay behind.
+                    if layer_type == 'background':
+                        from ui.controllers.background_controller import controller
+                        background=controller(self);background.layer_id=layer.id;background.delete()
+                        return
                     if layer_type == "image" and str(getattr(track, "name", "")) == "L1 Logo":
                         self._delete_logo_layer(layer)
                         return
@@ -12032,6 +12069,9 @@ class VideoTranslatorGUI(QMainWindow):
         self.refresh_ui_state()
 
     def _refresh_timeline_history_buttons(self):
+        layout = getattr(self, 'video_layout_controller', None)
+        if layout is not None:
+            layout.buttons()
         if hasattr(self, "timeline_undo_btn"):
             self.timeline_undo_btn.setEnabled(bool(self._timeline_timing_undo_stack))
         if hasattr(self, "timeline_redo_btn"):
@@ -12043,6 +12083,15 @@ class VideoTranslatorGUI(QMainWindow):
         if not self._timeline_timing_undo_stack:
             return False
         entry = self._timeline_timing_undo_stack.pop()
+        if entry.get('type') == 'background_layer':
+            from ui.controllers.background_controller import controller
+            controller(self).apply_history(entry,use_after=False)
+            self._push_timeline_redo_entry(entry)
+            return True
+        if entry.get("type") == "video_layout":
+            self.video_layout_controller.apply_history(entry, use_after=False)
+            self._push_timeline_redo_entry(entry)
+            return True
         if entry.get("type") == "secondary_subtitle":
             self.subtitle_presentation_controller.apply_history(entry, use_after=False)
             self._push_timeline_redo_entry(entry)
@@ -12089,6 +12138,15 @@ class VideoTranslatorGUI(QMainWindow):
         if not self._timeline_timing_redo_stack:
             return False
         entry = self._timeline_timing_redo_stack.pop()
+        if entry.get('type') == 'background_layer':
+            from ui.controllers.background_controller import controller
+            controller(self).apply_history(entry,use_after=True)
+            self._push_timeline_undo_repush(entry)
+            return True
+        if entry.get("type") == "video_layout":
+            self.video_layout_controller.apply_history(entry, use_after=True)
+            self._push_timeline_undo_repush(entry)
+            return True
         if entry.get("type") == "secondary_subtitle":
             self.subtitle_presentation_controller.apply_history(entry, use_after=True)
             self._push_timeline_undo_repush(entry)
@@ -13724,8 +13782,10 @@ class VideoTranslatorGUI(QMainWindow):
                         region for region, layer in zip(blur_region, blur_layers)
                         if str(getattr(layer, "id", "") or "") != suppressed_id
                     ]
-        should_apply_mpv = bool(force or self._preview_is_playing())
-        if blur_enabled and blur_region and should_apply_mpv:
+        # Pause only removes editing handles. Keep the rendered effect graph
+        # loaded; a selected edit target is already excluded from this payload.
+        # Removing all blur here also rebuilt the image background on resume.
+        if blur_enabled and blur_region:
             self.media_player.set_blur_region(blur_region)
         else:
             self.media_player.clear_blur_region()
@@ -13953,26 +14013,19 @@ class VideoTranslatorGUI(QMainWindow):
             return
         if regions is None:
             regions = self._current_mask_regions_payload(
-                include_inactive=True,
+                include_inactive=False,
                 exclude_layer_id=self._deferred_effect_layer_id_for("mask"),
             )
-        should_apply_mpv = bool(force or self._preview_is_playing())
-        if regions and should_apply_mpv:
+        if regions:
             self.media_player.set_mask_region(regions)
         else:
             self.media_player.clear_mask_region()
 
     def _on_preview_state_changed(self, _state: int):
-        """Re-apply the M1 mask filter when the player state changes.
+        """Update editing handles and active effects without clearing on pause.
 
-        The mask is only applied to the video while the player is
-        playing. Hooked from `media_player.stateChanged` in
-        `setup_media_player` so the mpv filter chain is updated on
-        play / pause / stop. The mask overlay is also locked
-        (`set_editable(False)`) while the video is playing so the
-        user cannot accidentally drag or resize the region during
-        playback. Also sync the timeline play state so the timeline
-        stops running when the video ends (Bug 2).
+        Only a selected edit target, visibility change or timing boundary
+        changes effect content. Plain Pause/Play retains the native graph.
         """
         if getattr(getattr(self, "media_player", None), "_video_frozen", False) or getattr(self, "_active_freeze_warp", None) is not None:
             return
@@ -14098,8 +14151,8 @@ class VideoTranslatorGUI(QMainWindow):
             except Exception:
                 pass
         try:
-            self.apply_preview_blur_region(force=is_playing)
-            self._apply_mask_to_preview(force=is_playing)
+            self._timed_layer_preview_signature = None
+            self.refresh_timed_layer_preview()
         except Exception:
             pass
         # Disable UI collapse toggles during playback to prevent Qt layout
@@ -15988,6 +16041,11 @@ class VideoTranslatorGUI(QMainWindow):
             button = getattr(self, button_name, None)
             if button is not None:
                 button.setEnabled(self._optional_layer_controls_ready)
+        if hasattr(self,'add_background_btn'):
+            self.add_background_btn.setEnabled(bool(source_video) and not review_mode and not voice_running)
+        background=getattr(self,'background_controller',None)
+        if background is not None:
+            background.refresh_enabled()
         # Subtitle segments are valid as soon as a transcript/translation is
         # available. Keep the shared + Layer menu usable for manual fixes
         # without unlocking the unrelated overlay-layer actions early.
@@ -18915,6 +18973,10 @@ class VideoTranslatorGUI(QMainWindow):
             self.video_path_edit.clear()
         if hasattr(self, "timeline"):
             if hasattr(self.timeline, "reset_timeline"):
+                layout = getattr(self, "video_layout_controller", None)
+                if layout is not None:
+                    layout.applied = None
+                    self.video_view.video_layout = None
                 self.timeline.reset_timeline()
             else:
                 self.timeline.set_segments([])
@@ -19651,6 +19713,10 @@ class VideoTranslatorGUI(QMainWindow):
                 self.sync_segment_editor_rows()
             if hasattr(self, "timeline"):
                 if hasattr(self.timeline, "reset_timeline"):
+                    layout = getattr(self, "video_layout_controller", None)
+                    if layout is not None:
+                        layout.applied = None
+                        self.video_view.video_layout = None
                     self.timeline.reset_timeline()
                 else:
                     self.timeline.set_segments([])
@@ -19810,6 +19876,9 @@ class VideoTranslatorGUI(QMainWindow):
                                 self.video_view.video_surface.show()
                             except Exception:
                                 pass
+                        layout = getattr(self, 'video_layout_controller', None)
+                        if layout is not None and layout.current():
+                            layout.refresh()
                         if hasattr(self, "sync_live_subtitle_preview"):
                             self.sync_live_subtitle_preview()
                         if hasattr(self, "media_player") and not self.media_player.is_playing():

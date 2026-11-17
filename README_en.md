@@ -25,6 +25,8 @@
 
 ## ✨ Highlights
 
+* **[Video Layout](docs/video-layout.md):** Hook + subtitles, title + part, cinematic frames; solid/image/blur backgrounds, rounded corners and shadows saved with the project.
+
 * 🔄 **Guided 5-Step Pipeline:** Prepare → Transcribe (STT / OCR) → Translate → Voice-over (TTS) → Export.
 * 🗂️ **Quality / Performance:** Choose the full editor or a still-frame editor for long videos. Performance processes a sequential queue with independent settings per video, manual rendering, and optional automatic export after processing.
 * 📱 **Adaptive Workspace (16:9 & 9:16):** Automatically switches layout between landscape videos (YouTube/Cinema) and portrait videos (TikTok, Shorts, Reels).

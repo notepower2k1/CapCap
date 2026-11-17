@@ -137,6 +137,7 @@ def _capture_snapshot(gui):
         "warps": copy.deepcopy(getattr(gui, "video_time_warps", []) or []),
         "mirror_horizontal": bool(getattr(gui, "_video_mirror_horizontal", False)),
         "framing": {"mode": gui.get_output_scale_mode_key(), "focus": gui.get_output_fill_focus()},
+        "video_layout": copy.deepcopy(gui.get_video_filter_state().get("video_layout")),
         "subtitle_position": {key: subtitle_style.get(key) for key in ("custom_position_enabled", "custom_position_x", "custom_position_y")},
     }
 

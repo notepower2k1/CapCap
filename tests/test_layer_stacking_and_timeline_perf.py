@@ -688,9 +688,8 @@ class TestLayerStackingAndTimelinePerf(unittest.TestCase):
         container.deleteLater()
         self.app.processEvents()
 
-    def test_blur_and_mask_mpv_filters_only_applied_when_playing_or_forced(self):
-        """Verify apply_preview_blur_region and _apply_mask_to_preview clear MPV filter when paused,
-        and apply when playing or force=True."""
+    def test_blur_and_mask_mpv_filters_remain_applied_while_paused(self):
+        """Pausing keeps rendered effects; edit suppression is handled per layer."""
         from ui.main_window import VideoTranslatorGUI
 
         gui = MagicMock()
@@ -706,14 +705,14 @@ class TestLayerStackingAndTimelinePerf(unittest.TestCase):
         video_view = MagicMock()
         gui.video_view = video_view
 
-        # 1. While paused (force=False), MPV filters must be cleared
+        # 1. Plain pause keeps both effects, avoiding a layout rebuild on resume.
         VideoTranslatorGUI.apply_preview_blur_region(gui, force=False)
-        player.clear_blur_region.assert_called_once()
-        player.set_blur_region.assert_not_called()
+        player.set_blur_region.assert_called_once()
+        player.clear_blur_region.assert_not_called()
 
         VideoTranslatorGUI._apply_mask_to_preview(gui, force=False)
-        player.clear_mask_region.assert_called_once()
-        player.set_mask_region.assert_not_called()
+        player.set_mask_region.assert_called_once()
+        player.clear_mask_region.assert_not_called()
 
         # 2. When forced (force=True), MPV filters are applied even while paused
         player.reset_mock()

@@ -16,6 +16,7 @@ class LayerType(str, Enum):
     STICKER = "sticker"
     BLUR = "blur"
     MASK = "mask"
+    BACKGROUND = "background"
 
 
 class BlendMode(str, Enum):

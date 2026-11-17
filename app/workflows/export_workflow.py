@@ -581,10 +581,8 @@ class ExportWorkflow:
                     subtitle_style[KEY] = presentation
         target_w, target_h = self._resolve_target_dimensions(video_path, output_quality, output_ratio)
         target_fps = self._resolve_target_fps(output_fps)
-        # MPV renders the live ASS track on the source frame before its
-        # Fit/Fill presentation transform.  Author export ASS in that same
-        # source render space; embed_ass_subtitles applies the canvas transform
-        # after the ASS pass so preview and export share one coordinate system.
+        # Export subtitles on the final canvas so they can occupy the layout
+        # background as well as the video slot.
         source_w, source_h = self.engine_runtime.get_video_dimensions(video_path)
         ass_style = dict(subtitle_style)
         from app.subtitle_presentation import subtitle_to_canvas, secondary_style, style_from_controls
@@ -617,13 +615,13 @@ class ExportWorkflow:
         # Text layers are rendered to target-canvas PNGs.  Their stored
         # normalized positions are source-video coordinates, so use the same
         # Fit/Fill transform as the preview before Qt renders the bitmap.
-        if target_w and target_h and text_layers:
+        if text_layers and ((target_w and target_h) or (video_filter_state or {}).get('video_layout')):
             from app.output_geometry import source_point_to_canvas
             source_size = self.engine_runtime.get_video_dimensions(video_path)
             for layer in text_layers:
                 layer["x"], layer["y"] = source_point_to_canvas(
-                    layer.get("x", .5), layer.get("y", .5), source_size, (target_w, target_h),
-                    output_scale_mode, (output_fill_focus_x, output_fill_focus_y))
+                    layer.get("x", .5), layer.get("y", .5), source_size, canvas_size,
+                    output_scale_mode, (output_fill_focus_x, output_fill_focus_y), (video_filter_state or {}).get("video_layout"))
         text_image_layers = self._build_text_layer_images(text_layers, project_temp_dir, render_w or 1920, render_h or 1080)
         print(f"[Export] Extracted {len(mask_regions)} mask(s), {len(logo_layers)} logo(s), {len(text_layers)} text layer(s), {len(blur_regions)} blur(s)")
 

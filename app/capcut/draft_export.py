@@ -61,7 +61,7 @@ class DraftExporter:
         if self.cancelled():
             raise ExportCancelled()
 
-    def _run(self, command):
+    def _run(self, command, *, timeout=120):
         self._check()
         # A file avoids deadlocks from an unconsumed stderr pipe on long inputs.
         with tempfile.TemporaryFile() as stderr:
@@ -73,7 +73,7 @@ class DraftExporter:
                         output, _ = process.communicate(timeout=0.2)
                         break
                     except subprocess.TimeoutExpired:
-                        if self.cancelled() or time.monotonic() - started > 120:
+                        if self.cancelled() or time.monotonic() - started > timeout:
                             process.kill()
                             process.communicate()
                             self._check()
@@ -117,7 +117,10 @@ class DraftExporter:
         self.layer_report = []
         try:
             (staging / "media").mkdir()
+            self._prepare_layout(snapshot)
             self._build(snapshot)
+            if getattr(self, '_layout_asset', None):
+                self._layout_asset.unlink(missing_ok=True)
             self._check()
             staging.rename(destination)
         except BaseException:
@@ -126,6 +129,64 @@ class DraftExporter:
         return {"path": str(destination), "warnings": self.warnings,
                 "tracks": len(self.tracks), "media": len(self.assets), "native_blur_count": len(self.materials["video_effects"]),
                 "native_mask_count": len(self.materials["common_mask"])}
+
+    def _prepare_layout(self, snapshot):
+        """Bake only the video frame/background; retain editable text/audio layers."""
+        self._layout_asset = None
+        cfg = snapshot.get('video_layout')
+        if not cfg:
+            return
+        from app.video_layout import filter_chain, map_point, geometry
+        source = snapshot['source_video']
+        info = self._probe(source)
+        sw, sh = info['width'], info['height']
+        comp = snapshot['timeline']['composition']
+        cw, ch = (sw, sh) if snapshot.get('source_canvas') else (int(comp['width']), int(comp['height']))
+        mode = snapshot.get('framing', {}).get('mode', 'fit')
+        focus = snapshot.get('framing', {}).get('focus', (.5,.5))
+        graph = filter_chain(cfg,cw,ch,sw,sh,mode,focus)
+        if snapshot.get('mirror_horizontal'):
+            graph = 'hflip,' + graph
+        baked = self.staging / 'layout_base.mp4'
+        self.progress('Preparing video layout')
+        self._run([self.ffmpeg,'-v','error','-i',source,'-vf',graph,'-map','0:v:0',
+                   '-an','-c:v','libx264','-crf','18','-preset','fast','-y',str(baked)], timeout=max(120,info['duration']*12))
+        self._layout_asset = baked
+        _, (_,_,dw,dh) = geometry(cfg,cw,ch,sw,sh,mode,focus)
+        tracks = snapshot['timeline']['tracks']
+        for track in tracks:
+            for layer in track.get('layers', []):
+                kind = layer.get('type')
+                if track.get('name') == 'V1 Video':
+                    layer['source'] = str(baked)
+                elif kind == 'text':
+                    tr = layer.setdefault('transform', {})
+                    tr['x'],tr['y'] = map_point(tr.get('x',.5),tr.get('y',.5),cfg,(sw,sh),(cw,ch),mode,focus)
+                elif kind in ('image','sticker'):
+                    tr = layer.setdefault('transform', {})
+                    x,y = map_point(float(tr.get('x',10))/100,float(tr.get('y',10))/100,cfg,(sw,sh),(cw,ch),mode,focus)
+                    tr.update(x=x*100,y=y*100,scale_x=float(tr.get('scale_x',1))*dw/cw,
+                              scale_y=float(tr.get('scale_y',1))*dh/ch)
+                elif kind in ('mask','blur'):
+                    x,y = map_point(layer.get('position_x',0),layer.get('position_y',0),cfg,(sw,sh),(cw,ch),mode,focus)
+                    layer.update(position_x=x,position_y=y,width=float(layer.get('width',0))*dw/cw,
+                                 height=float(layer.get('height',0))*dh/ch)
+                if kind in ('text','image','sticker'):
+                    for group in layer.get('transform', {}).get('keyframes', []):
+                        prop = group.get('property')
+                        for point in group.get('keyframes', []):
+                            value = float(point['value'])
+                            if prop in ('x','y'):
+                                unit = 100 if kind in ('image','sticker') else 1
+                                x,y = map_point(value/unit,value/unit,cfg,(sw,sh),(cw,ch),mode,focus)
+                                point['value'] = (x if prop == 'x' else y)*unit
+                            elif kind in ('image','sticker') and prop in ('scale_x','scale_y'):
+                                point['value'] = value*(dw/cw if prop == 'scale_x' else dh/ch)
+        snapshot['timeline']['tracks'] = [tr for tr in tracks if tr.get('type') != 'background']
+        snapshot.update(source_video=str(baked),source_canvas=False,mirror_horizontal=False,
+                        framing={'mode':'fit','focus':(.5,.5)})
+        comp.update(width=cw,height=ch)
+        self.warnings.append('Video layout background, rounded corners and shadow are baked into the base video; text, subtitles, logos and audio remain editable.')
 
     def _asset(self, source, audio=False):
         source = Path(source).resolve()

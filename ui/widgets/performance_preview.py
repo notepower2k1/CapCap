@@ -1,6 +1,6 @@
 """A still image with shared layer editors, without a decoder or native surface."""
-from PySide6.QtCore import Qt, QRect
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtCore import Qt, QRect, QRectF
+from PySide6.QtGui import QColor, QPainter, QPixmap, QImage, QPainterPath
 from PySide6.QtWidgets import QLabel
 from widgets.mpv_video_view import MpvVideoView
 
@@ -61,6 +61,32 @@ class StaticVideoView(MpvVideoView):
                 painter.setOpacity(item.get('opacity', 1.0))
                 painter.drawImage(rect, crop)
             painter.end()
+        if getattr(self, 'video_layout', None):
+            from app.video_layout import geometry
+            cfg = self.video_layout
+            # Render at display resolution; full-resolution composition uses FFmpeg.
+            canvas = self.get_preview_canvas_rect()
+            w, h = max(2, round(canvas.width())), max(2, round(canvas.height()))
+            frame = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+            frame.fill(QColor(cfg['color']))
+            p = QPainter(frame); p.setRenderHint(QPainter.SmoothPixmapTransform)
+            bg = image if cfg['background'] == 'blur' else QImage(cfg['image']) if cfg['background'] == 'image' else QImage()
+            if not bg.isNull():
+                if cfg['background'] == 'blur':
+                    bg = bg.scaled(max(2,w//int(cfg['blur'])), max(2,h//int(cfg['blur'])), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                bg = bg.scaled(w,h,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation)
+                p.drawImage(round((w-bg.width())/2),round((h-bg.height())/2),bg)
+            slot, displayed = geometry(cfg,w,h,image.width(),image.height(),self.preview_scale_mode,self.get_preview_fill_focus())
+            face = QRectF(*(slot if self.preview_scale_mode == 'fill' else displayed))
+            radius = cfg['corner'] * h / max(1,cfg['_canvas_height'])
+            if cfg['shadow']:
+                offset = cfg['shadow'] * h / max(1,cfg['_canvas_height'])
+                p.setPen(Qt.NoPen); p.setBrush(QColor(0,0,0,110))
+                p.drawRoundedRect(face.translated(offset,offset),radius,radius)
+            clip = QPainterPath(); clip.addRoundedRect(face,radius,radius)
+            p.setClipPath(clip)
+            p.drawImage(QRectF(*displayed), image)
+            p.end(); image = frame
         self._image.setPixmap(QPixmap.fromImage(image))
         self._image.setGeometry(self.video_surface.rect())
         if self.isVisible() and not getattr(self.window(),'_project_loading_in_progress',False):
@@ -70,6 +96,8 @@ class StaticVideoView(MpvVideoView):
         super().resizeEvent(event)
         if hasattr(self, '_image'):
             self._image.setGeometry(self.video_surface.rect())
+            if getattr(self, 'video_layout', None):
+                self._render_frame()
 
     def _sync_preview_stack(self):
         super()._sync_preview_stack()

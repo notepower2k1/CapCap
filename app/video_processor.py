@@ -733,7 +733,7 @@ def _build_canvas_filter_chain(target_width=None, target_height=None, scale_mode
 
 def _map_normalized_overlays_to_canvas(regions, source_width, source_height,
                                        target_width, target_height,
-                                       scale_mode="fit", focus_x=0.5, focus_y=0.5):
+                                       scale_mode="fit", focus_x=0.5, focus_y=0.5, video_layout=None):
     """Map source-video-normalized rectangles into the output canvas.
 
     Editor overlays are authored in source-video coordinates.  The preview
@@ -760,6 +760,10 @@ def _map_normalized_overlays_to_canvas(regions, source_width, source_height,
         else:
             offset_x = (tw - displayed_w) * 0.5
             offset_y = (th - displayed_h) * 0.5
+        if video_layout:
+            from app.video_layout import geometry
+            _, (offset_x, offset_y, displayed_w, displayed_h) = geometry(
+                video_layout, tw, th, sw, sh, mode, (fx, fy))
     except (TypeError, ValueError):
         return list(regions)
 
@@ -1862,6 +1866,12 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
     except Exception:
         canvas_w, canvas_h = source_w, source_h
 
+    layout = (video_filter_state or {}).get('video_layout')
+    if layout:
+        from app.video_layout import filter_chain
+        scale_chain = filter_chain(layout, canvas_w, canvas_h, source_w, source_h,
+                                   output_scale_mode, (output_fill_focus_x, output_fill_focus_y))
+
     print(
         f"[Export Geometry] subtitle/filter space={source_w}x{source_h} "
         f"canvas={canvas_w}x{canvas_h} "
@@ -1873,8 +1883,8 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
     # source-normalized rectangles into output-canvas coordinates first.
     logo_layers_for_canvas = _map_normalized_overlays_to_canvas(
         logo_layers, source_w, source_h, canvas_w, canvas_h,
-        output_scale_mode, output_fill_focus_x, output_fill_focus_y,
-    ) if target_width and target_height else logo_layers
+        output_scale_mode, output_fill_focus_x, output_fill_focus_y, layout,
+    ) if (target_width and target_height) or layout else logo_layers
 
     blur_chain = _build_blur_filter_chain(blur_region, video_w, video_h)
     mask_chain = _build_mask_filter_chain(mask_regions, video_w, video_h)

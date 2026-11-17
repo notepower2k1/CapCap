@@ -2,6 +2,10 @@
 
 ## Tính năng mới
 
+- **Layer nền độc lập:** Thêm bằng nút Nền dưới preview, nút BG trên thanh dọc hoặc menu + Layer mà không cần áp dụng bố cục. Có inspector chọn màu/ảnh/nền mờ, ẩn/hiện, xóa và Undo/Redo; lưu theo project và hỗ trợ export.
+
+- **Bố cục video:** Tab riêng với mẫu Hook + Phụ đề, Tiêu đề + Part và Khung điện ảnh. Tùy chỉnh nền màu/ảnh/nền mờ, vùng video, bo góc và đổ bóng; áp dụng bản nháp, gỡ mẫu và Undo/Redo. Giữ các layer tự thêm; lưu theo project/hàng đợi, hỗ trợ Fast Preview, export và gói tài nguyên. Xuất CapCut dựng sẵn nền/khung vào video nền, giữ chữ, phụ đề, logo và âm thanh riêng.
+
 - **Preset cá nhân:** Lưu nhiều custom prompt và Audio Mix có tên, chọn lại hoặc xóa khi cần. Thư viện prompt dùng chung cho dịch chính/phụ; Audio Mix lưu cả âm lượng gốc, TTS và nhạc nền. Tự bổ sung ngôn ngữ và hợp đồng định dạng vào prompt gửi AI.
 
 - **Phụ đề trên video:** Chọn không hiển thị, một phụ đề hoặc song ngữ. Phụ đề phụ có thể lấy từ phụ đề gốc, nhập SRT hoặc dịch sang ngôn ngữ khác; có track, inspector, kiểu chữ và prompt riêng. Hỗ trợ preview, Fit Voice, xuất video và dự án CapCut.
@@ -21,6 +25,16 @@
 - **CapCut:** Cải thiện lựa chọn ngôn ngữ STT, giữ timestamp từ, kiểm tra kết quả TTS và bổ sung log theo job/chunk.
 
 ## Sửa lỗi
+
+- Không tạo track Text rỗng khi áp dụng Khung điện ảnh hoặc mẫu chưa có nội dung chữ; dọn track rỗng cũ khi áp dụng lại, giữ nguyên layer chữ của người dùng.
+
+- Giữ Blur/Mask khi Pause để không dựng lại nền và toàn bộ bộ lọc lúc Play; chỉ tạm ngừng layer được chọn để chỉnh, vẫn giữ đúng thời gian và trạng thái ẩn/hiện.
+
+- Tối ưu preview Khung điện ảnh: tính sẵn mặt nạ bo góc/đổ bóng thay vì dựng lại mỗi khung; nền ảnh bám nhịp video nguồn, tránh giật ở video 30/60 fps.
+
+- Sửa treo/crash khi đổi nhiều ảnh nền ở Khung điện ảnh: chỉ giải mã một khung ảnh, lặp khung đã thu nhỏ và giới hạn luồng giải mã; bổ sung log lỗi bộ lọc preview.
+
+- Sửa lỗi mở editor khi khôi phục Bố cục video trước khi trình phát khởi tạo; chỉ cập nhật preview sau khi media đã sẵn sàng.
 
 - Không khôi phục nhầm bố cục layer bám vùng hình từ bản cũ khi chuyển sang cách bố trí theo toàn canvas.
 

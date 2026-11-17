@@ -53,6 +53,8 @@ MUTE_PREFIXES = {"A1", "A2", "TS1"}
 
 def display_track_name(name: str) -> str:
     """Keep model IDs intact while showing only useful names in the UI."""
+    if name == 'Background':
+        return t('Background')
     prefix = (name or "").split(" ")[0]
     if prefix in {"TS1", "S1"} or name == "A2 Dub":
         return t("Main subtitles")
