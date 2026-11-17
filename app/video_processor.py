@@ -1942,13 +1942,11 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
             filter_parts.append(f"{current_label}{lut_chain}[lut_filtered]")
             current_label = "[lut_filtered]"
         
-        # TS1 remains an ASS/libass pass in source-video coordinates, matching
-        # MPV preview. The output canvas transform follows this pass.
+        if scale_chain:
+            filter_parts.append(f"{current_label}{scale_chain}[scaled]")
+            current_label = "[scaled]"
         filter_parts.append(f"{current_label}{_ass_filter_expression(ass_path)}[subbed]")
         current_label = "subbed"
-        if scale_chain:
-            filter_parts.append(f"[{current_label}]{scale_chain}[scaled]")
-            current_label = "scaled"
         if text_ass_path and os.path.exists(text_ass_path):
             filter_parts.append(f"[{current_label}]{_ass_filter_expression(text_ass_path)}[text_ass]")
             current_label = "text_ass"
@@ -2134,12 +2132,12 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
         filter_parts.append(f"[{main_label}]{lut_chain}[lut_filtered]")
         main_label = "lut_filtered"
 
-    filter_parts.append(f"[{main_label}]{_ass_filter_expression(ass_path)}[subbed]")
-    main_label = "subbed"
     if scale_chain:
         filter_parts.append(f"[{main_label}]{scale_chain}[scaled]")
         main_label = "scaled"
-    
+    filter_parts.append(f"[{main_label}]{_ass_filter_expression(ass_path)}[subbed]")
+    main_label = "subbed"
+
     # 2. Process each logo layer
     logo_input_idx = 1
     current_label = main_label

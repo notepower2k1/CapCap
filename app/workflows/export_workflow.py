@@ -64,52 +64,8 @@ class ExportWorkflow:
         return style
 
     def _resolve_target_dimensions(self, video_path: str, output_quality: str, output_ratio: str = "source"):
-        key = str(output_quality or "source").strip().lower()
-        ratio = self._resolve_target_ratio(output_ratio)
-
-        src_w, src_h = self.engine_runtime.get_video_dimensions(video_path)
-        if not src_w or not src_h:
-            return None, None
-
-        if key in ("", "source", "same", "original", "auto"):
-            if not ratio:
-                return None, None
-            src_ratio = src_w / src_h
-            target_ratio = ratio[0] / ratio[1]
-            if abs(src_ratio - target_ratio) < 0.001:
-                return None, None
-            fit_scale = min(src_w / ratio[0], src_h / ratio[1])
-            return (
-                max(2, int((ratio[0] * fit_scale) // 2 * 2)),
-                max(2, int((ratio[1] * fit_scale) // 2 * 2)),
-            )
-
-        if key in ("720", "720p", "hd"):
-            short_edge = 720
-        elif key in ("1080", "1080p", "fullhd", "fhd", "full hd", "full"):
-            short_edge = 1080
-        elif key in ("1440", "1440p", "2k", "qhd"):
-            short_edge = 1440
-        elif key in ("2160", "2160p", "4k", "uhd"):
-            short_edge = 2160
-        else:
-            return None, None
-
-        if ratio:
-            target_scale = short_edge / min(ratio)
-            base_w = max(2, int((ratio[0] * target_scale) // 2 * 2))
-            base_h = max(2, int((ratio[1] * target_scale) // 2 * 2))
-            if src_w <= base_w and src_h <= base_h:
-                fit_scale = min(src_w / ratio[0], src_h / ratio[1])
-                base_w = max(2, int((ratio[0] * fit_scale) // 2 * 2))
-                base_h = max(2, int((ratio[1] * fit_scale) // 2 * 2))
-            return base_w, base_h
-
-        portrait = src_h > src_w
-        base_w, base_h = (short_edge, int(round(short_edge * 16 / 9))) if portrait else (int(round(short_edge * 16 / 9)), short_edge)
-        if src_w <= base_w and src_h <= base_h:
-            return None, None
-        return base_w, base_h
+        from app.output_geometry import resolve_output_dimensions
+        return resolve_output_dimensions(*self.engine_runtime.get_video_dimensions(video_path), output_quality, output_ratio)
 
     def _resolve_target_fps(self, output_fps: str):
         key = str(output_fps or "source").strip().lower()
@@ -122,14 +78,8 @@ class ExportWorkflow:
         return fps if fps > 0 else None
 
     def _resolve_target_ratio(self, output_ratio: str):
-        key = str(output_ratio or "source").strip().lower()
-        ratio_map = {
-            "16:9": (16, 9),
-            "9:16": (9, 16),
-            "1:1": (1, 1),
-            "4:3": (4, 3),
-        }
-        return ratio_map.get(key)
+        from app.output_geometry import canvas_ratio
+        return canvas_ratio(output_ratio)
 
     def _build_temp_mux_path(self, project_temp_dir: str = "") -> str:
         tmp_dir = str(project_temp_dir or "").strip() or os.path.join(self.workspace_root, "temp")
@@ -369,8 +319,8 @@ class ExportWorkflow:
                                     "font_bold": bool(layer.get("font_bold", False)),
                                     "font_italic": bool(layer.get("font_italic", False)),
                                     "font_underline": bool(layer.get("font_underline", False)),
-                                    "x": max(0.0, min(1.0, float(transform.get("x", 0.5)))),
-                                    "y": max(0.0, min(1.0, float(transform.get("y", 0.5)))),
+                                    "x": float(transform.get("x", 0.5)),
+                                    "y": float(transform.get("y", 0.5)),
                                     "start": max(0.0, float(layer.get("start", 0.0))),
                                     "end": max(0.0, float(layer.get("end", 0.0))),
                                 })
@@ -637,28 +587,16 @@ class ExportWorkflow:
         # after the ASS pass so preview and export share one coordinate system.
         source_w, source_h = self.engine_runtime.get_video_dimensions(video_path)
         ass_style = dict(subtitle_style)
+        from app.subtitle_presentation import subtitle_to_canvas, secondary_style, style_from_controls
+        canvas_size = (target_w or source_w, target_h or source_h)
         if presentation["mode"] == "bilingual":
-            from app.subtitle_presentation import canvas_to_source, secondary_style, style_from_controls
             secondary = presentation.get("secondary_render_style") or style_from_controls(presentation["styles"].get("secondary", {}), secondary_style(subtitle_style))
-            presentation["secondary_render_style"] = canvas_to_source(secondary, (source_w, source_h),
-                (target_w or source_w, target_h or source_h), output_scale_mode, (output_fill_focus_x, output_fill_focus_y))
-        if ass_style.get("custom_position_enabled") and target_w and target_h:
-            try:
-                mode_key = str(output_scale_mode or "fit").strip().lower()
-                fx = max(0.0, min(1.0, float(output_fill_focus_x)))
-                fy = max(0.0, min(1.0, float(output_fill_focus_y)))
-                scale = max(target_w / source_w, target_h / source_h) if mode_key == "fill" else min(target_w / source_w, target_h / source_h)
-                displayed_w, displayed_h = source_w * scale, source_h * scale
-                offset_x = (target_w - displayed_w) * (fx if mode_key == "fill" else 0.5)
-                offset_y = (target_h - displayed_h) * (fy if mode_key == "fill" else 0.5)
-                x_canvas = float(ass_style.get("custom_position_x", 50.0)) * target_w / 100.0
-                y_canvas = float(ass_style.get("custom_position_y", 86.0)) * target_h / 100.0
-                ass_style["custom_position_x"] = max(0.0, min(100.0, (x_canvas - offset_x) * 100.0 / displayed_w))
-                ass_style["custom_position_y"] = max(0.0, min(100.0, (y_canvas - offset_y) * 100.0 / displayed_h))
-            except (TypeError, ValueError, ZeroDivisionError):
-                pass
+            presentation["secondary_render_style"] = subtitle_to_canvas(secondary, (source_w, source_h), canvas_size,
+                output_scale_mode, (output_fill_focus_x, output_fill_focus_y))
+        ass_style = subtitle_to_canvas(ass_style, (source_w, source_h), canvas_size,
+            output_scale_mode, (output_fill_focus_x, output_fill_focus_y))
         ass_path = self._ensure_subtitle_ass(
-            ass_path, srt_path, ass_style, video_path, source_w, source_h
+            "", srt_path, ass_style, video_path, *canvas_size
         )
 
         state = self._load_state(project_state_path)
@@ -680,20 +618,12 @@ class ExportWorkflow:
         # normalized positions are source-video coordinates, so use the same
         # Fit/Fill transform as the preview before Qt renders the bitmap.
         if target_w and target_h and text_layers:
-            # Text x/y is a centre anchor (unlike rectangle layers' top-left).
-            sw, sh = self.engine_runtime.get_video_dimensions(video_path)
-            try:
-                scale = max(target_w / float(sw), target_h / float(sh)) if str(output_scale_mode).lower() == "fill" else min(target_w / float(sw), target_h / float(sh))
-                dw, dh = float(sw) * scale, float(sh) * scale
-                fx = max(0.0, min(1.0, float(output_fill_focus_x)))
-                fy = max(0.0, min(1.0, float(output_fill_focus_y)))
-                ox = (target_w - dw) * (fx if str(output_scale_mode).lower() == "fill" else 0.5)
-                oy = (target_h - dh) * (fy if str(output_scale_mode).lower() == "fill" else 0.5)
-                for layer in text_layers:
-                    layer["x"] = (float(layer.get("x", 0.5)) * dw + ox) / float(target_w)
-                    layer["y"] = (float(layer.get("y", 0.5)) * dh + oy) / float(target_h)
-            except (TypeError, ValueError, ZeroDivisionError):
-                pass
+            from app.output_geometry import source_point_to_canvas
+            source_size = self.engine_runtime.get_video_dimensions(video_path)
+            for layer in text_layers:
+                layer["x"], layer["y"] = source_point_to_canvas(
+                    layer.get("x", .5), layer.get("y", .5), source_size, (target_w, target_h),
+                    output_scale_mode, (output_fill_focus_x, output_fill_focus_y))
         text_image_layers = self._build_text_layer_images(text_layers, project_temp_dir, render_w or 1920, render_h or 1080)
         print(f"[Export] Extracted {len(mask_regions)} mask(s), {len(logo_layers)} logo(s), {len(text_layers)} text layer(s), {len(blur_regions)} blur(s)")
 

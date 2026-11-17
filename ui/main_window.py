@@ -1295,7 +1295,8 @@ class VideoTranslatorGUI(QMainWindow):
         layer = next((item for item in self._text_layers() if item.id == layer_id), None)
         if layer is None:
             return
-        layer.transform.x, layer.transform.y = float(x), float(y)
+        from ui.utils.video_geometry import canvas_to_source_point
+        layer.transform.x, layer.transform.y = canvas_to_source_point(self.video_view, float(x), float(y))
         self.schedule_timeline_project_persist()
 
     def _configure_local_voice_mode_ui(self):
@@ -6377,12 +6378,14 @@ class VideoTranslatorGUI(QMainWindow):
         return False
 
     def on_output_ratio_changed(self, *_args):
+        previous_framing = self._capture_layer_framing()
         if hasattr(self, "video_view") and hasattr(self.video_view, "set_preview_aspect_ratio"):
             self.video_view.set_preview_aspect_ratio(self.get_output_ratio_key())
         if hasattr(self, "video_view") and hasattr(self.video_view, "set_preview_scale_mode"):
             self.video_view.set_preview_scale_mode(self.get_output_scale_mode_key())
         self._sync_preview_framing_to_player()
         self._sync_preview_output_canvas_dimensions()
+        self._restore_layer_framing(previous_framing)
         self.update_subtitle_preview_style()
         # update_subtitle_preview_style establishes the new output canvas
         # render dimensions. Refresh Text afterwards so it cannot reuse the
@@ -6392,10 +6395,12 @@ class VideoTranslatorGUI(QMainWindow):
         self.refresh_ui_state()
 
     def on_output_scale_mode_changed(self, *_args):
+        previous_framing = self._capture_layer_framing()
         if hasattr(self, "video_view") and hasattr(self.video_view, "set_preview_scale_mode"):
             self.video_view.set_preview_scale_mode(self.get_output_scale_mode_key())
         self._sync_preview_framing_to_player()
         self._sync_preview_output_canvas_dimensions()
+        self._restore_layer_framing(previous_framing)
         self.update_subtitle_preview_style()
         self._refresh_text_layer_preview(getattr(getattr(self, "timeline", None), "_selected_layer_id", ""))
         self.apply_preview_blur_region()
@@ -6407,12 +6412,99 @@ class VideoTranslatorGUI(QMainWindow):
         self.apply_preview_blur_region()
         self.refresh_ui_state()
 
+    def _capture_layer_framing(self):
+        view = getattr(self, "video_view", None)
+        if view is None or getattr(self, "_project_loading_in_progress", False):
+            return None
+        from PySide6.QtCore import QRectF
+        source = QRectF(view.get_video_content_rect())
+        dimensions = (int(getattr(view, "subtitle_render_width", 0) or getattr(view, "video_source_width", 0) or 1920),
+                      int(getattr(view, "subtitle_render_height", 0) or getattr(view, "video_source_height", 0) or 1080))
+        project_id = getattr(getattr(self, "current_project_state", None), "project_id", "")
+        if getattr(view, "_authored_canvas_project", None) == project_id:
+            dimensions = getattr(view, "_authored_canvas_dimensions", dimensions)
+        key = (str(getattr(view, "preview_aspect_key", "source")),
+               str(getattr(view, "preview_scale_mode", "fit")), *dimensions,
+               False)
+        from ui.utils.video_geometry import layer_bounds_rect
+        return source, layer_bounds_rect(view), dimensions, key
+
+    def _restore_layer_framing(self, previous):
+        if previous is not None and hasattr(self, "video_view"):
+            self.video_view._authored_canvas_dimensions = self._subtitle_render_dimensions()
+            self.video_view._authored_canvas_project = getattr(getattr(self, "current_project_state", None), "project_id", "")
+        auto = getattr(self, "auto_layer_reframe_cb", None)
+        if auto is not None and not auto.isChecked():
+            return
+        if previous is None:
+            return
+        model = getattr(getattr(self, "timeline", None), "_timeline", None)
+        if model is None:
+            return
+        from ui.utils.layer_framing import reframe_layers, subtitle_layout, lookup_layout
+        source = self.video_view.get_video_content_rect()
+        from ui.utils.video_geometry import layer_bounds_rect
+        visible = layer_bounds_rect(self.video_view)
+        old_source, old_visible, old_dimensions = previous[:3]
+        width, height = self._subtitle_render_dimensions()
+        if (old_dimensions == (width, height) and old_source == source
+                and all(abs(a - b) < .5 for a, b in zip(old_visible.getRect(), visible.getRect()))):
+            return
+        import json, copy
+        limited = False
+        old_layout = previous[3][1:] if len(previous) > 3 else ("fit", *old_dimensions)
+        if len(old_layout) == 3:
+            old_layout = (*old_layout, limited)
+        # Source-relative layouts from older builds are not interchangeable
+        # with whole-canvas layouts, even when resolution/Fit match.
+        old_key = json.dumps(("canvas-v2", *old_layout))
+        new_key = json.dumps(("canvas-v2", str(getattr(self.video_view, "preview_scale_mode", "fit")), width, height, limited))
+        factor = min(width / max(1, old_dimensions[0]), height / max(1, old_dimensions[1]))
+        changed = reframe_layers(model.tracks, old_source, old_visible, source, visible,
+            font_scale=factor, pixel_scale=self.video_view.get_preview_canvas_rect().height() / max(1, height),
+            old_key=old_key, new_key=new_key)
+        presentation = getattr(self, "subtitle_presentation_controller", None)
+        if presentation is not None and old_key != new_key:
+            presentation.capture_style()
+            presentation.timer.stop()
+            layouts = presentation.cfg.setdefault("canvas_style_layouts", {})
+            locked_roles = {"secondary" if track.name == "TS2" else "primary" for track in model.tracks
+                            if track.name in ("TS1", "TS2", "A2 Dub") and (track.locked or any(layer.locked for layer in track.layers))}
+            for role, style in presentation.cfg["styles"].items():
+                if role in locked_roles:
+                    continue
+                saved_styles = layouts.setdefault(role, {})
+                saved_styles[old_key] = subtitle_layout(style)
+                saved = lookup_layout(saved_styles, new_key)
+                if isinstance(saved, dict):
+                    style.update(copy.deepcopy(saved))
+                    continue
+                for key in ("size", "background_padding", "background_radius"):
+                    if key in style:
+                        style[key] = max(1 if key == "size" else 0, round(style[key] * factor))
+                for key in ("margin_v", "x_offset"):
+                    if key in style.get("position", {}):
+                        style["position"][key] = round(style["position"][key] * factor)
+            presentation.apply_controls(presentation.cfg["styles"][presentation.role])
+            presentation.capture_style()
+            presentation._committed_styles = copy.deepcopy(presentation.cfg["styles"])
+            presentation.persist()
+            changed = True
+        if changed:
+            self._timed_layer_preview_signature = None
+            self.refresh_timed_layer_preview()
+            self.schedule_timeline_project_persist()
+
     def reset_preview_framing(self):
         if hasattr(self, "video_view") and hasattr(self.video_view, "reset_preview_fill_focus"):
             self.video_view.reset_preview_fill_focus()
         self._sync_preview_framing_to_player()
         self.apply_preview_blur_region()
         self.refresh_ui_state()
+
+    def _can_use_native_subtitle_preview(self):
+        from ui.utils.video_geometry import native_subtitle_preview
+        return native_subtitle_preview(self.video_view)
 
     def get_audio_handling_mode(self):
         if not hasattr(self, "audio_handling_combo"):
@@ -7066,29 +7158,24 @@ class VideoTranslatorGUI(QMainWindow):
 
     def on_subtitle_font_scale_changed(self, _index: int = -1):
         """Translate the friendly percentage picker into the stored font size."""
-        combo = getattr(self, "subtitle_font_scale_combo", None)
+        control = getattr(self, "subtitle_font_scale_spin", None)
         spin = getattr(self, "subtitle_font_size_spin", None)
-        if combo is None or spin is None:
+        if control is None or spin is None:
             return
-        percent = int(combo.currentData() or 100)
+        percent = float(control.value())
         spin.setValue(max(spin.minimum(), min(spin.maximum(), round(60 * percent / 100.0))))
+        self.sync_subtitle_font_scale_control()
 
     def sync_subtitle_font_scale_control(self, size: int | None = None):
         """Keep the visible selector honest when a preset/project sets a size."""
-        combo = getattr(self, "subtitle_font_scale_combo", None)
+        control = getattr(self, "subtitle_font_scale_spin", None)
         spin = getattr(self, "subtitle_font_size_spin", None)
-        if combo is None or spin is None:
+        if control is None or spin is None:
             return
         size = int(spin.value() if size is None else size)
-        choices = [int(combo.itemData(index)) for index in range(combo.count())]
-        if not choices:
-            return
-        nearest = min(choices, key=lambda percent: abs((60 * percent / 100.0) - size))
-        index = combo.findData(nearest)
-        if index >= 0 and index != combo.currentIndex():
-            was_blocked = combo.blockSignals(True)
-            combo.setCurrentIndex(index)
-            combo.blockSignals(was_blocked)
+        was_blocked = control.blockSignals(True)
+        control.setValue(size * 100 / 60)
+        control.blockSignals(was_blocked)
 
     def _subtitle_render_dimensions(self) -> tuple[int, int]:
         """Return the canvas dimensions the export ASS file is authored for."""
@@ -7222,41 +7309,19 @@ class VideoTranslatorGUI(QMainWindow):
         self.sync_live_subtitle_preview()
         self.schedule_auto_frame_preview()
 
-    def _set_live_subtitle_effects(self, segment: dict | None, position_ms: int = 0):
-        """Feed the editable preview layer the same cue effects used at export."""
+    def _set_live_subtitle_effects(self, segment: dict | None, position_ms: int | None = None):
+        """Keep effect timing tied to the cue during playback and UI refreshes."""
         if not hasattr(self, "video_view"):
             return
-        item = self.video_view.subtitle_item
-        segment = segment or {}
-        preset = self.get_subtitle_preset_config()
-        text = str(segment.get("text", "") or "")
-        mode = current_source_text(self.subtitle_highlight_mode_combo).strip() if hasattr(self, "subtitle_highlight_mode_combo") else "Auto"
-        phrases = []
-        if mode in ("Auto", "Auto + Manual"):
-            phrases.extend(segment.get("auto_highlights", []) or [])
-        if mode in ("Manual", "Auto + Manual"):
-            phrases.extend(segment.get("manual_highlights", []) or [])
-        animation = current_source_text(self.subtitle_animation_combo).strip().lower() if hasattr(self, "subtitle_animation_combo") else ""
-        animation_duration = max(0.01, float(self.subtitle_animation_time_spin.value())) if hasattr(self, "subtitle_animation_time_spin") else 0.22
-        start = float(segment.get("start", 0.0) or 0.0)
-        end = max(start + 0.01, float(segment.get("end", start + 0.01) or start + 0.01))
-        elapsed = max(0.0, float(position_ms) / 1000.0 - start)
-        animation_progress = min(1.0, elapsed / animation_duration)
-        if animation == "fade out":
-            animation_progress = min(1.0, max(0.0, float(position_ms) / 1000.0 - (end - animation_duration)) / animation_duration)
-        karaoke_index = -1
-        if animation == "word highlight karaoke" and text:
-            words = [word for word in text.split() if word]
-            progress = max(0.0, min(0.999, (float(position_ms) / 1000.0 - start) / (end - start)))
-            karaoke_index = min(len(words) - 1, int(progress * len(words))) if words else -1
-        item.set_effects(
-            highlight_color=self._highlight_color_hex() or preset.get("highlight_color", "#FFD400"),
-            highlight_phrases=phrases,
-            karaoke_word_index=karaoke_index,
-            auto_keyword_highlight=bool(self.subtitle_keyword_highlight_cb.isChecked()) if hasattr(self, "subtitle_keyword_highlight_cb") else False,
-            animation_style=animation,
-            animation_progress=animation_progress,
-        )
+        from ui.utils.subtitle_effects import preview_effects
+        if position_ms is None:
+            position_ms = int(self.media_player.position() or 0)
+        style = dict(animation=current_source_text(self.subtitle_animation_combo),
+            animation_duration=float(self.subtitle_animation_time_spin.value()),
+            highlight_mode=current_source_text(self.subtitle_highlight_mode_combo),
+            highlight_color=self._highlight_color_hex() or "#FFD400",
+            auto_keyword_highlight=self.subtitle_keyword_highlight_cb.isChecked())
+        self.video_view.subtitle_item.set_effects(**preview_effects(segment, style, position_ms))
 
     def on_single_line_toggled(self, checked: bool):
         self.update_subtitle_preview_style()
@@ -9137,6 +9202,8 @@ class VideoTranslatorGUI(QMainWindow):
             if not self._layer_is_active_at_preview_time(layer):
                 continue
             transform = getattr(layer, "transform", None)
+            from ui.utils.video_geometry import source_to_canvas
+            x, y = source_to_canvas(self.video_view, getattr(transform, "x", .5), getattr(transform, "y", .5))
             items.append({
                 "id": layer.id, "text": getattr(layer, "text", ""),
                 "font_name": getattr(layer, "font_name", "Arial"),
@@ -9151,10 +9218,17 @@ class VideoTranslatorGUI(QMainWindow):
                 # the preview canvas just like glyph size, so export and the
                 # editor use the same physical box geometry.
                 "padding_scale": preview_scale,
-                "x": getattr(transform, "x", .5) if transform else .5,
-                "y": getattr(transform, "y", .5) if transform else .5,
+                "x": x,
+                "y": y,
             })
         self.video_view.set_text_layers(items, effective_active_id)
+        size_control = getattr(self, "text_inspector_size_spin", None)
+        selected_text = next((layer for layer in self._text_layers()
+                              if layer.id == getattr(self.timeline, "_selected_layer_id", "")), None)
+        if size_control is not None and selected_text is not None:
+            blocked = size_control.blockSignals(True)
+            size_control.setValue(selected_text.font_size * 100 / 60)
+            size_control.blockSignals(blocked)
         if getattr(self.video_view, "text_overlay", None) is not None:
             self.video_view.text_overlay.set_editable(bool(is_editable))
 
@@ -9173,11 +9247,9 @@ class VideoTranslatorGUI(QMainWindow):
         self.text_inspector_font_combo.setCurrentText(font_name)
         self.text_inspector_font_combo.blockSignals(False)
         size = int(getattr(layer, "font_size", 60))
-        choices = [int(self.text_inspector_size_combo.itemData(i)) for i in range(self.text_inspector_size_combo.count())]
-        nearest = min(choices, key=lambda percent: abs(60 * percent / 100.0 - size))
-        self.text_inspector_size_combo.blockSignals(True)
-        self.text_inspector_size_combo.setCurrentIndex(self.text_inspector_size_combo.findData(nearest))
-        self.text_inspector_size_combo.blockSignals(False)
+        blocked = self.text_inspector_size_spin.blockSignals(True)
+        self.text_inspector_size_spin.setValue(size * 100 / 60)
+        self.text_inspector_size_spin.blockSignals(blocked)
         color = str(getattr(layer, "font_color", "#FFFFFF"))
         self.text_inspector_color_btn.setText(color)
         self.text_inspector_color_btn.setStyleSheet(f"background-color: {color}; color: #fff;")
@@ -9225,8 +9297,12 @@ class VideoTranslatorGUI(QMainWindow):
         def size_changed(_index):
             layer = selected()
             if layer:
-                percent = int(self.text_inspector_size_combo.currentData() or 100)
-                layer.font_size = int(round(60 * percent / 100.0)); changed()
+                percent = self.text_inspector_size_spin.value()
+                layer.font_size = max(1, min(1000, int(round(60 * percent / 100.0))))
+                blocked = self.text_inspector_size_spin.blockSignals(True)
+                self.text_inspector_size_spin.setValue(layer.font_size * 100 / 60)
+                self.text_inspector_size_spin.blockSignals(blocked)
+                changed()
         def font_changed(value):
             layer = selected()
             if layer: layer.font_name = str(value); changed()
@@ -9255,7 +9331,7 @@ class VideoTranslatorGUI(QMainWindow):
                 self.text_inspector_background_opacity_value.setText(f"{value}%")
                 changed()
         self.text_inspector_content.textChanged.connect(content_changed)
-        self.text_inspector_size_combo.currentIndexChanged.connect(size_changed)
+        self.text_inspector_size_spin.valueChanged.connect(size_changed)
         self.text_inspector_font_combo.currentTextChanged.connect(font_changed)
         self.text_inspector_color_btn.clicked.connect(color_changed)
         self.text_inspector_background_btn.clicked.connect(background_changed)
@@ -15218,20 +15294,9 @@ class VideoTranslatorGUI(QMainWindow):
         source_height = max(1, int(getattr(self.video_view, "video_source_height", 0) or 1080))
         canvas_width, canvas_height = self._subtitle_render_dimensions()
         subtitle_style = copy.deepcopy(self.get_subtitle_export_style(segments=segments))
-        if subtitle_style.get("custom_position_enabled") and (canvas_width != source_width or canvas_height != source_height):
-            try:
-                scale_mode = self.get_output_scale_mode_key()
-                focus_x, focus_y = self.get_output_fill_focus()
-                scale = max(canvas_width / source_width, canvas_height / source_height) if scale_mode == "fill" else min(canvas_width / source_width, canvas_height / source_height)
-                displayed_w, displayed_h = source_width * scale, source_height * scale
-                offset_x = (canvas_width - displayed_w) * (focus_x if scale_mode == "fill" else 0.5)
-                offset_y = (canvas_height - displayed_h) * (focus_y if scale_mode == "fill" else 0.5)
-                x_canvas = float(subtitle_style.get("custom_position_x", 50.0)) * canvas_width / 100.0
-                y_canvas = float(subtitle_style.get("custom_position_y", 86.0)) * canvas_height / 100.0
-                subtitle_style["custom_position_x"] = max(0.0, min(100.0, (x_canvas - offset_x) * 100.0 / displayed_w))
-                subtitle_style["custom_position_y"] = max(0.0, min(100.0, (y_canvas - offset_y) * 100.0 / displayed_h))
-            except (TypeError, ValueError, ZeroDivisionError):
-                pass
+        from app.subtitle_presentation import canvas_to_source
+        subtitle_style = canvas_to_source(subtitle_style, (source_width, source_height),
+            (canvas_width, canvas_height), self.get_output_scale_mode_key(), self.get_output_fill_focus())
         signature = (video_path, source_width, source_height, repr(segments), repr(subtitle_style))
         return {
             "segments": copy.deepcopy(list(segments or [])),
@@ -15320,6 +15385,9 @@ class VideoTranslatorGUI(QMainWindow):
         self._live_preview_signature = signature
         self.processed_artifacts["subtitle_preview_srt"] = srt_path
         self.processed_artifacts["subtitle_preview_ass"] = ass_path
+        if not self._can_use_native_subtitle_preview():
+            self.sync_live_subtitle_preview()
+            return
         try:
             self.media_player.set_subtitle_file(ass_path)
             self._loaded_live_ass_path = ass_path
@@ -15393,20 +15461,9 @@ class VideoTranslatorGUI(QMainWindow):
         # its Fit/Fill presentation transform. Convert custom canvas-relative
         # anchors back into source coordinates so the visible result follows
         # the same point after framing.
-        if subtitle_style.get("custom_position_enabled") and (canvas_width != source_width or canvas_height != source_height):
-            try:
-                scale_mode = self.get_output_scale_mode_key()
-                focus_x, focus_y = self.get_output_fill_focus()
-                scale = max(canvas_width / source_width, canvas_height / source_height) if scale_mode == "fill" else min(canvas_width / source_width, canvas_height / source_height)
-                displayed_w, displayed_h = source_width * scale, source_height * scale
-                offset_x = (canvas_width - displayed_w) * (focus_x if scale_mode == "fill" else 0.5)
-                offset_y = (canvas_height - displayed_h) * (focus_y if scale_mode == "fill" else 0.5)
-                x_canvas = float(subtitle_style.get("custom_position_x", 50.0)) * canvas_width / 100.0
-                y_canvas = float(subtitle_style.get("custom_position_y", 86.0)) * canvas_height / 100.0
-                subtitle_style["custom_position_x"] = max(0.0, min(100.0, (x_canvas - offset_x) * 100.0 / displayed_w))
-                subtitle_style["custom_position_y"] = max(0.0, min(100.0, (y_canvas - offset_y) * 100.0 / displayed_h))
-            except (TypeError, ValueError, ZeroDivisionError):
-                pass
+        from app.subtitle_presentation import canvas_to_source
+        subtitle_style = canvas_to_source(subtitle_style, (source_width, source_height),
+            (canvas_width, canvas_height), self.get_output_scale_mode_key(), self.get_output_fill_focus())
         video_width, video_height = source_width, source_height
         preview_signature = (
             video_path,
@@ -15622,7 +15679,7 @@ class VideoTranslatorGUI(QMainWindow):
                 active_index = self._find_active_segment_index(position_ms, segments)
                 self.timeline.set_active_segment_index(active_index)
                 self._follow_playback_subtitle_selection(active_index, presentation=presentation, position_ms=position_ms)
-                if getattr(self, "performance_mode", False) or not hasattr(self.media_player, "_sub_track_id"):
+                if not self._can_use_native_subtitle_preview() or getattr(self, "performance_mode", False) or not hasattr(self.media_player, "_sub_track_id"):
                     presentation.fallback_preview(self.get_active_segments(), position_ms)
                 else:
                     presentation.sync_drag_target(segments)
@@ -15728,7 +15785,10 @@ class VideoTranslatorGUI(QMainWindow):
                 presentation.hide_overlays()
                 return
             segments, _ = self._resolve_live_preview_segments()
-            if getattr(self, "performance_mode", False) or not hasattr(self.media_player, "_sub_track_id"):
+            if not self._can_use_native_subtitle_preview() or getattr(self, "performance_mode", False) or not hasattr(self.media_player, "_sub_track_id"):
+                self.media_player.clear_subtitle()
+                self._loaded_live_ass_path = ""
+                self._loaded_live_ass_signature = None
                 presentation.fallback_preview(segments)
                 return
             _, ass = self._write_live_preview_assets(segments)
@@ -15758,6 +15818,7 @@ class VideoTranslatorGUI(QMainWindow):
         )
         can_render_libass = bool(
             not is_paused_subtitle_edit
+            and self._can_use_native_subtitle_preview()
             and getattr(self, "_use_libass_live_preview", False)
             and hasattr(self.media_player, "set_subtitle_file")
             and hasattr(self.media_player, "_sub_track_id")

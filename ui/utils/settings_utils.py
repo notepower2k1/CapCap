@@ -183,7 +183,8 @@ def load_user_settings(gui):
         gui.output_fps_combo.setCurrentIndex(max(0, idx))
     if hasattr(gui, "output_ratio_combo"):
         saved_r = str(s.value("output_ratio", "") or "")
-        idx = gui.output_ratio_combo.findData(saved_r) if saved_r else 0
+        from widgets.output_canvas import ensure_canvas_item
+        idx = ensure_canvas_item(gui.output_ratio_combo, saved_r) if saved_r else 0
         gui.output_ratio_combo.setCurrentIndex(max(0, idx))
     if hasattr(gui, "output_scale_mode_combo"):
         saved_s = str(s.value("output_scale_mode", "") or "")

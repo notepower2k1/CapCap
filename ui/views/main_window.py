@@ -239,7 +239,7 @@ def _connect_ui_signals(gui):
         gui.left_panel_stack.currentChanged.connect(gui.on_left_panel_workflow_changed)
     gui.output_mode_combo.currentTextChanged.connect(gui.on_output_mode_changed)
     if hasattr(gui, "output_quality_combo"):
-        gui.output_quality_combo.currentIndexChanged.connect(gui.refresh_ui_state)
+        gui.output_quality_combo.currentIndexChanged.connect(gui.on_output_ratio_changed)
     gui.audio_handling_combo.currentTextChanged.connect(gui.refresh_ui_state)
     if hasattr(gui, "audio_mix_preset_combo"):
         gui.audio_mix_preset_combo.currentIndexChanged.connect(
@@ -327,8 +327,8 @@ def _connect_ui_signals(gui):
         gui.anchor_inspector_cb.toggled.connect(gui.on_anchor_inspector_toggled)
     gui.subtitle_font_combo.currentTextChanged.connect(gui.update_subtitle_preview_style)
     gui.subtitle_font_size_spin.valueChanged.connect(gui.update_subtitle_preview_style)
-    if hasattr(gui, "subtitle_font_scale_combo"):
-        gui.subtitle_font_scale_combo.currentIndexChanged.connect(gui.on_subtitle_font_scale_changed)
+    if hasattr(gui, "subtitle_font_scale_spin"):
+        gui.subtitle_font_scale_spin.valueChanged.connect(gui.on_subtitle_font_scale_changed)
         gui.subtitle_font_size_spin.valueChanged.connect(gui.sync_subtitle_font_scale_control)
     gui.subtitle_animation_combo.currentTextChanged.connect(gui.on_subtitle_animation_changed)
     gui.subtitle_bold_cb.toggled.connect(gui.update_subtitle_preview_style)

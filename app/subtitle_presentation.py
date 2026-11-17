@@ -182,15 +182,38 @@ def canvas_to_source(style, source_size, canvas_size, mode="fit", focus=(.5, .5)
     style = copy.deepcopy(style)
     sw, sh = source_size
     cw, ch = canvas_size
-    if not style.get("custom_position_enabled") or not all((sw, sh, cw, ch)):
+    if not all((sw, sh, cw, ch)):
         return style
     fill = mode == "fill"
     scale = max(cw / sw, ch / sh) if fill else min(cw / sw, ch / sh)
     dw, dh = sw * scale, sh * scale
     ox, oy = (cw - dw) * (focus[0] if fill else .5), (ch - dh) * (focus[1] if fill else .5)
-    style["custom_position_x"] = max(0., min(100., (style.get("custom_position_x", 50) * cw / 100 - ox) * 100 / dw))
-    style["custom_position_y"] = max(0., min(100., (style.get("custom_position_y", 86) * ch / 100 - oy) * 100 / dh))
+    left, top = max(0., ox), max(0., oy)
+    vw, vh = min(cw, ox + dw) - left, min(ch, oy + dh) - top
+    if style.get("custom_position_enabled"):
+        x, y = style.get("custom_position_x", 50) / 100, style.get("custom_position_y", 86) / 100
+    else:
+        alignment = int(style.get("alignment", 2))
+        x = .05 if alignment == 1 else .95 if alignment == 3 else .5
+        margin = float(style.get("margin_v", 30)) + float(style.get("font_size", 60)) * .6
+        y = min(.95, margin / max(1., vh)) if alignment == 8 else .5 if alignment == 5 else max(.05, 1 - margin / max(1., vh))
+        x += float(style.get("x_offset", 0)) / max(1., vw)
+    style["custom_position_enabled"] = True
+    style["custom_position_x"] = max(0., min(100., (left + x * vw - ox) * 100 / dw))
+    style["custom_position_y"] = max(0., min(100., (top + y * vh - oy) * 100 / dh))
+    for field in ("font_size", "outline_width", "shadow_depth", "background_padding", "background_radius", "margin_v", "x_offset"):
+        if field in style:
+            style[field] = float(style[field]) / scale
+    if "font_size" in style:
+        style["font_size"] = max(1, round(style["font_size"]))
     return style
+
+
+def subtitle_to_canvas(style, source_size, canvas_size, mode="fit", focus=(.5, .5)):
+    """Author ASS after the video canvas transform, including letterbox areas."""
+    result = copy.deepcopy(style)
+    result.pop("limit_layers_to_video", None)  # Ignore the retired project option.
+    return result
 
 
 def render_ass(rows, style, width, height, path):

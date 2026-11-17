@@ -316,8 +316,9 @@ class QuickPreviewWorker(QThread):
                 empty_srt = os.path.join(temp_dir, f"empty_clip_{stamp}.srt")
                 with open(empty_srt, "w", encoding="utf-8") as f:
                     f.write("")
-                empty_ass = os.path.join(temp_dir, f"empty_clip_{stamp}.ass")
-                srt_to_ass(empty_srt, empty_ass)
+                from video_processor import get_video_dimensions
+                source_w, source_h = get_video_dimensions(current_video)
+                empty_ass = srt_to_ass(empty_srt, self.target_width or source_w, self.target_height or source_h)
                 ok = embed_ass_subtitles(
                     current_video,
                     empty_ass,
@@ -325,6 +326,8 @@ class QuickPreviewWorker(QThread):
                     blur_region=self.blur_regions,
                     mask_regions=self.mask_regions,
                     logo_layers=self.logo_layers,
+                    text_ass_path=self.text_ass_path,
+                    text_image_layers=self.text_image_layers,
                     target_width=self.target_width,
                     target_height=self.target_height,
                     output_scale_mode=self.output_scale_mode,

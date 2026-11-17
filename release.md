@@ -11,12 +11,20 @@
 
 ## Cải tiến
 
+- **Bố cục layer:** Thêm Tự chỉnh layer; chữ, logo và phụ đề dùng toàn canvas và có thể đặt trên viền đen. Bố cục và lựa chọn tự chỉnh lưu cùng cấu hình project.
+
+- **Tỉ lệ video:** Giữ đúng tỉ lệ Source khi thay độ phân giải; dùng chung cách tính cho preview/export. Cho nhập tỉ lệ hoặc kích thước canvas tùy ý và khôi phục theo cấu hình project/hàng đợi.
+
 - **Dịch GPT/Gemini Web:** Cho phép tối đa bốn batch song song, tái sử dụng cửa sổ dịch và chờ tín hiệu hoàn tất của từng lượt. Khi fallback, giữ các batch đã dịch thành công. Nếu extension đã cài, hãy reload extension sau khi cập nhật.
 - **Phụ đề phụ:** Dùng lại màn chọn dịch vụ, kiểm tra prompt và popup tiến trình; hỗ trợ hủy và báo lý do fallback. Tối ưu inspector, timeline cho project lớn và phân biệt track phụ, layer bị khóa.
 - **OCR:** Tối ưu xử lý video để cải thiện tốc độ nhận dạng.
 - **CapCut:** Cải thiện lựa chọn ngôn ngữ STT, giữ timestamp từ, kiểm tra kết quả TTS và bổ sung log theo job/chunk.
 
 ## Sửa lỗi
+
+- Không khôi phục nhầm bố cục layer bám vùng hình từ bản cũ khi chuyển sang cách bố trí theo toàn canvas.
+
+- Sửa Fast Video Preview lỗi worker `None`; đồng bộ kích thước phụ đề và vị trí text với canvas export, giữ cả text overlay trong chế độ chỉ xuất giọng đọc.
 
 - Retry có giới hạn khi GPT/Gemini trả định dạng sai; bổ sung log điều tra, xử lý focus và nhắc giữ cửa sổ dịch hiển thị.
 - Retry lỗi tạm thời khi upload hoặc chờ CapCut STT; chia nhỏ đoạn timeout khi cần và giữ kết quả đã hoàn tất.

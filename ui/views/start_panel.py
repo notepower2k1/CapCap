@@ -392,6 +392,10 @@ def build_start_group(gui, left_layout):
     gui.output_ratio_combo.addItem("4:3", "4:3")
     gui.output_ratio_combo.currentIndexChanged.connect(gui.on_output_ratio_changed)
     output_ratio_row.addWidget(gui.output_ratio_combo)
+    from widgets.output_canvas import choose_custom_canvas
+    gui.custom_canvas_btn = QPushButton(t("Custom video canvas"))
+    gui.custom_canvas_btn.clicked.connect(lambda: choose_custom_canvas(gui))
+    output_ratio_row.addWidget(gui.custom_canvas_btn)
     output_quality_layout.addLayout(output_ratio_row)
     output_scale_row = QVBoxLayout()
     output_scale_row.addWidget(QLabel("Canvas"))
@@ -405,6 +409,9 @@ def build_start_group(gui, left_layout):
     gui.reset_framing_btn.hide()
     output_scale_row.addWidget(gui.reset_framing_btn)
     output_quality_layout.addLayout(output_scale_row)
+    gui.auto_layer_reframe_cb = QCheckBox(t("Auto-adjust layers"))
+    gui.auto_layer_reframe_cb.setChecked(True)
+    output_quality_layout.addWidget(gui.auto_layer_reframe_cb)
     output_layout.addWidget(output_quality_card)
 
     audio_cleanup_card, audio_cleanup_layout = _section_card()
@@ -820,12 +827,10 @@ def build_start_group(gui, left_layout):
     gui.subtitle_font_size_spin = ReliableSpinBox()
     # Retained as the canonical source-video size for projects/export. The
     # percentage picker below is the user-facing control.
-    gui.subtitle_font_size_spin.setRange(30, 90)
+    gui.subtitle_font_size_spin.setRange(1, 1000)
     gui.subtitle_font_size_spin.setValue(60)
-    gui.subtitle_font_scale_combo = QComboBox()
-    for percent in (50, 75, 100, 125, 150):
-        gui.subtitle_font_scale_combo.addItem(f"{percent}%", percent)
-    gui.subtitle_font_scale_combo.setCurrentIndex(2)
+    from widgets.font_controls import font_scale_input
+    gui.subtitle_font_scale_spin = font_scale_input()
     gui.subtitle_color_btn = QPushButton("White")
     gui.subtitle_color_hex = "#FFFFFF"
     gui.subtitle_color_btn.clicked.connect(gui.choose_subtitle_color)
@@ -873,7 +878,7 @@ def build_start_group(gui, left_layout):
     custom_controls_layout.addWidget(QLabel("Font:"), 0, 0)
     custom_controls_layout.addWidget(gui.subtitle_font_combo, 0, 1)
     custom_controls_layout.addWidget(QLabel("Size:"), 1, 0)
-    custom_controls_layout.addWidget(gui.subtitle_font_scale_combo, 1, 1)
+    custom_controls_layout.addWidget(gui.subtitle_font_scale_spin, 1, 1)
     custom_controls_layout.addWidget(QLabel("Text Color:"), 2, 0)
     custom_controls_layout.addWidget(gui.subtitle_color_btn, 2, 1)
     custom_controls_layout.addWidget(gui.subtitle_outline_cb, 3, 0)

@@ -384,21 +384,19 @@ class PreviewController:
         return hours * 3600.0 + minutes * 60.0 + seconds + centiseconds / 100.0
 
     def _build_fast_preview_subtitle_ass(self, start_seconds: float, duration_seconds: float) -> str:
-        """Rebase the live libass script to the short Fast Preview clip.
-
-        The editor and final export use the live ASS file as their source of truth.
-        Fast Preview trims the source video first, so its subtitle events need only a
-        time offset; copying the script otherwise keeps font metrics, positions,
-        speaker colours, boxes, and animation styles identical.
-        """
+        """Build current export-canvas subtitles, then rebase events to the clip."""
         try:
-            self.gui.sync_live_subtitle_preview()
-            live_ass_path = str(getattr(self.gui, "live_preview_ass_path", "") or "")
+            # Native MPV ASS is authored before Fit/Fill. Fast Preview, like
+            # export, burns subtitles after framing, so build fresh canvas ASS.
+            from app.subtitle_presentation import config, presentation_ass
+            style = self.gui.get_subtitle_export_style()
             presentation = getattr(self.gui, "subtitle_presentation_controller", None)
-            if isinstance(getattr(presentation, "cfg", None), dict) and presentation.cfg["mode"] != "single":
-                live_ass_path = presentation.render_preview(self.gui.get_active_segments(), timeline=True)
-            if not live_ass_path or not os.path.isfile(live_ass_path):
-                return ""
+            settings = config(style.get("subtitle_presentation"))
+            rows = list(self.gui.get_active_segments() or [])
+            secondary = presentation.timeline_rows() if presentation is not None else []
+            width, height = self.gui._subtitle_render_dimensions()
+            directory = os.path.join(self.gui.get_project_temp_dir("preview"), "fast_canvas_subtitles")
+            live_ass_path = presentation_ass(settings, rows, secondary, style, width, height, directory)
 
             clip_start = max(0.0, float(start_seconds))
             clip_end = clip_start + max(0.0, float(duration_seconds))
@@ -434,7 +432,7 @@ class PreviewController:
             output_path = os.path.join(preview_dir, f"fast_preview_subtitle_{int(time.time() * 1000)}.ass")
             with open(output_path, "w", encoding="utf-8") as handle:
                 handle.writelines(rebased_lines)
-            print(f"[Preview] Rebased {event_count} live ASS subtitle event(s) for Fast Preview.")
+            print(f"[Preview] Rebased {event_count} canvas ASS subtitle event(s) for Fast Preview.")
             return output_path
         except Exception as exc:
             print(f"[Preview] Could not build Fast Preview ASS from live preview: {exc}")
@@ -493,7 +491,7 @@ class PreviewController:
         print(f"[Preview] Added {len(events)} TextLayer event(s) to {ass_path}")
         return ass_path
 
-    def _build_fast_preview_text_images(self, text_layers, start_seconds, duration_seconds, width, height, temp_dir):
+    def _build_fast_preview_text_images(self, text_layers, start_seconds, duration_seconds, width, height, temp_dir, *, source_size=None, scale_mode="fit", focus=(.5, .5)):
         """Render editor TEXT layers with the shared Qt renderer for Fast Preview."""
         if not text_layers:
             return []
@@ -510,6 +508,11 @@ class PreviewController:
                 continue
             try:
                 payload = dict(layer)
+                if source_size:
+                    from app.output_geometry import source_point_to_canvas
+                    payload["x"], payload["y"] = source_point_to_canvas(
+                        layer.get("x", .5), layer.get("y", .5), source_size, (width, height), scale_mode, focus)
+
                 payload["font_size"] = max(1, int(round(float(layer["font_size"]) * 0.85)))
                 payload["padding_scale"] = 1.0
                 rendered = render_text_layer(payload, int(width), int(height))
@@ -692,25 +695,12 @@ class PreviewController:
         if target_w and target_h:
             return f"{target_w}x{target_h}"
 
-        key = str(output_quality or "source").strip().lower()
-        if key in ("", "source", "same", "original", "auto"):
-            return f"{src_w}x{src_h} (Source)"
+        return f"{src_w}x{src_h} (Source)"
 
-        portrait = src_h > src_w
-        if key in ("720", "720p", "hd"):
-            base_w, base_h = (720, 1280) if portrait else (1280, 720)
-        elif key in ("1080", "1080p", "fullhd", "fhd", "full hd", "full"):
-            base_w, base_h = (1080, 1920) if portrait else (1920, 1080)
-        elif key in ("1440", "1440p", "2k", "qhd"):
-            base_w, base_h = (1440, 2560) if portrait else (2560, 1440)
-        elif key in ("2160", "2160p", "4k", "uhd"):
-            base_w, base_h = (2160, 3840) if portrait else (3840, 2160)
-        else:
-            return f"{src_w}x{src_h}"
-
-        if src_w <= base_w and src_h <= base_h:
-            return f"{src_w}x{src_h} (Source)"
-        return f"{base_w}x{base_h}"
+    @staticmethod
+    def _source_video_dimensions(video_path):
+        from video_processor import get_video_dimensions
+        return get_video_dimensions(video_path)
 
     def _resolve_output_canvas_dimensions(self, video_path: str):
         try:
@@ -721,57 +711,8 @@ class PreviewController:
         if not src_w or not src_h:
             return None, None
 
-        output_quality = self.gui.get_output_quality_key()
-        output_ratio = self.gui.get_output_ratio_key()
-        ratio_map = {
-            "16:9": (16, 9),
-            "9:16": (9, 16),
-            "1:1": (1, 1),
-            "4:3": (4, 3),
-        }
-        ratio = ratio_map.get(str(output_ratio or "source").strip().lower())
-        quality_key = str(output_quality or "source").strip().lower()
-
-        if quality_key in ("", "source", "same", "original", "auto"):
-            if not ratio:
-                return None, None
-            src_ratio = src_w / src_h
-            target_ratio = ratio[0] / ratio[1]
-            if abs(src_ratio - target_ratio) < 0.001:
-                return None, None
-            fit_scale = min(src_w / ratio[0], src_h / ratio[1])
-            return (
-                max(2, int((ratio[0] * fit_scale) // 2 * 2)),
-                max(2, int((ratio[1] * fit_scale) // 2 * 2)),
-            )
-
-        if quality_key in ("720", "720p", "hd"):
-            short_edge = 720
-        elif quality_key in ("1080", "1080p", "fullhd", "fhd", "full hd", "full"):
-            short_edge = 1080
-        elif quality_key in ("1440", "1440p", "2k", "qhd"):
-            short_edge = 1440
-        elif quality_key in ("2160", "2160p", "4k", "uhd"):
-            short_edge = 2160
-        else:
-            return None, None
-
-        if ratio:
-            scale = short_edge / min(ratio)
-            target_w = max(2, int((ratio[0] * scale) // 2 * 2))
-            target_h = max(2, int((ratio[1] * scale) // 2 * 2))
-            if src_w <= target_w and src_h <= target_h:
-                fit_scale = min(src_w / ratio[0], src_h / ratio[1])
-                target_w = max(2, int((ratio[0] * fit_scale) // 2 * 2))
-                target_h = max(2, int((ratio[1] * fit_scale) // 2 * 2))
-            return target_w, target_h
-
-        portrait = src_h > src_w
-        target_w = short_edge if portrait else int(round(short_edge * 16 / 9))
-        target_h = int(round(short_edge * 16 / 9)) if portrait else short_edge
-        if src_w <= target_w and src_h <= target_h:
-            return None, None
-        return target_w, target_h
+        from app.output_geometry import resolve_output_dimensions
+        return resolve_output_dimensions(src_w, src_h, self.gui.get_output_quality_key(), self.gui.get_output_ratio_key())
 
     def _confirm_export_summary(self, *, video_path: str, output_path: str, mode: str, audio_path: str):
         output_quality = self.gui.get_output_quality_key()
@@ -819,7 +760,7 @@ class PreviewController:
             "2160": "2160p", "2160p": "2160p", "4k": "2160p", "uhd": "2160p",
         }.get(quality_key, str(output_quality))
         ratio_key = str(self.gui.get_output_ratio_key() or "source").strip().lower()
-        ratio_label = "Source" if ratio_key in {"", "source", "same", "original", "auto"} else ratio_key
+        ratio_label = "Source" if ratio_key in {"", "source", "same", "original", "auto"} else ratio_key.removeprefix("size:")
         has_subtitles = mode_key in {"subtitle", "both"} and bool(
             getattr(self.gui, "current_translated_segments", None)
             or getattr(self.gui, "last_translated_srt_path", "")
@@ -1243,6 +1184,10 @@ class PreviewController:
         self.gui.export_thread.start()
 
     def preview_five_seconds(self):
+        existing = getattr(self.gui, "quick_preview_thread", None)
+        if existing is not None and existing.isRunning():
+            self.gui.log("[Preview] 5s preview already running, ignoring request")
+            return
         if hasattr(self.gui, "ensure_media_backend_ready"):
             self.gui.ensure_media_backend_ready()
         video_path = self.gui.video_path_edit.text().strip()
@@ -1309,6 +1254,8 @@ class PreviewController:
         text_image_layers = self._build_fast_preview_text_images(
             text_layers, start_seconds, duration_seconds, text_canvas_width, text_canvas_height,
             self.gui.get_project_temp_dir("preview"),
+            source_size=self._source_video_dimensions(video_path),
+            scale_mode=self.gui.get_output_scale_mode_key(), focus=(fill_focus_x, fill_focus_y),
         )
 
         if mode in ("subtitle", "both"):
@@ -1317,6 +1264,9 @@ class PreviewController:
                 QMessageBox.warning(self.gui, t("Error"), t("Could not build the 5-second subtitle preview clip."))
                 return
             preview_ass_path = self._build_fast_preview_subtitle_ass(start_seconds, duration_seconds)
+            if not preview_ass_path:
+                QMessageBox.warning(self.gui, t("Error"), t("Could not build the 5-second subtitle preview clip."))
+                return
 
         self.gui.preview_5s_btn.setEnabled(False)
         self.gui.preview_5s_btn.setText(t("Rendering..."))
@@ -1326,11 +1276,6 @@ class PreviewController:
             self.gui.media_player.pause()
         except Exception:
             pass
-
-        # Check if a quick preview is already running
-        if hasattr(self.gui, 'quick_preview_thread') and self.gui.quick_preview_thread.isRunning():
-            self.gui.log("[Preview] 5s preview already running, ignoring request")
-            return
 
         self.gui.quick_preview_thread = QuickPreviewWorker(
             video_path=video_path,

@@ -32,6 +32,280 @@ class SubtitlePresentationUiTests(unittest.TestCase):
         gui.apply_segments_to_timeline()
         return gui
 
+    def test_ratio_change_alone_places_text_and_logo_on_letterbox_canvas(self):
+        from pathlib import Path
+        from app.layers.text import TextLayer
+        from app.layers.image import ImageLayer
+        from app.layers.transform import Transform
+        from app.layers.base import LayerType
+        from app.layers.sync_bridge import find_or_create_track
+        from ui.utils.video_geometry import source_to_canvas
+        gui = self.editor()
+        with patch("video_processor.get_video_dimensions", return_value=(1920, 1080)):
+            gui.video_view.video_source_width, gui.video_view.video_source_height = 1920, 1080
+            gui.output_quality_combo.setCurrentIndex(gui.output_quality_combo.findData("source"))
+            gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("16:9"))
+            gui._sync_preview_output_canvas_dimensions()
+            text = TextLayer(text="Bottom title", font_size=40, start=0, end=.8, transform=Transform(x=.5, y=.85))
+            logo = ImageLayer(source=str(Path(__file__).resolve().parents[1] / "assets" / "capcap.png"), start=0, end=.8, transform=Transform(x=20, y=5, scale_x=.5, scale_y=.5))
+            # Earlier builds cached source-relative positions under this key.
+            import json
+            legacy_key = json.dumps(["fit", 606, 1080, False])
+            for layer in (text, logo):
+                saved = {key: getattr(layer.transform, key) for key in ("x", "y", "scale_x", "scale_y")}
+                if layer is text:
+                    saved["font_size"] = layer.font_size
+                layer.metadata["_canvas_layouts"] = {legacy_key: saved}
+            find_or_create_track(gui.timeline._timeline, "T1 Text", LayerType.TEXT, 80).layers.append(text)
+            find_or_create_track(gui.timeline._timeline, "L1 Logo", LayerType.IMAGE, 80).layers.append(logo)
+            gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("9:16"))
+            QCoreApplication.processEvents()
+            x, y = source_to_canvas(gui.video_view, text.transform.x, text.transform.y)
+            self.assertAlmostEqual(y, .85, delta=.01)
+            canvas = gui.video_view.get_preview_canvas_rect()
+            source = gui.video_view.get_video_content_rect()
+            self.assertGreater(canvas.top() + y * canvas.height(), source.bottom())
+            logo_rect = gui.video_view.logo_overlay.region_rect(0)
+            self.assertLess(logo_rect.bottom(), source.top())
+            # New whole-canvas manual edits must still restore exactly.
+            from ui.utils.video_geometry import canvas_to_source_point
+            text.font_size = 37
+            text.transform.x, text.transform.y = canvas_to_source_point(gui.video_view, .25, .92)
+            saved = copy.deepcopy(text.transform.to_dict())
+            gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("16:9"))
+            QCoreApplication.processEvents()
+            gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("9:16"))
+            QCoreApplication.processEvents()
+            self.assertEqual(text.font_size, 37)
+            self.assertEqual(text.transform.to_dict(), saved)
+
+    def test_fast_preview_accepts_none_worker_and_builds_canvas_sized_subtitles(self):
+        from unittest.mock import MagicMock
+        from pathlib import Path
+        from app.layers.text import TextLayer
+        from app.layers.transform import Transform
+        from app.layers.base import LayerType
+        from app.layers.sync_bridge import find_or_create_track
+        gui = self.editor()
+        controller = gui.preview_controller
+        text = TextLayer(text="Fast preview text", font_size=60, start=0, end=.8, transform=Transform(x=.6, y=.8))
+        find_or_create_track(gui.timeline._timeline, "T1 Text", LayerType.TEXT, 80).layers.append(text)
+        gui.quick_preview_thread = None
+        worker = MagicMock()
+        module = controller.__class__.__module__
+        with patch(module + ".QFileDialog.getExistingDirectory", return_value=str(self.host.root)), \
+                patch(module + ".QuickPreviewWorker", return_value=worker) as factory, \
+                patch.object(gui, "get_output_mode_key", return_value="subtitle"), \
+                patch.object(gui, "get_output_scale_mode_key", return_value="fit"), \
+                patch.object(gui, "get_output_ratio_key", return_value="9:16"), \
+                patch.object(gui, "get_output_quality_key", return_value="1080p"), \
+                patch.object(gui, "_subtitle_render_dimensions", return_value=(1080, 1920)), \
+                patch("video_processor.get_video_dimensions", return_value=(1920, 1080)):
+            controller.preview_five_seconds()
+        worker.start.assert_called_once()
+        options = factory.call_args.kwargs
+        script = Path(options["ass_path"]).read_text(encoding="utf-8-sig")
+        self.assertIn("PlayResX: 1080", script)
+        self.assertIn("PlayResY: 1920", script)
+        font_sizes = [float(line.split(",")[2]) for line in script.splitlines() if line.startswith("Style:")]
+        self.assertIn(float(gui.get_subtitle_export_style()["font_size"]), font_sizes)
+        self.assertTrue(options["text_image_layers"])
+        # Fit puts source y=.8 inside the picture, not at canvas y=.8.
+        self.assertLess(options["text_image_layers"][0]["y"], 1300)
+        from PySide6.QtGui import QImage
+        image = QImage(options["text_image_layers"][0]["path"])
+        self.assertAlmostEqual(options["text_image_layers"][0]["y"] + image.height() / 2,
+                               656.25 + .8 * 607.5, delta=1.5)
+        self.assertEqual(options["target_width"], 1080)
+        self.assertEqual(options["target_height"], 1920)
+        gui.quick_preview_thread = None
+
+    def test_text_font_percentage_is_flexible_and_independent_per_layer(self):
+        from app.layers.text import TextLayer
+        from app.layers.base import LayerType
+        from app.layers.sync_bridge import find_or_create_track
+        gui = self.editor()
+        track = find_or_create_track(gui.timeline._timeline, "T1 Text", LayerType.TEXT, 80)
+        first = TextLayer(text="First", font_size=61, start=0, end=.8)
+        second = TextLayer(text="Second", font_size=18, start=0, end=.8)
+        track.layers.extend([first, second])
+        subtitles = copy.deepcopy(gui.subtitle_presentation_controller.primary_controls())
+        gui.timeline.select_layer(first.id)
+        gui.on_timeline_layer_selected(first.id)
+        self.assertEqual(gui.text_inspector_size_spin.value(), 101.67)
+        self.assertTrue(gui.text_inspector_font_combo.isEditable())
+        gui.text_inspector_size_spin.setValue(225)
+        self.assertEqual(first.font_size, 135)
+        self.assertEqual(second.font_size, 18)
+        gui.timeline.select_layer(second.id)
+        gui.on_timeline_layer_selected(second.id)
+        self.assertEqual(gui.text_inspector_size_spin.value(), 30.)
+        gui.text_inspector_size_spin.setValue(37.3)
+        self.assertEqual(second.font_size, 22)
+        self.assertEqual(gui.text_inspector_size_spin.value(), 36.67)
+        gui.text_inspector_font_combo.setCurrentText("Tahoma")
+        self.assertEqual(second.font_name, "Tahoma")
+        self.assertEqual(first.font_name, "Arial")
+        gui.timeline.select_layer(first.id)
+        gui.on_timeline_layer_selected(first.id)
+        self.assertEqual(gui.text_inspector_size_spin.value(), 225.)
+        first.font_size = 19  # Auto-reframe also updates the displayed value.
+        gui._refresh_text_layer_preview(first.id)
+        self.assertEqual(gui.text_inspector_size_spin.value(), 31.67)
+        self.assertEqual(TextLayer.from_dict(second.to_dict()).font_size, 22)
+        self.assertEqual(gui.subtitle_presentation_controller.primary_controls(), subtitles)
+
+
+    def test_all_layer_sizes_roundtrip_with_default_canvas_options(self):
+        from app.layers.text import TextLayer
+        from app.layers.image import ImageLayer
+        from app.layers.transform import Transform
+        from app.layers.sync_bridge import find_or_create_track
+        from app.layers.base import LayerType
+        gui = self.editor()
+        text = TextLayer(text="A test caption", font_size=67, start=0, end=.8, transform=Transform(x=.8, y=.8))
+        logo = ImageLayer(source=str(self.host.source()), start=0, end=.8, transform=Transform(x=75, y=15))
+        find_or_create_track(gui.timeline._timeline, "T1 Text", LayerType.TEXT, 80).layers.append(text)
+        find_or_create_track(gui.timeline._timeline, "L1 Logo", LayerType.IMAGE, 80).layers.append(logo)
+        with patch("video_processor.get_video_dimensions", return_value=(1080, 1920)):
+            gui.video_view.video_source_width, gui.video_view.video_source_height = 1080, 1920
+            gui.output_quality_combo.setCurrentIndex(gui.output_quality_combo.findData("source"))
+            gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("16:9"))
+            gui._sync_preview_output_canvas_dimensions()
+            original = (text.font_size, copy.deepcopy(text.transform.to_dict()), copy.deepcopy(logo.transform.to_dict()),
+                        gui.get_subtitle_export_style()["font_size"])
+            for _ in range(3):
+                gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("9:16"))
+                QCoreApplication.processEvents()
+                authored = gui._subtitle_render_dimensions()
+                gui.video_view.subtitle_render_width, gui.video_view.subtitle_render_height = 320, 180
+                self.assertEqual(gui._capture_layer_framing()[2], authored)
+                gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("16:9"))
+                QCoreApplication.processEvents()
+                self.assertEqual((text.font_size, text.transform.to_dict(), logo.transform.to_dict(),
+                                  gui.get_subtitle_export_style()["font_size"]), original)
+
+    def test_bilingual_canvas_preview_uses_independent_cue_animations(self):
+        gui = self.editor()
+        controller = gui.subtitle_presentation_controller
+        controller.mode.setCurrentIndex(2)
+        controller.cfg["styles"]["primary"].update(animation="Pop In", animation_time=.4)
+        controller.cfg["styles"]["secondary"].update(animation="Fade Out", animation_time=.4)
+        controller.apply_controls(controller.cfg["styles"]["primary"])
+        controller.fallback_preview(gui.get_active_segments(), 100)
+        primary, secondary = controller.overlays
+        self.assertEqual(primary.animation_style, "pop in")
+        self.assertAlmostEqual(primary.animation_progress, .25)
+        self.assertEqual(secondary.animation_style, "fade out")
+        self.assertAlmostEqual(secondary.animation_opacity, 1.)
+        controller.fallback_preview(gui.get_active_segments(), 700)
+        self.assertAlmostEqual(primary.animation_progress, 1.)
+        self.assertLess(secondary.animation_opacity, .4)
+
+    def test_style_refresh_keeps_animation_at_current_playback_time(self):
+        gui = self.editor()
+        gui.subtitle_animation_combo.setCurrentText("Pop In")
+        gui.subtitle_animation_time_spin.setValue(.4)
+        with patch.object(gui.media_player, "position", return_value=200):
+            from ui.main_window import VideoTranslatorGUI
+            VideoTranslatorGUI._set_live_subtitle_effects(gui, gui.current_translated_segments[0])
+        self.assertAlmostEqual(gui.video_view.subtitle_item.animation_progress, .5)
+
+    def test_layer_options_defaults_disable_auto_reframe_and_restore_with_project(self):
+        from ui.utils.performance_config import restore
+        gui = self.editor()
+        self.assertTrue(gui.auto_layer_reframe_cb.isChecked())
+        self.assertFalse(hasattr(gui, "limit_layers_to_video_cb"))
+        gui.auto_layer_reframe_cb.setChecked(False)
+        before = copy.deepcopy(gui.subtitle_presentation_controller.cfg["styles"])
+        with patch.object(gui, "_subtitle_render_dimensions", return_value=(1080, 1920)):
+            gui._restore_layer_framing((None, None, (1920, 1080)))
+        self.assertEqual(gui.subtitle_presentation_controller.cfg["styles"], before)
+        restore(gui, dict(controls={"auto_layer_reframe_cb": False, "limit_layers_to_video_cb": True}), refresh=False)
+        self.assertNotIn("limit_layers_to_video", gui.get_subtitle_export_style())
+
+    def test_subtitle_percentage_accepts_custom_values_and_reports_actual_pixel_size(self):
+        gui = self.editor()
+        controller = gui.subtitle_presentation_controller
+        controller.mode.setCurrentIndex(2)
+        gui.subtitle_font_size_spin.setValue(18)
+        self.assertEqual(gui.subtitle_font_scale_spin.value(), 30.)
+        gui.subtitle_font_scale_spin.setValue(200)
+        self.assertEqual(gui.subtitle_font_size_spin.value(), 120)
+        gui.subtitle_font_size_spin.setValue(61)
+        self.assertEqual(gui.subtitle_font_scale_spin.value(), 101.67)
+        self.assertEqual(gui.get_subtitle_export_style()["font_size"], 61)
+        controller.capture_style()
+        controller.style_role.setCurrentIndex(1)
+        gui.subtitle_font_scale_spin.setValue(35)
+        self.assertEqual(gui.subtitle_font_size_spin.value(), 21)
+        controller.style_role.setCurrentIndex(0)
+        self.assertEqual(gui.subtitle_font_scale_spin.value(), 101.67)
+        self.assertEqual(gui.subtitle_font_size_spin.value(), 61)
+
+    def test_ratio_change_scales_both_subtitle_styles_without_overwriting_defaults(self):
+        from PySide6.QtCore import QRectF
+        gui = self.editor()
+        controller = gui.subtitle_presentation_controller
+        controller.mode.setCurrentIndex(2)
+        controller.capture_style()
+        before = {role: style["size"] for role, style in controller.cfg["styles"].items()}
+        defaults = gui.settings.value("subtitle_style_default_primary")
+        old = QRectF(0, 0, 1920, 1080)
+        canvas = QRectF(0, 0, 608, 1080)
+        source = QRectF(-656, 0, 1920, 1080)
+        with patch.object(gui, "_subtitle_render_dimensions", return_value=(608, 1080)), \
+                patch.object(gui.video_view, "get_video_content_rect", return_value=source), \
+                patch.object(gui.video_view, "get_preview_canvas_rect", return_value=canvas):
+            gui._restore_layer_framing((old, old, (1920, 1080)))
+        for role in before:
+            self.assertAlmostEqual(controller.cfg["styles"][role]["size"], round(before[role] * 608 / 1920), delta=1)
+        self.assertEqual(gui.settings.value("subtitle_style_default_primary"), defaults)
+
+    def test_subtitle_size_restores_exactly_when_returning_to_original_canvas(self):
+        from PySide6.QtCore import QRectF
+        gui = self.editor()
+        controller = gui.subtitle_presentation_controller
+        controller.mode.setCurrentIndex(2)
+        controller.capture_style()
+        before = copy.deepcopy(controller.cfg["styles"])
+        old = QRectF(0, 0, 1920, 1080)
+        portrait = QRectF(0, 0, 608, 1080)
+        source = QRectF(-656, 0, 1920, 1080)
+        for _ in range(3):
+            gui.video_view.preview_aspect_key = "9:16"
+            gui.video_view.preview_scale_mode = "fit"
+            with patch.object(gui, "_subtitle_render_dimensions", return_value=(608, 1080)), \
+                    patch.object(gui.video_view, "get_video_content_rect", return_value=source), \
+                    patch.object(gui.video_view, "get_preview_canvas_rect", return_value=portrait):
+                gui._restore_layer_framing((old, old, (1920, 1080), ("16:9", "fit", 1920, 1080)))
+            self.assertLess(controller.export_style(role="primary")["font_size"], before["primary"]["size"])
+            gui.video_view.preview_aspect_key = "16:9"
+            with patch.object(gui, "_subtitle_render_dimensions", return_value=(1920, 1080)), \
+                    patch.object(gui.video_view, "get_video_content_rect", return_value=old), \
+                    patch.object(gui.video_view, "get_preview_canvas_rect", return_value=old):
+                gui._restore_layer_framing((source, portrait, (608, 1080), ("9:16", "fit", 608, 1080)))
+            self.assertEqual(controller.cfg["styles"], before)
+
+    def test_ratio_combo_updates_exported_subtitle_size_and_restores_it(self):
+        gui = self.editor()
+        controller = gui.subtitle_presentation_controller
+        controller.mode.setCurrentIndex(2)
+        with patch("video_processor.get_video_dimensions", return_value=(1920, 1080)):
+            gui.video_view.video_source_width = 1920
+            gui.video_view.video_source_height = 1080
+            gui.output_quality_combo.setCurrentIndex(gui.output_quality_combo.findData("source"))
+            gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("16:9"))
+            gui._sync_preview_output_canvas_dimensions()
+            original = controller.export_style(role="primary")["font_size"]
+            for _ in range(3):
+                gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("9:16"))
+                QCoreApplication.processEvents()
+                self.assertLess(controller.export_style(role="primary")["font_size"], original)
+                gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData("16:9"))
+                QCoreApplication.processEvents()
+                self.assertEqual(controller.export_style(role="primary")["font_size"], original)
+
     def test_bilingual_playback_follows_main_inspector_without_rebuilding_or_saving(self):
         gui = self.editor()
         controller = gui.subtitle_presentation_controller
@@ -607,6 +881,7 @@ class SubtitlePresentationUiTests(unittest.TestCase):
         from unittest.mock import MagicMock
         from ui.main_window import VideoTranslatorGUI
         gui = self.editor()
+        gui.video_view.limit_layers_to_video = True
         controller = gui.subtitle_presentation_controller
         controller.mode.setCurrentIndex(2)
         from PySide6.QtCore import QSignalBlocker

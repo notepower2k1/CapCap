@@ -38,6 +38,29 @@ class SubtitleOverlayItem(QGraphicsObject):
         self._drag_active = False
         self._target_view = None
         self.setAcceptedMouseButtons(Qt.NoButton)
+        self.animation_style, self.animation_progress, self.animation_opacity = "static", 1., None
+        self.highlight_color = QColor("#FFD400")
+        self.highlight_phrases = []
+        self.karaoke_word_index = -1
+        self.auto_keyword_highlight = False
+        self.shadow_depth = 0.
+        self.shadow_color = QColor("#000000")
+
+    def set_effects(self, **kwargs):
+        from widgets.mpv_video_view import _SubtitleOverlayWidget
+        _SubtitleOverlayWidget.set_effects(self, **kwargs)
+
+    def _visible_lines(self):
+        from widgets.mpv_video_view import _SubtitleOverlayWidget
+        return _SubtitleOverlayWidget._visible_lines(self)
+
+    def _highlight_spans(self, text):
+        from widgets.mpv_video_view import _SubtitleOverlayWidget
+        return _SubtitleOverlayWidget._highlight_spans(self, text)
+
+    def _draw_colored_text(self, painter, text, rect, spans):
+        from widgets.mpv_video_view import _SubtitleOverlayWidget
+        return _SubtitleOverlayWidget._draw_colored_text(self, painter, text, rect, spans)
 
     def attach_to_view(self, view):
         self._target_view = view
@@ -62,7 +85,8 @@ class SubtitleOverlayItem(QGraphicsObject):
         if not self._drag_active or self._target_view is None:
             event.ignore()
             return
-        rect = self._target_view.get_preview_canvas_rect()
+        from ui.utils.video_geometry import layer_bounds_rect as visible_video_rect
+        rect = visible_video_rect(self._target_view)
         if rect.width() <= 0 or rect.height() <= 0:
             return
         center = event.scenePos() - self._drag_grab_offset + QPointF(self.W / 2, self.H / 2)
@@ -134,7 +158,13 @@ class SubtitleOverlayItem(QGraphicsObject):
         background_color=None,
         single_line=None,
         bold=None,
+        shadow_color=None,
+        shadow_depth=None,
     ):
+        if shadow_color is not None:
+            self.shadow_color = shadow_color
+        if shadow_depth is not None:
+            self.shadow_depth = float(shadow_depth)
         changed = False
         if bold is not None and bool(bold) != self.bold:
             self.bold = bool(bold)
@@ -197,12 +227,24 @@ class SubtitleOverlayItem(QGraphicsObject):
     def paint(self, painter, option, widget):
         if not self._text_rendering_enabled:
             return
-        if not self.current_text and not self.current_lines and not self.isVisible():
+        if not self.current_text and not visible_lines and not self.isVisible():
             return
         painter.setRenderHint(QPainter.Antialiasing)
         rect = self.boundingRect()
+        import math
+        progress = self.animation_progress
+        if self.animation_opacity is not None:
+            painter.setOpacity(self.animation_opacity)
+        if self.animation_style in ("pop in", "pulse"):
+            scale = 1.18 - .18 * progress if self.animation_style == "pop in" else 1 + .05 * math.sin(progress * math.pi)
+            painter.translate(rect.center())
+            painter.scale(scale, scale)
+            painter.translate(-rect.center())
+        elif self.animation_style == "slide up":
+            painter.translate(0, (1 - progress) * max(8., self.font_size * .8))
 
-        if not self.current_lines:
+        visible_lines = self._visible_lines()
+        if not visible_lines:
             return
 
         painter.setPen(self.font_color)
@@ -215,12 +257,12 @@ class SubtitleOverlayItem(QGraphicsObject):
         wrap_flags = Qt.AlignCenter | Qt.TextWordWrap
 
         line_rects: list[QRectF] = []
-        if len(self.current_lines) == 1:
+        if len(visible_lines) == 1:
             line_rects = [rect]
         else:
-            total_h = line_height * len(self.current_lines)
+            total_h = line_height * len(visible_lines)
             y0 = max(0.0, (rect.height() - total_h) / 2.0)
-            for i in range(len(self.current_lines)):
+            for i in range(len(visible_lines)):
                 line_rects.append(QRectF(rect.x(), rect.y() + y0 + i * line_height, rect.width(), line_height))
 
         if self.background_box:
@@ -229,7 +271,7 @@ class SubtitleOverlayItem(QGraphicsObject):
             metrics = painter.fontMetrics()
             box_pad_x = max(2, int(round(max(2.0, self.outline_width))))
             box_pad_y = max(1, int(round(max(1.0, self.outline_width * 0.5))))
-            max_width = max((metrics.boundingRect(line).width() for line in self.current_lines), default=0)
+            max_width = max((metrics.boundingRect(line).width() for line in visible_lines), default=0)
             if max_width and line_rects:
                 block_top = line_rects[0].top()
                 block_bottom = line_rects[-1].bottom()
@@ -249,10 +291,14 @@ class SubtitleOverlayItem(QGraphicsObject):
                 (-w * 0.7, w * 0.7), (w * 0.7, w * 0.7),
             ]
             painter.setPen(self.outline_color)
-            for line_text, line_rect in zip(self.current_lines, line_rects):
+            for line_text, line_rect in zip(visible_lines, line_rects):
                 for dx, dy in outline_offsets:
                     painter.drawText(line_rect.translated(dx, dy), int(wrap_flags), line_text)
 
         painter.setPen(self.font_color)
-        for line_text, line_rect in zip(self.current_lines, line_rects):
-            painter.drawText(line_rect, int(wrap_flags), line_text)
+        for line_text, line_rect in zip(visible_lines, line_rects):
+            spans = self._highlight_spans(line_text)
+            if spans:
+                self._draw_colored_text(painter, line_text, line_rect, spans)
+            else:
+                painter.drawText(line_rect, int(wrap_flags), line_text)

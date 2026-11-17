@@ -84,6 +84,9 @@ def restore(gui, config, *, refresh=True):
             if widget is None:
                 continue
             if isinstance(widget, QComboBox) and isinstance(value, dict):
+                if name == "output_ratio_combo" and value.get("data"):
+                    from widgets.output_canvas import ensure_canvas_item
+                    ensure_canvas_item(widget, value["data"])
                 index = widget.findData(value.get("data")) if value.get("data") is not None else -1
                 if index >= 0:
                     widget.setCurrentIndex(index)

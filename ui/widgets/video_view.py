@@ -95,15 +95,10 @@ class VideoView(QGraphicsView):
         return (float(self.preview_fill_focus_x), float(self.preview_fill_focus_y))
 
     def _resolve_canvas_aspect_ratio(self) -> float | None:
-        aspect_key = str(getattr(self, "preview_aspect_key", "source") or "source").strip().lower()
-        aspect_map = {
-            "16:9": 16.0 / 9.0,
-            "9:16": 9.0 / 16.0,
-            "1:1": 1.0,
-            "4:3": 4.0 / 3.0,
-        }
-        if aspect_key in aspect_map:
-            return aspect_map[aspect_key]
+        from app.output_geometry import canvas_ratio
+        ratio = canvas_ratio(getattr(self, "preview_aspect_key", "source"))
+        if ratio:
+            return ratio[0] / ratio[1]
         if self.video_source_width and self.video_source_height:
             return self.video_source_width / self.video_source_height
         return None
@@ -174,7 +169,8 @@ class VideoView(QGraphicsView):
 
     def reposition_subtitle(self):
         item = self.subtitle_item
-        rect = self.get_preview_canvas_rect()
+        from ui.utils.video_geometry import layer_bounds_rect as visible_video_rect
+        rect = visible_video_rect(self)
         if rect.width() <= 0 or rect.height() <= 0:
             return
 
@@ -289,7 +285,7 @@ class VideoView(QGraphicsView):
 
         aspect_key = str(getattr(self, "preview_aspect_key", "source") or "source").strip().lower()
         if aspect_key != "source":
-            label = aspect_key.upper()
+            label = aspect_key.removeprefix("size:").upper()
             metrics = painter.fontMetrics()
             text_w = metrics.horizontalAdvance(label) + 18
             text_h = metrics.height() + 8

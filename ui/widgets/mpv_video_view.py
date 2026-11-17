@@ -274,7 +274,8 @@ class _SubtitleOverlayWidget(QWidget):
         if view is None or not hasattr(view, "get_preview_canvas_rect"):
             event.ignore()
             return
-        canvas = view.get_preview_canvas_rect()
+        from ui.utils.video_geometry import layer_bounds_rect as visible_video_rect
+        canvas = visible_video_rect(view)
         if canvas.width() <= 0 or canvas.height() <= 0:
             event.ignore()
             return
@@ -420,7 +421,7 @@ class _SubtitleOverlayWidget(QWidget):
 
     def set_effects(self, *, highlight_color=None, highlight_phrases=None,
                     karaoke_word_index=-1, auto_keyword_highlight=False,
-                    animation_style="Static", animation_progress=1.0):
+                    animation_style="Static", animation_progress=1.0, animation_opacity=None):
         """Apply cue-specific TikTok/highlight effects to the live layer."""
         next_color = QColor(highlight_color or "#FFD400")
         next_phrases = [str(value).strip() for value in (highlight_phrases or []) if str(value).strip()]
@@ -435,6 +436,7 @@ class _SubtitleOverlayWidget(QWidget):
             or self.auto_keyword_highlight != next_auto_highlight
             or self.animation_style != next_animation
             or abs(self.animation_progress - next_progress) > 0.0001
+            or getattr(self, "animation_opacity", None) != animation_opacity
         )
         if not changed:
             return
@@ -444,6 +446,7 @@ class _SubtitleOverlayWidget(QWidget):
         self.auto_keyword_highlight = next_auto_highlight
         self.animation_style = next_animation
         self.animation_progress = next_progress
+        self.animation_opacity = animation_opacity
         self.update()
 
     def _visible_lines(self) -> list[str]:
@@ -562,17 +565,19 @@ class _SubtitleOverlayWidget(QWidget):
         elif self.animation_style == "fade out":
             painter.setOpacity(1.0 - progress)
         elif self.animation_style == "pop in":
-            scale = 0.72 + 0.28 * progress
+            scale = 1.18 - 0.18 * progress
             painter.translate(rect.center())
             painter.scale(scale, scale)
             painter.translate(-rect.center())
         elif self.animation_style == "pulse":
-            scale = 1.0 + 0.08 * math.sin(progress * math.pi)
+            scale = 1.0 + 0.05 * math.sin(progress * math.pi)
             painter.translate(rect.center())
             painter.scale(scale, scale)
             painter.translate(-rect.center())
         elif self.animation_style == "slide up":
             painter.translate(0, (1.0 - progress) * max(8.0, self.font_size * 0.8))
+        if getattr(self, "animation_opacity", None) is not None:
+            painter.setOpacity(self.animation_opacity)
 
         painter.setPen(self.font_color)
         font = QFont(self.font_name)
@@ -597,7 +602,7 @@ class _SubtitleOverlayWidget(QWidget):
         if self.background_box:
             painter.setPen(Qt.NoPen)
             box_color = QColor(self.background_color)
-            if self.animation_style == "background appear":
+            if self.animation_style == "background appear" and getattr(self, "animation_opacity", None) is None:
                 box_color.setAlpha(int(round(box_color.alpha() * progress)))
             painter.setBrush(box_color)
             metrics = painter.fontMetrics()
@@ -1006,12 +1011,11 @@ class _BlurRegionOverlayWindow(QWidget):
         if bounded.bottom() > bounds.bottom():
             bounded.moveBottom(bounds.bottom())
 
-        self._regions[index] = QRectF(
-            max(0.0, (bounded.x() - content_rect.x()) / width),
-            max(0.0, (bounded.y() - content_rect.y()) / height),
-            min(1.0, bounded.width() / width),
-            min(1.0, bounded.height() / height),
-        )
+        outside_source = getattr(self, "allow_outside_source", False)
+        nx, ny = (bounded.x() - content_rect.x()) / width, (bounded.y() - content_rect.y()) / height
+        nw, nh = bounded.width() / width, bounded.height() / height
+        self._regions[index] = QRectF(nx if outside_source else max(0., nx), ny if outside_source else max(0., ny),
+                                    nw if outside_source else min(1., nw), nh if outside_source else min(1., nh))
         if callable(self._on_region_changed):
             self._on_region_changed()
         self.update()
@@ -1211,6 +1215,13 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
     """
 
     BADGE_LABEL = "Logo"
+    allow_outside_source = True
+
+    def _visible_canvas_rect(self):
+        if self._target_view is not None:
+            from ui.utils.video_geometry import layer_bounds_rect
+            return layer_bounds_rect(self._target_view)
+        return super()._visible_canvas_rect()
     logoMoved = Signal(float, float, float, float)
     logoDeleted = Signal()
     logoEditFinished = Signal()
@@ -1369,10 +1380,7 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
             self._regions.append(QRectF(0.0, 0.0, 1.0, 1.0))
             self._active_index = 0
         self._regions[self._active_index] = QRectF(
-            max(0.0, min(1.0, x)),
-            max(0.0, min(1.0, y)),
-            max(0.01, min(1.0, w)),
-            max(0.01, min(1.0, h)),
+            float(x), float(y), max(0.01, float(w)), max(0.01, float(h)),
         )
         self.update()
 
@@ -1390,10 +1398,10 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
         regions, items = [], []
         for logo in logos or []:
             try:
-                x = max(0.0, min(1.0, float(logo.get("x", 0.1))))
-                y = max(0.0, min(1.0, float(logo.get("y", 0.1))))
-                w = max(0.01, min(1.0 - x, float(logo.get("width", 0.2))))
-                h = max(0.01, min(1.0 - y, float(logo.get("height", 0.2))))
+                x = float(logo.get("x", 0.1))
+                y = float(logo.get("y", 0.1))
+                w = max(0.01, float(logo.get("width", 0.2)))
+                h = max(0.01, float(logo.get("height", 0.2)))
                 opacity = max(0.0, min(1.0, float(logo.get("opacity", 1.0))))
                 rotation = float(logo.get("rotation", 0.0)) % 360.0
             except (AttributeError, TypeError, ValueError):
@@ -1403,6 +1411,7 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
             items.append({"pixmap": QPixmap(path) if path and os.path.exists(path) else None,
                           "opacity": opacity, "rotation": rotation})
         super().set_regions(regions)
+        self._regions = [QRectF(r["x"], r["y"], r["width"], r["height"]) for r in regions]
         self._logo_items = items
         if self._regions:
             self._active_index = max(0, min(int(active_index), len(self._regions) - 1))
@@ -1895,14 +1904,20 @@ class _TextLayerOverlayWindow(QWidget):
         rect, *_ = self._rect_for(item)
         half_w = max(0.0, float(rect.width()) / (2.0 * w))
         half_h = max(0.0, float(rect.height()) / (2.0 * h))
-        if half_w >= 0.5:
-            x = 0.5
+        from ui.utils.video_geometry import layer_bounds_rect as visible_video_rect
+        view = getattr(self, "_target_view", None)
+        canvas = view.get_preview_canvas_rect() if view is not None else QRectF(0, 0, w, h)
+        bounds = visible_video_rect(view) if view is not None else canvas
+        left, right = (bounds.left() - canvas.left()) / w, (bounds.right() - canvas.left()) / w
+        top, bottom = (bounds.top() - canvas.top()) / h, (bounds.bottom() - canvas.top()) / h
+        if half_w * 2 >= right - left:
+            x = (left + right) / 2
         else:
-            x = max(half_w, min(1.0 - half_w, point.x() / w))
-        if half_h >= 0.5:
-            y = 0.5
+            x = max(left + half_w, min(right - half_w, point.x() / w))
+        if half_h * 2 >= bottom - top:
+            y = (top + bottom) / 2
         else:
-            y = max(half_h, min(1.0 - half_h, point.y() / h))
+            y = max(top + half_h, min(bottom - half_h, point.y() / h))
 
         if abs(x - 0.5) <= 0.02:
             x = 0.5
@@ -2356,6 +2371,8 @@ class MpvVideoView(QWidget):
         self.reposition_subtitle()
         self.blur_overlay.sync_to_view()
         self.mask_overlay.sync_to_view()
+        if getattr(self, "logo_overlay", None) is not None:
+            self.logo_overlay.sync_to_view()
         if self.text_overlay is not None:
             self.text_overlay.sync_to_view()
         self.update()
@@ -2368,6 +2385,8 @@ class MpvVideoView(QWidget):
         self.reposition_subtitle()
         self.blur_overlay.sync_to_view()
         self.mask_overlay.sync_to_view()
+        if getattr(self, "logo_overlay", None) is not None:
+            self.logo_overlay.sync_to_view()
         if self.text_overlay is not None:
             self.text_overlay.sync_to_view()
         self.update()
@@ -2387,6 +2406,8 @@ class MpvVideoView(QWidget):
         self.reposition_subtitle()
         self.blur_overlay.sync_to_view()
         self.mask_overlay.sync_to_view()
+        if getattr(self, "logo_overlay", None) is not None:
+            self.logo_overlay.sync_to_view()
         if self.text_overlay is not None:
             self.text_overlay.sync_to_view()
         self.update()
@@ -2420,7 +2441,7 @@ class MpvVideoView(QWidget):
         if aspect_key == "source":
             self.ratio_badge.hide()
             return
-        self.ratio_badge.setText(aspect_key.upper())
+        self.ratio_badge.setText(aspect_key.removeprefix("size:").upper())
         self.ratio_badge.adjustSize()
         margin = 10
         canvas_rect = self.get_preview_canvas_rect().toRect()
@@ -2431,15 +2452,10 @@ class MpvVideoView(QWidget):
         self.ratio_badge.show()
 
     def _resolve_canvas_aspect_ratio(self) -> float | None:
-        aspect_key = str(getattr(self, "preview_aspect_key", "source") or "source").strip().lower()
-        aspect_map = {
-            "16:9": 16.0 / 9.0,
-            "9:16": 9.0 / 16.0,
-            "1:1": 1.0,
-            "4:3": 4.0 / 3.0,
-        }
-        if aspect_key in aspect_map:
-            return aspect_map[aspect_key]
+        from app.output_geometry import canvas_ratio
+        ratio = canvas_ratio(getattr(self, "preview_aspect_key", "source"))
+        if ratio:
+            return ratio[0] / ratio[1]
         if self.video_source_width and self.video_source_height:
             return self.video_source_width / self.video_source_height
         return None
@@ -2509,7 +2525,8 @@ class MpvVideoView(QWidget):
             item.hide()
             return
 
-        rect = self.get_preview_canvas_rect()
+        from ui.utils.video_geometry import layer_bounds_rect as visible_video_rect
+        rect = visible_video_rect(self)
         if rect.width() <= 0 or rect.height() <= 0:
             return
 
@@ -2565,7 +2582,10 @@ class MpvVideoView(QWidget):
             y_pos = max(y_min, min(y_pos, y_max))
 
         raw_box = QRect(int(round(x_pos)), int(round(y_pos)), int(round(item_w)), int(round(item_h)))
-        visible_canvas = _clipped_view_local_rect(self, rect)
+        # Let a selected caption remain editable beyond the output frame in
+        # the preview matte. Playback/export still clip to the output canvas.
+        editing_overflow = getattr(item, "_editable", False)
+        visible_canvas = _clipped_view_local_rect(self, self.rect() if editing_overflow else rect)
         if visible_canvas.width() <= 2 or visible_canvas.height() <= 2:
             item.hide()
             return

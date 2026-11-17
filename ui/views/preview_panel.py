@@ -837,14 +837,10 @@ class FramePreviewWidget(QWidget):
         self.update()
 
     def _resolve_canvas_aspect_ratio(self) -> float | None:
-        aspect_map = {
-            "16:9": 16.0 / 9.0,
-            "9:16": 9.0 / 16.0,
-            "1:1": 1.0,
-            "4:3": 4.0 / 3.0,
-        }
-        if self.preview_aspect_key in aspect_map:
-            return aspect_map[self.preview_aspect_key]
+        from app.output_geometry import canvas_ratio
+        ratio = canvas_ratio(getattr(self, "preview_aspect_key", "source"))
+        if ratio:
+            return ratio[0] / ratio[1]
         if self.video_source_width and self.video_source_height:
             return self.video_source_width / self.video_source_height
         if not self._pixmap.isNull() and self._pixmap.height() > 0:
@@ -2270,19 +2266,15 @@ def build_preview_panel(gui):
     font_row = QHBoxLayout()
     font_row.addWidget(QLabel("Font"))
     gui.text_inspector_font_combo = QComboBox()
+    gui.text_inspector_font_combo.setEditable(True)
     gui.text_inspector_font_combo.addItems(["Montserrat", "Roboto", "Inter", "Poppins", "Arial", "Segoe UI", "Tahoma", "Verdana", "Times New Roman"])
     font_row.addWidget(gui.text_inspector_font_combo, 1)
     text_layout.addLayout(font_row)
     size_row = QHBoxLayout()
     size_row.addWidget(QLabel("Font size"))
-    gui.text_inspector_size_combo = QComboBox()
-    # Keep the same 60 px base used by subtitle-compatible Text layers, but
-    # expose smaller presets for captions and compact labels.
-    for percent in (25, 35, 50, 75, 100, 125, 150):
-        gui.text_inspector_size_combo.addItem(f"{percent}%", percent)
-    gui.text_inspector_size_combo.setCurrentIndex(4)
-    gui.text_inspector_size_combo.setToolTip("Matches the subtitle font-size presets (60 px at 100%).")
-    size_row.addWidget(gui.text_inspector_size_combo, 1)
+    from widgets.font_controls import font_scale_input
+    gui.text_inspector_size_spin = font_scale_input()
+    size_row.addWidget(gui.text_inspector_size_spin, 1)
     text_layout.addLayout(size_row)
     color_row = QHBoxLayout()
     color_row.addWidget(QLabel("Text color"))

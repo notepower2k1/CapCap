@@ -193,6 +193,10 @@ class SubtitlePresentationController(QObject):
             self.configure_preview_item(item, style)
             lines = [row["text"] for row in rows if row["start"] <= seconds < row["end"]]
             item.set_text("\n".join(lines))
+            from ui.utils.subtitle_effects import preview_effects
+            active = [row for row in rows if row["start"] <= seconds < row["end"]]
+            if active:
+                item.set_effects(**preview_effects(active[-1], style, position_ms or 0))
             main_item = view.subtitle_item
             try:
                 view.subtitle_item = item

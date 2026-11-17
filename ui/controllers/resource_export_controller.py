@@ -96,6 +96,7 @@ def capture_resources(gui):
                     video_mirror_horizontal=bool(getattr(gui, "_video_mirror_horizontal", False)),
                     blur_state={"enabled": bool(gui._blur_effect_enabled()), "regions": []},
                     package_output_controls={"ratio": gui.get_output_ratio_key(), "quality": gui.get_output_quality_key(),
+                        "auto_layers": bool(gui.auto_layer_reframe_cb.isChecked()) if hasattr(gui, "auto_layer_reframe_cb") else True,
                         "fps": gui.get_output_fps_key(), "scale_mode": gui.get_output_scale_mode_key(), "focus": list(gui.get_output_fill_focus())},
                     audio_handling_mode=gui.get_audio_handling_mode(),
                     preview_track_visibility={"TS1": bool(getattr(gui, "_subtitle_track_preview_visible", True)),
@@ -117,12 +118,21 @@ def restore_package_output_controls(gui, state):
                         ("fps", "output_fps_combo"), ("scale_mode", "output_scale_mode_combo")):
         combo = getattr(gui, name, None)
         if combo is not None and field in controls:
+            if field == "ratio":
+                from widgets.output_canvas import ensure_canvas_item
+                ensure_canvas_item(combo, controls[field])
             index = combo.findData(controls[field])
             if index >= 0:
                 blocked = combo.blockSignals(True)
                 combo.setCurrentIndex(index)
                 combo.blockSignals(blocked)
     view = getattr(gui, "video_view", None)
+    for field, name, default in (("auto_layers", "auto_layer_reframe_cb", True),):
+        widget = getattr(gui, name, None)
+        if widget is not None:
+            blocked = widget.blockSignals(True)
+            widget.setChecked(bool(controls.get(field, default)))
+            widget.blockSignals(blocked)
     if view is not None:
         view.set_preview_aspect_ratio(gui.get_output_ratio_key())
         view.set_preview_scale_mode(gui.get_output_scale_mode_key())
