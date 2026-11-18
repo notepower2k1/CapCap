@@ -229,12 +229,15 @@ class ExportWorkflow:
                     # Extract mask regions from mask track (type="mask")
                     if track_type == "mask":
                         saw_mask_track = True
+                        ordered = bool(timeline_data.get("overlay_order"))
                         for layer in layers:
                             try:
                                 source = str(layer.get("source", ""))
+                                if (ordered or layer.get("mode") == "image") and not (
+                                    track.get("visible", True) and layer.get("visible", True) and mask_visible
+                                ):
+                                    continue
                                 if layer.get("mode") == "image":
-                                    if not (track.get("visible", True) and layer.get("visible", True) and mask_visible):
-                                        continue
                                     if source and not os.path.isabs(source):
                                         source = os.path.join(state.project_root, source)
                                 mask_regions.append({

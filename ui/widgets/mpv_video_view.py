@@ -884,7 +884,9 @@ class _BlurRegionOverlayWindow(QWidget):
         self._offset_x = float(target_rect.left() - clipped_rect.left())
         self._offset_y = float(target_rect.top() - clipped_rect.top())
         top_left = self._target_view.mapToGlobal(clipped_rect.topLeft())
-        self.setGeometry(QRect(top_left, clipped_rect.size()))
+        geometry = QRect(top_left, clipped_rect.size())
+        if self.geometry() != geometry:
+            self.setGeometry(geometry)
         self.show()
         if hasattr(self._target_view, "_sync_overlay_stack_order"):
             self._target_view._sync_overlay_stack_order()
@@ -1300,7 +1302,9 @@ class _LogoRegionOverlayWindow(_BlurRegionOverlayWindow):
         self._offset_x = float(target_rect.left() - clipped_rect.left())
         self._offset_y = float(target_rect.top() - clipped_rect.top())
         top_left = self._target_view.mapToGlobal(clipped_rect.topLeft())
-        self.setGeometry(QRect(top_left, clipped_rect.size()))
+        geometry = QRect(top_left, clipped_rect.size())
+        if self.geometry() != geometry:
+            self.setGeometry(geometry)
         self.show()
         if hasattr(self._target_view, "_sync_overlay_stack_order"):
             self._target_view._sync_overlay_stack_order()
@@ -1527,14 +1531,16 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
         self._fill_color = QColor(201, 140, 90)
         self._sync_timer = None
         self._mask_images = {}
+        self._mask_fills = {}
 
     def _should_show_overlay(self):
         return super()._should_show_overlay() or bool(
-            self._logical_visible and any(index < len(self._regions) for index in self._mask_images)
+            self._logical_visible and self._regions and (self._mask_images or self._mask_fills)
         )
 
     def clear_region(self):
         self._mask_images.clear()
+        self._mask_fills.clear()
         super().clear_region()
 
     def set_fill_color(self, color: str | QColor):
@@ -1570,12 +1576,18 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
         """Display every M1 region while making one layer editable."""
         pixmaps = {path: pixmap for path, pixmap, _ in self._mask_images.values()}
         self._mask_images = {}
+        self._mask_fills = {}
+        ordered = bool(getattr(self._target_view, "overlay_order", ()))
         for index, region in enumerate(regions):
             path = region.get("source", "") if region.get("mode") == "image" else ""
             if path:
                 if path not in pixmaps:
                     pixmaps[path] = QPixmap(path)
                 self._mask_images[index] = (path, pixmaps[path], region.get("opacity", 1.0))
+            elif ordered and region.get("mode", "solid") == "solid":
+                color = QColor(region.get("color", "#000000"))
+                color.setAlphaF(max(0., min(1., region.get("opacity", 1.0))))
+                self._mask_fills[index] = color
         super().set_regions(regions)
         if self._regions:
             self._active_index = max(0, min(int(active_index), len(self._regions) - 1))
@@ -1659,6 +1671,9 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
             if rect.width() <= 0 or rect.height() <= 0:
                 continue
             image = self._mask_images.get(index)
+            solid = self._mask_fills.get(index)
+            if solid is not None:
+                painter.fillRect(rect, solid)
             if image:
                 _, pixmap, opacity = image
                 painter.save()
@@ -1670,10 +1685,11 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
             if self._in_review_mode:
                 continue
             is_active = bool(self._editable and index == self._active_index)
-            if image and not is_active:
+            if (image or solid is not None) and not is_active:
                 continue
             accent = QColor(self.ACCENT)
-            fill = QColor(self._fill_color.red(), self._fill_color.green(), self._fill_color.blue(), 0 if image else 36 if is_active else 22)
+            fill = QColor(self._fill_color.red(), self._fill_color.green(), self._fill_color.blue(),
+                          0 if image or solid is not None else (36 if is_active else 22))
             if is_active:
                 painter.setPen(QPen(accent, 2, Qt.DashLine))
                 painter.setBrush(fill)
@@ -2118,15 +2134,16 @@ class MpvVideoView(QWidget):
         self._sync_overlay_stack_order()
 
     def _sync_overlay_stack_order(self):
-        overlays = [
-            getattr(self, "blur_overlay", None),
-            getattr(self, "mask_overlay", None),
-            getattr(self, "logo_overlay", None),
-            getattr(self, "text_overlay", None),
-            getattr(self, "subtitle_item", None),
-        ]
+        explicit_order = getattr(self, "overlay_order", ())
+        order = explicit_order or ("mask", "logo", "text")
+        overlays = [getattr(self, "blur_overlay", None)]
+        overlays.extend(getattr(self, group + "_overlay", None) for group in order)
         valid_overlays = [o for o in overlays if o is not None and _is_valid_qobject(o)]
+        subtitle = getattr(self, "subtitle_item", None)
+        if subtitle is not None and _is_valid_qobject(subtitle):
+            valid_overlays.append(subtitle)
         if _should_suppress_overlay(self):
+            self._applied_overlay_stack = None
             for o in valid_overlays:
                 try:
                     o.hide()
@@ -2134,21 +2151,26 @@ class MpvVideoView(QWidget):
                     pass
             return
 
-        editable_overlay = None
-        for o in valid_overlays:
-            if o.isVisible():
-                try:
-                    o.raise_()
-                except Exception:
-                    pass
-            if getattr(o, "_editable", False):
-                editable_overlay = o
-
-        if editable_overlay is not None and editable_overlay.isVisible():
-            try:
-                editable_overlay.raise_()
-            except Exception:
-                pass
+        visible = [o for o in valid_overlays if o.isVisible()]
+        if explicit_order:
+            # Subtitles can show, hide or move at each cue. Raising every
+            # native overlay in response briefly exposes an obscured logo
+            # before the mask window is raised again.
+            decorations = tuple(o for o in visible if o is not subtitle)
+            if decorations != getattr(self, "_applied_overlay_stack", None):
+                for overlay in decorations:
+                    overlay.installEventFilter(self)
+                    overlay.raise_()
+                self._applied_overlay_stack = decorations
+            if subtitle in visible:
+                subtitle.raise_()
+        else:
+            self._applied_overlay_stack = None
+            editable = next((o for o in reversed(visible) if getattr(o, "_editable", False)), None)
+            for overlay in visible:
+                overlay.raise_()
+            if editable is not None:
+                editable.raise_()
 
         popup = QApplication.activePopupWidget()
         if _is_own_popup_menu(self, popup):
@@ -2254,7 +2276,7 @@ class MpvVideoView(QWidget):
             is_loading = getattr(win, "_project_loading_in_progress", False)
             if self.text_overlay._items and not self.text_overlay._suppressed and not is_loading:
                 self.text_overlay.show()
-                self.text_overlay.raise_()
+                self._sync_overlay_stack_order()
         self.update()
 
     def moveEvent(self, event):
@@ -2265,6 +2287,7 @@ class MpvVideoView(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._applied_overlay_stack = None
         if not self._blur_event_filter_installed:
             self._blur_event_filter_installed = True
             _win = self.window()
@@ -2289,17 +2312,16 @@ class MpvVideoView(QWidget):
             if self.text_overlay is not None and self.text_overlay._items and not self.text_overlay._suppressed:
                 self.text_overlay.sync_to_view()
                 self.text_overlay.show()
-                self.text_overlay.raise_()
             if (self._logo_track_visible
                     and getattr(self, "logo_overlay", None) is not None
                     and getattr(self.logo_overlay, "_regions", None)):
                 self.logo_overlay.sync_to_view()
                 self.logo_overlay.show()
-                self.logo_overlay.raise_()
             if self._subtitle_track_visible and self.subtitle_item.current_text:
                 self.subtitle_item.show()
         self.blur_overlay.sync_to_view()
         self.mask_overlay.sync_to_view()
+        self._sync_overlay_stack_order()
 
     def eventFilter(self, watched, event):
         try:
@@ -2309,9 +2331,12 @@ class MpvVideoView(QWidget):
         except Exception:
             pass
         try:
+            if event.type() == QEvent.Hide and watched in (getattr(self, "_applied_overlay_stack", None) or ()):
+                self._applied_overlay_stack = None
             if watched is self.window():
                 event_type = event.type()
                 if event_type == QEvent.WindowActivate:
+                    self._applied_overlay_stack = None
                     QTimer.singleShot(0, lambda: self._restore_subtitle_overlay() if _is_valid_qobject(self) else None)
                     QTimer.singleShot(60, lambda: self._restore_subtitle_overlay() if _is_valid_qobject(self) else None)
                 else:

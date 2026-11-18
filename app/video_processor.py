@@ -532,7 +532,7 @@ def _build_blur_filter_chain(blur_region, video_width, video_height):
     return f"format=yuv420p,split={len(regions) + 1}{split_outputs};" + ";".join(crop_parts + overlay_parts)
 
 
-def _build_mask_filter_chain(mask_regions, video_width, video_height):
+def _build_mask_filter_chain(mask_regions, video_width, video_height, *, canvas_overlay=False):
     """Build FFmpeg filter chain for mask layers.
     
     Mask modes:
@@ -583,6 +583,9 @@ def _build_mask_filter_chain(mask_regions, video_width, video_height):
         y = max(0, min(video_height - 2, int(round(y_norm * video_height))))
         w = max(2, min(video_width - x, int(round(w_norm * video_width))))
         h = max(2, min(video_height - y, int(round(h_norm * video_height))))
+        if canvas_overlay:
+            x, y = round(x_norm * video_width), round(y_norm * video_height)
+            w, h = max(2, round(w_norm * video_width)), max(2, round(h_norm * video_height))
         try:
             start = max(0.0, float(region.get("start", 0.0) or 0.0))
             end = float(region.get("end", 0.0) or 0.0)
@@ -620,8 +623,9 @@ def _build_mask_filter_chain(mask_regions, video_width, video_height):
             color_clean = color.lstrip("#")
             if len(color_clean) != 6:
                 color_clean = "000000"
+            opacity = max(0., min(1., float(region.get("opacity", 1.0)))) if canvas_overlay else 1.
             filter_statements.append(
-                f"color=c=0x{color_clean}:s={w}x{h}:d=1[solid{index}]"
+                f"color=c=0x{color_clean}@{opacity}:s={w}x{h}:d=1,format=rgba[solid{index}]"
             )
             filter_statements.append(f"{current_input}[solid{index}]overlay={x}:{y}{timing}{output_label}")
 
@@ -1903,6 +1907,18 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
     ) if (target_width and target_height) or layout else logo_layers
 
     blur_chain = _build_blur_filter_chain(blur_region, video_w, video_h)
+    from app.layers.stack import overlay_order
+
+    order = overlay_order((video_filter_state or {}).get("overlay_order"))
+    ordered_mask_chain = ""
+    if order:
+        overlays = [region for region in (mask_regions or []) if region.get("mode", "solid") in {"image", "solid"}]
+        mask_regions = [region for region in (mask_regions or []) if region.get("mode", "solid") not in {"image", "solid"}]
+        mapped = _map_normalized_overlays_to_canvas(overlays, source_w, source_h, canvas_w, canvas_h,
+            output_scale_mode, output_fill_focus_x, output_fill_focus_y, layout)
+        ordered_mask_chain = _build_mask_filter_chain(mapped, canvas_w, canvas_h, canvas_overlay=True)
+        # Source masks use the same filter builder and must have distinct pads.
+        ordered_mask_chain = re.sub(r"\[(m\d+|solid\d+|mask_image\d+)\]", r"[overlay_\1]", ordered_mask_chain)
     mask_chain = _build_mask_filter_chain(mask_regions, video_w, video_h)
     print(f"[FFmpeg] mask_chain={mask_chain[:100] if mask_chain else 'empty'}")
     
@@ -1912,10 +1928,10 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
     print(f"[FFmpeg] has_logos={has_logos}, logo_layers count={len(logo_layers_for_canvas) if logo_layers_for_canvas else 0}")
     
     # Build command based on whether we have logos
-    if has_logos:
+    if has_logos or order:
         # Complex filter graph with multiple inputs
         command = _build_logo_overlay_command(
-            ffmpeg, video_path, ass_path, output_path, logo_layers_for_canvas,
+            ffmpeg, video_path, ass_path, output_path, logo_layers_for_canvas or [],
             blur_region, mask_regions, canvas_w, canvas_h,
             scale_chain, blur_chain, mask_chain,
             output_fps, video_filter_state, text_ass_path, text_image_layers,
@@ -1923,6 +1939,7 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
             audio_gain_db=audio_gain_db,
             video_quality=video_quality,
             video_time_warps=video_time_warps,
+            order=order, ordered_mask_chain=ordered_mask_chain,
         )
     else:
         # Simple filter chain (no logos)
@@ -2075,12 +2092,62 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
         return False
 
 
+def _append_logo_image_parts(filter_parts, current_label, logo_layers, video_w, video_h):
+    # 2. Process each logo layer
+    logo_input_idx = 1
+
+    for i, logo in enumerate(logo_layers):
+        source = logo.get('source', '')
+        if not source or not os.path.exists(source):
+            continue
+
+        x = float(logo.get('x', 0.1))
+        y = float(logo.get('y', 0.1))
+        width = float(logo.get('width', 0.2))
+        height = float(logo.get('height', 0.2))
+        opacity = float(logo.get('opacity', 1.0))
+        rotation = float(logo.get('rotation', 0.0))
+        start = max(0.0, float(logo.get('start', 0.0) or 0.0))
+        end = float(logo.get('end', 0.0) or 0.0)
+
+        # Calculate pixel dimensions
+        logo_w = int(video_w * width)
+        logo_h = int(video_h * height)
+        logo_x = int(video_w * x)
+        logo_y = int(video_h * y)
+
+        # Scale logo
+        filter_parts.append(f"[{logo_input_idx}:v]scale={logo_w}:{logo_h}[logo{i}_scaled]")
+
+        # Apply opacity if needed
+        if opacity < 1.0:
+            filter_parts.append(f"[logo{i}_scaled]format=rgba,colorchannelmixer=aa={opacity}[logo{i}_opacity]")
+            logo_label = f"logo{i}_opacity"
+        else:
+            logo_label = f"logo{i}_scaled"
+
+        # Apply rotation if needed
+        if abs(rotation) > 0.1:
+            # FFmpeg uses radians, convert from degrees
+            rotation_rad = rotation * 3.14159265 / 180.0
+            filter_parts.append(f"[{logo_label}]rotate={rotation_rad}:c=none:ow={logo_w}:oh={logo_h}[logo{i}_rotated]")
+            logo_label = f"logo{i}_rotated"
+
+        # Overlay logo on video
+        next_label = f"with_logo{i}"
+        timing = f":enable='between(t,{start:.3f},{end:.3f})'" if end > start else ""
+        filter_parts.append(f"[{current_label}][{logo_label}]overlay={logo_x}:{logo_y}{timing}[{next_label}]")
+        current_label = next_label
+        logo_input_idx += 1
+    return current_label
+
+
 def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_layers,
                                  blur_region, mask_regions, video_w, video_h,
                                  scale_chain, blur_chain, mask_chain,
                                  output_fps, video_filter_state, text_ass_path="", text_image_layers=None,
                                  source_width=None, source_height=None, audio_gain_db=0.0,
-                                 video_quality="medium", video_time_warps=None):
+                                 video_quality="medium", video_time_warps=None, order=(), ordered_mask_chain=""):
     """Build FFmpeg command with logo overlay using filter_complex."""
     
     # Start building the command with video input
@@ -2146,7 +2213,6 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
     if mask_chain:
         adjusted_mask_chain = mask_chain.replace("[0:v]", f"[{main_label}]", 1)
         filter_parts.append(adjusted_mask_chain)
-        import re
         matches = re.findall(r'\[m\d+\]', adjusted_mask_chain)
         if matches:
             main_label = matches[-1].strip("[]")
@@ -2161,66 +2227,30 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
     if scale_chain:
         filter_parts.append(f"[{main_label}]{scale_chain}[scaled]")
         main_label = "scaled"
-    filter_parts.append(f"[{main_label}]{_ass_filter_expression(ass_path)}[subbed]")
-    main_label = "subbed"
-
-    # 2. Process each logo layer
-    logo_input_idx = 1
     current_label = main_label
-    
-    for i, logo in enumerate(logo_layers):
-        source = logo.get('source', '')
-        if not source or not os.path.exists(source):
-            continue
-        
-        x = float(logo.get('x', 0.1))
-        y = float(logo.get('y', 0.1))
-        width = float(logo.get('width', 0.2))
-        height = float(logo.get('height', 0.2))
-        opacity = float(logo.get('opacity', 1.0))
-        rotation = float(logo.get('rotation', 0.0))
-        start = max(0.0, float(logo.get('start', 0.0) or 0.0))
-        end = float(logo.get('end', 0.0) or 0.0)
-        
-        # Calculate pixel dimensions
-        logo_w = int(video_w * width)
-        logo_h = int(video_h * height)
-        logo_x = int(video_w * x)
-        logo_y = int(video_h * y)
-        
-        # Scale logo
-        filter_parts.append(f"[{logo_input_idx}:v]scale={logo_w}:{logo_h}[logo{i}_scaled]")
-        
-        # Apply opacity if needed
-        if opacity < 1.0:
-            filter_parts.append(f"[logo{i}_scaled]format=rgba,colorchannelmixer=aa={opacity}[logo{i}_opacity]")
-            logo_label = f"logo{i}_opacity"
-        else:
-            logo_label = f"logo{i}_scaled"
-        
-        # Apply rotation if needed
-        if abs(rotation) > 0.1:
-            # FFmpeg uses radians, convert from degrees
-            rotation_rad = rotation * 3.14159265 / 180.0
-            filter_parts.append(f"[{logo_label}]rotate={rotation_rad}:c=none:ow={logo_w}:oh={logo_h}[logo{i}_rotated]")
-            logo_label = f"logo{i}_rotated"
-        
-        # Overlay logo on video
-        next_label = f"with_logo{i}"
-        timing = f":enable='between(t,{start:.3f},{end:.3f})'" if end > start else ""
-        filter_parts.append(f"[{current_label}][{logo_label}]overlay={logo_x}:{logo_y}{timing}[{next_label}]")
-        current_label = next_label
-        logo_input_idx += 1
-    
-    # Optional legacy secondary ASS/Text pass remains a canvas overlay.
-    if text_ass_path and os.path.exists(text_ass_path):
-        filter_parts.append(f"[{current_label}]{_ass_filter_expression(text_ass_path)}[text_ass]")
-        current_label = "text_ass"
-    current_label = _append_text_image_filter_parts(
-        filter_parts, current_label, text_image_layers, 1 + sum(
-            1 for logo in logo_layers if logo.get('source', '') and os.path.exists(logo.get('source', ''))
-        )
-    )
+    text_input = 1 + sum(1 for logo in logo_layers if os.path.isfile(logo.get("source", "")))
+
+    def append_text(label):
+        if text_ass_path and os.path.exists(text_ass_path):
+            filter_parts.append(f"[{label}]{_ass_filter_expression(text_ass_path)}[text_ass]")
+            label = "text_ass"
+        return _append_text_image_filter_parts(filter_parts, label, text_image_layers, text_input)
+
+    if order:
+        for group in order:
+            if group == "mask" and ordered_mask_chain:
+                filter_parts.append(ordered_mask_chain.replace("[0:v]", f"[{current_label}]", 1))
+                current_label = re.findall(r"\[(overlay_m\d+)\]", ordered_mask_chain)[-1]
+            elif group == "logo":
+                current_label = _append_logo_image_parts(filter_parts, current_label, logo_layers, video_w, video_h)
+            elif group == "text":
+                current_label = append_text(current_label)
+        filter_parts.append(f"[{current_label}]{_ass_filter_expression(ass_path)}[subbed]")
+        current_label = "subbed"
+    else:
+        filter_parts.append(f"[{current_label}]{_ass_filter_expression(ass_path)}[subbed]")
+        current_label = _append_logo_image_parts(filter_parts, "subbed", logo_layers, video_w, video_h)
+        current_label = append_text(current_label)
     filter_parts.append(f"[{current_label}]null[final]")
     
     # Join all filter parts

@@ -255,26 +255,16 @@ class PreviewController:
         mask_regions = []
         logo_layers = []
         text_layers = []
+        ordered = False
         try:
-            if hasattr(self.gui, "_current_mask_regions_payload"):
-                raw_masks = self.gui._current_mask_regions_payload()
-                print(f"[Preview] Found {len(raw_masks)} mask region(s) from M1 track")
-                for region in raw_masks:
-                    if region.get("mode") == "image":
-                        continue  # Collected with its full timing from the timeline below.
-                    mask_regions.append({
-                        "x": float(region.get("x", 0.3)),
-                        "y": float(region.get("y", 0.4)),
-                        "width": float(region.get("width", 0.4)),
-                        "height": float(region.get("height", 0.2)),
-                        "mode": str(region.get("mode", "solid")),
-                        "color": str(region.get("color", "#000000")),
-                        "opacity": float(region.get("opacity", 1.0)),
-                        "pixelate_size": int(region.get("pixelate_size", 12)),
-                        "blur_strength": int(region.get("blur_strength", 20)),
-                    })
-        except Exception as e:
-            print(f"Warning: Failed to extract mask regions: {e}")
+            model = getattr(getattr(self.gui, "timeline", None), "_timeline", None)
+            ordered = bool(getattr(model, "overlay_order", ()))
+            if ordered and getattr(self.gui, "_mask_track_preview_visible", True):
+                mask_regions = self.gui._current_mask_regions_payload(include_inactive=True)
+            elif hasattr(self.gui, "_current_mask_regions_payload"):
+                mask_regions = [region for region in self.gui._current_mask_regions_payload() if region.get("mode") != "image"]
+        except (AttributeError, TypeError, ValueError) as exc:
+            print(f"Warning: Failed to extract mask regions: {exc}")
 
         try:
             if hasattr(self.gui, "timeline") and hasattr(self.gui.timeline, "_timeline"):
@@ -283,7 +273,7 @@ class PreviewController:
                     for tr in timeline_obj.tracks:
                         track_type = tr.type.value if hasattr(tr.type, "value") else str(tr.type)
                         print(f"[Preview] Checking track: name={tr.name} type={track_type}")
-                        if track_type == "mask":
+                        if track_type == "mask" and not ordered:
                             for layer in tr.layers:
                                 try:
                                     if layer.mode == "image":
@@ -1261,11 +1251,11 @@ class PreviewController:
         mask_regions, logo_layers, text_layers = self._extract_overlay_layers()
         clip_end = start_seconds + duration_seconds
         mask_regions = [
-            dict(region, start=max(0., region['start'] - start_seconds), end=min(clip_end, region['end']) - start_seconds)
-            if region.get('mode') == 'image' and region['end'] > region['start'] else region
+            dict(region, start=max(0., region.get('start', 0.) - start_seconds), end=min(clip_end, region['end']) - start_seconds)
+            if region.get('end', 0.) > region.get('start', 0.) else region
             for region in mask_regions
-            if region.get('mode') != 'image' or region['end'] <= region['start']
-            or (region['start'] < clip_end and region['end'] > start_seconds)
+            if region.get('end', 0.) <= region.get('start', 0.)
+            or (region.get('start', 0.) < clip_end and region['end'] > start_seconds)
         ]
         blur_regions = self._extract_fast_preview_blur_regions(start_seconds, duration_seconds)
         video_name = os.path.splitext(os.path.basename(video_path))[0]

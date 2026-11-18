@@ -90,6 +90,7 @@ class LayoutPresetsController:
         p.capture_style()
         state = self.gui.current_project_state
         return dict(layout=copy.deepcopy(self.owner.applied), tracks=recipes.visual_tracks(self.gui.timeline._timeline),
+                    overlay_order=self.gui._overlay_stack_order(),
                     styles=copy.deepcopy(p.cfg['styles']), controls=self.controls(),
                     legacy_effects={key: copy.deepcopy(state.settings.get(key)) if state else None
                                     for key in ('mask_state', 'blur_state')},
@@ -148,6 +149,7 @@ class LayoutPresetsController:
             QMessageBox.warning(self.gui, t('Error'), str(exc))
             return
         after = dict(layout=cfg, tracks=tracks, styles=styles, controls=controls,
+                     overlay_order=list(self.pending.get('overlay_order', ())),
                      # The new timeline is authoritative; old fallback regions
                      # must not resurrect effects removed by this recipe.
                      legacy_effects={'mask_state': dict(enabled=controls.get('visibility', {}).get('_mask_track_preview_visible', True), regions=[]),
@@ -170,6 +172,7 @@ class LayoutPresetsController:
         self.owner.pending_before = None
         self.owner.applied = copy.deepcopy(snap['layout'])
         recipes.replace_visual_tracks(self.gui.timeline._timeline, snap['tracks'])
+        self.gui.timeline._timeline.overlay_order = list(snap.get('overlay_order', ()))
         self.set_controls(snap['controls'])
         p.cfg['styles'] = copy.deepcopy(snap['styles'])
         p.apply_controls(p.cfg['styles'][p.role])

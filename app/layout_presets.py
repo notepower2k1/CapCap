@@ -98,6 +98,7 @@ def capture(model, *, layout, controls, styles, canvas, source):
             elif layer['type'] == 'mask' and layer['mode'] == 'image':
                 layer['source'] = LOGO_ASSET
     return dict(version=1, layout=cfg, controls=copy.deepcopy(controls), styles=copy.deepcopy(styles),
+                **({'overlay_order': list(model.overlay_order)} if model.overlay_order else {}),
                 canvas=list(canvas), source=list(source), duration=max(.001, float(model.duration)), tracks=tracks)
 
 

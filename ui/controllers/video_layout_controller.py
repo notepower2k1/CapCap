@@ -238,7 +238,7 @@ class VideoLayoutController:
         self.applied = config(state.settings[KEY]) if state and state.settings.get(KEY) else None
         for name in ('_timeline_timing_undo_stack', '_timeline_timing_redo_stack'):
             stack = getattr(self.gui, name, [])
-            stack[:] = [entry for entry in stack if entry.get('type') not in ('video_layout','layout_preset','video_frame','background_layer','logo_source')]
+            stack[:] = [entry for entry in stack if entry.get('type') not in ('video_layout','layout_preset','video_frame','background_layer','logo_source','overlay_order')]
         self.pending_before = None; self.fill(self.applied)
         self.refresh()
 

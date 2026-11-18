@@ -14,6 +14,10 @@ class StaticVideoView(MpvVideoView):
         self._frame = QPixmap()
         self._effects = []
         self._mirror = False
+        self._background_path = None
+        self._background_source = QImage()
+        self._background_size = None
+        self._background_scaled = QImage()
         self._image = QLabel(self.video_surface)
         self._image.setScaledContents(True)
         self._image.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -31,6 +35,19 @@ class StaticVideoView(MpvVideoView):
             return
         self._effects, self._mirror = effects, bool(mirror)
         self._render_frame()
+
+    def _scaled_image_background(self, path, width, height):
+        if path != self._background_path:
+            self._background_path = path
+            self._background_source = QImage(path)
+            self._background_size = None
+        size = (width, height)
+        if self._background_size != size:
+            self._background_scaled = self._background_source.scaled(
+                width, height, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+            ) if not self._background_source.isNull() else QImage()
+            self._background_size = size
+        return self._background_scaled
 
     def _render_frame(self):
         if self._frame.isNull():
@@ -70,11 +87,14 @@ class StaticVideoView(MpvVideoView):
             frame = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
             frame.fill(QColor(cfg['color']))
             p = QPainter(frame); p.setRenderHint(QPainter.SmoothPixmapTransform)
-            bg = image if cfg['background'] == 'blur' else QImage(cfg['image']) if cfg['background'] == 'image' else QImage()
-            if not bg.isNull():
-                if cfg['background'] == 'blur':
-                    bg = bg.scaled(max(2,w//int(cfg['blur'])), max(2,h//int(cfg['blur'])), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            bg = QImage()
+            if cfg['background'] == 'image':
+                bg = self._scaled_image_background(cfg['image'], w, h)
+            elif cfg['background'] == 'blur':
+                bg = image.scaled(max(2,w//int(cfg['blur'])), max(2,h//int(cfg['blur'])),
+                                  Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 bg = bg.scaled(w,h,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation)
+            if not bg.isNull():
                 p.drawImage(round((w-bg.width())/2),round((h-bg.height())/2),bg)
             slot, displayed = geometry(cfg,w,h,image.width(),image.height(),self.preview_scale_mode,self.get_preview_fill_focus())
             face = QRectF(*(slot if self.preview_scale_mode == 'fill' else displayed))

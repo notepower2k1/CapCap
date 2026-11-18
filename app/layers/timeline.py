@@ -127,11 +127,13 @@ class Timeline:
     composition_width: int = 1920
     composition_height: int = 1080
     fps: float = 30.0
+    overlay_order: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "duration": self.duration,
             "tracks": [t.to_dict() for t in self.tracks],
+            "overlay_order": list(self.overlay_order),
             "composition": {
                 "width": self.composition_width,
                 "height": self.composition_height,
@@ -141,6 +143,7 @@ class Timeline:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Timeline:
+        from app.layers.stack import overlay_order
         comp = data.get("composition", {})
         return cls(
             duration=float(data.get("duration", 0.0)),
@@ -148,6 +151,7 @@ class Timeline:
             composition_width=int(comp.get("width", 1920)),
             composition_height=int(comp.get("height", 1080)),
             fps=float(comp.get("fps", 30.0)),
+            overlay_order=overlay_order(data.get("overlay_order")),
         )
 
     def get_track(self, track_id: str) -> Track | None:

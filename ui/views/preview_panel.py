@@ -1725,6 +1725,7 @@ def build_preview_panel(gui):
     gui.track_label_bar.subtitleToggled.connect(gui.on_track_subtitle_toggled)
     gui.track_label_bar.trackSelected.connect(gui.on_track_label_selected)
     gui.track_label_bar.lockToggled.connect(gui.on_timeline_track_lock_toggled)
+    gui.track_label_bar.stackMoved.connect(gui.move_overlay_track)
 
     def _sync_labels():
         if hasattr(gui, "timeline") and gui.timeline._timeline:

@@ -412,6 +412,8 @@ class DraftExporter:
         solids = {}
         for track in timeline.get("tracks", []):
             overlays = []
+            decorations = []
+            ordered = bool(timeline.get("overlay_order"))
             for layer in self._layers(track, all_layers):
                 self._check()
                 kind = layer.get("type")
@@ -439,7 +441,8 @@ class DraftExporter:
                     photo = dict(layer, type="image", transform=dict(x=100 * left, y=100 * top,
                         scale_x=5 * (right - left), scale_y=5 * (bottom - top)))
                     material, _ = self._material(source, "photo")
-                    overlays.append(self._segment(material, start / 1e6, (end - start) / 1e6, volume=0., layer=photo))
+                    target = decorations if ordered else overlays
+                    target.append(self._segment(material, start / 1e6, (end - start) / 1e6, volume=0., layer=photo))
                     continue
                 if mode not in ("blur", "pixelate", "solid"):
                     raise ValueError(f"Unsupported mask mode: {mode}")
@@ -504,13 +507,15 @@ class DraftExporter:
                         native_effect["id"] = _id()
                         self.materials["video_effects"].append(native_effect)
                         segment["extra_material_refs"].append(native_effect["id"])
-                    overlays.append(segment)
+                    target = decorations if ordered and kind == "mask" and mode == "solid" else overlays
+                    target.append(segment)
                     count += 1
                 self.layer_report.append({"name": layer.get("name", track.get("name", "Region")), "type": kind,
                     "start": start / 1e6, "end": end / 1e6, "status": "native_region" if count else "outside_video",
                     "effect": effect["name"] if effect else "Solid", "region_transferred": bool(count),
                     "segments": count, "source_region": {key: layer.get(key) for key in ("position_x", "position_y", "width", "height")}})
             self._track(f"{track.get('name', 'Region')} Regions", "video", overlays)
+            self._track(f"{track.get('name', 'Region')} Overlay", "video", decorations)
         if self.materials["common_mask"]:
             self.warnings.append("Blur/mask rectangles are transferred as editable source overlays. Effect intensity is approximate; verify areas in CapCut. CapCut may need to download native mask/effect resources.")
 
@@ -690,7 +695,29 @@ class DraftExporter:
             fade = apply_envelope(segment, layer, start, end, metadata, total, _id)
             if fade:
                 self.materials["audio_fades"].append(fade)
+        if timeline.get("overlay_order"):
+            self._apply_overlay_stack(timeline["overlay_order"])
         self._write(snapshot, width, height, fps)
+
+    def _apply_overlay_stack(self, saved_order):
+        from app.layers.stack import overlay_order
+
+        ranks = {group: index + 1 for index, group in enumerate(overlay_order(saved_order))}
+
+        def rank(track):
+            name = track["name"]
+            for prefix, group in (("M1 Overlay", "mask"), ("L1 Logo", "logo"), ("T1 Text", "text")):
+                if name == prefix or name.startswith(prefix + " "):
+                    return ranks[group]
+            if track["type"] == "text":
+                return len(ranks) + 1
+            return 0
+
+        self.tracks.sort(key=rank)
+        for index, track in enumerate(self.tracks):
+            for segment in track["segments"]:
+                segment["track_render_index"] = index
+                segment["render_index"] = max(11000, index * 1000) if track["type"] == "effect" else index * 1000
 
     def _write(self, snapshot, width, height, fps):
         now, timeline_id, draft_id = time.time_ns() // 1000, _id(), _id()

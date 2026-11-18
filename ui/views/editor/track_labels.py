@@ -1,5 +1,6 @@
 import os
 from ui.views.editor.timeline_palette import SECONDARY_SUBTITLE_FILL, SECONDARY_SUBTITLE_ACCENT, LOCK_ACCENT
+from app.layers.stack import TRACK_GROUPS
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QMouseEvent, QPainter, QPen, QPolygonF
@@ -76,6 +77,7 @@ class TrackLabelBar(QFrame):
     subtitleToggled = Signal(str, bool)  # track_name, is_shown
     trackSelected = Signal(str)  # track_name
     lockToggled = Signal(str, bool)  # track_name, is_locked
+    stackMoved = Signal(str, str, bool)  # dragged track, target track, before target
 
     TRACK_HEADER_W = 188
     RULER_HEIGHT = 30
@@ -96,6 +98,9 @@ class TrackLabelBar(QFrame):
         self._track_subtitle_shown: list[bool] = []
         self._controls_enabled = True
         self._timeline_widget = None  # for vertical scroll sync
+        self._drag_stack = ""
+        self._stack_target = -1
+        self._stack_before = True
 
     def set_timeline(self, timeline):
         """Store a reference to the timeline so the labels can be
@@ -285,6 +290,13 @@ class TrackLabelBar(QFrame):
                 name = self._track_names[idx]
                 prefix = name.split(" ")[0] if name else ""
                 x = event.position().x()
+                if x < 22 and name in TRACK_GROUPS:
+                    if self._controls_enabled and not self._track_locked[idx]:
+                        self._drag_stack = name
+                        self._stack_target = -1
+                        self.setCursor(Qt.ClosedHandCursor)
+                    event.accept()
+                    return
                 if x >= self.TRACK_HEADER_W - 84 and not self._controls_enabled:
                     event.accept()
                     return
@@ -388,11 +400,27 @@ class TrackLabelBar(QFrame):
         # Show a context tooltip for the dedicated controls and for the
         # label-selection area.
         idx = self._track_index_at(event.position().y())
+        if self._drag_stack:
+            self._stack_target = idx if 0 <= idx < len(self._track_names) and self._track_names[idx] in TRACK_GROUPS else -1
+            if self._stack_target >= 0:
+                top = self._track_top(idx)
+                self._stack_before = event.position().y() < top + self._track_heights[idx] / 2
+            self.update()
+            return
         is_clickable = False
         if 0 <= idx < len(self._track_names):
             prefix = self._track_names[idx].split(" ")[0] if self._track_names[idx] else ""
             is_clickable = bool(prefix)
         x = event.position().x()
+        if is_clickable and x < 22:
+            name = self._track_names[idx]
+            draggable = name in TRACK_GROUPS and self._controls_enabled and not self._track_locked[idx]
+            if name in BLUR_PREFIXES:
+                self.setToolTip(t("Blur stays on the source video below translated subtitles"))
+            else:
+                self.setToolTip(t("Drag to change overlay order") if draggable else t("Fixed layer order"))
+            self.setCursor(Qt.OpenHandCursor if draggable else Qt.ArrowCursor)
+            return
         if is_clickable and x >= self.TRACK_HEADER_W - 84 and not self._controls_enabled:
             self.setToolTip(t("Pause playback to edit layer controls"))
             self.setCursor(Qt.ForbiddenCursor)
@@ -429,6 +457,22 @@ class TrackLabelBar(QFrame):
     def leaveEvent(self, event):
         self.setCursor(Qt.ArrowCursor)
         super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._drag_stack:
+            source, target = self._drag_stack, self._stack_target
+            self._drag_stack, self._stack_target = "", -1
+            self.unsetCursor()
+            self.update()
+            if self._controls_enabled and 0 <= target < len(self._track_names):
+                self.stackMoved.emit(source, self._track_names[target], self._stack_before)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _track_top(self, index):
+        scroll = self._timeline_widget.verticalScrollBar().value() if self._timeline_widget else 0
+        return self.RULER_HEIGHT + sum(self._track_heights[:index]) - scroll
 
     def _track_index_at(self, y: float) -> int:
         # Add the timeline's vertical scroll offset so the click
@@ -535,7 +579,7 @@ class TrackLabelBar(QFrame):
         # Reserve compact cells on every track. Audio uses mute + lock;
         # subtitles use mute + visibility + lock; overlays use visibility + lock.
         icon_col_w = 84
-        text_x = 8
+        text_x = 24
         text_w = self.TRACK_HEADER_W - text_x - icon_col_w - 4
 
         for i, name in enumerate(self._track_names):
@@ -572,6 +616,14 @@ class TrackLabelBar(QFrame):
 
             painter.setPen(QPen(c, 0))
             painter.fillRect(0, y, 3, h, c)
+            painter.setPen(QPen(QColor("#9cb4cc"), 1.3))
+            center = y + h / 2
+            if name in TRACK_GROUPS:
+                for dy in (-4, 0, 4):
+                    painter.drawLine(QPointF(8, center + dy), QPointF(16, center + dy))
+            else:
+                painter.drawEllipse(QRectF(9, center - 5, 6, 6))
+                painter.drawLine(QPointF(12, center + 1), QPointF(12, center + 6))
 
             dim_text = (muted or logo_hidden or mask_hidden or text_hidden or subtitle_hidden
                         or (prefix in BLUR_PREFIXES and not blur_on))
@@ -626,4 +678,10 @@ class TrackLabelBar(QFrame):
 
             y += h
 
+        if self._stack_target >= 0 and self._drag_stack:
+            line = self._track_top(self._stack_target)
+            if not self._stack_before:
+                line += self._track_heights[self._stack_target]
+            painter.setPen(QPen(QColor("#5eead4"), 2))
+            painter.drawLine(QPointF(0, line), QPointF(self.width(), line))
         painter.end()

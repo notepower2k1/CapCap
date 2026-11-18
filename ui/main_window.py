@@ -6287,6 +6287,7 @@ class VideoTranslatorGUI(QMainWindow):
             "lut_strength": lut_strength,
             "active": active or bool(layout),
             "video_layout": layout,
+            "overlay_order": self._overlay_stack_order(),
         }
 
     def has_active_video_filters(self):
@@ -6463,7 +6464,7 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _can_use_native_subtitle_preview(self):
         from ui.utils.video_geometry import native_subtitle_preview
-        if not native_subtitle_preview(self.video_view):
+        if self._overlay_stack_order() or not native_subtitle_preview(self.video_view):
             return False
         # Image masks are Qt overlays. Use Qt subtitles as well so subtitles
         # remain above them, in the same order as the rendered video.
@@ -8045,6 +8046,7 @@ class VideoTranslatorGUI(QMainWindow):
         """Show only overlay layers whose timeline interval contains the playhead."""
         if not hasattr(self, "timeline") or not self.timeline._timeline:
             return
+        self.video_view.overlay_order = self._overlay_stack_order()
         time_seconds = float(position_ms if position_ms is not None else self.media_player.position()) / 1000.0
         tracked = []
         for track in self.timeline._timeline.tracks:
@@ -10640,8 +10642,8 @@ class VideoTranslatorGUI(QMainWindow):
             # visible in the timeline (otherwise overlapping layers at
             # the same position hide each other).
             stagger = idx % 4
-            base_y = 0.75 - stagger * 0.06
-            base_x = 0.30 + (stagger % 2) * 0.08
+            base_y = 0.82 - stagger * 0.06
+            base_x = 0.10 + (stagger % 2) * 0.04
             # New Blur layers are global by default.  Their geometry can be
             # narrowed later in the inspector/timeline, but creating one must
             # not unexpectedly limit it to a five-second window at the
@@ -10652,8 +10654,8 @@ class VideoTranslatorGUI(QMainWindow):
                 name=f"Blur {idx + 1}",
                 position_x=float(base_x),
                 position_y=float(base_y),
-                width=0.4,
-                height=0.1,
+                width=0.76,
+                height=0.12,
                 blur_strength=20.0,
                 start=blur_start,
                 end=blur_end,
@@ -12099,12 +12101,53 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "timeline_redo_btn"):
             self.timeline_redo_btn.setEnabled(bool(self._timeline_timing_redo_stack))
 
+    def _overlay_stack_order(self):
+        model = getattr(getattr(self, "timeline", None), "_timeline", None)
+        return list(getattr(model, "overlay_order", ()))
+
+    def move_overlay_track(self, source, target, before_target):
+        from app.layers.stack import TRACK_GROUPS, overlay_order
+
+        if source == target or source not in TRACK_GROUPS or target not in TRACK_GROUPS or self._preview_is_playing():
+            return
+        model = self.timeline._timeline
+        tracks = [track for track in model.tracks if track.name in TRACK_GROUPS]
+        names = [track.name for track in tracks]
+        if source not in names or target not in names or any(track.locked for track in tracks if track.name == source):
+            return
+        moved = [name for name in names if name != source]
+        moved.insert(moved.index(target) + int(not before_target), source)
+        if moved == names:
+            return
+        before = (names, list(model.overlay_order))
+        after = (moved, overlay_order([TRACK_GROUPS[name] for name in reversed(moved)]))
+        self._apply_overlay_track_order(*after)
+        self._push_timeline_undo_entry(dict(type="overlay_order", before=before, after=after))
+
+    def _apply_overlay_track_order(self, names, order):
+        model = self.timeline._timeline
+        by_name = {track.name: track for track in model.tracks if track.name in names}
+        ordered = iter(by_name[name] for name in names if name in by_name)
+        model.tracks[:] = [next(ordered) if track.name in by_name else track for track in model.tracks]
+        model.overlay_order = list(order)
+        self.timeline._redraw()
+        self._sync_track_labels()
+        self._timed_layer_preview_signature = None
+        self.refresh_timed_layer_preview()
+        self.video_view._sync_overlay_stack_order()
+        self.sync_live_subtitle_preview()
+        self.persist_current_timeline_project_data()
+
     def undo_last_timeline_timing_edit(self):
         if self._preview_is_playing():
             return False
         if not self._timeline_timing_undo_stack:
             return False
         entry = self._timeline_timing_undo_stack.pop()
+        if entry.get("type") == "overlay_order":
+            self._apply_overlay_track_order(*entry["before"])
+            self._push_timeline_redo_entry(entry)
+            return True
         if entry.get('type') == 'video_frame':
             self.video_layout_controller.set_video_frame(entry['before'])
             self._push_timeline_redo_entry(entry)
@@ -12172,6 +12215,10 @@ class VideoTranslatorGUI(QMainWindow):
         if not self._timeline_timing_redo_stack:
             return False
         entry = self._timeline_timing_redo_stack.pop()
+        if entry.get("type") == "overlay_order":
+            self._apply_overlay_track_order(*entry["after"])
+            self._push_timeline_undo_repush(entry)
+            return True
         if entry.get('type') == 'video_frame':
             self.video_layout_controller.set_video_frame(entry['after'])
             self._push_timeline_undo_repush(entry)
@@ -14069,7 +14116,8 @@ class VideoTranslatorGUI(QMainWindow):
                 include_inactive=False,
                 exclude_layer_id=self._deferred_effect_layer_id_for("mask"),
             )
-        regions = [region for region in regions if region.get("mode") != "image"]
+        overlay_modes = {"image", "solid"} if VideoTranslatorGUI._overlay_stack_order(self) else {"image"}
+        regions = [region for region in regions if region.get("mode", "solid") not in overlay_modes]
         if regions:
             self.media_player.set_mask_region(regions)
         else:

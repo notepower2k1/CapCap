@@ -323,6 +323,7 @@ class PerformanceEditor(VideoTranslatorGUI):
     def refresh_timed_layer_preview(self,*args,**kwargs):
         if getattr(self,"_project_loading_in_progress",False) or not hasattr(self,"timeline"):
             return
+        self.video_view.overlay_order = self._overlay_stack_order()
         selected=str(getattr(self.timeline,"_selected_layer_id","") or "")
         self._refresh_text_layer_preview(selected)
         blur_layers=[]
@@ -399,7 +400,9 @@ class PerformanceEditor(VideoTranslatorGUI):
                     continue
                 if kind=="blur" and not self._blur_effect_enabled():
                     continue
-                if kind=="mask" and (layer.mode == "image" or not getattr(self,"_mask_track_preview_visible",True)):
+                if kind=="mask" and (layer.mode == "image" or
+                                     (layer.mode == "solid" and self._overlay_stack_order()) or
+                                     not getattr(self,"_mask_track_preview_visible",True)):
                     continue
                 effects.append(dict(x=layer.position_x,y=layer.position_y,width=layer.width,height=layer.height,
                     mode=("pixelate" if layer.pixelate else "blur") if kind=="blur" else layer.mode,

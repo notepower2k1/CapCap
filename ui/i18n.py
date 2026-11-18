@@ -23,6 +23,9 @@ _current_language: str | None = None
 # the catalog can be extended without changing callers.  Technical product
 # names and values entered by the user intentionally stay in English.
 VI_TRANSLATIONS: dict[str, str] = {
+    "Drag to change overlay order": "Kéo để đổi thứ tự lớp phủ",
+    "Fixed layer order": "Thứ tự lớp cố định",
+    "Blur stays on the source video below translated subtitles": "Blur che vùng trên video nguồn, bên dưới phụ đề dịch",
     "Mask overlay image": "Ảnh phủ",
     "Drag the overlay image to move it. Drag a corner to resize.": "Kéo ảnh phủ để di chuyển. Kéo góc để đổi kích thước.",
     "Remove overlay image": "Gỡ ảnh phủ",
