@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import hashlib
+from bisect import bisect_right
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal, QTimer, QSignalBlocker, Qt, QEvent
@@ -188,15 +189,22 @@ class SubtitlePresentationController(QObject):
         width, height = self.gui._subtitle_render_dimensions()
         if hasattr(view, "set_subtitle_render_dimensions"):
             view.set_subtitle_render_dimensions(width, height)
+        self.capture_style()
         for role, item, rows in zip(("primary", "secondary"), self.overlays, (primary, self.timeline_rows(copy_rows=False))):
-            style = self.export_style(rows, role)
-            self.configure_preview_item(item, style)
-            lines = [row["text"] for row in rows if row["start"] <= seconds < row["end"]]
+            active = self._fallback_active_rows(role, rows, seconds)
+            style = self._fallback_style(role)
+            lines = [row["text"] for row in active]
+            appearance = (style, height, view.get_preview_canvas_rect().height())
+            if getattr(item, "_fallback_appearance", None) != appearance:
+                self.configure_preview_item(item, style)
+                item._fallback_appearance = appearance
             item.set_text("\n".join(lines))
             from ui.utils.subtitle_effects import preview_effects
-            active = [row for row in rows if row["start"] <= seconds < row["end"]]
             if active:
-                item.set_effects(**preview_effects(active[-1], style, position_ms or 0))
+                effects = preview_effects(active[-1], style, position_ms or 0)
+                if active[-1].get("auto_highlights"):
+                    effects["auto_keyword_highlight"] = False
+                item.set_effects(**effects)
             main_item = view.subtitle_item
             try:
                 view.subtitle_item = item
@@ -209,6 +217,31 @@ class SubtitlePresentationController(QObject):
             else:
                 item.setZValue(20)
         self.sync_drag_target(primary)
+
+    def _fallback_active_rows(self, role, rows, seconds):
+        cache = self.__dict__.setdefault("_fallback_row_indices", {})
+        entry = cache.get(role)
+        if entry is None or entry[0] is not rows or len(rows) != len(entry[1]):
+            intervals = sorted((row["start"], row["end"], index) for index, row in enumerate(rows))
+            starts, max_ends, running_end = [], [], float("-inf")
+            for start, end, _ in intervals:
+                starts.append(start)
+                running_end = max(running_end, end)
+                max_ends.append(running_end)
+            entry = cache[role] = (rows, intervals, starts, max_ends)
+        _, intervals, starts, max_ends = entry
+        first, last = bisect_right(max_ends, seconds), bisect_right(starts, seconds)
+        return [rows[index] for index in sorted(index for _, end, index in intervals[first:last] if end > seconds)]
+
+    def _fallback_style(self, role):
+        cache = self.__dict__.setdefault("_fallback_styles", {})
+        key = (self.cfg["styles"].get(role), getattr(self.gui, "subtitle_export_font_scale", 1.0))
+        entry = cache.get(role)
+        if entry is None or entry[0] != key:
+            # Cue words/highlights are applied from the active row, not
+            # generated for the entire transcript on every playback tick.
+            entry = cache[role] = (copy.deepcopy(key), self.export_style([], role))
+        return entry[1]
 
     def configure_preview_item(self, item, style):
         view = self.gui.video_view
@@ -408,6 +441,8 @@ class SubtitlePresentationController(QObject):
                 pass
         self.cfg = config(state.settings.get(KEY))
         self._timeline_cache_key = None
+        self._fallback_row_indices = {}
+        self._fallback_styles = {}
         for role, value in defaults.items():
             self.cfg["styles"].setdefault(role, value)
         self.cfg["styles"]["primary"] = copy.deepcopy(self.cfg["styles"].get("primary") or state.settings.get("subtitle_style_controls") or defaults.get("primary", {}))
@@ -677,6 +712,7 @@ class SubtitlePresentationController(QObject):
         self.changed()
 
     def sync_tracks(self):
+        self._fallback_row_indices = {}
         timeline = getattr(getattr(self.gui, "timeline", None), "_timeline", None)
         if timeline is None:
             return

@@ -1426,6 +1426,11 @@ class MpvMediaPlayerBackend(QObject):
             input_label=("b_last" if blur_body else ("color_main" if color_body else None))
         )
         layout = self._color_filter_state.get("video_layout")
+        if layout:
+            from app.video_layout import layout_is_passthrough
+            if layout_is_passthrough(layout, layout["_canvas_width"], layout["_canvas_height"],
+                                     layout["_source_width"], layout["_source_height"]):
+                layout = None
         if not color_body and not blur_body and not mask_body and not layout:
             if getattr(self, "_last_applied_vf_combined", None) == "":
                 return

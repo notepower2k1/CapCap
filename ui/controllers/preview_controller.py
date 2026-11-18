@@ -255,17 +255,6 @@ class PreviewController:
         mask_regions = []
         logo_layers = []
         text_layers = []
-        ordered = False
-        try:
-            model = getattr(getattr(self.gui, "timeline", None), "_timeline", None)
-            ordered = bool(getattr(model, "overlay_order", ()))
-            if ordered and getattr(self.gui, "_mask_track_preview_visible", True):
-                mask_regions = self.gui._current_mask_regions_payload(include_inactive=True)
-            elif hasattr(self.gui, "_current_mask_regions_payload"):
-                mask_regions = [region for region in self.gui._current_mask_regions_payload() if region.get("mode") != "image"]
-        except (AttributeError, TypeError, ValueError) as exc:
-            print(f"Warning: Failed to extract mask regions: {exc}")
-
         try:
             if hasattr(self.gui, "timeline") and hasattr(self.gui.timeline, "_timeline"):
                 timeline_obj = self.gui.timeline._timeline
@@ -273,22 +262,20 @@ class PreviewController:
                     for tr in timeline_obj.tracks:
                         track_type = tr.type.value if hasattr(tr.type, "value") else str(tr.type)
                         print(f"[Preview] Checking track: name={tr.name} type={track_type}")
-                        if track_type == "mask" and not ordered:
+                        if (track_type == "mask" and tr.visible
+                                and getattr(self.gui, "_mask_track_preview_visible", True)):
                             for layer in tr.layers:
                                 try:
-                                    if layer.mode == "image":
-                                        if tr.visible and layer.visible and getattr(self.gui, "_mask_track_preview_visible", True):
-                                            source = self.gui._normalize_local_file_path(layer.source)
-                                            state = self.gui.current_project_state
-                                            if source and state and not os.path.isabs(source):
-                                                source = os.path.join(state.project_root, source)
-                                            mask_regions.append(dict(
-                                                mode="image", source=source, x=layer.position_x, y=layer.position_y,
-                                                width=layer.width, height=layer.height, opacity=layer.opacity,
-                                                start=layer.start, end=layer.end,
-                                            ))
+                                    if not layer.visible:
                                         continue
+                                    source = ""
+                                    if layer.mode == "image":
+                                        source = self.gui._normalize_local_file_path(layer.source)
+                                        state = getattr(self.gui, "current_project_state", None)
+                                        if source and state and not os.path.isabs(source):
+                                            source = os.path.join(state.project_root, source)
                                     mask_regions.append({
+                                        "source": source,
                                         "x": float(getattr(layer, "position_x", 0.3)),
                                         "y": float(getattr(layer, "position_y", 0.4)),
                                         "width": float(getattr(layer, "width", 0.4)),
@@ -298,6 +285,8 @@ class PreviewController:
                                         "opacity": float(getattr(layer, "opacity", 1.0)),
                                         "pixelate_size": int(getattr(layer, "pixelate_size", 12)),
                                         "blur_strength": int(getattr(layer, "blur_strength", 20)),
+                                        "start": layer.start,
+                                        "end": layer.end,
                                     })
                                 except (TypeError, ValueError):
                                     continue

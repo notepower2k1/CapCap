@@ -12,6 +12,13 @@ from runtime_paths import bin_path
 
 
 class VideoLayoutTests(unittest.TestCase):
+    def test_covered_background_skips_compositing_but_retains_fill_crop(self):
+        cfg = dict(template="free", background="image", image="unused.png")
+        self.assertEqual(filter_chain(cfg, 1920, 1080, 1920, 1080), "setsar=1")
+        fill = filter_chain(cfg, 1080, 1920, 1920, 1080, "fill")
+        self.assertIn("crop=1080:1920", fill)
+        self.assertNotIn("movie=", fill)
+        self.assertIn("movie=", filter_chain(cfg, 1080, 1920, 1920, 1080))
     def test_static_image_mask_shadow_preserve_source_frame_times(self):
         ffmpeg=bin_path('ffmpeg','ffmpeg.exe')
         for fps in (24,25,30,60):

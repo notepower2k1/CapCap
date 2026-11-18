@@ -78,9 +78,12 @@ class StaticVideoView(MpvVideoView):
                 painter.setOpacity(item.get('opacity', 1.0))
                 painter.drawImage(rect, crop)
             painter.end()
-        if getattr(self, 'video_layout', None):
-            from app.video_layout import geometry
-            cfg = self.video_layout
+        cfg = getattr(self, 'video_layout', None)
+        if cfg:
+            from app.video_layout import geometry, background_is_covered
+        if cfg and (image.hasAlphaChannel() or not background_is_covered(
+                cfg, cfg["_canvas_width"], cfg["_canvas_height"], cfg["_source_width"], cfg["_source_height"]
+        )):
             # Render at display resolution; full-resolution composition uses FFmpeg.
             canvas = self.get_preview_canvas_rect()
             w, h = max(2, round(canvas.width())), max(2, round(canvas.height()))

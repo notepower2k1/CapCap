@@ -611,9 +611,13 @@ def _build_mask_filter_chain(mask_regions, video_width, video_height, *, canvas_
 
             path = movie_path(str(region["source"]))
             opacity = max(0., min(1., float(region.get("opacity", 1.0))))
+            fit_image = f"scale={w}:{h},format=rgba"
+            if "image_crop" in region:
+                full_w, full_h, crop_x, crop_y = region["image_crop"]
+                fit_image = f"scale={full_w}:{full_h},format=rgba,crop={w}:{h}:{crop_x}:{crop_y}"
             filter_statements.append(
                 f"movie=filename={path}:loop=1:dec_threads=1,trim=end_frame=1,"
-                f"scale={w}:{h},format=rgba,colorchannelmixer=aa={opacity},"
+                f"{fit_image},colorchannelmixer=aa={opacity},"
                 f"setpts=PTS-STARTPTS[mask_image{index}]"
             )
             filter_statements.append(
@@ -753,7 +757,8 @@ def _build_canvas_filter_chain(target_width=None, target_height=None, scale_mode
 
 def _map_normalized_overlays_to_canvas(regions, source_width, source_height,
                                        target_width, target_height,
-                                       scale_mode="fit", focus_x=0.5, focus_y=0.5, video_layout=None):
+                                       scale_mode="fit", focus_x=0.5, focus_y=0.5, video_layout=None,
+                                       *, clip_to_video_slot=False):
     """Map source-video-normalized rectangles into the output canvas.
 
     Editor overlays are authored in source-video coordinates.  The preview
@@ -780,9 +785,10 @@ def _map_normalized_overlays_to_canvas(regions, source_width, source_height,
         else:
             offset_x = (tw - displayed_w) * 0.5
             offset_y = (th - displayed_h) * 0.5
+        slot = (0, 0, tw, th)
         if video_layout:
             from app.video_layout import geometry
-            _, (offset_x, offset_y, displayed_w, displayed_h) = geometry(
+            slot, (offset_x, offset_y, displayed_w, displayed_h) = geometry(
                 video_layout, tw, th, sw, sh, mode, (fx, fy))
     except (TypeError, ValueError):
         return list(regions)
@@ -798,9 +804,9 @@ def _map_normalized_overlays_to_canvas(regions, source_width, source_height,
             h = float(region.get("height", 0.0)) * displayed_h
         except (TypeError, ValueError):
             continue
-        # Clip exactly as the preview canvas clips the native video surface.
-        left, top = max(0.0, x), max(0.0, y)
-        right, bottom = min(tw, x + w), min(th, y + h)
+        sx, sy, slot_w, slot_h = slot if clip_to_video_slot else (0, 0, tw, th)
+        left, top = max(sx, x), max(sy, y)
+        right, bottom = min(sx + slot_w, x + w), min(sy + slot_h, y + h)
         if right <= left or bottom <= top:
             continue
         item = dict(region)
@@ -808,6 +814,13 @@ def _map_normalized_overlays_to_canvas(regions, source_width, source_height,
         item["y"] = top / th
         item["width"] = (right - left) / tw
         item["height"] = (bottom - top) / th
+        if clip_to_video_slot and region.get("mode") == "image" and (left, top, right, bottom) != (x, y, x+w, y+h):
+            crop_x, crop_y = round(left - x), round(top - y)
+            item["image_crop"] = (
+                max(round(w), crop_x + max(2, round(right-left))),
+                max(round(h), crop_y + max(2, round(bottom-top))),
+                crop_x, crop_y,
+            )
         mapped.append(item)
     return mapped
 
@@ -1915,7 +1928,7 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
         overlays = [region for region in (mask_regions or []) if region.get("mode", "solid") in {"image", "solid"}]
         mask_regions = [region for region in (mask_regions or []) if region.get("mode", "solid") not in {"image", "solid"}]
         mapped = _map_normalized_overlays_to_canvas(overlays, source_w, source_h, canvas_w, canvas_h,
-            output_scale_mode, output_fill_focus_x, output_fill_focus_y, layout)
+            output_scale_mode, output_fill_focus_x, output_fill_focus_y, layout, clip_to_video_slot=True)
         ordered_mask_chain = _build_mask_filter_chain(mapped, canvas_w, canvas_h, canvas_overlay=True)
         # Source masks use the same filter builder and must have distinct pads.
         ordered_mask_chain = re.sub(r"\[(m\d+|solid\d+|mask_image\d+)\]", r"[overlay_\1]", ordered_mask_chain)

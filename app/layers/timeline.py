@@ -143,9 +143,9 @@ class Timeline:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Timeline:
-        from app.layers.stack import overlay_order
+        from app.layers.stack import overlay_order, sync_overlay_rows
         comp = data.get("composition", {})
-        return cls(
+        timeline = cls(
             duration=float(data.get("duration", 0.0)),
             tracks=[Track.from_dict(t) for t in data.get("tracks", [])],
             composition_width=int(comp.get("width", 1920)),
@@ -153,6 +153,8 @@ class Timeline:
             fps=float(comp.get("fps", 30.0)),
             overlay_order=overlay_order(data.get("overlay_order")),
         )
+        sync_overlay_rows(timeline)
+        return timeline
 
     def get_track(self, track_id: str) -> Track | None:
         for t in self.tracks:

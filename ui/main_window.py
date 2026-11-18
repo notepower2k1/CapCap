@@ -12117,10 +12117,11 @@ class VideoTranslatorGUI(QMainWindow):
             return
         moved = [name for name in names if name != source]
         moved.insert(moved.index(target) + int(not before_target), source)
-        if moved == names:
+        order = overlay_order([TRACK_GROUPS[name] for name in reversed(moved)])
+        if moved == names and order == model.overlay_order:
             return
         before = (names, list(model.overlay_order))
-        after = (moved, overlay_order([TRACK_GROUPS[name] for name in reversed(moved)]))
+        after = (moved, order)
         self._apply_overlay_track_order(*after)
         self._push_timeline_undo_entry(dict(type="overlay_order", before=before, after=after))
 

@@ -76,6 +76,22 @@ def movie_path(path):
     return ''.join('\\'+c if c in "\\'[],;" else c for c in path)
 
 
+def background_is_covered(settings, width, height, source_w, source_h, mode="fit"):
+    """Whether the opaque source completely fills the canvas without effects."""
+    cfg = config(settings)
+    if cfg["corner"] or cfg["shadow"] or min(width, height, source_w, source_h) <= 0:
+        return False
+    if has_video_frame(cfg) and (cfg["inset"] or cfg["video_height"] != 100):
+        return False
+    return mode == "fill" or width * source_h == height * source_w
+
+
+def layout_is_passthrough(settings, width, height, source_w, source_h):
+    return (width, height) == (source_w, source_h) and background_is_covered(
+        settings, width, height, source_w, source_h
+    )
+
+
 def filter_chain(settings, width, height, source_w, source_h, mode="fit", focus=(.5, .5)):
     """Single-input/output lavfi graph; backgrounds inherit source timestamps."""
     cfg = config(settings)
@@ -90,6 +106,10 @@ def filter_chain(settings, width, height, source_w, source_h, mode="fit", focus=
         fw, fh = max(2, int(fw)//2*2), max(2, int(fh)//2*2)
         main = f"scale={fw}:{fh}"
     x, y = int(round(x)), int(round(y))
+    if background_is_covered(cfg, width, height, source_w, source_h, mode):
+        if layout_is_passthrough(cfg, width, height, source_w, source_h):
+            return "setsar=1"
+        return main + ",setsar=1"
     fill = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
     graph = ["split=2[layout_bg_src][layout_main_src]"]
     if cfg["background"] == "blur":

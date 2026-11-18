@@ -126,3 +126,20 @@ class OverlayStackTests(unittest.TestCase):
         expected = list(model.overlay_order)
         gui.load_project_context(gui.current_project_state)
         self.assertEqual(gui.timeline._timeline.overlay_order, expected)
+        gui.on_add_timeline_layer("text")
+        from app.layers.stack import TRACK_GROUPS
+        rows = [TRACK_GROUPS[track.name] for track in gui.timeline._timeline.tracks if track.name in TRACK_GROUPS]
+        self.assertEqual(rows, list(reversed(expected)))
+        gui._mask_track_preview_visible = False
+        self.assertEqual(gui.preview_controller._extract_overlay_layers()[0], [])
+
+    def test_mask_mapping_clips_to_slot_and_preserves_image_crop(self):
+        from app.video_processor import _map_normalized_overlays_to_canvas
+
+        layout = dict(template="frame", inset=20, video_height=70)
+        region = dict(x=0, y=0, width=1, height=1, mode="image")
+        mapped, = _map_normalized_overlays_to_canvas([region], 320, 180, 320, 180, "fill",
+                                                     video_layout=layout, clip_to_video_slot=True)
+        self.assertAlmostEqual(mapped["y"] * 180, 36)
+        self.assertAlmostEqual(mapped["height"] * 180, 108)
+        self.assertEqual(mapped["image_crop"], (248, 140, 0, 16))

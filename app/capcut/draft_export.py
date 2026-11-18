@@ -91,6 +91,7 @@ class DraftExporter:
             self._probes[key] = {
                 "duration": float(data.get("format", {}).get("duration") or video.get("duration") or 0),
                 "width": int(video.get("width", 0)), "height": int(video.get("height", 0)),
+                "sample_aspect_ratio": video.get("sample_aspect_ratio"),
                 "has_audio": any(s.get("codec_type") == "audio" for s in data["streams"]),
                 "fps": float(Fraction(video.get("avg_frame_rate") or "0/1")) if video.get("avg_frame_rate") != "0/0" else 0.,
             }
@@ -136,12 +137,14 @@ class DraftExporter:
         cfg = snapshot.get('video_layout')
         if not cfg:
             return
-        from app.video_layout import filter_chain, map_point, geometry
+        from app.video_layout import filter_chain, map_point, geometry, layout_is_passthrough
         source = snapshot['source_video']
         info = self._probe(source)
         sw, sh = info['width'], info['height']
         comp = snapshot['timeline']['composition']
         cw, ch = (sw, sh) if snapshot.get('source_canvas') else (int(comp['width']), int(comp['height']))
+        if layout_is_passthrough(cfg, cw, ch, sw, sh) and info.get("sample_aspect_ratio") in (None, "1:1", "N/A", "0:1"):
+            return
         mode = snapshot.get('framing', {}).get('mode', 'fit')
         focus = snapshot.get('framing', {}).get('focus', (.5,.5))
         graph = filter_chain(cfg,cw,ch,sw,sh,mode,focus)

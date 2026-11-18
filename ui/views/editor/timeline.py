@@ -883,6 +883,9 @@ class EditorTimeline(QGraphicsView):
                 self._overlap_layout_cache.pop(track_id, None)
                 self._overlap_row_assignments.pop(str(track_id), None)
         tl = self._timeline
+        if tl.overlay_order and changed_tracks is None:
+            from app.layers.stack import sync_overlay_rows
+            sync_overlay_rows(tl)
         tracks = [t for t in tl.tracks if self.is_track_shown_on_timeline(t)]
         # Recompute each track's height based on its layer count so
         # tracks with more layers (e.g. multiple blur regions) expand.

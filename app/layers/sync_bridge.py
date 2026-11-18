@@ -29,6 +29,10 @@ def find_or_create_track(
             return t
     track = Track(name=name, type=layer_type, height=height)
     timeline.tracks.append(track)
+    if timeline.overlay_order:
+        from app.layers.stack import TRACK_GROUPS, sync_overlay_rows
+        if name in TRACK_GROUPS:
+            sync_overlay_rows(timeline)
     return track
 
 
