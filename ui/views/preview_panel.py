@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QProgressBar,
     QPushButton,
@@ -2140,6 +2141,18 @@ def build_preview_panel(gui):
     logo_layout.addWidget(gui.logo_inspector_summary_label)
     _add_layer_timing_controls(logo_layout, "logo")
 
+    image_label = QLabel(t('Image'))
+    image_label.setObjectName('sectionTitle')
+    logo_layout.addWidget(image_label)
+    image_row = QHBoxLayout()
+    gui.logo_inspector_image_edit = QLineEdit()
+    gui.logo_inspector_image_edit.setReadOnly(True)
+    image_row.addWidget(gui.logo_inspector_image_edit, 1)
+    gui.logo_inspector_change_image_btn = QPushButton(t('Change image'))
+    gui.logo_inspector_change_image_btn.clicked.connect(gui.change_logo_image)
+    image_row.addWidget(gui.logo_inspector_change_image_btn)
+    logo_layout.addLayout(image_row)
+
     # --- Opacity ---
     opacity_header = QHBoxLayout()
     opacity_label = QLabel("Opacity")
@@ -2353,6 +2366,7 @@ def build_preview_panel(gui):
     gui.video_inspector_summary_label.setObjectName("helperLabel")
     gui.video_inspector_summary_label.setWordWrap(True)
     video_layout.addWidget(gui.video_inspector_summary_label)
+    gui.video_layout_controller.build_video_inspector(video_layout)
 
     gui.video_inspector_mirror_cb = QCheckBox("Mirror horizontally")
     gui.video_inspector_mirror_cb.setObjectName("videoInspectorMirrorCheckBox")

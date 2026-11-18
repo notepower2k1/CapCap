@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
                              QScrollArea,
                              QColorDialog, QTabWidget, QDialog, QSizePolicy, QInputDialog, QLayout,
                              QSpinBox, QDoubleSpinBox)
-from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QEvent, Signal, QPoint, QRect
+from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QEvent, Signal, QPoint, QRect, QSize
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QIcon, QImage, QKeySequence, QPixmap, QShortcut, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
@@ -6444,8 +6444,8 @@ class VideoTranslatorGUI(QMainWindow):
         key = (str(getattr(view, "preview_aspect_key", "source")),
                str(getattr(view, "preview_scale_mode", "fit")), *dimensions,
                False)
-        if getattr(view, 'video_layout', None) and view.video_layout.get('template') != 'free':
-            from app.video_layout import cache_key
+        from app.video_layout import cache_key, has_video_frame
+        if has_video_frame(getattr(view, 'video_layout', None)):
             key += (cache_key(view.video_layout),)
         from ui.utils.video_geometry import layer_bounds_rect
         return source, layer_bounds_rect(view), dimensions, key
@@ -6480,8 +6480,8 @@ class VideoTranslatorGUI(QMainWindow):
         # with whole-canvas layouts, even when resolution/Fit match.
         old_key = json.dumps(("canvas-v2", *old_layout))
         new_key = json.dumps(("canvas-v2", str(getattr(self.video_view, "preview_scale_mode", "fit")), width, height, limited))
-        if getattr(self.video_view, 'video_layout', None) and self.video_view.video_layout.get('template') != 'free':
-            from app.video_layout import cache_key
+        from app.video_layout import cache_key, has_video_frame
+        if has_video_frame(getattr(self.video_view, 'video_layout', None)):
             new_key = json.dumps((*json.loads(new_key), cache_key(self.video_view.video_layout)))
         factor = min(width / max(1, old_dimensions[0]), height / max(1, old_dimensions[1]))
         changed = reframe_layers(model.tracks, old_source, old_visible, source, visible,
@@ -8114,6 +8114,19 @@ class VideoTranslatorGUI(QMainWindow):
         self._timed_layer_preview_signature = signature
         selected_id = str(getattr(self.timeline, "_selected_layer_id", "") or "")
 
+        # A layout reset can remove L1 entirely. The track loop below cannot
+        # clear its old overlay in that case; discard both pixels and the
+        # inspector's binding so a later preview refresh cannot revive it.
+        has_logo_layer = any(
+            track.name == 'L1 Logo' and bool(track.layers)
+            for track in self.timeline._timeline.tracks
+        )
+        if not has_logo_layer:
+            if hasattr(self.video_view, 'clear_logo'):
+                self.video_view.clear_logo()
+            self._logo_overlay_track = None
+            self._logo_overlay_layer = None
+
         # Text layers are rendered independently, so filtering their payload
         # makes them disappear/reappear without changing their saved state.
         self._refresh_text_layer_preview(selected_id)
@@ -9373,6 +9386,10 @@ class VideoTranslatorGUI(QMainWindow):
         if layer is None:
             return
         self._set_layer_timing_controls("logo", layer)
+        if hasattr(self, 'logo_inspector_image_edit'):
+            self.logo_inspector_image_edit.setText(os.path.basename(str(layer.source or '')))
+            self.logo_inspector_image_edit.setToolTip(str(layer.source or ''))
+            self.logo_inspector_change_image_btn.setEnabled(not self._preview_is_playing() and not track.locked and not layer.locked)
         # Read current opacity/rotation from the layer and apply to the
         # inspector controls.
         opacity = float(getattr(layer, "opacity", 1.0) or 1.0)
@@ -9404,6 +9421,59 @@ class VideoTranslatorGUI(QMainWindow):
                     track_name=tname, layer_name=lname,
                 )
             )
+
+    def _selected_logo_layer(self):
+        model = getattr(getattr(self, 'timeline', None), '_timeline', None)
+        selected = str(getattr(getattr(self, 'timeline', None), '_selected_layer_id', '') or '')
+        for track in getattr(model, 'tracks', []):
+            if track.name != 'L1 Logo':
+                continue
+            for layer in track.layers:
+                if layer.id == selected and getattr(getattr(layer, 'type', None), 'value', '') == 'image':
+                    return track, layer
+        return None, None
+
+    def change_logo_image(self):
+        track, layer = self._selected_logo_layer()
+        if layer is None or track.locked or layer.locked or self._preview_is_playing():
+            return
+        selected_id = layer.id
+        path, _ = QFileDialog.getOpenFileName(self, t('Change image'),
+            os.path.dirname(str(layer.source or '')), 'Images (*.png *.jpg *.jpeg *.webp *.bmp)')
+        if not path:
+            return
+        # Resolve the selection again after the modal file picker.
+        track, layer = self._selected_logo_layer()
+        if layer is None or layer.id != selected_id or track.locked or layer.locked or self._preview_is_playing():
+            return
+        from PySide6.QtGui import QImageReader
+        reader = QImageReader(path)
+        reader.setScaledSize(QSize(64, 64))
+        if not os.path.isfile(path) or reader.read().isNull():
+            QMessageBox.warning(self, t('Error'), t('Choose a readable logo image first.'))
+            return
+        if str(layer.source or '') == path:
+            return
+        entry = dict(type='logo_source', layer_id=layer.id, before=str(layer.source or ''), after=path)
+        self._apply_logo_source_history(entry, use_after=True)
+        self._push_timeline_undo_entry(entry)
+
+    def _apply_logo_source_history(self, entry, use_after):
+        model = getattr(getattr(self, 'timeline', None), '_timeline', None)
+        for track in getattr(model, 'tracks', []):
+            if track.name != 'L1 Logo':
+                continue
+            for layer in track.layers:
+                if layer.id != entry['layer_id']:
+                    continue
+                # Keep transform, timing, opacity, keyframes and layer ID.
+                layer.source = entry['after' if use_after else 'before']
+                self._timed_layer_preview_signature = None
+                self.refresh_timed_layer_preview()
+                if str(getattr(self.timeline, '_selected_layer_id', '') or '') == layer.id:
+                    self._show_logo_inspector_for_track(track, layer)
+                self.persist_current_timeline_project_data()
+                return
 
     def _wire_logo_inspector_controls(self):
         """One-time wiring of the Logo Inspector's opacity/rotation controls."""
@@ -9464,6 +9534,9 @@ class VideoTranslatorGUI(QMainWindow):
                 return
 
     def _show_video_inspector_for_track(self, track, layer=None):
+        layout = self.video_layout_controller
+        layout.sync_video_inspector()
+        layout.frame_editor.setEnabled(not (track.locked or getattr(layer, 'locked', False) or self._preview_is_playing()))
         """Show the Video Track Inspector (V1 Video)."""
         self._switch_inspector("video")
         available = self._video_filter_inspector_available()
@@ -12083,6 +12156,18 @@ class VideoTranslatorGUI(QMainWindow):
         if not self._timeline_timing_undo_stack:
             return False
         entry = self._timeline_timing_undo_stack.pop()
+        if entry.get('type') == 'video_frame':
+            self.video_layout_controller.set_video_frame(entry['before'])
+            self._push_timeline_redo_entry(entry)
+            return True
+        if entry.get('type') == 'layout_preset':
+            self.video_layout_controller.saved.apply_history(entry, use_after=False)
+            self._push_timeline_redo_entry(entry)
+            return True
+        if entry.get('type') == 'logo_source':
+            self._apply_logo_source_history(entry, use_after=False)
+            self._push_timeline_redo_entry(entry)
+            return True
         if entry.get('type') == 'background_layer':
             from ui.controllers.background_controller import controller
             controller(self).apply_history(entry,use_after=False)
@@ -12138,6 +12223,18 @@ class VideoTranslatorGUI(QMainWindow):
         if not self._timeline_timing_redo_stack:
             return False
         entry = self._timeline_timing_redo_stack.pop()
+        if entry.get('type') == 'video_frame':
+            self.video_layout_controller.set_video_frame(entry['after'])
+            self._push_timeline_undo_repush(entry)
+            return True
+        if entry.get('type') == 'layout_preset':
+            self.video_layout_controller.saved.apply_history(entry, use_after=True)
+            self._push_timeline_undo_repush(entry)
+            return True
+        if entry.get('type') == 'logo_source':
+            self._apply_logo_source_history(entry, use_after=True)
+            self._push_timeline_undo_repush(entry)
+            return True
         if entry.get('type') == 'background_layer':
             from ui.controllers.background_controller import controller
             controller(self).apply_history(entry,use_after=True)
@@ -16043,6 +16140,9 @@ class VideoTranslatorGUI(QMainWindow):
                 button.setEnabled(self._optional_layer_controls_ready)
         if hasattr(self,'add_background_btn'):
             self.add_background_btn.setEnabled(bool(source_video) and not review_mode and not voice_running)
+        if hasattr(self, 'logo_inspector_change_image_btn'):
+            logo_track, logo_layer = self._selected_logo_layer()
+            self.logo_inspector_change_image_btn.setEnabled(bool(logo_layer and not logo_track.locked and not logo_layer.locked and not review_mode and not voice_running))
         background=getattr(self,'background_controller',None)
         if background is not None:
             background.refresh_enabled()

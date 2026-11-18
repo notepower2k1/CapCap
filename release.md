@@ -2,6 +2,8 @@
 
 ## Tính năng mới
 
+- **Bố cục cá nhân:** Lưu, đặt tên và xóa bố cục hiện tại để dùng lại giữa các project. Giữ canvas, khung video, các layer hình ảnh/chữ và hai kiểu phụ đề; dùng logo/nền ảnh mẫu đi kèm app, không phụ thuộc ảnh của project cũ. Hỗ trợ bản nháp trước khi áp dụng, co thời gian layer theo video mới và Undo/Redo. Inspector Logo có nút **Đổi ảnh**, giữ nguyên các chỉnh sửa của layer.
+
 - **Layer nền độc lập:** Thêm bằng nút Nền dưới preview, nút BG trên thanh dọc hoặc menu + Layer mà không cần áp dụng bố cục. Có inspector chọn màu/ảnh/nền mờ, ẩn/hiện, xóa và Undo/Redo; lưu theo project và hỗ trợ export.
 
 - **Bố cục video:** Tab riêng với mẫu Hook + Phụ đề, Tiêu đề + Part và Khung điện ảnh. Tùy chỉnh nền màu/ảnh/nền mờ, vùng video, bo góc và đổ bóng; áp dụng bản nháp, gỡ mẫu và Undo/Redo. Giữ các layer tự thêm; lưu theo project/hàng đợi, hỗ trợ Fast Preview, export và gói tài nguyên. Xuất CapCut dựng sẵn nền/khung vào video nền, giữ chữ, phụ đề, logo và âm thanh riêng.

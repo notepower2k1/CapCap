@@ -1,5 +1,17 @@
 # Bố cục video
 
+## Bố cục cá nhân
+
+Sau khi chỉnh preview, nhấn **Lưu bố cục hiện tại** trong tab **Bố cục video** và đặt tên. Có thể lưu nhiều mẫu, ghi đè mẫu cùng tên hoặc xóa mẫu. Thư viện dùng chung giữa các project và vẫn còn khi mở lại app.
+
+Mẫu lưu tỉ lệ canvas, Fit/Fill, vị trí khung video, các layer chữ/logo/nền/blur/mask và kiểu của cả hai phụ đề. Nội dung phụ đề, bản dịch, giọng đọc và âm thanh lấy từ project đang mở. Khi áp dụng sang video dài/ngắn hơn, khoảng xuất hiện và keyframe của layer được co theo thời lượng; vị trí logo/chữ được quy đổi theo canvas mới.
+
+Logo và nền ảnh trong mẫu được thay bằng ảnh mẫu đi kèm app, không lưu đường dẫn ảnh cá nhân. Sau khi áp dụng, chọn logo trên timeline rồi nhấn **Đổi ảnh** trong inspector; giữ nguyên vị trí, kích thước, thời gian và hỗ trợ Undo/Redo. Với nền ảnh, chọn layer nền và chọn ảnh trong inspector nền.
+
+Chọn một mẫu đã lưu chỉ nạp bản nháp. Nhấn **Áp dụng bố cục** để thay các layer chữ/logo/nền/blur/mask hiện tại; video, phụ đề và âm thanh được giữ lại. Undo/Redo khôi phục cả bố cục, canvas và kiểu phụ đề trước/sau khi áp dụng. Nếu có layer hình ảnh/chữ bị khóa, hãy mở khóa trước khi áp dụng. Các mẫu dựng sẵn vẫn giữ cơ chế bảo toàn layer tự thêm như trước.
+
+## Mẫu dựng sẵn
+
 Mở tab **Bố cục video / Video Layout** ở bên trái editor. Chọn tỷ lệ canvas ở Media như trước; bố cục dùng được với video ngang, dọc và kích thước tùy chỉnh.
 
 Bạn cũng có thể thêm nền độc lập bằng nút **Nền** dưới video preview, nút **BG** trên thanh layer dọc hoặc **+ Layer → Nền**. Không cần chọn mẫu bố cục và có thể thêm ngay sau khi chọn video, trước STT/dịch. Chọn layer nền để mở inspector riêng, chọn màu/ảnh/nền mờ rồi nhấn **Áp dụng**; hỗ trợ ẩn/hiện, xóa và Undo/Redo. Nền nằm dưới video và sẽ bị che nếu video phủ kín canvas. Khi có nhiều nền, nền thêm sau nằm trên các nền trước; ẩn nó để thấy nền bên dưới.

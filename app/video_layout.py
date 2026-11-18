@@ -6,7 +6,14 @@ import re
 
 KEY = "video_layout"
 DEFAULT = dict(template="free", background="color", color="#101826", image="", blur=24,
-               inset=6, video_height=58, video_x=50, video_y=50, corner=0, shadow=0, hook="", title="", part="", description="")
+               inset=6, video_height=58, video_x=50, video_y=50, corner=0, shadow=0,
+               custom_frame=False, hook="", title="", part="", description="")
+
+FRAME_DEFAULTS = dict(inset=0, video_height=100, video_x=50, video_y=50, corner=0, shadow=0)
+
+
+def has_video_frame(settings):
+    return bool(settings and (settings.get('template', 'free') != 'free' or settings.get('custom_frame')))
 
 
 def config(value=None):
@@ -38,8 +45,8 @@ def cache_key(settings):
 
 def geometry(settings, width, height, source_w, source_h, mode="fit", focus=(.5, .5)):
     cfg = config(settings)
-    if cfg['template'] == 'free':
-        cfg.update(inset=0, video_height=100, video_x=50, video_y=50)
+    if not has_video_frame(cfg):
+        cfg.update(FRAME_DEFAULTS)
     # The template only defines a slot; Fit/Fill retains the source shape.
     inset = min(width, height) * cfg["inset"] / 100
     slot_w = max(2., width - inset * 2)

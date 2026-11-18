@@ -2,24 +2,27 @@
 import json
 
 from PySide6.QtCore import QSignalBlocker
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QComboBox, QPushButton, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QComboBox, QPushButton, QInputDialog, QMessageBox
 from i18n import t
 
 
 class NamedPresets(QWidget):
-    def __init__(self, parent, *, settings, key, capture, apply):
+    def __init__(self, parent, *, settings, key, capture, apply, compact=False):
         super().__init__(parent)
         self.settings, self.key = settings, key
         self.capture, self.apply = capture, apply
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self) if compact else QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.combo = QComboBox()
         self.combo.setMinimumContentsLength(12)
         self.save_button = QPushButton(t("Save preset"))
         self.delete_button = QPushButton(t("Delete preset"))
         layout.addWidget(self.combo, 1)
-        layout.addWidget(self.save_button)
-        layout.addWidget(self.delete_button)
+        buttons = QHBoxLayout() if compact else layout
+        buttons.addWidget(self.save_button)
+        buttons.addWidget(self.delete_button)
+        if compact:
+            layout.addLayout(buttons)
         self.combo.activated.connect(self.load_selected)
         self.combo.currentIndexChanged.connect(lambda: self.delete_button.setEnabled(self.combo.currentData() is not None))
         self.save_button.clicked.connect(self.save_current)

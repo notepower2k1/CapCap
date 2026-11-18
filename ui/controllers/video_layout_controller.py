@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon, QImageReader
 from PySide6.QtWidgets import (QWidget, QFormLayout, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QComboBox, QLineEdit, QSpinBox, QPushButton, QFileDialog, QColorDialog, QMessageBox)
-from app.video_layout import KEY, config, geometry, canvas_point
+from app.video_layout import KEY, FRAME_DEFAULTS, config, geometry, canvas_point, has_video_frame
 from i18n import t
 
 
@@ -20,11 +20,13 @@ class LayoutDiagram(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         cfg = self.controller.draft()
         ratio = self.controller.canvas_size()
+        if self.controller.saved.pending is not None:
+            ratio = self.controller.saved.target_canvas(self.controller.saved.pending['controls'])
         scale = min((self.width()-16) / ratio[0], 200 / ratio[1])
         w, h = ratio[0]*scale, ratio[1]*scale
         p.translate((self.width()-w)/2, 8)
         p.fillRect(0, 0, int(w), int(h), QColor(cfg['color']))
-        if cfg['template'] == 'free':
+        if not has_video_frame(cfg):
             p.fillRect(0, 0, int(w), int(h), QColor('#233b52'))
         else:
             slot, _ = geometry(cfg, w, h, 16, 9)
@@ -38,6 +40,15 @@ class LayoutDiagram(QWidget):
 
 
 class VideoLayoutController:
+    FRAME_FIELDS = (
+        ('inset', 'Canvas inset (%)', 0, 30),
+        ('video_height', 'Video area height (%)', 20, 100),
+        ('video_x', 'Horizontal position (%)', 0, 100),
+        ('video_y', 'Vertical position (%)', 0, 100),
+        ('corner', 'Corner radius (px)', 0, 100),
+        ('shadow', 'Shadow (px)', 0, 40),
+    )
+
     def __init__(self, gui, layout):
         self.gui, self.applied = gui, None
         self.pending_before = None
@@ -53,6 +64,8 @@ class VideoLayoutController:
             p.setPen(QColor('#5eead4')); p.drawText(pix.rect(), Qt.AlignCenter, '—\n▶\n—' if key != 'free' else '▶'); p.end()
             item = QListWidgetItem(QIcon(pix), t(label)); item.setData(Qt.UserRole, key); self.templates.addItem(item)
         layout.addWidget(self.templates)
+        from ui.controllers.layout_presets_controller import LayoutPresetsController
+        self.saved = LayoutPresetsController(self, layout)
         self.diagram = LayoutDiagram(self); layout.addWidget(self.diagram)
         self.fields = {}
         form = self.form = QFormLayout()
@@ -65,12 +78,10 @@ class VideoLayoutController:
         form.addRow(t('Background'), self.background)
         self.color = QPushButton('#101826'); form.addRow(t('Color'), self.color)
         self.image = QLineEdit(); self.image.setReadOnly(True)
-        image_row = QHBoxLayout(); image_row.addWidget(self.image)
+        image_row = self.image_row = QHBoxLayout(); image_row.addWidget(self.image)
         choose = QPushButton(t('Choose image')); image_row.addWidget(choose); form.addRow(image_row)
         self.spins = {}
-        for key, label, low, high in (('blur', 'Blur strength', 1, 60), ('inset', 'Canvas inset (%)', 0, 30),
-                ('video_height', 'Video area height (%)', 20, 100), ('video_x', 'Horizontal position (%)', 0, 100),
-                ('video_y', 'Vertical position (%)', 0, 100), ('corner', 'Corner radius (px)', 0, 100), ('shadow', 'Shadow (px)', 0, 40)):
+        for key, label, low, high in (('blur', 'Blur strength', 1, 60), *self.FRAME_FIELDS):
             spin = QSpinBox(); spin.setRange(low, high); self.spins[key] = spin
             form.addRow(t(label), spin); spin.valueChanged.connect(self.diagram.update)
         layout.addLayout(form)
@@ -83,6 +94,7 @@ class VideoLayoutController:
         layout.addLayout(actions)
         self.status = QLabel(); self.status.setWordWrap(True); layout.addWidget(self.status)
         self.templates.currentRowChanged.connect(self.template_changed)
+        self.templates.itemClicked.connect(self.builtin_clicked)
         self.background.currentIndexChanged.connect(self.diagram.update)
         self.color.clicked.connect(self.choose_color); choose.clicked.connect(self.choose_image)
         self.fill(config())
@@ -101,6 +113,7 @@ class VideoLayoutController:
         if self.templates.currentItem() is None:
             return
         if not self.restoring:
+            self.saved.clear_draft()
             key = self.templates.currentItem().data(Qt.UserRole)
             self.form.setRowVisible(self.fields['hook'], key == 'hook')
             for field in ('title', 'part', 'description'):
@@ -112,6 +125,11 @@ class VideoLayoutController:
             elif key in ('hook', 'parts'):
                 self.spins['video_height'].setValue(58)
         self.diagram.update()
+
+    def builtin_clicked(self, _item):
+        # A saved free layout and the built-in Free use the same list row.
+        if self.saved.pending is not None:
+            self.template_changed()
 
     def choose_color(self):
         color = QColorDialog.getColor(QColor(self.color.text()), self.gui, t('Background'))
@@ -125,7 +143,9 @@ class VideoLayoutController:
 
     def draft(self):
         item = self.templates.currentItem()
+        layout = self.saved.pending.get('layout') if self.saved.pending is not None else self.applied
         return config(dict(template=item.data(Qt.UserRole) if item else 'free',
+            custom_frame=(layout or {}).get('custom_frame', False),
             background=self.background.currentData(), color=self.color.text(), image=self.image.text(),
             **{k: w.text() for k, w in self.fields.items()}, **{k: w.value() for k, w in self.spins.items()}))
 
@@ -141,22 +161,89 @@ class VideoLayoutController:
         for field in ('title', 'part', 'description'):
             self.form.setRowVisible(self.fields[field], key == 'parts')
         self.restoring = False; self.diagram.update(); self.buttons()
+        if self.saved.pending is not None:
+            self.saved.show_recipe_fields(True)
+        self.sync_video_inspector()
+
+    def build_video_inspector(self, layout):
+        self.frame_editor = QWidget()
+        form = QFormLayout(self.frame_editor)
+        form.setContentsMargins(0, 0, 0, 0)
+        self.frame_spins = {}
+        for key, label, low, high in self.FRAME_FIELDS:
+            spin = QSpinBox()
+            spin.setRange(low, high)
+            self.frame_spins[key] = spin
+            form.addRow(t(label), spin)
+        actions = QHBoxLayout()
+        apply = self.frame_apply_button = QPushButton(t('Apply video frame'))
+        reset = QPushButton(t('Reset video frame'))
+        apply.clicked.connect(self.apply_video_frame)
+        reset.clicked.connect(lambda: self.apply_video_frame(reset=True))
+        actions.addWidget(apply)
+        actions.addWidget(reset)
+        form.addRow(actions)
+        heading = QLabel(t('Video frame'))
+        heading.setObjectName('sectionTitle')
+        layout.addWidget(heading)
+        layout.addWidget(self.frame_editor)
+        self.sync_video_inspector()
+
+    def sync_video_inspector(self):
+        if not hasattr(self, 'frame_spins'):
+            return
+        frame = self.applied if has_video_frame(self.applied) else FRAME_DEFAULTS
+        for key, spin in self.frame_spins.items():
+            spin.setValue(round(frame[key]))
+
+    def apply_video_frame(self, *, reset=False):
+        gui = self.gui
+        if gui._preview_is_playing() or not gui.video_path_edit.text().strip():
+            return
+        selected = gui.timeline._selected_layer_id
+        model = gui.timeline._timeline
+        target = next(((tr, layer) for tr in model.tracks if tr.type.value == 'video'
+                       for layer in tr.layers if layer.id == selected), None)
+        if target is None or any(item.locked for item in target):
+            return
+        frame = FRAME_DEFAULTS if reset else {key: spin.value() for key, spin in self.frame_spins.items()}
+        cfg = config(self.applied or FRAME_DEFAULTS)
+        cfg.update(frame, custom_frame=cfg['template'] == 'free' and frame != FRAME_DEFAULTS)
+        if cfg == self.applied or (self.applied is None and frame == FRAME_DEFAULTS):
+            return
+        before = copy.deepcopy(self.applied)
+        self.set_video_frame(cfg)
+        gui._push_timeline_undo_entry(dict(type='video_frame', before=before, after=copy.deepcopy(cfg)))
+
+    def set_video_frame(self, cfg):
+        self.applied = copy.deepcopy(cfg)
+        state = self.gui.ensure_current_project()
+        if state:
+            state.set_setting(KEY, copy.deepcopy(cfg))
+            self.gui.project_service.save_project(state)
+        self.sync_video_inspector()
+        if self.saved.pending is None and self.templates.currentItem().data(Qt.UserRole) == (cfg or {}).get('template', 'free'):
+            for key in FRAME_DEFAULTS:
+                self.spins[key].setValue(self.frame_spins[key].value())
+        self.diagram.update()
+        self.refresh()
 
     def buttons(self):
         for button, name in ((self.undo_btn, '_timeline_timing_undo_stack'), (self.redo_btn, '_timeline_timing_redo_stack')):
             stack = getattr(self.gui, name, [])
-            button.setEnabled(bool(stack and stack[-1].get('type') == 'video_layout'))
+            button.setEnabled(bool(stack and stack[-1].get('type') in ('video_layout', 'layout_preset')))
 
     def restore(self, state):
+        self.saved.clear_draft()
         self.applied = config(state.settings[KEY]) if state and state.settings.get(KEY) else None
         for name in ('_timeline_timing_undo_stack', '_timeline_timing_redo_stack'):
             stack = getattr(self.gui, name, [])
-            stack[:] = [entry for entry in stack if entry.get('type') not in ('video_layout','background_layer')]
+            stack[:] = [entry for entry in stack if entry.get('type') not in ('video_layout','layout_preset','video_frame','background_layer','logo_source')]
         self.pending_before = None; self.fill(self.applied)
         self.refresh()
 
     def current(self):
-        has_slot = bool(self.applied and self.applied['template'] != 'free')
+        has_slot = has_video_frame(self.applied)
         result = copy.deepcopy(self.applied) if has_slot else config(dict(template='free',inset=0,video_height=100,corner=0,shadow=0))
         result.update(background='color', color='#000000', image='')
         timeline = getattr(getattr(self.gui, 'timeline', None), '_timeline', None)
@@ -217,7 +304,10 @@ class VideoLayoutController:
         self._applying = True
         self.apply_btn.setEnabled(False)
         try:
-            self._apply()
+            if self.saved.pending is not None:
+                self.saved.apply()
+            else:
+                self._apply()
         finally:
             self._applying = False
             self.apply_btn.setEnabled(True)
@@ -282,6 +372,7 @@ class VideoLayoutController:
         self.finish()
 
     def reset(self):
+        self.saved.clear_draft()
         if self.applied is None: return
         model = self.gui.timeline._timeline
         if any((track.locked or layer.locked) for track in model.tracks for layer in track.layers if layer.metadata.get('layout_role')):

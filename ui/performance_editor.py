@@ -350,6 +350,9 @@ class PerformanceEditor(VideoTranslatorGUI):
             self._show_logo_overlay(logo_track,target,editable=target.id==selected)
         else:
             self.video_view.clear_logo()
+            if not any(track.name == 'L1 Logo' and track.layers for track in self.timeline._timeline.tracks):
+                self._logo_overlay_track = None
+                self._logo_overlay_layer = None
         self._refresh_static_effects()
 
     @staticmethod

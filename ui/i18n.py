@@ -23,6 +23,19 @@ _current_language: str | None = None
 # the catalog can be extended without changing callers.  Technical product
 # names and values entered by the user intentionally stay in English.
 VI_TRANSLATIONS: dict[str, str] = {
+    "Video frame": "Khung video",
+    "Apply video frame": "Áp dụng khung",
+    "Reset video frame": "Đặt lại khung",
+    "The saved layout uses a sample background image.": "Bố cục đã lưu dùng ảnh nền mẫu.",
+    "Saved layouts": "Bố cục đã lưu",
+    "Save current layout": "Lưu bố cục hiện tại",
+    "Saved layouts use sample logo/background images. Apply replaces visual layers; Undo restores them.": "Mẫu dùng logo và nền ảnh mẫu. Áp dụng sẽ thay các layer hình ảnh/chữ; có thể Hoàn tác.",
+    "Saved layout selected. Click Apply layout to use it.": "Đã chọn bố cục lưu. Nhấn Áp dụng bố cục để sử dụng.",
+    "Unlock visual layers before applying a saved layout.": "Hãy mở khóa các layer hình ảnh/chữ trước khi áp dụng bố cục đã lưu.",
+    "Unsupported layout preset version": "Phiên bản bố cục lưu không được hỗ trợ.",
+    "A sample layout image is missing.": "Thiếu ảnh mẫu của bố cục.",
+    "Change image": "Đổi ảnh",
+    "Choose a readable logo image first.": "Hãy chọn ảnh logo hợp lệ.",
     "Video Layout": "Bố cục video",
     "Free layout": "Tự do",
     "Hook + Subtitles": "Hook + Phụ đề",
