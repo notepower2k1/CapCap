@@ -85,11 +85,12 @@ def _elevenlabs_key_fingerprint(api_key: str) -> str:
     return hashlib.sha256(clean_key.encode("utf-8")).hexdigest() if clean_key else ""
 
 
-def read_elevenlabs_voice_cache(api_key: str) -> dict:
-    """Read a fresh voice cache belonging to ``api_key`` without making requests.
+def read_elevenlabs_voice_cache(api_key: str, *, allow_expired: bool = False) -> dict:
+    """Read the key-bound voice cache without making requests.
 
     Cache entries from older versions, incomplete payloads, expired entries, and
-    entries written for another API key are treated as cache misses.
+    entries written for another API key are treated as cache misses. Offline
+    consumers can keep using the last sync by opting into older entries.
     """
     expected_fingerprint = _elevenlabs_key_fingerprint(api_key)
     if not expected_fingerprint:
@@ -112,7 +113,7 @@ def read_elevenlabs_voice_cache(api_key: str) -> dict:
         if not math.isfinite(fetched_at):
             return {}
         cache_age = time.time() - fetched_at
-        if cache_age < 0 or cache_age >= MAX_CACHE_AGE_SECONDS:
+        if cache_age < 0 or (not allow_expired and cache_age >= MAX_CACHE_AGE_SECONDS):
             return {}
 
         voices = cache_data.get("voices")

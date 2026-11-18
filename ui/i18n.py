@@ -23,6 +23,10 @@ _current_language: str | None = None
 # the catalog can be extended without changing callers.  Technical product
 # names and values entered by the user intentionally stay in English.
 VI_TRANSLATIONS: dict[str, str] = {
+    "Mask overlay image": "Ảnh phủ",
+    "Drag the overlay image to move it. Drag a corner to resize.": "Kéo ảnh phủ để di chuyển. Kéo góc để đổi kích thước.",
+    "Remove overlay image": "Gỡ ảnh phủ",
+    "Choose a readable mask image first.": "Hãy chọn ảnh phủ hợp lệ.",
     "Video frame": "Khung video",
     "Apply video frame": "Áp dụng khung",
     "Reset video frame": "Đặt lại khung",

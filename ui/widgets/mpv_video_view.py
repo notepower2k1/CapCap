@@ -963,7 +963,7 @@ class _BlurRegionOverlayWindow(QWidget):
                 return QRectF(rect)
         return QRectF(0, 0, float(self.width()), float(self.height()))
 
-    def region_rect(self, index: int | None = None) -> QRectF:
+    def region_rect(self, index: int | None = None, *, clip=True) -> QRectF:
         """Map a source-normalized region into the visible output canvas.
 
         The source rect can extend beyond the canvas in Fill mode.  Preview
@@ -984,7 +984,7 @@ class _BlurRegionOverlayWindow(QWidget):
             normalized_rect.width() * width,
             normalized_rect.height() * height,
         )
-        return mapped.intersected(self._visible_canvas_rect())
+        return mapped.intersected(self._visible_canvas_rect()) if clip else mapped
 
     def _set_region_rect(self, rect: QRectF, index: int | None = None):
         if index is None:
@@ -1526,6 +1526,16 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
         super().__init__(on_region_changed=on_region_changed, on_edit_finished=on_edit_finished)
         self._fill_color = QColor(201, 140, 90)
         self._sync_timer = None
+        self._mask_images = {}
+
+    def _should_show_overlay(self):
+        return super()._should_show_overlay() or bool(
+            self._logical_visible and any(index < len(self._regions) for index in self._mask_images)
+        )
+
+    def clear_region(self):
+        self._mask_images.clear()
+        super().clear_region()
 
     def set_fill_color(self, color: str | QColor):
         """Set the fill colour used to draw the overlay rectangle."""
@@ -1558,6 +1568,14 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
 
     def set_mask_regions(self, regions, active_index: int = 0):
         """Display every M1 region while making one layer editable."""
+        pixmaps = {path: pixmap for path, pixmap, _ in self._mask_images.values()}
+        self._mask_images = {}
+        for index, region in enumerate(regions):
+            path = region.get("source", "") if region.get("mode") == "image" else ""
+            if path:
+                if path not in pixmaps:
+                    pixmaps[path] = QPixmap(path)
+                self._mask_images[index] = (path, pixmaps[path], region.get("opacity", 1.0))
         super().set_regions(regions)
         if self._regions:
             self._active_index = max(0, min(int(active_index), len(self._regions) - 1))
@@ -1640,9 +1658,22 @@ class _MaskRegionOverlayWindow(_BlurRegionOverlayWindow):
             rect = self.region_rect(index)
             if rect.width() <= 0 or rect.height() <= 0:
                 continue
+            image = self._mask_images.get(index)
+            if image:
+                _, pixmap, opacity = image
+                painter.save()
+                painter.setOpacity(max(0., min(1., opacity)))
+                painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                painter.setClipRect(rect, Qt.IntersectClip)
+                painter.drawPixmap(self.region_rect(index, clip=False), pixmap, QRectF(pixmap.rect()))
+                painter.restore()
+            if self._in_review_mode:
+                continue
             is_active = bool(self._editable and index == self._active_index)
+            if image and not is_active:
+                continue
             accent = QColor(self.ACCENT)
-            fill = QColor(self._fill_color.red(), self._fill_color.green(), self._fill_color.blue(), 36 if is_active else 22)
+            fill = QColor(self._fill_color.red(), self._fill_color.green(), self._fill_color.blue(), 0 if image else 36 if is_active else 22)
             if is_active:
                 painter.setPen(QPen(accent, 2, Qt.DashLine))
                 painter.setBrush(fill)

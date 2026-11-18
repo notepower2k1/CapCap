@@ -65,7 +65,7 @@ class PerformanceQueueTests(unittest.TestCase):
         self.workspace.cleanup()
 
     def editor(self,video,cls=PerformanceEditor):
-        with patch.object(QTimer,"singleShot"),patch.object(main_window.VideoTranslatorGUI,"_preload_active_voice_if_needed"),patch.object(main_window.VideoTranslatorGUI,"_start_elevenlabs_catalog_refresh"),patch("views.launcher.LauncherWindow.add_recent"),patch.object(PerformanceEditor,"_request_still"):
+        with patch.object(QTimer,"singleShot"),patch.object(main_window.VideoTranslatorGUI,"_preload_active_voice_if_needed"),patch("views.launcher.LauncherWindow.add_recent"),patch.object(PerformanceEditor,"_request_still"):
             editor=cls()
             self.windows.append(editor)
             editor.workspace_root=str(self.root)
@@ -442,8 +442,7 @@ class PerformanceQueueTests(unittest.TestCase):
              patch.object(real_launcher,"_load_recent"), \
              patch.object(real_launcher,"_validate_resources_for_device"), \
              patch.object(launcher_module,"LauncherWindow",side_effect=create_launcher), \
-             patch("editor_factory.create_editor",side_effect=create_editor), \
-             patch.object(PerformanceEditor,"_start_elevenlabs_catalog_refresh"):
+             patch("editor_factory.create_editor",side_effect=create_editor):
             self.assertEqual(launcher_module.show_launcher(None),"")
         if errors:raise errors[0]
         self.assertTrue(finished,"Launcher returned before its explicit close")
@@ -464,15 +463,14 @@ from services.project_service import ProjectService
 from services.gui_project_bridge import GUIProjectBridge
 app=QApplication([])
 app.setQuitOnLastWindowClosed(False)
-with patch.object(PerformanceEditor,'_start_elevenlabs_catalog_refresh'):
-    editor=create_editor('performance')
-    editor.workspace_root=sys.argv[2]
-    editor.project_service=ProjectService(sys.argv[2])
-    editor.project_bridge=GUIProjectBridge(editor.project_service)
-    editor.settings=QSettings(str(Path(sys.argv[2])/'settings.ini'),QSettings.IniFormat)
-    editor.load_video_project(sys.argv[3])
-    QTimer.singleShot(300,editor,editor.close)
-    app.exec()
+editor=create_editor('performance')
+editor.workspace_root=sys.argv[2]
+editor.project_service=ProjectService(sys.argv[2])
+editor.project_bridge=GUIProjectBridge(editor.project_service)
+editor.settings=QSettings(str(Path(sys.argv[2])/'settings.ini'),QSettings.IniFormat)
+editor.load_video_project(sys.argv[3])
+QTimer.singleShot(300,editor,editor.close)
+app.exec()
 assert editor._closing
 assert not editor._frame_worker.isRunning()
 print('EDITOR_PROCESS_EXITED_CLEANLY',flush=True)

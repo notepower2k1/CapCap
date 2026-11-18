@@ -2227,6 +2227,16 @@ def build_preview_panel(gui):
     gui.mask_inspector_summary_label.setObjectName("helperLabel")
     gui.mask_inspector_summary_label.setWordWrap(True)
     mask_layout.addWidget(gui.mask_inspector_summary_label)
+    mask_image_row = QHBoxLayout()
+    gui.mask_image_name = QLineEdit()
+    gui.mask_image_name.setReadOnly(True)
+    gui.mask_image_name.setPlaceholderText(t("Mask overlay image"))
+    gui.mask_choose_image = QPushButton(t("Choose image"))
+    gui.mask_remove_image = QPushButton(t("Remove overlay image"))
+    mask_image_row.addWidget(gui.mask_image_name, 1)
+    mask_image_row.addWidget(gui.mask_choose_image)
+    mask_layout.addLayout(mask_image_row)
+    mask_layout.addWidget(gui.mask_remove_image)
     _add_layer_timing_controls(mask_layout, "mask")
 
     # --- Colour ---

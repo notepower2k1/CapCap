@@ -37,30 +37,3 @@ class ElevenLabsSettingsSyncWorker(QThread):
         except Exception as exc:
             result["error"] = str(exc) or exc.__class__.__name__
         self.completed.emit(result)
-
-
-class ElevenLabsCatalogRefreshWorker(QThread):
-    """Refresh one key's catalog into a staged payload for guarded GUI commit."""
-
-    completed = Signal(object)
-
-    def __init__(self, api_key: str, parent=None):
-        super().__init__(parent)
-        self.api_key = str(api_key or "").strip()
-
-    def run(self):
-        result = {"api_key": self.api_key, "payload": None, "error": ""}
-        try:
-            try:
-                from app.engines.elevenlabs_tts import fetch_elevenlabs_voice_catalog
-            except ImportError:
-                from engines.elevenlabs_tts import fetch_elevenlabs_voice_catalog
-
-            result["payload"] = fetch_elevenlabs_voice_catalog(
-                self.api_key,
-                force_refresh=True,
-                write_cache=False,
-            )
-        except Exception as exc:
-            result["error"] = str(exc) or exc.__class__.__name__
-        self.completed.emit(result)

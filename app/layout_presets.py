@@ -95,6 +95,8 @@ def capture(model, *, layout, controls, styles, canvas, source):
                 layer['filters'] = {}
             elif layer['type'] == 'background':
                 layer['source'] = BACKGROUND_ASSET if layer['mode'] == 'image' else ''
+            elif layer['type'] == 'mask' and layer['mode'] == 'image':
+                layer['source'] = LOGO_ASSET
     return dict(version=1, layout=cfg, controls=copy.deepcopy(controls), styles=copy.deepcopy(styles),
                 canvas=list(canvas), source=list(source), duration=max(.001, float(model.duration)), tracks=tracks)
 
@@ -138,6 +140,8 @@ def materialize(recipe, *, layout, source, canvas, controls, duration):
                 if layer['mode'] == 'image':
                     layer['source'] = sample_asset(BACKGROUND_ASSET)
             elif kind == 'image':
+                layer['source'] = sample_asset(LOGO_ASSET)
+            elif kind == 'mask' and layer['mode'] == 'image':
                 layer['source'] = sample_asset(LOGO_ASSET)
             if kind in ('image', 'text'):
                 transform = layer['transform']

@@ -588,7 +588,10 @@ def _build_mask_filter_chain(mask_regions, video_width, video_height):
             end = float(region.get("end", 0.0) or 0.0)
         except (TypeError, ValueError):
             start, end = 0.0, 0.0
-        regions.append((x, y, w, h, mode, color, pixelate_size, blur_strength, start, end))
+        source = str(region.get("source", ""))
+        if mode not in {"solid", "pixelate", "blur", "image"} or (mode == "image" and not os.path.isfile(source)):
+            continue
+        regions.append((x, y, w, h, mode, color, pixelate_size, blur_strength, start, end, region))
     
     if not regions:
         return ""
@@ -596,11 +599,24 @@ def _build_mask_filter_chain(mask_regions, video_width, video_height):
     filter_statements = []
     current_input = "[0:v]"
 
-    for index, (x, y, w, h, mode, color, pixelate_size, blur_strength, start, end) in enumerate(regions):
+    for index, (x, y, w, h, mode, color, pixelate_size, blur_strength, start, end, region) in enumerate(regions):
         output_label = f"[m{index}]"
         timing = f":enable='between(t,{start:.3f},{end:.3f})'" if end > start else ""
 
-        if mode == "solid":
+        if mode == "image":
+            from app.video_layout import movie_path
+
+            path = movie_path(str(region["source"]))
+            opacity = max(0., min(1., float(region.get("opacity", 1.0))))
+            filter_statements.append(
+                f"movie=filename={path}:loop=1:dec_threads=1,trim=end_frame=1,"
+                f"scale={w}:{h},format=rgba,colorchannelmixer=aa={opacity},"
+                f"setpts=PTS-STARTPTS[mask_image{index}]"
+            )
+            filter_statements.append(
+                f"{current_input}[mask_image{index}]overlay={x}:{y}:eof_action=repeat{timing}{output_label}"
+            )
+        elif mode == "solid":
             color_clean = color.lstrip("#")
             if len(color_clean) != 6:
                 color_clean = "000000"

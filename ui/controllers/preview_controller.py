@@ -260,6 +260,8 @@ class PreviewController:
                 raw_masks = self.gui._current_mask_regions_payload()
                 print(f"[Preview] Found {len(raw_masks)} mask region(s) from M1 track")
                 for region in raw_masks:
+                    if region.get("mode") == "image":
+                        continue  # Collected with its full timing from the timeline below.
                     mask_regions.append({
                         "x": float(region.get("x", 0.3)),
                         "y": float(region.get("y", 0.4)),
@@ -284,6 +286,18 @@ class PreviewController:
                         if track_type == "mask":
                             for layer in tr.layers:
                                 try:
+                                    if layer.mode == "image":
+                                        if tr.visible and layer.visible and getattr(self.gui, "_mask_track_preview_visible", True):
+                                            source = self.gui._normalize_local_file_path(layer.source)
+                                            state = self.gui.current_project_state
+                                            if source and state and not os.path.isabs(source):
+                                                source = os.path.join(state.project_root, source)
+                                            mask_regions.append(dict(
+                                                mode="image", source=source, x=layer.position_x, y=layer.position_y,
+                                                width=layer.width, height=layer.height, opacity=layer.opacity,
+                                                start=layer.start, end=layer.end,
+                                            ))
+                                        continue
                                     mask_regions.append({
                                         "x": float(getattr(layer, "position_x", 0.3)),
                                         "y": float(getattr(layer, "position_y", 0.4)),
@@ -1245,6 +1259,14 @@ class PreviewController:
                 text_canvas_width, text_canvas_height = 1920, 1080
         fill_focus_x, fill_focus_y = self.gui.get_output_fill_focus()
         mask_regions, logo_layers, text_layers = self._extract_overlay_layers()
+        clip_end = start_seconds + duration_seconds
+        mask_regions = [
+            dict(region, start=max(0., region['start'] - start_seconds), end=min(clip_end, region['end']) - start_seconds)
+            if region.get('mode') == 'image' and region['end'] > region['start'] else region
+            for region in mask_regions
+            if region.get('mode') != 'image' or region['end'] <= region['start']
+            or (region['start'] < clip_end and region['end'] > start_seconds)
+        ]
         blur_regions = self._extract_fast_preview_blur_regions(start_seconds, duration_seconds)
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         preview_output = os.path.join(out_dir, f"{video_name}_preview5s_{int(time.time())}.mp4")

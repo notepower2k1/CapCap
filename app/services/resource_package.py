@@ -510,7 +510,10 @@ def _import_resources(source, workspace, selected=None, *, progress=None, cancel
             for track in timeline["tracks"]:
                 kept = []
                 for layer in track["layers"]:
-                    if layer.get("type") in ("video", "audio", "image", "sticker") and not layer.get("source"):
+                    needs_media = layer.get("type") in ("video", "audio", "image", "sticker") or (
+                        layer.get("type") == "mask" and layer.get("mode") == "image"
+                    )
+                    if needs_media and not layer.get("source"):
                         warnings.append("Some media layers were omitted because their files were not selected.")
                         continue
                     kept.append(layer)

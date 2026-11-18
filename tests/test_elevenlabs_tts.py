@@ -196,6 +196,10 @@ class TestElevenLabsTTS(unittest.TestCase):
                 "key_fingerprint": hashlib.sha256(b"test_api_key").hexdigest(),
             }, f)
 
+        self.assertEqual(read_elevenlabs_voice_cache("test_api_key", allow_expired=True)["voices"], old_voices)
+        self.assertEqual(read_elevenlabs_voice_cache("other_key", allow_expired=True), {})
+        mock_get.assert_not_called()
+
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {

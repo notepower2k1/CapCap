@@ -11,6 +11,7 @@ class MaskMode(str, Enum):
     SOLID = "solid"
     PIXELATE = "pixelate"
     BLUR = "blur"
+    IMAGE = "image"
 
 
 @dataclass
@@ -26,7 +27,8 @@ class MaskLayer(BaseLayer):
     width: float = 0.4
     height: float = 0.2
     color: str = "#000000"
-    mode: str = "solid"  # "solid" | "pixelate" | "blur"
+    mode: str = "solid"
+    source: str = ""
     pixelate_size: int = 12
     blur_strength: int = 20
 
@@ -39,6 +41,7 @@ class MaskLayer(BaseLayer):
             "height": self.height,
             "color": self.color,
             "mode": self.mode,
+            "source": self.source,
             "pixelate_size": self.pixelate_size,
             "blur_strength": self.blur_strength,
         })
@@ -60,6 +63,7 @@ class MaskLayer(BaseLayer):
             height=float(data.get("height", 0.2)),
             color=str(data.get("color", "#000000")),
             mode=str(data.get("mode", "solid")),
+            source=str(data.get("source", "")),
             pixelate_size=int(data.get("pixelate_size", 12)),
             blur_strength=int(data.get("blur_strength", 20)),
         )

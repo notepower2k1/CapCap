@@ -112,7 +112,6 @@ from worker_adapters import (
     AlternateRangeTranscriptionWorker,
 )
 from worker_adapters.elevenlabs_workers import (
-    ElevenLabsCatalogRefreshWorker,
     ElevenLabsSettingsSyncWorker,
 )
 
@@ -771,8 +770,6 @@ class VideoTranslatorGUI(QMainWindow):
         self._desired_timeline_thumbnail_request = None
         self._retiring_workers = []
         self._elevenlabs_sync_worker = None
-        self._elevenlabs_catalog_refresh_workers = {}
-        self._elevenlabs_catalog_refresh_attempted_key = ""
         self._voice_catalog_elevenlabs_key = ""
         self._pending_timeline_waveform_refresh = False
         self._pending_timeline_thumbnail_refresh = False
@@ -1704,7 +1701,7 @@ class VideoTranslatorGUI(QMainWindow):
                 from app.engines.elevenlabs_tts import read_elevenlabs_voice_cache
             except ImportError:
                 from engines.elevenlabs_tts import read_elevenlabs_voice_cache
-            cached_elevenlabs = read_elevenlabs_voice_cache(elevenlabs_key) if elevenlabs_key else {}
+            cached_elevenlabs = read_elevenlabs_voice_cache(elevenlabs_key, allow_expired=True) if elevenlabs_key else {}
         except Exception:
             cached_elevenlabs = {}
 
@@ -1715,11 +1712,10 @@ class VideoTranslatorGUI(QMainWindow):
             if isinstance(entry, dict) and str(entry.get("provider", "")).strip().lower() == "elevenlabs"
         ]
         # Catalog loading is a GUI operation. Read ElevenLabs from its
-        # validated key-bound cache and refresh missing data in a QThread.
+        # validated key-bound cache and only sync from Settings on request.
         catalog_entries = self.voice_catalog_service.load_catalog(allow_elevenlabs_network=False)
         if elevenlabs_key and not cached_elevenlabs and previous_key == elevenlabs_key and previous_elevenlabs:
-            # An expired cache or a transient refresh failure must not make
-            # currently usable voices disappear while the replacement loads.
+            # Keep the current list if its cache becomes temporarily unavailable.
             known_ids = {
                 str(entry.get("id", "")).strip()
                 for entry in catalog_entries
@@ -1731,8 +1727,6 @@ class VideoTranslatorGUI(QMainWindow):
             )
         self.voice_catalog_entries_all = catalog_entries
         self._voice_catalog_elevenlabs_key = elevenlabs_key
-        if elevenlabs_key and not cached_elevenlabs:
-            self._start_elevenlabs_catalog_refresh(elevenlabs_key)
         # A packaged build keeps its catalog under _internal (read-only), so
         # newly downloaded piper-new voices may not be persisted there. Merge
         # the local manifest in memory as well, ensuring their names/genders
@@ -1743,69 +1737,6 @@ class VideoTranslatorGUI(QMainWindow):
             self.voice_preview_dialog.close()
             self.voice_preview_dialog = None
         self.refresh_voice_catalog_combos()
-
-    def _start_elevenlabs_catalog_refresh(self, api_key: str):
-        key = str(api_key or "").strip()
-        if not key or key != str(os.getenv("ELEVENLABS_API_KEY", "") or "").strip():
-            return
-        if not hasattr(self, "_elevenlabs_catalog_refresh_workers"):
-            self._elevenlabs_catalog_refresh_workers = {}
-        if key in self._elevenlabs_catalog_refresh_workers:
-            worker = self._elevenlabs_catalog_refresh_workers.get(key)
-            if worker is not None and worker.isRunning():
-                return
-        if str(getattr(self, "_elevenlabs_catalog_refresh_attempted_key", "") or "") == key:
-            return
-
-        self._elevenlabs_catalog_refresh_attempted_key = key
-        worker = ElevenLabsCatalogRefreshWorker(key, self)
-        self._elevenlabs_catalog_refresh_workers[key] = worker
-        worker.completed.connect(lambda result, w=worker: self._on_elevenlabs_catalog_refresh_completed(w, result))
-        worker.finished.connect(lambda w=worker, k=key: self._retire_elevenlabs_catalog_refresh_worker(k, w))
-        worker.start()
-
-    def _on_elevenlabs_catalog_refresh_completed(self, worker, result):
-        result = result if isinstance(result, dict) else {}
-        key = str(result.get("api_key", "") or "").strip()
-        if key != str(os.getenv("ELEVENLABS_API_KEY", "") or "").strip():
-            return
-        if str(getattr(self, "_voice_catalog_elevenlabs_key", "") or "").strip() != key:
-            return
-        error = str(result.get("error", "") or "").strip()
-        payload = result.get("payload")
-        if error:
-            self.log(f"[ElevenLabs] Catalog refresh failed; keeping the current catalog: {error}")
-            return
-        if not isinstance(payload, dict) or not isinstance(payload.get("voices"), list):
-            self.log("[ElevenLabs] Catalog refresh returned an invalid payload; keeping the current catalog.")
-            return
-        try:
-            try:
-                from app.engines.elevenlabs_tts import write_elevenlabs_voice_cache
-            except ImportError:
-                from engines.elevenlabs_tts import write_elevenlabs_voice_cache
-            cache_written = write_elevenlabs_voice_cache(key, payload)
-        except Exception as exc:
-            self.log(f"[ElevenLabs] Could not save refreshed voice cache: {exc}")
-            return
-        if not cache_written:
-            self._elevenlabs_catalog_refresh_attempted_key = ""
-            self.log("[ElevenLabs] Refreshed voice cache was rejected; keeping the current catalog.")
-            return
-        # Once the cache expires, a later load may start another refresh for
-        # this same key. The just-completed load sees the fresh cache and will
-        # not immediately launch a duplicate request.
-        self._elevenlabs_catalog_refresh_attempted_key = ""
-        self.load_voice_preview_catalog()
-
-    def _retire_elevenlabs_catalog_refresh_worker(self, key: str, worker):
-        workers = getattr(self, "_elevenlabs_catalog_refresh_workers", {})
-        if workers.get(key) is worker:
-            workers.pop(key, None)
-        try:
-            worker.deleteLater()
-        except RuntimeError:
-            pass
 
     def _load_piper_voice_meta(self) -> dict:
         meta_path = models_path("piper", "voices_meta.json")
@@ -5994,7 +5925,11 @@ class VideoTranslatorGUI(QMainWindow):
         root = self.get_workspace_temp_root()
         if not os.path.isdir(root):
             return
+        from app.engines.elevenlabs_tts import CACHE_FILE_NAME
+
         for entry in os.listdir(root):
+            if entry == CACHE_FILE_NAME:
+                continue  # Keep the last manually synced voice list across sessions.
             fpath = os.path.join(root, entry)
             if not os.path.isfile(fpath):
                 continue
@@ -6528,7 +6463,17 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _can_use_native_subtitle_preview(self):
         from ui.utils.video_geometry import native_subtitle_preview
-        return native_subtitle_preview(self.video_view)
+        if not native_subtitle_preview(self.video_view):
+            return False
+        # Image masks are Qt overlays. Use Qt subtitles as well so subtitles
+        # remain above them, in the same order as the rendered video.
+        model = getattr(getattr(self, "timeline", None), "_timeline", None)
+        return not any(
+            layer.visible and getattr(layer, "mode", "") == "image" and layer.source
+            for track in getattr(model, "tracks", ())
+            if track.name == "M1" and track.visible
+            for layer in track.layers
+        )
 
     def get_audio_handling_mode(self):
         if not hasattr(self, "audio_handling_combo"):
@@ -8126,6 +8071,10 @@ class VideoTranslatorGUI(QMainWindow):
                 self.video_view.clear_logo()
             self._logo_overlay_track = None
             self._logo_overlay_layer = None
+        if not any(track.name == "M1" for track in self.timeline._timeline.tracks):
+            overlay = getattr(self.video_view, "mask_overlay", None)
+            if overlay is not None and overlay.has_region():
+                self.video_view.clear_mask_region()
 
         # Text layers are rendered independently, so filtering their payload
         # makes them disappear/reappear without changing their saved state.
@@ -14077,10 +14026,16 @@ class VideoTranslatorGUI(QMainWindow):
             if tr.name != "M1":
                 continue
             for layer in tr.layers:
+                if getattr(layer, "mode", "") == "image" and not (tr.visible and layer.visible):
+                    continue
                 if exclude_layer_id and str(getattr(layer, "id", "") or "") == str(exclude_layer_id):
                     continue
                 if not include_inactive and not self._layer_is_active_at_preview_time(layer, time_seconds):
                     continue
+                source = str(getattr(layer, "source", "") or "")
+                state = getattr(self, "current_project_state", None)
+                if source and state and not os.path.isabs(source):
+                    source = os.path.join(state.project_root, source)
                 try:
                     items.append({
                         "x": float(getattr(layer, "position_x", 0.3)),
@@ -14089,6 +14044,7 @@ class VideoTranslatorGUI(QMainWindow):
                         "height": float(getattr(layer, "height", 0.2)),
                         "color": str(getattr(layer, "color", "#000000")),
                         "mode": str(getattr(layer, "mode", "solid")),
+                        "source": source,
                         "opacity": float(getattr(layer, "opacity", 1.0)),
                         "pixelate_size": int(getattr(layer, "pixelate_size", 12)),
                         "blur_strength": int(getattr(layer, "blur_strength", 20)),
@@ -14113,6 +14069,7 @@ class VideoTranslatorGUI(QMainWindow):
                 include_inactive=False,
                 exclude_layer_id=self._deferred_effect_layer_id_for("mask"),
             )
+        regions = [region for region in regions if region.get("mode") != "image"]
         if regions:
             self.media_player.set_mask_region(regions)
         else:
@@ -14328,6 +14285,7 @@ class VideoTranslatorGUI(QMainWindow):
                         height=float(r.get("height", 0.2)),
                         color=str(r.get("color", "#000000")),
                         mode=str(r.get("mode", "solid")),
+                        source=str(r.get("source", "")),
                         pixelate_size=int(r.get("pixelate_size", 12)),
                         blur_strength=int(r.get("blur_strength", 20)),
                         start=0.0,
@@ -14352,19 +14310,21 @@ class VideoTranslatorGUI(QMainWindow):
                 pass
 
     def _show_mask_inspector_for_track(self, track, layer=None):
-        """Show the Mask Track Inspector populated with the selected M1 layer.
-
-        The inspector only exposes the mask's colour + opacity. Position,
-        size and mode are not configurable here — the user positions /
-        resizes the region via the draggable overlay on the video. The
-        mask is only applied to the video while the player is playing.
-        """
+        """Show appearance and timing for the selected mask."""
         self._switch_inspector("mask")
         self._wire_mask_inspector_controls()
         self._wire_layer_timing_controls("mask")
         if layer is None:
             return
         self._set_layer_timing_controls("mask", layer)
+        image = layer.source if layer.mode == "image" else ""
+        self.mask_image_name.setText(os.path.basename(image))
+        self.mask_image_name.setToolTip(image)
+        editable = not (track.locked or layer.locked or self._preview_is_playing())
+        self.mask_choose_image.setEnabled(editable)
+        self.mask_remove_image.setVisible(bool(image))
+        self.mask_remove_image.setEnabled(editable)
+        self.mask_inspector_color_btn.setVisible(not image)
         color = str(getattr(layer, "color", "#000000"))
         if hasattr(self, "mask_inspector_color_btn"):
             self.mask_inspector_color_btn.blockSignals(True)
@@ -14387,6 +14347,9 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "mask_inspector_summary_label"):
             tname = getattr(track, "name", "M1")
             lname = getattr(layer, "name", "Mask")
+            if image:
+                self.mask_inspector_summary_label.setText(t("Drag the overlay image to move it. Drag a corner to resize."))
+                return
             self.mask_inspector_summary_label.setText(
                 t(
                     "Selected: {track_name} → {layer_name}. Drag the mask on the video "
@@ -14398,12 +14361,7 @@ class VideoTranslatorGUI(QMainWindow):
             )
 
     def _wire_mask_inspector_controls(self):
-        """One-time wiring of the Mask Inspector controls.
-
-        Only colour + opacity are wired here. Position / size / mode
-        are not configurable in the inspector; the user positions and
-        resizes the mask via the draggable overlay on the video.
-        """
+        """Wire the Mask Inspector controls once."""
         if getattr(self, "_mask_inspector_wired", False):
             return
         self._mask_inspector_wired = True
@@ -14419,13 +14377,14 @@ class VideoTranslatorGUI(QMainWindow):
             return None, None
 
         def _sync_preview(l):
+            self._timed_layer_preview_signature = None
+            self.refresh_timed_layer_preview()
             try:
                 self._apply_mask_to_preview()
             except Exception:
                 pass
             try:
-                if hasattr(self, "persist_project_mask_state"):
-                    self.persist_project_mask_state()
+                self.schedule_timeline_project_persist(mask_state=True)
             except Exception:
                 pass
 
@@ -14471,6 +14430,39 @@ class VideoTranslatorGUI(QMainWindow):
         self._mask_color_handler = _on_color_clicked
         if hasattr(self, "mask_inspector_color_btn"):
             self.mask_inspector_color_btn.clicked.connect(_on_color_clicked)
+
+        def change_image(remove=False):
+            layer, track = _selected_mask_layer()
+            if layer is None or layer.type.value != "mask" or track.locked or layer.locked or self._preview_is_playing():
+                return
+            if remove:
+                layer.mode = layer.metadata.pop("mask_mode_before_image", "solid")
+                layer.source = ""
+            else:
+                from PySide6.QtGui import QImageReader
+
+                path, _ = QFileDialog.getOpenFileName(self, t("Choose image"), os.path.dirname(layer.source),
+                                                     "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+                if not path or _selected_mask_layer()[0] is not layer:
+                    return
+                if track.locked or layer.locked or self._preview_is_playing():
+                    return
+                reader = QImageReader(path)
+                reader.setScaledSize(QSize(64, 64))
+                if reader.read().isNull():
+                    QMessageBox.warning(self, t("Error"), t("Choose a readable mask image first."))
+                    return
+                if layer.mode != "image":
+                    layer.metadata["mask_mode_before_image"] = layer.mode
+                layer.source = path
+                layer.mode = "image"
+            self._show_mask_inspector_for_track(track, layer)
+            _sync_preview(layer)
+            self.sync_live_subtitle_preview()
+            self._flush_pending_timeline_persist()
+
+        self.mask_choose_image.clicked.connect(lambda: change_image())
+        self.mask_remove_image.clicked.connect(lambda: change_image(remove=True))
 
     def _resolve_voice_preview_source(self, entry: dict) -> QUrl:
         preview_path = str(entry.get("preview_video_path", "")).strip()
@@ -17527,7 +17519,7 @@ class VideoTranslatorGUI(QMainWindow):
                 from app.engines.elevenlabs_tts import read_elevenlabs_voice_cache
             except ImportError:
                 from engines.elevenlabs_tts import read_elevenlabs_voice_cache
-            cached_account = read_elevenlabs_voice_cache(saved_key) if saved_key else {}
+            cached_account = read_elevenlabs_voice_cache(saved_key, allow_expired=True) if saved_key else {}
             c_sub = cached_account.get("user_subscription", {}) if isinstance(cached_account, dict) else {}
         except Exception:
             c_sub = {}
@@ -19535,28 +19527,6 @@ class VideoTranslatorGUI(QMainWindow):
                 except Exception as e:
                     print(f"[Cleanup] Failed to stop {name}: {e}")
             setattr(self, name, None)
-        catalog_refresh_workers = getattr(self, "_elevenlabs_catalog_refresh_workers", {})
-        for worker in list(catalog_refresh_workers.values()):
-            if worker is None or not getattr(worker, "isRunning", lambda: False)():
-                continue
-            try:
-                if hasattr(worker, "completed"):
-                    worker.completed.disconnect()
-                worker.finished.disconnect()
-            except Exception:
-                pass
-            try:
-                worker.requestInterruption()
-                worker.quit()
-                worker.wait(1000)
-                if worker.isRunning():
-                    self._retiring_workers.append(worker)
-                    worker.finished.connect(
-                        lambda w=worker: self._retiring_workers.remove(w) if w in self._retiring_workers else None
-                    )
-            except Exception as exc:
-                print(f"[Cleanup] Failed to stop ElevenLabs catalog refresh worker: {exc}")
-        catalog_refresh_workers.clear()
         threads_dict = getattr(self, "_segment_preview_threads", None)
         if threads_dict:
             for idx, worker in list(threads_dict.items()):

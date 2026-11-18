@@ -399,7 +399,7 @@ class PerformanceEditor(VideoTranslatorGUI):
                     continue
                 if kind=="blur" and not self._blur_effect_enabled():
                     continue
-                if kind=="mask" and not getattr(self,"_mask_track_preview_visible",True):
+                if kind=="mask" and (layer.mode == "image" or not getattr(self,"_mask_track_preview_visible",True)):
                     continue
                 effects.append(dict(x=layer.position_x,y=layer.position_y,width=layer.width,height=layer.height,
                     mode=("pixelate" if layer.pixelate else "blur") if kind=="blur" else layer.mode,

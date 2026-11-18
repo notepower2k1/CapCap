@@ -326,7 +326,7 @@ class TestElevenLabsVoiceSignatureInputs(unittest.TestCase):
             host.deleteLater()
             QApplication.instance().processEvents()
 
-    def test_catalog_load_is_cache_only_and_preserves_same_key_voices_during_refresh(self):
+    def test_catalog_load_is_cache_only_and_preserves_same_key_voices(self):
         host = QWidget()
         key = "active-key"
         voice = {"id": "elevenlabs:active", "provider": "elevenlabs"}
@@ -335,7 +335,6 @@ class TestElevenLabsVoiceSignatureInputs(unittest.TestCase):
         host.voice_catalog_service.load_catalog.side_effect = lambda **_kwargs: [{"id": "piper:local", "provider": "piper"}]
         host.voice_catalog_entries_all = [voice]
         host._voice_catalog_elevenlabs_key = key
-        host._start_elevenlabs_catalog_refresh = MagicMock()
         host._merge_piper_manifest_voices = MagicMock()
         host._apply_piper_voice_meta_overrides = MagicMock()
         host.voice_preview_dialog = None
@@ -345,7 +344,6 @@ class TestElevenLabsVoiceSignatureInputs(unittest.TestCase):
                     patch("app.engines.elevenlabs_tts.read_elevenlabs_voice_cache", return_value={}):
                 VideoTranslatorGUI.load_voice_preview_catalog(host)
             host.voice_catalog_service.load_catalog.assert_called_once_with(allow_elevenlabs_network=False)
-            host._start_elevenlabs_catalog_refresh.assert_called_once_with(key)
             self.assertIn(voice, host.voice_catalog_entries_all)
 
             host._voice_catalog_elevenlabs_key = key

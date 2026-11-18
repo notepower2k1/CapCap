@@ -195,6 +195,8 @@ class ExportWorkflow:
         
         try:
             # Extract logo layers from timeline
+            mask_visible = state.settings.get("preview_track_visibility", {}).get("M1", True)
+            saw_mask_track = False
             timeline_data = state.artifacts.get("timeline")
             print(f"[Export] timeline artifact: {timeline_data}")
             if timeline_data:
@@ -226,8 +228,15 @@ class ExportWorkflow:
                     
                     # Extract mask regions from mask track (type="mask")
                     if track_type == "mask":
+                        saw_mask_track = True
                         for layer in layers:
                             try:
+                                source = str(layer.get("source", ""))
+                                if layer.get("mode") == "image":
+                                    if not (track.get("visible", True) and layer.get("visible", True) and mask_visible):
+                                        continue
+                                    if source and not os.path.isabs(source):
+                                        source = os.path.join(state.project_root, source)
                                 mask_regions.append({
                                     "x": float(layer.get("position_x", 0.3)),
                                     "y": float(layer.get("position_y", 0.4)),
@@ -235,6 +244,7 @@ class ExportWorkflow:
                                     "height": float(layer.get("height", 0.2)),
                                     "color": str(layer.get("color", "#000000")),
                                     "mode": str(layer.get("mode", "solid")),
+                                    "source": source,
                                     "opacity": float(layer.get("opacity", 1.0)),
                                     "pixelate_size": int(layer.get("pixelate_size", 12)),
                                     "blur_strength": int(layer.get("blur_strength", 20)),
@@ -328,7 +338,7 @@ class ExportWorkflow:
                                 continue
 
             # Fallback: extract mask regions from settings if not found in timeline
-            if not mask_regions:
+            if not mask_regions and not saw_mask_track:
                 mask_state = state.settings.get("mask_state", {})
                 print(f"[Export] Fallback: checking settings mask_state: {mask_state}")
                 if mask_state and mask_state.get("enabled", False):

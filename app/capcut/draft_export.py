@@ -399,7 +399,7 @@ class DraftExporter:
             offset += length * speed
         return segments
 
-    def _regional_tracks(self, timeline, all_layers, base_segments, source_size):
+    def _regional_tracks(self, timeline, all_layers, base_segments, source_size, framing):
         """Editable, muted source copies under text/logo, split at every warp.
 
         Match the reference recipe (spectrika/capcut-mcp blur_region): source
@@ -423,6 +423,24 @@ class DraftExporter:
                 mode = "pixelate" if layer.get("pixelate") else "blur"
                 if kind == "mask":
                     mode = layer.get("mode", "solid")
+                if mode == "image":
+                    source = layer.get("source", "")
+                    if not source:
+                        continue
+                    from app.output_geometry import source_point_to_canvas
+
+                    def point(x, y):
+                        return source_point_to_canvas(x, y, source_size, self.canvas,
+                            framing.get("mode", "fit"), framing.get("focus", (.5, .5)))
+
+                    x, y = layer["position_x"], layer["position_y"]
+                    left, top = point(x, y)
+                    right, bottom = point(x + layer["width"], y + layer["height"])
+                    photo = dict(layer, type="image", transform=dict(x=100 * left, y=100 * top,
+                        scale_x=5 * (right - left), scale_y=5 * (bottom - top)))
+                    material, _ = self._material(source, "photo")
+                    overlays.append(self._segment(material, start / 1e6, (end - start) / 1e6, volume=0., layer=photo))
+                    continue
                 if mode not in ("blur", "pixelate", "solid"):
                     raise ValueError(f"Unsupported mask mode: {mode}")
                 opacity = float(layer.get("opacity", 1)) * (float(layer.get("blur_opacity", 1)) if kind == "blur" else 1.)
@@ -548,7 +566,8 @@ class DraftExporter:
             video_segments.append(self._segment(material, start, duration, 0 if freeze else source, speed, 0., current))
         if v1.get("visible", True):
             self._track("V1 Video", "video", video_segments)
-        self._regional_tracks(timeline, all_layers, video_segments if v1.get("visible", True) else [], (info["width"], info["height"]))
+        self._regional_tracks(timeline, all_layers, video_segments if v1.get("visible", True) else [],
+                              (info["width"], info["height"]), snapshot.get("framing", {}))
         original = snapshot.get("original_audio")
         if original and not self._probe(original)["has_audio"]:
             self.warnings.append("Source has no original audio stream; exported video and other audio tracks.")

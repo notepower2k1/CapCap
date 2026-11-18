@@ -125,7 +125,7 @@ class VoiceCatalogService:
                             from app.engines.elevenlabs_tts import read_elevenlabs_voice_cache
                         except ImportError:
                             from engines.elevenlabs_tts import read_elevenlabs_voice_cache
-                        elevenlabs_voices = read_elevenlabs_voice_cache(elevenlabs_key).get("voices", [])
+                        elevenlabs_voices = read_elevenlabs_voice_cache(elevenlabs_key, allow_expired=True).get("voices", [])
                     for ev in elevenlabs_voices:
                         normalized_voices.append(self._normalize_loaded_voice(ev))
             except Exception as e:

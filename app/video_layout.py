@@ -69,6 +69,13 @@ def canvas_point(x, y, settings, source_size, canvas_size, mode="fit", focus=(.5
     return (float(x) * canvas_size[0] - ox) / dw, (float(y) * canvas_size[1] - oy) / dh
 
 
+def movie_path(path):
+    """Escape a path for the movie option parser and its filtergraph."""
+    path = path.replace('\\', '/')
+    path = ''.join('\\'+c if c in "\\':" else c for c in path)
+    return ''.join('\\'+c if c in "\\'[],;" else c for c in path)
+
+
 def filter_chain(settings, width, height, source_w, source_h, mode="fit", focus=(.5, .5)):
     """Single-input/output lavfi graph; backgrounds inherit source timestamps."""
     cfg = config(settings)
@@ -90,9 +97,7 @@ def filter_chain(settings, width, height, source_w, source_h, mode="fit", focus=
     elif cfg["background"] == "image" and cfg["image"]:
         # Escape the option parser, then the surrounding filtergraph parser.
         # Passing this as one argv value avoids shell quoting entirely.
-        path = cfg['image'].replace('\\', '/')
-        path = ''.join('\\'+c if c in "\\':" else c for c in path)
-        path = ''.join('\\'+c if c in "\\'[],;" else c for c in path)
+        path = movie_path(cfg['image'])
         # Keep the source video as the clock. A looping 25-fps image source
         # would otherwise drive the overlay and stutter/drop 30/60-fps video.
         # Decode/scale one image frame; framesync retains it after EOF.
