@@ -119,9 +119,10 @@ class LayoutPresetEditorTests(unittest.TestCase):
 
     def prepare_recipe(self):
         self.layout.templates.setCurrentRow(3)
-        self.layout.background.setCurrentIndex(self.layout.background.findData('image'))
-        self.layout.image.setText(str(harness.ROOT/'assets/capcap.png'))
         self.layout.apply()
+        background = self.select_background_inspector('image')
+        background.image.setText(str(harness.ROOT/'assets/capcap.png'))
+        background.apply_btn.click()
         self.gui.timeline._timeline.tracks.append(Track(name='L1 Logo', type=LayerType.IMAGE,
             layers=[ImageLayer(source=str(harness.ROOT/'assets/capcap.png'), end=1,
                                transform=Transform(x=11, y=12, scale_x=.4, scale_y=.4))]))
@@ -175,6 +176,11 @@ class LayoutPresetEditorTests(unittest.TestCase):
         self.saved.library.combo.setCurrentIndex(self.saved.library.combo.findData('My layout'))
         self.saved.library.load_selected()
         self.assertEqual(self.saved.pending, recipe)
+        self.assertEqual(self.layout.templates.currentRow(), -1)
+        before = self.saved.snapshot()
+        self.layout.templates.setCurrentRow(3)
+        self.assertIsNone(self.saved.pending)
+        self.assertEqual(self.saved.snapshot(), before)
 
     def test_locked_and_playing_do_not_apply(self):
         recipe = self.prepare_recipe()
@@ -239,13 +245,46 @@ class LayoutPresetEditorTests(unittest.TestCase):
             self.saved.select(recipe)
         self.assertEqual(self.saved.snapshot(), before)
 
+    def test_preview_shows_saved_layer_types_and_visibility_before_applying(self):
+        from app.layers.blur import BlurLayer
+        from app.layers.mask import MaskLayer
+        from app.layers.text import TextLayer
+
+        self.prepare_recipe()
+        model = self.gui.timeline._timeline
+        model.tracks.extend([
+            Track(name='M1', type=LayerType.MASK, layers=[MaskLayer(mode='image', end=1)]),
+            Track(name='B1', type=LayerType.BLUR, layers=[BlurLayer(width=.4, height=.2, end=1, visible=False)]),
+            Track(name='T1 Text', type=LayerType.TEXT, layers=[
+                TextLayer(text='First line', end=1), TextLayer(text='Second line', end=1),
+            ]),
+        ])
+        saved = self.saved.capture()
+        self.layout.templates.setCurrentRow(1)
+        preview = self.layout.diagram
+        translate = harness.main_window.t
+        self.assertIn(translate('Subtitle position'), preview.inventory.text())
+        self.assertNotIn(translate('Logo'), preview.inventory.text())
+        before = model.to_dict()
+
+        self.saved.select(saved)
+        legend = preview.inventory.text()
+        for category in ('Background image', 'Logo', 'Mask overlay image'):
+            self.assertIn(translate(category), legend)
+        self.assertIn(f"{translate('Text Layer')} ×3", legend)
+        self.assertIn(translate('{layer} (hidden)', layer=translate('Blur Area')), legend)
+        preview.canvas.resize(330, 224)
+        self.assertFalse(preview.canvas.grab().isNull())
+        self.assertEqual(model.to_dict(), before)
+
     def test_saved_blur_survives_preview_refresh_in_quality_mode(self):
         from app.layers.blur import BlurLayer
 
         self.layout.templates.setCurrentRow(3)
-        self.layout.background.setCurrentIndex(self.layout.background.findData('blur'))
-        self.layout.spins['blur'].setValue(36)
         self.layout.apply()
+        background = self.select_background_inspector('blur')
+        background.blur.setValue(36)
+        background.apply_btn.click()
         model = self.gui.timeline._timeline
         blur = BlurLayer(start=0, end=.7, position_x=.2, position_y=.3,
                          width=.4, height=.2, blur_strength=32, blur_opacity=.65,
@@ -270,6 +309,13 @@ class LayoutPresetEditorTests(unittest.TestCase):
         self.layout.templates.setCurrentRow(0)
         self.layout.apply()
         self.assertFalse(any(l.type == LayerType.BLUR for l in model.all_layers()))
+
+    def select_background_inspector(self, mode):
+        self.gui.timeline.select_layer('layout-background')
+        self.gui.on_timeline_layer_selected('layout-background')
+        background = self.gui.background_controller
+        background.mode.setCurrentIndex(background.mode.findData(mode))
+        return background
 
     def test_free_layout_clears_removed_preset_logo_and_undo_redo_refreshes_preview(self):
         recipe = self.prepare_recipe()

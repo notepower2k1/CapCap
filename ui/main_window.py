@@ -6335,9 +6335,10 @@ class VideoTranslatorGUI(QMainWindow):
         self._refresh_text_layer_preview(getattr(getattr(self, "timeline", None), "_selected_layer_id", ""))
         self.apply_preview_blur_region()
         layout = getattr(self, "video_layout_controller", None)
-        if layout is not None and layout.current():
-            layout.refresh()
-            layout.diagram.update()
+        if layout is not None:
+            if layout.current():
+                layout.refresh()
+            layout.diagram.refresh()
         self.refresh_ui_state()
 
     def on_output_scale_mode_changed(self, *_args):
@@ -6351,9 +6352,10 @@ class VideoTranslatorGUI(QMainWindow):
         self._refresh_text_layer_preview(getattr(getattr(self, "timeline", None), "_selected_layer_id", ""))
         self.apply_preview_blur_region()
         layout = getattr(self, "video_layout_controller", None)
-        if layout is not None and layout.current():
-            layout.refresh()
-            layout.diagram.update()
+        if layout is not None:
+            if layout.current():
+                layout.refresh()
+            layout.diagram.refresh()
         self.refresh_ui_state()
 
     def on_preview_framing_changed(self, *_args):
@@ -6361,9 +6363,10 @@ class VideoTranslatorGUI(QMainWindow):
         self._refresh_text_layer_preview(getattr(getattr(self, "timeline", None), "_selected_layer_id", ""))
         self.apply_preview_blur_region()
         layout = getattr(self, "video_layout_controller", None)
-        if layout is not None and layout.current():
-            layout.refresh()
-            layout.diagram.update()
+        if layout is not None:
+            if layout.current():
+                layout.refresh()
+            layout.diagram.refresh()
         self.refresh_ui_state()
 
     def _capture_layer_framing(self):
@@ -6604,6 +6607,10 @@ class VideoTranslatorGUI(QMainWindow):
         # Filter thumbnail preview should only stay active while the Filter page is open.
         if int(index) != 4 and getattr(self, "_filter_thumbnail_visible", False):
             self.hide_filter_thumbnail_preview()
+        self.video_summary_controller.schedule_refresh()
+        tab = self.workflow_tab_buttons.get('layout')
+        if tab is not None and tab.isChecked():
+            self.video_layout_controller.diagram.refresh()
 
     def _workflow_dependency_state(self) -> dict:
         video_path = self.video_path_edit.text().strip() if hasattr(self, "video_path_edit") else ""
@@ -6616,12 +6623,13 @@ class VideoTranslatorGUI(QMainWindow):
             "filter": {"enabled": has_video, "reason": "Select a video first to preview and apply filters."},
             "advanced": {"enabled": True, "reason": ""},
             "layout": {"enabled": has_video, "reason": "Select a video first to style subtitle output."},
+            "summary": {"enabled": has_video, "reason": ""},
         }
 
     def update_workflow_availability(self):
         states = self._workflow_dependency_state()
         current_index = int(self.left_panel_stack.currentIndex()) if hasattr(self, "left_panel_stack") else 0
-        page_order = ["media", "audio", "language", "voice", "style", "advanced", "layout"]
+        page_order = ["media", "audio", "language", "voice", "style", "layout", "summary", "advanced"]
 
         for page_key, state in states.items():
             container = getattr(self, "workflow_page_containers", {}).get(page_key) if hasattr(self, "workflow_page_containers") else None
@@ -16055,6 +16063,9 @@ class VideoTranslatorGUI(QMainWindow):
 
     def refresh_ui_state(self):
         """Basic enable/disable rules to guide user flow."""
+        summary = getattr(self, "video_summary_controller", None)
+        if summary is not None:
+            summary.schedule_refresh()
         # Legacy Audio Source controls are kept only for compatibility with
         # older project/settings data.  Re-assert their hidden state on every
         # UI refresh so playback, project loading, or mode changes cannot
@@ -19472,6 +19483,9 @@ class VideoTranslatorGUI(QMainWindow):
         QTimer.singleShot(50, lambda: _relaunch_launcher(existing_window=self))
 
     def _terminate_workers(self, close_media: bool = True):
+        summary = getattr(self, "video_summary_controller", None)
+        if summary is not None:
+            summary.clear_project()
         presentation = getattr(self, "subtitle_presentation_controller", None)
         if presentation is not None:
             if presentation.timer.isActive():

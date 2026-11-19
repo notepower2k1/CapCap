@@ -1,4 +1,4 @@
-"""Translation progress shared by the main and secondary subtitle tracks."""
+"""Shared progress dialog for subtitle translation and video summaries."""
 import os
 import time
 
@@ -18,14 +18,24 @@ def provider_label(provider):
 
 
 class TranslationProgressDialog(QProgressDialog):
-    def __init__(self, parent, *, provider="", is_retranslation=False, secondary=False):
+    def __init__(self, parent, *, provider="", is_retranslation=False, secondary=False, video_task=""):
         super().__init__("", t("Cancel"), 0, 100, parent)
         self._started_at = time.monotonic()
         self._action = "Re-translating" if is_retranslation else "Translating"
         self._provider = provider_label(provider) or (
             parent._selected_ai_provider_label() if hasattr(parent, "_selected_ai_provider_label") else "AI")
         self._subject = "Secondary subtitles" if secondary else "Subtitles"
-        self._fallback_msg = self._progress_str = ""
+        self._progress_template = "{completed}/{total} cues ({percent}%)"
+        self._duration_hint = "Large subtitle projects can take a few minutes."
+        if video_task:
+            self._progress_template = "{completed}/{total} steps ({percent}%)"
+            if video_task == "hooks":
+                self._action, self._subject = "Generating", "Hook suggestions"
+                self._duration_hint = ""
+            else:
+                self._action, self._subject = "Summarizing", "Video"
+                self._duration_hint = "Summarizing long videos can take a few minutes."
+        self._status_msg = self._progress_str = ""
         icon = getattr(parent, "light_window_icon", None)
         if icon is not None and not icon.isNull():
             self.setWindowIcon(icon)
@@ -53,26 +63,28 @@ class TranslationProgressDialog(QProgressDialog):
 
     def refresh_label(self):
         elapsed = int(time.monotonic() - self._started_at)
-        notice = f"\n{t(self._fallback_msg)}" if self._fallback_msg else ""
+        notice = f"\n{t(self._status_msg)}" if self._status_msg else ""
         progress = f"{t('Progress')}: {self._progress_str}\n" if self._progress_str else ""
+        hint = f"\n{t(self._duration_hint)}" if self._duration_hint else ""
         self.setWindowTitle(f"{t(self._action)} {t(self._subject)} ({self._provider})")
         self.setLabelText(
             f"{t(self._action)} {t(self._subject)} — {self._provider}...{notice}\n"
-            f"{progress}{t('Elapsed')}: {elapsed // 60:02d}:{elapsed % 60:02d}\n"
-            f"{t('Large subtitle projects can take a few minutes.')}")
+            f"{progress}{t('Elapsed')}: {elapsed // 60:02d}:{elapsed % 60:02d}{hint}")
 
     def set_status(self, provider, message=""):
         if provider:
             self._provider = provider_label(provider)
         if message:
-            self._fallback_msg = message
+            self._status_msg = message
         self.refresh_label()
 
-    def set_progress(self, completed, total):
+    def set_progress(self, completed, total, *, message=""):
         if total <= 0:
             return
+        if message:
+            self._status_msg = message
         percent = max(0, min(100, int(completed * 100 / total)))
-        self._progress_str = t("{completed}/{total} cues ({percent}%)", completed=completed, total=total, percent=percent)
+        self._progress_str = t(self._progress_template, completed=completed, total=total, percent=percent)
         self.setValue(percent)
         self.refresh_label()
 

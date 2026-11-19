@@ -705,6 +705,7 @@ class BrowserBridgePolisherProvider:
             if self.parallel_batches and operation == "batch" and self._parallel_stopping:
                 raise TranslationProviderError("Parallel browser translation was stopped.")
             pooled = self.parallel_batches and operation == "batch"
+            isolated = pooled or operation == "summary"
             session_id = self._session_id
             if pooled:
                 worker_id = threading.get_ident()
@@ -715,8 +716,8 @@ class BrowserBridgePolisherProvider:
                     "platform": self.platform,
                     "temporary_chat": self.temporary_chat,
                     "session_id": session_id,
-                    "isolated": pooled,
-                    "keep_open": pooled,
+                    "isolated": isolated,
+                    "keep_open": isolated,
                     "new_chat": pooled or fresh_chat,
                     "prompt": prompt,
                     "operation": operation,
@@ -756,6 +757,24 @@ class BrowserBridgePolisherProvider:
         print(f"[Browser AI] Reply task={task_id} session={session_id} chars={len(text)} "
               f"elapsed={time.monotonic() - task_wait_start:.2f}s diagnostics={result.get('error', '')}", flush=True)
         return text
+
+    def run_video_analysis(self, generate, source, *, progress, is_canceled):
+        server = self._get_server()
+
+        def request(*, system_msg, user_msg, timeout, **_):
+            return self._execute_prompt_on_browser(
+                system_msg=system_msg, user_msg=user_msg, operation="summary",
+                timeout=max(timeout, self.MIN_GENERATE_TIMEOUT_SECONDS),
+                is_canceled=is_canceled, fresh_chat=True,
+            )
+
+        try:
+            return generate(source, request, progress=progress, is_canceled=is_canceled)
+        finally:
+            server.enqueue_fire_and_forget_task({
+                "type": "cleanup_session", "platform": self.platform,
+                "session_id": self._session_id, "close_owned": True,
+            })
 
     def generate_text(
         self,

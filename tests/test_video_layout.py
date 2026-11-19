@@ -92,7 +92,7 @@ class VideoLayoutUiTests(unittest.TestCase):
         self.host=harness.PerformanceQueueTests(); self.host.setUp()
     def tearDown(self): self.host.tearDown()
 
-    def test_cinematic_and_blank_templates_do_not_leave_empty_text_tracks(self):
+    def test_built_in_templates_create_only_their_editable_text_layers(self):
         from app.layers.base import LayerType
         from app.layers.timeline import Track
         from app.layers.text import TextLayer
@@ -103,10 +103,18 @@ class VideoLayoutUiTests(unittest.TestCase):
         layout=gui.video_layout_controller
         layout.templates.setCurrentRow(3);layout.apply()
         self.assertFalse(any(track.type==LayerType.TEXT for track in model.tracks))
-        layout.templates.setCurrentRow(1);layout.fields['hook'].setText('');layout.apply()
-        self.assertFalse(any(track.type==LayerType.TEXT for track in model.tracks))
-        layout.fields['hook'].setText('A hook');layout.apply()
-        self.assertTrue(any(track.type==LayerType.TEXT for track in model.tracks))
+        layout.templates.setCurrentRow(1);layout.apply()
+        self.assertEqual([layer.id for layer in model.all_layers() if layer.type == LayerType.TEXT], ['layout-hook'])
+        gui.timeline.select_layer('layout-hook')
+        gui.on_timeline_layer_selected('layout-hook')
+        gui.text_inspector_content.setPlainText('Hook edited in the inspector')
+        recipe=layout.saved.capture()
+        self.assertIn('Hook edited in the inspector',
+                      [layer['text'] for row in recipe['tracks'] for layer in row['track']['layers']
+                       if layer['type'] == 'text'])
+        layout.templates.setCurrentRow(2);layout.apply()
+        self.assertEqual([layer.id for layer in model.all_layers() if layer.type == LayerType.TEXT],
+                         ['layout-title', 'layout-part', 'layout-description'])
         layout.templates.setCurrentRow(3);layout.apply()
         self.assertFalse(any(track.type==LayerType.TEXT for track in model.tracks))
         # Existing user text remains intact when the template has no text.
@@ -115,24 +123,27 @@ class VideoLayoutUiTests(unittest.TestCase):
         layout.apply()
         self.assertIn(user.id,[layer.id for track in model.tracks for layer in track.layers])
 
-    def test_repeated_cinematic_image_apply_keeps_one_background_and_restores_history(self):
+    def test_repeated_background_inspector_edits_keep_one_layer_and_restore_history(self):
         from PySide6.QtGui import QImage, QColor
         gui=self.host.editor(self.host.source())
         gui.video_view.set_frame(str(harness.ROOT/'assets/preview.JPG'))
         controller=gui.video_layout_controller
-        controller.templates.setCurrentRow(3)
-        controller.background.setCurrentIndex(controller.background.findData('image'))
+        controller.templates.setCurrentRow(3);controller.apply()
+        gui.timeline.select_layer('layout-background')
+        gui.on_timeline_layer_selected('layout-background')
+        inspector=gui.background_controller
+        inspector.mode.setCurrentIndex(inspector.mode.findData('image'))
         paths=[]
         for index in range(12):
             image=QImage(128,72,QImage.Format_RGB32);image.fill(QColor.fromHsv(index*25,180,170))
             path=self.host.root/f'background_{index}.jpg';self.assertTrue(image.save(str(path)))
-            paths.append(str(path));controller.image.setText(str(path));controller.apply()
+            paths.append(str(path));inspector.image.setText(str(path));inspector.apply_btn.click()
             layers=[layer for track in gui.timeline._timeline.tracks for layer in track.layers if layer.type.value=='background']
             self.assertEqual(len(layers),1)
             self.assertEqual(layers[0].source,str(path))
             self.assertTrue(controller.apply_btn.isEnabled())
-        controller.undo();self.assertEqual(controller.current()['image'],paths[-2])
-        controller.redo();self.assertEqual(controller.current()['image'],paths[-1])
+        gui.undo_last_timeline_timing_edit();self.assertEqual(controller.current()['image'],paths[-2])
+        gui.redo_last_timeline_timing_edit();self.assertEqual(controller.current()['image'],paths[-1])
 
     def test_template_ratio_round_trip_and_undo_keep_user_edits(self):
         from app.layers.text import TextLayer
@@ -142,7 +153,7 @@ class VideoLayoutUiTests(unittest.TestCase):
         ratio=gui.output_ratio_combo
         ratio.setCurrentIndex(ratio.findData('16:9'))
         c=gui.video_layout_controller
-        c.templates.setCurrentRow(1);c.fields['hook'].setText('Hook');c.apply()
+        c.templates.setCurrentRow(1);c.apply()
         layer=next(l for tr in gui.timeline._timeline.tracks for l in tr.layers if l.id=='layout-hook')
         before=copy.deepcopy(layer.to_dict())
         ratio.setCurrentIndex(ratio.findData('9:16'))
@@ -163,7 +174,7 @@ class VideoLayoutUiTests(unittest.TestCase):
         gui=self.host.editor(video)
         gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData('9:16'))
         c=gui.video_layout_controller
-        c.templates.setCurrentRow(1);c.fields['hook'].setText('Queue hook');c.apply()
+        c.templates.setCurrentRow(1);c.apply()
         gui.save_processing_profile()
         cfg=copy.deepcopy(gui.current_project_state.settings['processing_profile'])
         cfg['prepare'].update(mode='subtitle',skip_translation=True,audio_handling_mode='fast')
@@ -180,9 +191,12 @@ class VideoLayoutUiTests(unittest.TestCase):
         from app.services.resource_package import build_catalog, export_resources, import_resources
         gui=self.host.editor(self.host.source())
         c=gui.video_layout_controller
-        c.templates.setCurrentRow(3)
-        c.background.setCurrentIndex(c.background.findData('image'))
-        c.image.setText(str(harness.ROOT/'assets/capcap.png'));c.apply()
+        c.templates.setCurrentRow(3);c.apply()
+        gui.timeline.select_layer('layout-background')
+        gui.on_timeline_layer_selected('layout-background')
+        inspector=gui.background_controller
+        inspector.mode.setCurrentIndex(inspector.mode.findData('image'))
+        inspector.image.setText(str(harness.ROOT/'assets/capcap.png'));inspector.apply_btn.click()
         snapshot=capture_resources(gui)
         items=build_catalog(snapshot)
         package=self.host.root/'layout_package'
@@ -207,7 +221,7 @@ class VideoLayoutUiTests(unittest.TestCase):
         user=TextLayer(text='My layer',start=0,end=1)
         find_or_create_track(gui.timeline._timeline,'T1 Text',LayerType.TEXT,80).layers.append(user)
         before=copy.deepcopy(gui.timeline._timeline.to_dict())
-        layout.templates.setCurrentRow(1); layout.fields['hook'].setText('A hook')
+        layout.templates.setCurrentRow(1)
         self.assertEqual(before,gui.timeline._timeline.to_dict())
         layout.apply()
         self.assertEqual(layout.current()['template'],'hook')
@@ -239,7 +253,7 @@ class VideoLayoutUiTests(unittest.TestCase):
         gui.apply_segments_to_timeline()
         gui.output_ratio_combo.setCurrentIndex(gui.output_ratio_combo.findData('9:16'))
         c=gui.video_layout_controller
-        c.templates.setCurrentRow(1);c.fields['hook'].setText('Hook');c.apply()
+        c.templates.setCurrentRow(1);c.apply()
         c.diagram.grab()  # Exercise the actual Qt paint path.
         gui.video_view.set_frame(str(harness.ROOT/'assets/capcap.png'))
         srt=self.host.root/'test.srt';srt.write_text('1\n00:00:00,000 --> 00:00:00,800\nHello\n',encoding='utf-8')

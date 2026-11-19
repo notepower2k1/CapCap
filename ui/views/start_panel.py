@@ -316,7 +316,9 @@ def build_start_group(gui, left_layout):
     advanced_page, advanced_layout = _make_page("advanced")
     gui.workflow_advanced_layout = advanced_layout
     layout_page, video_layout = _make_page("layout")
-    pages.extend([media_page, audio_page, language_page, voice_page, style_page, advanced_page, layout_page])
+    summary_page, summary_layout = _make_page("summary")
+    pages.extend([media_page, audio_page, language_page, voice_page, style_page, layout_page,
+                  summary_page, advanced_page])
 
     def _add_tab(label: str, page_index: int, page_key: str, checked: bool = False):
         btn = QPushButton(label)
@@ -340,8 +342,9 @@ def build_start_group(gui, left_layout):
     _add_tab("Language", 2, "language")
     _add_tab("Voice", 3, "voice")
     _add_tab("Style", 4, "style")
-    _add_tab("Advanced", 5, "advanced")
-    _add_tab(t("Video Layout"), 6, "layout")
+    _add_tab(t("Video Layout"), 5, "layout")
+    _add_tab(t("Summary"), 6, "summary")
+    _add_tab("Advanced", 7, "advanced")
     gui.show_progress_btn = QPushButton("Show Progress")
     gui.show_progress_btn.clicked.connect(gui.show_active_progress_dialog)
     gui.show_progress_btn.setVisible(False)
@@ -1091,9 +1094,12 @@ def build_start_group(gui, left_layout):
     gui.subtitle_presentation_controller = SubtitlePresentationController(gui, presentation_layout, subtitle_layout)
     from ui.controllers.video_layout_controller import VideoLayoutController
     gui.video_layout_controller = VideoLayoutController(gui, video_layout)
+    from ui.controllers.video_summary_controller import VideoSummaryController
+    gui.video_summary_controller = VideoSummaryController(gui, summary_page, summary_layout)
 
     for page in pages:
-        page.layout().addStretch()
+        if page is not summary_page:
+            page.layout().addStretch()
         gui.left_panel_stack.addWidget(page)
 
     workflow_shell_layout.addWidget(gui.left_panel_stack, 1)

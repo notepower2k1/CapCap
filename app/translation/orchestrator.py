@@ -573,6 +573,28 @@ class TranslationOrchestrator:
     def result_to_srt(self, result: TranslationResult) -> str:
         return to_srt(result.segments)
 
+    def summarize_video(self, transcript, *, override_provider="", progress, is_canceled):
+        from .video_summary import generate_video_summary
+
+        return self._run_video_analysis(generate_video_summary, transcript, override_provider, progress, is_canceled)
+
+    def suggest_video_hooks(self, summary, *, override_provider="", progress, is_canceled):
+        from .video_summary import generate_video_hooks
+
+        return self._run_video_analysis(generate_video_hooks, summary, override_provider, progress, is_canceled)
+
+    def _run_video_analysis(self, generate, source, override_provider, progress, is_canceled):
+        if override_provider in {"google", "bing"}:
+            raise TranslationConfigError("Select an AI provider in Settings.")
+        provider_type, provider = self._resolve_ai_provider(override_provider)
+        if not provider.is_configured():
+            raise TranslationConfigError(f"AI provider '{provider_type}' is not configured. Check Settings.")
+        if isinstance(provider, BrowserBridgePolisherProvider):
+            return provider.run_video_analysis(
+                generate, source, progress=progress, is_canceled=is_canceled,
+            )
+        return generate(source, provider.generate_text, progress=progress, is_canceled=is_canceled)
+
     def extract_dialogue_context(
         self,
         segments: list[dict],

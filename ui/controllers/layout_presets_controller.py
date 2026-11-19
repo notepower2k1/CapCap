@@ -8,6 +8,7 @@ from PySide6.QtCore import QSignalBlocker
 from PySide6.QtWidgets import QLabel, QMessageBox
 
 from app import layout_presets as recipes
+from app.video_layout import config
 from i18n import t
 from widgets.named_presets import NamedPresets
 
@@ -25,8 +26,8 @@ class LayoutPresetsController:
         layout.addWidget(note)
 
     def source_size(self):
-        view = self.gui.video_view
-        return (view.video_source_width or 1920, view.video_source_height or 1080)
+        view = getattr(self.gui, 'video_view', None)
+        return (getattr(view, 'video_source_width', 0) or 1920, getattr(view, 'video_source_height', 0) or 1080)
 
     def controls(self, *, portable=False):
         ratio = self.gui.get_output_ratio_key()
@@ -54,36 +55,25 @@ class LayoutPresetsController:
 
     def select(self, value):
         recipes.validate(value)
-        cfg = copy.deepcopy(value.get('layout'))
-        if cfg:
-            if cfg.get('image') == recipes.BACKGROUND_ASSET:
-                cfg['image'] = recipes.sample_asset(recipes.BACKGROUND_ASSET)
-            _, height = self.target_canvas(value['controls'])
-            for key in ('corner', 'shadow'):
-                cfg[key] *= height / value['canvas'][1]
-        self.owner.fill(cfg)
-        # Set after fill so built-in selection signals cannot clear the draft.
         self.pending = copy.deepcopy(value)
-        self.show_recipe_fields(True)
-        self.owner.diagram.update()
+        self.owner.sync_selection()
         message = t('Saved layout selected. Click Apply layout to use it.')
-        if cfg and cfg['background'] == 'image':
+        if (value.get('layout') or {}).get('background') == 'image':
             message += ' ' + t('The saved layout uses a sample background image.')
         self.owner.status.setText(message)
+
+    def draft_layout(self, canvas=None):
+        cfg = config(self.pending.get('layout'))
+        if cfg['background'] == 'image':
+            cfg['image'] = recipes.sample_asset(recipes.BACKGROUND_ASSET)
+        _, height = canvas or self.target_canvas(self.pending['controls'])
+        for key in ('corner', 'shadow'):
+            cfg[key] *= height / self.pending['canvas'][1]
+        return config(cfg)
 
     def clear_draft(self):
         self.pending = None
         self.library.refresh()
-        self.show_recipe_fields(False)
-
-    def show_recipe_fields(self, selected):
-        # Saved text/images are edited through their normal layer inspectors.
-        # Keep the form's video slot controls available for custom recipes.
-        for field in (self.owner.background, self.owner.color, self.owner.image_row, self.owner.spins['blur']):
-            self.owner.form.setRowVisible(field, not selected)
-        if selected:
-            for field in self.owner.fields.values():
-                self.owner.form.setRowVisible(field, False)
 
     def snapshot(self):
         p = self.gui.subtitle_presentation_controller
@@ -136,9 +126,7 @@ class LayoutPresetsController:
         controls = copy.deepcopy(self.pending['controls'])
         # Resolve target dimensions without changing the live editor.
         canvas = self.target_canvas(controls)
-        cfg = self.owner.draft()
-        if cfg['background'] == 'image':
-            cfg['image'] = recipes.sample_asset(recipes.BACKGROUND_ASSET)
+        cfg = self.draft_layout(canvas)
         try:
             tracks, styles = recipes.materialize(self.pending, layout=cfg, source=self.source_size(),
                                                  canvas=canvas, controls=controls, duration=model.duration or 1.)
@@ -208,7 +196,7 @@ class LayoutPresetsController:
                     state.set_setting(name, copy.deepcopy(value))
             # finish() resolves the project again from disk.
             self.gui.project_service.save_project(state)
-        self.owner.fill(self.owner.applied)
+        self.owner.sync_selection()
         self.owner.finish()
 
     def apply_history(self, entry, use_after):

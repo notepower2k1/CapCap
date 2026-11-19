@@ -607,7 +607,7 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
 
       const runTranslate = async () => {
         if (currentTask.canceled || closedSessions.has(sessionId)) throw new Error("Task canceled before submission");
-        const context = contextSessions[task.platform];
+        const context = task.operation === "summary" ? null : contextSessions[task.platform];
         // Claim synchronously before chrome.tabs.get yields, so two workers
         // cannot take over the same analysis conversation.
         if (context) delete contextSessions[task.platform];
@@ -694,7 +694,7 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
       retainSession = !!task.keep_open && !!response.success;
       if (response.success && task.operation === "context") {
         contextSessions[task.platform] = { sessionId, temporaryChat };
-      } else if (task.operation !== "context") {
+      } else if (task.operation !== "context" && task.operation !== "summary") {
         delete contextSessions[task.platform];
       }
       if (!currentTask.canceled) await postResult(task.id, response.success, response.text, response.error || response.diagnostics);
