@@ -576,14 +576,22 @@ class TranslationOrchestrator:
     def summarize_video(self, transcript, *, override_provider="", progress, is_canceled):
         from .video_summary import generate_video_summary
 
-        return self._run_video_analysis(generate_video_summary, transcript, override_provider, progress, is_canceled)
+        return self._run_video_analysis(generate_video_summary, transcript, override_provider, progress, is_canceled,
+                                        json_reply_key="summary")
 
     def suggest_video_hooks(self, summary, *, override_provider="", progress, is_canceled):
         from .video_summary import generate_video_hooks
 
-        return self._run_video_analysis(generate_video_hooks, summary, override_provider, progress, is_canceled)
+        return self._run_video_analysis(generate_video_hooks, summary, override_provider, progress, is_canceled,
+                                        json_reply_key="hooks")
 
-    def _run_video_analysis(self, generate, source, override_provider, progress, is_canceled):
+    def write_video_recap(self, source, *, override_provider="", progress, is_canceled):
+        from .video_recap import generate_video_recap
+
+        return self._run_video_analysis(generate_video_recap, source, override_provider, progress, is_canceled,
+                                        json_reply_key="segments")
+
+    def _run_video_analysis(self, generate, source, override_provider, progress, is_canceled, *, json_reply_key):
         if override_provider in {"google", "bing"}:
             raise TranslationConfigError("Select an AI provider in Settings.")
         provider_type, provider = self._resolve_ai_provider(override_provider)
@@ -591,7 +599,7 @@ class TranslationOrchestrator:
             raise TranslationConfigError(f"AI provider '{provider_type}' is not configured. Check Settings.")
         if isinstance(provider, BrowserBridgePolisherProvider):
             return provider.run_video_analysis(
-                generate, source, progress=progress, is_canceled=is_canceled,
+                generate, source, progress=progress, is_canceled=is_canceled, json_reply_key=json_reply_key,
             )
         return generate(source, provider.generate_text, progress=progress, is_canceled=is_canceled)
 

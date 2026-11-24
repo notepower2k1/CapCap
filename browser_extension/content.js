@@ -107,6 +107,24 @@
     return text;
   }
 
+  function extractJsonCode(el, key) {
+    if (!el || !key) return "";
+    for (const block of el.querySelectorAll('pre, code, [data-d-component="code"], [data-d-component="code-block"]')) {
+      const cleaned = block.cloneNode(true);
+      cleaned.querySelectorAll('button, [data-line-number], [aria-hidden="true"]').forEach(node => node.remove());
+      for (const value of [block.textContent, cleaned.textContent]) {
+        const text = (value || "").trim();
+        try {
+          const data = JSON.parse(text);
+          if (data && !Array.isArray(data) && Object.prototype.hasOwnProperty.call(data, key)) {
+            return text;
+          }
+        } catch (_) { /* Streaming code or an unrelated code example. */ }
+      }
+    }
+    return "";
+  }
+
   // Helper: Extract text from response container preserving list numbering
   function extractTextWithListNumbers(el) {
     if (!el) return "";
@@ -476,8 +494,10 @@
       ));
     },
 
-    getAssistantText(el) {
+    getAssistantText(el, jsonReplyKey = "") {
       if (!el) return "";
+      const json = extractJsonCode(el, jsonReplyKey);
+      if (json) return json;
       const blocks = Array.from(el.querySelectorAll('[data-dil-response], .markdown, .prose, div.whitespace-pre-wrap'));
       const roots = blocks.filter((block) => !blocks.some((other) =>
         other !== block && other.contains(block)
@@ -541,7 +561,7 @@
       throw new Error("ChatGPT did not accept the prompt after clicking Send. Check the chat window and try again.");
     },
 
-    async typeAndSend(prompt, platform = "chatgpt") {
+    async typeAndSend(prompt, platform = "chatgpt", jsonReplyKey = "") {
       if (abortRequested) {
         throw new Error("Đã hủy bởi CapCap.");
       }
@@ -558,7 +578,7 @@
       const initialMessages = this.getAssistantMessages();
       const initialAssistantCount = initialMessages.length;
       const initialAssistantText = initialMessages.length
-        ? this.getAssistantText(initialMessages[initialMessages.length - 1]) : "";
+        ? this.getAssistantText(initialMessages[initialMessages.length - 1], jsonReplyKey) : "";
 
       // Check abort before inserting text
       if (abortRequested) {
@@ -592,7 +612,7 @@
         isComplete: () => this.isReplyComplete(),
         getLatestText: () => {
           const msgs = this.getAssistantMessages();
-          return msgs.length > 0 ? this.getAssistantText(msgs[msgs.length - 1]) : "";
+          return msgs.length > 0 ? this.getAssistantText(msgs[msgs.length - 1], jsonReplyKey) : "";
         },
         isGenerating: () => this.isGenerating(),
         platformName: "ChatGPT",
@@ -657,9 +677,9 @@
       return responses.filter(el => !responses.some(other => other !== el && other.contains(el)));
     },
 
-    getResponseText(el) {
+    getResponseText(el, jsonReplyKey = "") {
       if (!el) return "";
-      return extractTextWithListNumbers(el);
+      return extractJsonCode(el, jsonReplyKey) || extractTextWithListNumbers(el);
     },
 
     latestReply() {
@@ -735,7 +755,7 @@
       }
     },
 
-    async typeAndSend(prompt, platform = "gemini", temporaryChat = false) {
+    async typeAndSend(prompt, platform = "gemini", temporaryChat = false, jsonReplyKey = "") {
       if (abortRequested) {
         throw new Error("Đã hủy bởi CapCap.");
       }
@@ -753,7 +773,7 @@
       const initialResponses = this.getResponses();
       const initialResponseCount = initialResponses.length;
       const initialResponseText = initialResponses.length
-        ? this.getResponseText(initialResponses[initialResponses.length - 1]) : "";
+        ? this.getResponseText(initialResponses[initialResponses.length - 1], jsonReplyKey) : "";
 
       // Check abort before inserting text
       if (abortRequested) {
@@ -809,7 +829,7 @@
         isComplete: () => this.isReplyComplete(),
         getLatestText: () => {
           const resps = this.getResponses();
-          return resps.length > 0 ? this.getResponseText(resps[resps.length - 1]) : "";
+          return resps.length > 0 ? this.getResponseText(resps[resps.length - 1], jsonReplyKey) : "";
         },
         isGenerating: () => this.isGenerating(),
         platformName: "Google Gemini",
@@ -867,7 +887,8 @@
           api.isGenerating() || !api.isReplyComplete()) {
         sendResponse({ success: false, error: `Cannot re-read same completed turn. visibility=${document.visibilityState}` });
       } else {
-        const text = request.platform === 'chatgpt' ? api.getAssistantText(node) : api.getResponseText(node);
+        const key = completedReply.jsonReplyKey;
+        const text = request.platform === 'chatgpt' ? api.getAssistantText(node, key) : api.getResponseText(node, key);
         sendResponse({ success: true, text, diagnostics: `visibility=${document.visibilityState} focused=${document.hasFocus()} generating=false same_turn=true` });
       }
       return false;
@@ -919,17 +940,18 @@
         window.location.hostname.includes("chatgpt.com") ||
         window.location.hostname.includes("chat.openai.com");
       const platform = isChatGPT ? "chatgpt" : "gemini";
+      const jsonReplyKey = request.json_reply_key || "";
 
       (async () => {
         try {
           let resultText = "";
           if (isChatGPT) {
-            resultText = await ChatGPT.typeAndSend(request.prompt, platform);
+            resultText = await ChatGPT.typeAndSend(request.prompt, platform, jsonReplyKey);
           } else {
-            resultText = await Gemini.typeAndSend(request.prompt, platform, request.temporary_chat !== false);
+            resultText = await Gemini.typeAndSend(request.prompt, platform, request.temporary_chat !== false, jsonReplyKey);
           }
 
-          completedReply = { taskId: request.task_id, node: isChatGPT ? ChatGPT.latestReply() : Gemini.latestReply() };
+          completedReply = { taskId: request.task_id, node: isChatGPT ? ChatGPT.latestReply() : Gemini.latestReply(), jsonReplyKey };
           sendResponse({ success: true, text: resultText, diagnostics: `visibility=${document.visibilityState} focused=${document.hasFocus()} generating=false` });
         } catch (err) {
           console.error("[CapCap Content] Translation error:", err);

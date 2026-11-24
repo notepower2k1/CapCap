@@ -34,6 +34,33 @@ test('all markdown blocks are retained without duplicating nested prose', () => 
   } finally { dom.window.close(); }
 });
 
+test('ChatGPT reads structured JSON from code without surrounding prose, headers or line numbers', () => {
+  const { dom, chat } = load(`
+    <article data-turn="assistant"><div data-dil-response>
+      <p>Here is the recap.</p>
+      <pre><code>{"example":true}</code></pre>
+      <div data-d-component="code-block"><div>JSON <button>Copy code</button></div>
+        <pre><code><div><span data-line-number>1</span>{</div>
+          <div><span data-line-number>2</span>"segments":[{"narration":"Line {1}","cue_ids":[2]}]</div>
+          <div><span data-line-number>3</span>}</div></code></pre>
+      </div><p>Done.</p>
+    </div></article>
+  `);
+  try {
+    const node = chat.latestReply();
+    assert.deepEqual(JSON.parse(chat.getAssistantText(node, 'segments')),
+      { segments: [{ narration: 'Line {1}', cue_ids: [2] }] });
+    assert.match(chat.getAssistantText(node), /Here is the recap/);
+  } finally { dom.window.close(); }
+});
+
+test('Gemini reads structured JSON from a code block in the latest turn', () => {
+  const { dom, gemini } = load('<model-response><p>Result:</p><pre><code>{"hooks":["a","b","c"]}</code></pre></model-response>');
+  try {
+    assert.equal(gemini.getResponseText(gemini.latestReply(), 'hooks'), '{"hooks":["a","b","c"]}');
+  } finally { dom.window.close(); }
+});
+
 test('reads the DIL renderer observed on the live ChatGPT tab', () => {
   const { dom, chat } = load(`
     <div data-markdown-text-style="user-message">Analyze the dialogue</div>

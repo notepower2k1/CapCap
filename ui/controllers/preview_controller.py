@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from runtime_paths import bin_path
+from services.gui_project_bridge import uses_original_subtitles
 from worker_adapters import ExactFramePreviewWorker, FinalExportWorker, PreviewMuxWorker, QuickPreviewWorker
 
 try:
@@ -912,6 +913,12 @@ class PreviewController:
             str(getattr(self.gui, "processed_artifacts", {}).get("srt_translated", "") or "").strip(),
         ]
         project_state = getattr(self.gui, "current_project_state", None)
+        is_recap = bool(project_state and project_state.settings.get("recap_project"))
+        if uses_original_subtitles(project_state) or (is_recap and not self.gui.current_translated_segments):
+            from subtitle_builder import generate_srt
+
+            out_path = self.gui.get_project_temp_path("export", "original_subtitles.srt", create_parent=True)
+            return out_path if generate_srt(segments, out_path, max_gap_ms=0 if is_recap else 100) else ""
         if project_state is not None:
             artifacts = getattr(project_state, "artifacts", {}) or {}
             saved_candidates.extend(
@@ -996,6 +1003,10 @@ class PreviewController:
         perfectly valid subtitle-only export.  Never override a real voice
         track: users who generated one retain their requested voice/both mode.
         """
+        project_state = getattr(self.gui, "current_project_state", None)
+        if uses_original_subtitles(project_state) or (project_state and project_state.settings.get("recap_project")
+                and project_state.settings.get("tts_skipped", False)):
+            return "subtitle"
         mode = str(requested_mode or "both").strip().lower()
         if mode not in {"voice", "both"}:
             return mode
@@ -1007,7 +1018,6 @@ class PreviewController:
                 and os.path.exists(str(self.gui.last_translated_srt_path))
             )
         )
-        project_state = getattr(self.gui, "current_project_state", None)
         if has_translated_subtitles and bool(
             project_state and project_state.settings.get("tts_skipped", False)
         ):

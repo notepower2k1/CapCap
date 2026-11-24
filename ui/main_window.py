@@ -34,6 +34,7 @@ from language_support import (
     voice_matches_language, elevenlabs_supports_language,
 )
 from services import GUIProjectBridge, ProjectService, ResourceDownloadService, VoiceCatalogService
+from services.gui_project_bridge import mark_tts_skipped, uses_original_subtitles
 from controllers import PipelineController, PreviewController, SubtitleController
 from helpers import (
     build_guidance_state,
@@ -1649,6 +1650,9 @@ class VideoTranslatorGUI(QMainWindow):
         return ""
 
     def _omnivoice_quality_busy(self):
+        summary = getattr(self, "video_summary_controller", None)
+        if summary is not None and summary.recap_voice.busy:
+            return True
         workers = [getattr(self, name, None) for name in ("voice_thread", "prepare_workflow_thread", "_voice_sample_preview_thread")]
         workers.extend((getattr(self, "_segment_preview_threads", {}) or {}).values())
         if bool(getattr(self, "_pipeline_active", False)):
@@ -2395,6 +2399,7 @@ class VideoTranslatorGUI(QMainWindow):
         gender: str = "any",
         engine: str = "all",
         include_voice: str = "",
+        target_language: str | None = None,
     ) -> list[tuple[str, str]]:
         """Return gender- and engine-filtered voices for a speaker row independently.
 
@@ -2407,7 +2412,8 @@ class VideoTranslatorGUI(QMainWindow):
         wanted_gender = self._normalize_gender_value(gender)
         wanted_engine = str(engine or "all").strip().lower()
         assigned = str(include_voice or "").strip()
-        target_language = self.get_target_language_code()
+        if target_language is None:
+            target_language = self.get_target_language_code()
 
         all_catalog = list(getattr(self, "voice_catalog_entries_all", []) or [])
         if not all_catalog:
@@ -3816,6 +3822,9 @@ class VideoTranslatorGUI(QMainWindow):
         return choices
 
     def _preferred_preview_audio_track_mode(self) -> str:
+        state = getattr(self, "current_project_state", None)
+        if state and (state.settings.get("tts_skipped", False) or uses_original_subtitles(state)):
+            return "original"
         has_active_music = any(not bool(t.get("muted", False)) for t in self._music_audio_tracks())
         track_mutes = self._timeline_audio_track_mutes()
         if track_mutes:
@@ -6993,14 +7002,16 @@ class VideoTranslatorGUI(QMainWindow):
         # intentionally skipped. Only a completed translation artifact/step
         # unlocks the next Step-by-Step action.
         translation_status = str(steps.get("translate_raw", "")).lower()
+        original_subtitles = uses_original_subtitles(state)
         # A retained translation artifact is useful for legacy projects, but
         # it must not make the phase look completed while a new translation
         # is running or after the user stopped it.
         translated = (
-            False if translation_status in {"running", "failed"}
+            False if original_subtitles or translation_status in {"running", "failed"}
             else translation_status == "done" or bool(artifacts.get("translation_final"))
         )
         tts_skipped = bool(state and state.settings.get("tts_skipped", False))
+        is_recap = bool(state and state.settings.get("recap_project", False))
         is_subtitles_only = hasattr(self, "get_output_mode_key") and self.get_output_mode_key() == "subtitle"
         is_tts_skip = tts_skipped or is_subtitles_only
         voice = not is_tts_skip and bool(
@@ -7032,11 +7043,24 @@ class VideoTranslatorGUI(QMainWindow):
             is_running = running == running_step or (key == "transcript" and running == "prepare")
             if is_running:
                 text, color = t("Processing…"), "#f6c453"
+            elif is_recap and key == "tts" and not voice:
+                text, color = t("Included in recap video"), "#6ee7d6"
+            elif (
+                (is_recap and key == "transcript" and not complete and steps.get("transcribe") == "skipped")
+                or (key == "translate" and original_subtitles)
+                or (key == "tts" and (tts_skipped or (original_subtitles and transcript)))
+            ):
+                text, color = t("Skipped"), "#8394aa"
+            elif key == "export" and has_video and not exported and (
+                is_recap or (original_subtitles and transcript) or (tts_skipped and translated)
+            ):
+                text, color = t("Ready to export"), "#6ee7d6"
             elif complete:
                 color = "#6ee7d6"
                 if key == "transcript":
-                    engine_name = self._completed_transcript_engine_label()
-                    text = t("{engine} Completed", engine=engine_name)
+                    text = t("✓ Completed") if is_recap else t(
+                        "{engine} Completed", engine=self._completed_transcript_engine_label()
+                    )
                 elif key == "translate":
                     provider_name = self._completed_translation_provider_label() or "Google Translate"
                     text = t("{provider} Completed", provider=provider_name)
@@ -7068,6 +7092,8 @@ class VideoTranslatorGUI(QMainWindow):
             self._generate_translate_action.setText(t("Re-translate") if translated else t("Auto Translate"))
         if hasattr(self, "_generate_import_translated_srt_action"):
             self._generate_import_translated_srt_action.setEnabled(transcript and not self._pipeline_active)
+        if hasattr(self, "_generate_use_original_subtitles_action"):
+            self._generate_use_original_subtitles_action.setEnabled(transcript and not self._pipeline_active)
         if hasattr(self, "_generate_tts_action"):
             self._generate_tts_action.setEnabled(
                 # TTS is intentionally repeatable: subtitle/voice edits may
@@ -7076,7 +7102,9 @@ class VideoTranslatorGUI(QMainWindow):
                 and self.get_output_mode_key() in ("voice", "both")
             )
         if hasattr(self, "_generate_tts_skip_action"):
-            self._generate_tts_skip_action.setEnabled(translated and not self._pipeline_active)
+            self._generate_tts_skip_action.setEnabled(
+                (translated or (original_subtitles and transcript)) and not tts_skipped and not self._pipeline_active
+            )
 
     def update_preview_context_label(self, has_subtitles: bool, has_voice_audio: bool):
         subtitle_source = "Vietnamese review track" if self.current_translated_segments else ("original subtitle track" if self.current_segments else "no subtitle track yet")
@@ -12468,6 +12496,8 @@ class VideoTranslatorGUI(QMainWindow):
     def _translation_phase_complete(self) -> bool:
         """Return whether translated subtitle data is a completed artifact."""
         state = getattr(self, "current_project_state", None)
+        if uses_original_subtitles(state):
+            return False
         steps = getattr(state, "steps", {}) or {}
         status = str(steps.get("translate_raw", "") or "").strip().lower()
         if status in {"running", "failed", "cancelled", "pending"}:
@@ -16091,6 +16121,8 @@ class VideoTranslatorGUI(QMainWindow):
             has_subtitle_track
             or (mode == "voice" and has_voice_audio)
             or has_overlays
+            or (uses_original_subtitles(self.current_project_state) and bool(self.current_segments))
+            or bool(self.current_project_state and self.current_project_state.settings.get("recap_project"))
         )
 
         self.extract_btn.setEnabled(v_ok)
@@ -16350,7 +16382,9 @@ class VideoTranslatorGUI(QMainWindow):
             translate_action.triggered.connect(lambda: self.run_pipeline_to_stage("translate"))
             import_translation_action = QAction(t("Import Translated File…"), translate_menu)
             import_translation_action.triggered.connect(self.import_translated_srt)
-            translate_menu.addActions([translate_action, import_translation_action])
+            use_original_subtitles_action = QAction(t("Use original subtitles"), translate_menu)
+            use_original_subtitles_action.triggered.connect(self.use_original_subtitles)
+            translate_menu.addActions([translate_action, import_translation_action, use_original_subtitles_action])
             tts_menu = step_menu.addMenu(t("Generate Voice / TTS"))
             tts_menu.setObjectName("generateStepMenu")
             tts_menu.setMinimumWidth(220)
@@ -16364,7 +16398,7 @@ class VideoTranslatorGUI(QMainWindow):
             full_menu.setObjectName("generateStepMenu")
             full_menu.setMinimumWidth(220)
             full_action = QAction(t("Run full pipeline"), full_menu)
-            full_action.triggered.connect(self.run_all_pipeline)
+            full_action.triggered.connect(self.choose_pipeline_steps)
             full_menu.addAction(full_action)
             btn.setMenu(menu)
             btn.setPopupMode(QToolButton.InstantPopup)
@@ -16373,6 +16407,7 @@ class VideoTranslatorGUI(QMainWindow):
             self._generate_import_original_srt_action = import_transcript_action
             self._generate_translate_action = translate_action
             self._generate_import_translated_srt_action = import_translation_action
+            self._generate_use_original_subtitles_action = use_original_subtitles_action
             self._generate_tts_action = tts_action
             self._generate_tts_skip_action = tts_skip_action
         self.update_workflow_stage_badges()
@@ -16543,8 +16578,8 @@ class VideoTranslatorGUI(QMainWindow):
     def on_transcription_finished(self, segments, error=""):
         self.subtitle_controller.on_transcription_finished(segments, error)
 
-    def run_translation(self, show_prompt_dialog: bool = True):
-        self.subtitle_controller.run_translation(show_prompt_dialog=show_prompt_dialog)
+    def run_translation(self, show_prompt_dialog: bool = True, *, on_success=None):
+        self.subtitle_controller.run_translation(show_prompt_dialog=show_prompt_dialog, on_success=on_success)
 
     def on_translation_finished(self, translated_srt, error, fallback_notice=""):
         self.subtitle_controller.on_translation_finished(translated_srt, error, fallback_notice)
@@ -18925,7 +18960,7 @@ class VideoTranslatorGUI(QMainWindow):
         self._voiceover_force_refresh = True
         self.run_voiceover()
 
-    def run_pipeline_to_stage(self, target_stage: str):
+    def run_pipeline_to_stage(self, target_stage: str, *, on_translation_success=None):
         target_stage = str(target_stage or "full").strip().lower()
         if target_stage not in {"transcript", "translate", "tts"}:
             self.run_all_pipeline()
@@ -18954,7 +18989,10 @@ class VideoTranslatorGUI(QMainWindow):
             if not self.transcript_text.toPlainText().strip() and self.current_segments:
                 self.transcript_text.setText(self.format_to_srt(self.current_segments))
             self.log("[Pipeline] Translate requested; using the completed transcript only.")
-            self.run_translation()
+            if on_translation_success is None:
+                self.run_translation()
+            else:
+                self.run_translation(on_success=on_translation_success)
             return
         if target_stage == "tts" and not has_translation:
             QMessageBox.information(self, t("Step-by-Step"), t("Complete Translate before running Generate Voice / TTS."))
@@ -18975,30 +19013,81 @@ class VideoTranslatorGUI(QMainWindow):
             return
         self.pipeline_controller.run_all_pipeline(target_stage=target_stage)
 
+    def use_original_subtitles(self):
+        translation = getattr(self, "translation_thread", None)
+        if not self.current_segments or (translation is not None and translation.isRunning()):
+            return
+        self.persist_current_timeline_project_data()
+        state = self.current_project_state
+        if state is None:
+            return
+        state.set_setting("use_original_subtitles", True)
+        state.set_step_status("translate_raw", "skipped")
+        state.set_step_status("refine_translation", "skipped")
+        mark_tts_skipped(state)
+        self.project_service.save_project(state)
+        self._single_line_split_cache = None
+        self.load_project_context(state)
+        self.sync_preview_audio_track_to_output(force=True)
+        self.refresh_ui_state()
+
     def skip_tts_stage(self):
-        """Explicitly finish the optional TTS phase after translation."""
+        """Keep the original audio for playback and export."""
         has_translation = bool(self.current_translated_segments or self.translated_text.toPlainText().strip())
-        if not has_translation:
+        has_original = bool(self.current_segments) and uses_original_subtitles(self.current_project_state)
+        if not (has_translation or has_original):
             QMessageBox.information(self, t("Skip TTS"), t("Complete Translate before skipping Generate Voice / TTS."))
             return
         state = self.ensure_current_project()
         if state is not None:
-            state.set_setting("tts_skipped", True)
-            state.set_step_status("generate_tts", "skipped")
-            state.set_step_status("mix_audio", "skipped")
+            mark_tts_skipped(state)
             self.project_service.save_project(state)
         self._voiceover_force_refresh = True
-        self.log("[Pipeline] Generate Voice / TTS skipped. The translated subtitle video is ready to export.")
+        self.log("[Pipeline] Generate Voice / TTS skipped. Subtitles can be exported with original audio.")
+        self.sync_preview_audio_track_to_output(force=True)
         self.refresh_ui_state()
 
-    def run_all_pipeline(self):
+    def choose_pipeline_steps(self):
+        from widgets.pipeline_steps_dialog import PipelineStepsDialog
+
+        translation = getattr(self, "translation_thread", None)
+        if self._pipeline_active or (translation is not None and translation.isRunning()):
+            return
+        dialog = PipelineStepsDialog(
+            self,
+            has_transcript=bool(self.current_segments or self.transcript_text.toPlainText().strip()),
+            has_translation=self._translation_phase_complete(),
+            same_language=self.get_source_language_code() == self.get_target_language_code(),
+            supports_voice=self.get_output_mode_key() in ("voice", "both"),
+        )
+        accepted = dialog.exec() == QDialog.Accepted
+        transcribe = dialog.transcript.isChecked()
+        translate = dialog.translate.isChecked()
+        voice = dialog.voice.isChecked()
+        dialog.deleteLater()
+        if not accepted:
+            return
+        if transcribe:
+            stage = "full" if voice else "translate" if translate else "transcript"
+            self.run_all_pipeline(target_stage=stage, force_transcription=True)
+        elif translate:
+            self.run_pipeline_to_stage(
+                "translate", on_translation_success=self._start_selected_voice if voice else self.skip_tts_stage,
+            )
+        elif voice:
+            self._start_selected_voice()
+
+    def _start_selected_voice(self):
+        self.run_pipeline_to_stage("tts")
+
+    def run_all_pipeline(self, *, target_stage="full", force_transcription=False):
         if getattr(self,"performance_mode",False) or (self.current_project_state and self.current_project_state.settings.get("processing_profile")):
             self.save_processing_profile()
         mode = self.get_output_mode_key()
-        include_voice = mode in ("voice", "both")
+        include_voice = target_stage == "full" and mode in ("voice", "both")
         is_ocr = self.get_transcription_engine() == "ocr"
         state = getattr(self, "current_project_state", None)
-        imported = bool(state and state.settings.get("transcript_imported", False))
+        imported = bool(not force_transcription and state and state.settings.get("transcript_imported", False))
         if not self.ensure_required_resources(
             "Generate",
             include_whisper=not is_ocr and not imported,
@@ -19007,7 +19096,10 @@ class VideoTranslatorGUI(QMainWindow):
             validate_pipeline_runtime=True,
         ):
             return
-        self.pipeline_controller.run_all_pipeline(target_stage="full")
+        if force_transcription:
+            self.pipeline_controller.run_all_pipeline(target_stage=target_stage, force_transcription=True)
+        else:
+            self.pipeline_controller.run_all_pipeline(target_stage=target_stage)
 
     def on_prepare_workflow_finished(self, project_state_path, error):
         self.pipeline_controller.on_prepare_workflow_finished(project_state_path, error)
@@ -19798,6 +19890,9 @@ class VideoTranslatorGUI(QMainWindow):
         if editor_busy():
             QMessageBox.information(self,t("Processing"),t("A video is being processed. Wait or stop it before opening an editor."))
             return
+        summary = getattr(self, "video_summary_controller", None)
+        if summary is not None:
+            summary.clear_project()
         candidate = os.path.join(self.project_service.projects_root,self.project_service._build_project_id(video_path),"project.json")
         if os.path.isfile(candidate):
             saved_state = self.project_service.load_project(candidate)
@@ -19895,7 +19990,7 @@ class VideoTranslatorGUI(QMainWindow):
             if os.path.isfile(candidate):
                 try:
                     imported_state = self.project_service.load_project(candidate)
-                    if imported_state.settings.get("resource_package_imported"):
+                    if imported_state.settings.get("resource_package_imported") or imported_state.settings.get("recap_project"):
                         from controllers.resource_export_controller import restore_imported_project_languages
                         restore_imported_project_languages(self, imported_state)
                 except Exception as exc:

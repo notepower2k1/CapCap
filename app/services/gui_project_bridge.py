@@ -6,6 +6,19 @@ import json
 from services.segment_service import SegmentService
 
 
+def uses_original_subtitles(state):
+    return bool(state and (
+        getattr(state, "settings", {}).get("use_original_subtitles") is True
+        or getattr(state, "steps", {}).get("translate_raw") == "skipped"
+    ))
+
+
+def mark_tts_skipped(state):
+    state.set_setting("tts_skipped", True)
+    state.set_step_status("generate_tts", "skipped")
+    state.set_step_status("mix_audio", "skipped")
+
+
 class GUIProjectBridge:
     def __init__(self, project_service):
         self.project_service = project_service
@@ -67,6 +80,10 @@ class GUIProjectBridge:
     def persist_translation(self, state, base_models, translated_segments, srt_path: str = ""):
         if not state:
             return []
+        if uses_original_subtitles(state):
+            if not translated_segments:
+                return []
+            state.set_setting("use_original_subtitles", False)
         models = self.segment_service.apply_translations(base_models, translated_segments)
 
         self.project_service.save_segment_artifact(
@@ -130,7 +147,9 @@ class GUIProjectBridge:
             context["current_segments"] = [segment.to_original_subtitle_dict() for segment in transcript_models]
 
         translation_json = state.artifacts.get("translation_final")
-        if translation_json and os.path.exists(translation_json):
+        if uses_original_subtitles(state):
+            context["last_translated_srt_path"] = ""
+        elif translation_json and os.path.exists(translation_json):
             translation_models = self.project_service.load_segment_artifact(state, "translation_final")
             # Repair projects written before flat ``speaker`` metadata was
             # retained during translation persistence.  Speaker identity is

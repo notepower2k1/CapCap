@@ -9,8 +9,13 @@ from PySide6.QtWidgets import (
 
 from i18n import t
 from translation import TranslationOrchestrator
+from translation.video_recap import is_saved_recap, summary_fingerprint
 from translation.video_summary import transcript_snapshot
+from services.recap_render import upgrade_scene_ranges
+from ui.controllers.recap_voice_controller import RecapVoiceController
+from ui.controllers.recap_studio_controller import RecapStudioController
 from widgets.translation_progress_dialog import TranslationProgressDialog, provider_label
+from widgets.video_recap_panel import VideoRecapPanel
 
 
 class _SummarySignals(QObject):
@@ -30,7 +35,11 @@ class _SummaryJob(QRunnable):
     def run(self):
         try:
             engine = TranslationOrchestrator()
-            generate = engine.suggest_video_hooks if self.task == "hooks" else engine.summarize_video
+            generate = {
+                "summary": engine.summarize_video,
+                "hooks": engine.suggest_video_hooks,
+                "recap": engine.write_video_recap,
+            }[self.task]
             result = generate(
                 self.source, override_provider=self.provider, progress=self.signals.progress.emit,
                 is_canceled=self.canceled.is_set,
@@ -43,6 +52,8 @@ class _SummaryJob(QRunnable):
 
 class VideoSummaryController(QObject):
     ARTIFACT = "video_summary"
+    RECAP_ARTIFACT = "video_recap"
+    RECAP_PATH = "analysis/video_recap.json"
 
     def __init__(self, gui, page, layout):
         super().__init__(gui)
@@ -59,6 +70,22 @@ class VideoSummaryController(QObject):
         self.refresh_timer.setSingleShot(True)
         self.refresh_timer.setInterval(100)
         self.refresh_timer.timeout.connect(self.refresh)
+        self.recap_save_timer = QTimer(self)
+        self.recap_save_timer.setSingleShot(True)
+        self.recap_save_timer.setInterval(350)
+        self.recap_save_timer.timeout.connect(self._save_recap_edits)
+
+        self.status = QLabel(t("Extract or import the original subtitles to summarize this video."))
+        self.status.setTextFormat(Qt.TextFormat.PlainText)
+        self.status.setWordWrap(True)
+        self.status.setObjectName("helperLabel")
+        layout.addWidget(self.status)
+        self.recap = VideoRecapPanel()
+        self.recap_voice = RecapVoiceController(self)
+        self.recap_studio = RecapStudioController(self)
+        self.recap.generate_requested.connect(self.start_recap)
+        self.recap.edited.connect(self.recap_save_timer.start)
+        self.recap.seek_requested.connect(lambda position: self.recap_studio.seek_source(position))
 
         actions = QHBoxLayout()
         self.generate_btn = QPushButton(t("Create summary"))
@@ -70,12 +97,11 @@ class VideoSummaryController(QObject):
         self.copy_btn.hide()
         actions.addWidget(self.copy_btn)
         layout.addLayout(actions)
+        self.open_recap_btn = QPushButton(t("Open recap studio"))
+        self.open_recap_btn.setEnabled(False)
+        self.open_recap_btn.clicked.connect(self.recap_studio.open)
+        layout.addWidget(self.open_recap_btn)
 
-        self.status = QLabel(t("Extract or import the original subtitles to summarize this video."))
-        self.status.setTextFormat(Qt.TextFormat.PlainText)
-        self.status.setWordWrap(True)
-        self.status.setObjectName("helperLabel")
-        layout.addWidget(self.status)
         self.result_view = QTextBrowser()
         self.result_view.setOpenLinks(False)
         self.result_view.setMinimumHeight(300)
@@ -102,12 +128,18 @@ class VideoSummaryController(QObject):
             hook_rows.addWidget(copy_btn, row, 1)
         self.hook_list.hide()
         layout.addWidget(self.hook_list)
+        layout.addStretch()
 
     def schedule_refresh(self):
         if self.gui.left_panel_stack.currentWidget() is self.page:
             self.refresh_timer.start()
 
     def clear_project(self):
+        self.recap_studio.clear_project()
+        self.recap_voice.clear_project()
+        if self.recap_save_timer.isActive():
+            self.recap_save_timer.stop()
+            self._save_recap_edits()
         if self.job is not None:
             self.job.canceled.set()
         self._close_progress()
@@ -115,6 +147,7 @@ class VideoSummaryController(QObject):
         self.project_root = ""
         self.message = ""
         self._show_result(None)
+        self.recap.set_draft(None)
 
     def _load_project(self):
         state = self.gui.current_project_state
@@ -133,6 +166,13 @@ class VideoSummaryController(QObject):
         except (OSError, ValueError, TypeError, KeyError) as exc:
             self.gui.log(f"[Video Summary] Could not load saved result: {exc}")
             self._show_result(None)
+        try:
+            draft = self.gui.project_service.load_json_artifact(state, self.RECAP_ARTIFACT)
+            if is_saved_recap(draft):
+                upgrade_scene_ranges(draft)
+                self.recap.set_draft(draft)
+        except (OSError, ValueError) as exc:
+            self.gui.log(f"[Video Recap] Could not load saved draft: {exc}")
 
     @Slot()
     def refresh(self):
@@ -141,11 +181,23 @@ class VideoSummaryController(QObject):
         self._update_status(rows, digest)
 
     def _update_status(self, rows, digest):
-        busy = self.job is not None
+        busy = self.job is not None or self.recap_voice.busy or self.recap_studio.busy
         self.stale = self.result is not None and self.result["transcript_digest"] != digest
         self.generate_btn.setEnabled(bool(rows and self.project_root and not busy))
         self.generate_btn.setText(t("Summarize again") if self.result else t("Create summary"))
         self.hook_btn.setEnabled(bool(self.result and not self.stale and not busy))
+        draft = self.recap.draft
+        self.open_recap_btn.setEnabled(bool(self.project_root and (self.result or draft)))
+        evidence_is_current = draft is None or draft["transcript_digest"] == digest
+        recap_stale = draft is not None and (
+            not evidence_is_current or self.result is None
+            or draft["summary_digest"] != summary_fingerprint(self.result)
+        )
+        self.recap.update_state(summary_ready=bool(self.result and not self.stale and rows),
+                                busy=busy, stale=recap_stale, evidence_is_current=evidence_is_current)
+        self.recap_voice.refresh()
+        self.recap_studio.update_scene_suggestions(rows, evidence_is_current)
+        self.recap_studio.refresh()
         message = ""
         if self.message:
             message = self.message
@@ -172,28 +224,48 @@ class VideoSummaryController(QObject):
     def start_hooks(self):
         self._start("hooks")
 
+    @Slot()
+    def start_recap(self):
+        self._start("recap")
+
     def _start(self, task):
-        if self.job is not None:
+        if self.job is not None or self.recap_voice.busy or self.recap_studio.busy:
             return
         self._load_project()
         rows, digest = transcript_snapshot(self.gui.current_segments or [])
         if not rows or not self.project_root:
             return
         hooks = task == "hooks"
-        if hooks and (self.result is None or self.result["transcript_digest"] != digest):
+        recap = task == "recap"
+        based_on_summary = hooks or recap
+        if based_on_summary and (self.result is None or self.result["transcript_digest"] != digest):
             self._update_status(rows, digest)
             return
         provider = (os.getenv("OPENAI_PROVIDER") or os.getenv("AI_POLISHER_PROVIDER")
                     or str(self.gui.settings.value("translation_provider", "google_ai_studio"))).strip().lower()
         if provider in {"google", "bing"}:
-            self.message = t("Select an AI provider in Settings to generate hooks." if hooks
-                             else "Select an AI provider in Settings to summarize this video.")
+            self.message = t({
+                "summary": "Select an AI provider in Settings to summarize this video.",
+                "hooks": "Select an AI provider in Settings to generate hooks.",
+                "recap": "Select an AI provider in Settings to create a recap.",
+            }[task])
+            if recap:
+                self.recap_studio.message = self.message
             self._update_status(rows, digest)
             return
         root = self.project_root
-        source = self.result if hooks else rows
+        summary = self.result
+        source = summary if hooks else rows
         provider_name = provider_label(provider) or "AI"
-        if hooks:
+        if recap:
+            title = self.recap.generate_btn.text()
+            target = self.recap.duration_combo.currentData()
+            source = (summary, rows, target)
+            question = t("Send the summary and relevant original dialogue to {provider} to create a {count}-minute recap?",
+                         provider=provider_name, count=target // 60)
+            if self.recap.draft:
+                question += "\n\n" + t("A successful generation will replace the current recap draft.")
+        elif hooks:
             title = t("Generate hook suggestions")
             question = t("Send the video summary to {provider} to generate hooks?", provider=provider_name)
         else:
@@ -201,21 +273,27 @@ class VideoSummaryController(QObject):
             question = t("Send {count} original subtitle cues to {provider} to create a summary?",
                          count=len(rows), provider=provider_name)
         answer = QMessageBox.question(
-            self.gui, title, question,
+            self.recap_studio.dialog if recap else self.gui, title, question,
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if answer != QMessageBox.Yes:
             return
         self._load_project()
-        if self.job is not None or self.project_root != root or (hooks and self.result is not source):
+        if (self.job is not None or self.recap_voice.busy or self.recap_studio.busy or self.project_root != root
+                or (based_on_summary and self.result is not summary)):
             return
         self.request = (root, digest, provider, task)
         self.job = _SummaryJob(source, provider, task)
         self.job.signals.progress.connect(self._on_progress)
         self.job.signals.completed.connect(self._on_completed)
-        self.message = t("Generating hook suggestions…" if hooks else "Creating summary…")
+        self.message = t({
+            "summary": "Creating summary…", "hooks": "Generating hook suggestions…", "recap": "Creating recap script…",
+        }[task])
+        if recap:
+            self.recap_studio.message = self.message
         self._update_status(rows, digest)
-        self.progress_dialog = TranslationProgressDialog(self.gui, provider=provider, video_task=task)
+        parent = self.recap_studio.dialog if recap else self.gui
+        self.progress_dialog = TranslationProgressDialog(parent, provider=provider, video_task=task)
         self.progress_dialog.canceled.connect(self.cancel)
         self.progress_dialog.show()
         QThreadPool.globalInstance().start(self.job)
@@ -224,11 +302,15 @@ class VideoSummaryController(QObject):
     def cancel(self):
         if self.job is None or self.request is None:
             return
-        hooks = self.request[3] == "hooks"
+        task = self.request[3]
         self.job.canceled.set()
         self.request = None
         self._close_progress()
-        self.message = t("Hook generation canceled." if hooks else "Summary canceled.")
+        self.message = t({
+            "summary": "Summary canceled.", "hooks": "Hook generation canceled.", "recap": "Recap generation canceled.",
+        }[task])
+        if task == "recap":
+            self.recap_studio.message = self.message
         self.refresh()
 
     def _close_progress(self):
@@ -243,9 +325,13 @@ class VideoSummaryController(QObject):
         label = {
             "transcript": "Summarizing transcript…", "merge": "Combining summaries…",
             "hooks": "Generating hook suggestions…",
+            "recap": "Creating recap script…",
         }[stage]
         self.message = t(label)
         self._show_status(self.message)
+        if stage == "recap":
+            self.recap_studio.message = self.message
+            self.recap_studio.refresh()
         dialog = self.progress_dialog
         if dialog is not None:
             dialog.set_progress(completed, total, message=label)
@@ -262,28 +348,63 @@ class VideoSummaryController(QObject):
 
         root, digest, provider, task = request
         if result is not None:
-            if task == "hooks":
-                payload = {**self.result, "hooks": result}
-            else:
-                payload = {"version": 1, "transcript_digest": digest, **result}
             try:
                 state = self.gui.ensure_current_project(persist_presentation=False)
                 if state is None or state.project_root != root:
                     self.refresh()
                     return
-                self.gui.project_service.save_json_artifact(
-                    state, self.ARTIFACT, "analysis/video_summary.json", payload,
-                )
-                self._show_result(payload)
+                if task == "recap":
+                    payload = {"version": 1, "transcript_digest": digest,
+                               "summary_digest": summary_fingerprint(self.result), **result}
+                    previous_voice = (self.recap.draft or {}).get("voice_id")
+                    if previous_voice:
+                        payload["voice_id"] = previous_voice
+                    payload["avoid_scene_overlap"] = (self.recap.draft or {}).get("avoid_scene_overlap", True)
+                    self.gui.project_service.save_json_artifact(state, self.RECAP_ARTIFACT, self.RECAP_PATH, payload)
+                    self.recap_save_timer.stop()
+                    self.recap_voice.clear_project()
+                    self.recap.set_draft(payload)
+                else:
+                    payload = ({**self.result, "hooks": result} if task == "hooks"
+                               else {"version": 1, "transcript_digest": digest, **result})
+                    self.gui.project_service.save_json_artifact(
+                        state, self.ARTIFACT, "analysis/video_summary.json", payload,
+                    )
+                    self._show_result(payload)
             except (OSError, ValueError) as exc:
                 error = str(exc)
         if error:
             self.gui.log(f"[Video Summary] Failed task={task} provider={provider}: {error}")
-            self.message = t("Could not generate hooks. {error}" if task == "hooks"
-                             else "Could not create the summary. {error}", error=error)
+            self.message = t({
+                "summary": "Could not create the summary. {error}",
+                "hooks": "Could not generate hooks. {error}",
+                "recap": "Could not create the recap. {error}",
+            }[task], error=error)
         else:
             self.message = ""
+        if task == "recap":
+            self.recap_studio.message = self.message
         self.refresh()
+
+    @Slot()
+    def _save_recap_edits(self):
+        state = self.gui.current_project_state
+        draft = self.recap.draft
+        if draft is None or state is None or state.project_root != self.project_root:
+            return False
+        try:
+            # Resolve the latest manifest so an edit does not replace unrelated project settings.
+            state = self.gui.ensure_current_project(persist_presentation=False)
+            if state and state.project_root == self.project_root:
+                self.gui.project_service.save_json_artifact(state, self.RECAP_ARTIFACT, self.RECAP_PATH, draft)
+                return True
+        except (OSError, ValueError) as exc:
+            self.gui.log(f"[Video Recap] Could not save edits: {exc}")
+            self.message = t("Could not save the recap. {error}", error=str(exc))
+            self._show_status(self.message)
+            self.recap_studio.message = self.message
+            self.recap_studio.refresh()
+        return False
 
     def _show_result(self, result):
         if result is None:

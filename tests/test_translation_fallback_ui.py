@@ -93,6 +93,24 @@ class TestTranslationFallbackUI(unittest.TestCase):
             self.assertNotIn("temporarily overloaded", message)
             gui.current_project_state.set_setting.assert_called_with("translation_fallback_notice", notice)
 
+    def test_selected_next_step_runs_only_after_successful_translation(self):
+        gui = MagicMock()
+        gui.video_path_edit.text.return_value = ""
+        gui.current_translated_segments = [{"text": "Xin chào"}]
+        controller = SubtitleController(gui)
+        follow_up = MagicMock()
+        controller._translation_on_success = follow_up
+        controller.on_translation_finished("", "canceled")
+        follow_up.assert_not_called()
+        self.assertIsNone(controller._translation_on_success)
+
+        controller._translation_on_success = follow_up
+        with patch("ui.controllers.subtitle_controller.QMessageBox.information"):
+            controller.on_translation_finished("1\n00:00:00,000 --> 00:00:01,000\nXin chào\n", "")
+        follow_up.assert_called_once_with()
+        gui._pipeline_advance.assert_not_called()
+        self.assertIsNone(controller._translation_on_success)
+
     def test_prepare_workflow_forwards_reason_saves_it_and_clears_it_after_ai_success(self):
         env = {"OPENAI_PROVIDER": "google_ai_studio", "CAPCAP_AUTO_TRANSLATION_CONTEXT": "0",
                "CAPCAP_RUNTIME_PROFILE": "local", "CAPCAP_TRANSLATION_PARALLEL_BATCHES": "0"}

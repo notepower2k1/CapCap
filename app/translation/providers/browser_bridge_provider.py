@@ -677,6 +677,7 @@ class BrowserBridgePolisherProvider:
         is_canceled=None,
         fresh_chat=False,
         expected_cues=0,
+        json_reply_key="",
     ) -> str:
         server = self._get_server()
         s_clean = (system_msg or "").strip()
@@ -722,6 +723,7 @@ class BrowserBridgePolisherProvider:
                     "prompt": prompt,
                     "operation": operation,
                     "expected_cues": expected_cues,
+                    **({"json_reply_key": json_reply_key} if json_reply_key else {}),
                 },
                 timeout=timeout,
             )
@@ -758,14 +760,14 @@ class BrowserBridgePolisherProvider:
               f"elapsed={time.monotonic() - task_wait_start:.2f}s diagnostics={result.get('error', '')}", flush=True)
         return text
 
-    def run_video_analysis(self, generate, source, *, progress, is_canceled):
+    def run_video_analysis(self, generate, source, *, progress, is_canceled, json_reply_key):
         server = self._get_server()
 
         def request(*, system_msg, user_msg, timeout, **_):
             return self._execute_prompt_on_browser(
                 system_msg=system_msg, user_msg=user_msg, operation="summary",
                 timeout=max(timeout, self.MIN_GENERATE_TIMEOUT_SECONDS),
-                is_canceled=is_canceled, fresh_chat=True,
+                is_canceled=is_canceled, fresh_chat=True, json_reply_key=json_reply_key,
             )
 
         try:

@@ -29,8 +29,10 @@ class TranslationProgressDialog(QProgressDialog):
         self._duration_hint = "Large subtitle projects can take a few minutes."
         if video_task:
             self._progress_template = "{completed}/{total} steps ({percent}%)"
-            if video_task == "hooks":
-                self._action, self._subject = "Generating", "Hook suggestions"
+            if video_task in {"hooks", "recap", "recap_render"}:
+                self._action = "Generating"
+                self._subject = {"hooks": "Hook suggestions", "recap": "Recap script",
+                                 "recap_render": "Recap video"}[video_task]
                 self._duration_hint = ""
             else:
                 self._action, self._subject = "Summarizing", "Video"

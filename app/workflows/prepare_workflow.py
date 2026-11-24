@@ -1199,6 +1199,7 @@ class PrepareWorkflow:
                 if provider_counts:
                     dominant_provider = max(provider_counts, key=provider_counts.get)
                     project_state.set_setting("translation_provider", dominant_provider)
+                project_state.set_setting("use_original_subtitles", False)
                 project_state.set_step_status("translate_raw", "done")
                 project_state.set_step_status("refine_translation", "done" if optimize_subtitles else "skipped")
                 self.project_service.save_project(project_state)
@@ -1226,9 +1227,10 @@ class PrepareWorkflow:
 
         print("\n--- Step 5: Generating Vietnamese Subtitle ---")
         translated_subtitle_started = time.perf_counter()
-        self.engine_runtime.generate_srt(segment_models, srt_translated_path)
+        if not skip_translation or not project_state.artifacts.get("translation_final"):
+            self.engine_runtime.generate_srt(segment_models, srt_translated_path)
+            project_state.set_artifact("subtitle_translated_srt", srt_translated_path)
         translated_subtitle_elapsed = time.perf_counter() - translated_subtitle_started
-        project_state.set_artifact("subtitle_translated_srt", srt_translated_path)
         from app.subtitle_presentation import KEY, build_secondary, config, read_srt
         presentation = config(subtitle_presentation if subtitle_presentation is not None else project_state.settings.get(KEY))
         if presentation["mode"] == "bilingual":

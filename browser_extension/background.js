@@ -666,7 +666,8 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
           platform: task.platform,
           temporary_chat: temporaryChat,
           session_id: sessionId,
-          task_id: task.id
+          task_id: task.id,
+          json_reply_key: task.json_reply_key
         });
 
         if (!resp) {
@@ -676,7 +677,31 @@ async function handleTask(task, currentTask = { id: task.id, tabId: null }) {
       };
 
       let response = await runTranslate();
-      if (response.success && task.expected_cues > 0) {
+      if (response.success && task.json_reply_key) {
+        const hasExpectedJson = text => {
+          try {
+            const data = JSON.parse(text || "");
+            return data !== null && Object.prototype.hasOwnProperty.call(data, task.json_reply_key);
+          } catch (_) {
+            return false;
+          }
+        };
+        if (!hasExpectedJson(response.text)) {
+          // Give the same completed turn one more read before CapCap considers
+          // sending a format retry. Keep the original text if re-reading fails.
+          try {
+            const reread = await sendMessageWithInjection(currentTask.tabId, {
+              action: "CAPCAP_READ_REPLY", task_id: task.id, platform: task.platform
+            });
+            if (reread?.success && hasExpectedJson(reread.text)) {
+              response = {
+                ...reread,
+                diagnostics: `json_reread=true initial_chars=${String(response.text || "").length} ${reread.diagnostics || ""}`
+              };
+            }
+          } catch (_) { /* The desktop parser can still read the original response. */ }
+        }
+      } else if (response.success && task.expected_cues > 0) {
         const ids = [...String(response.text || '').matchAll(/^\s*(\d+)\.\s+/gm)].map(match => Number(match[1]));
         const valid = ids.length === task.expected_cues && ids.every((id, index) => id === index + 1);
         if (!valid) {

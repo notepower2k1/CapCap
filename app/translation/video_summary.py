@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+import re
 
 from .errors import TranslationValidationError
 
@@ -72,18 +73,29 @@ def _transcript_chunks(rows):
         yield chunk
 
 
-def _read_json_reply(reply):
-    cleaned = reply.strip()
-    if cleaned.startswith("```") and cleaned.endswith("```"):
-        cleaned = cleaned.partition("\n")[2].rsplit("```", 1)[0].strip()
+def _read_json_reply(reply, *, expected_key):
+    cleaned = reply.strip().lstrip("\ufeff")
     try:
         return json.loads(cleaned)
     except ValueError as exc:
-        raise TranslationValidationError("Invalid JSON in the AI response.") from exc
+        # The bridge can return the rendered chat turn, including a language
+        # label, markdown fences, or prose outside the actual JSON object.
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r'\{\s*"', cleaned):
+            try:
+                candidate, _ = decoder.raw_decode(cleaned, match.start())
+            except ValueError:
+                continue
+            if isinstance(candidate, dict) and expected_key in candidate:
+                return candidate
+        position = getattr(exc, "pos", 0)
+        raise TranslationValidationError(
+            f"Invalid JSON in the AI response (expected {expected_key}, chars={len(cleaned)}, offset={position})."
+        ) from exc
 
 
 def _parse_reply(reply, allowed_ids):
-    payload = _read_json_reply(reply)
+    payload = _read_json_reply(reply, expected_key="summary")
     if not isinstance(payload, dict):
         raise TranslationValidationError("Invalid summary structure.")
     overview = payload.get("summary")
@@ -192,7 +204,7 @@ def generate_video_hooks(summary, generate_text, *, progress, is_canceled):
     )
     if is_canceled():
         raise InterruptedError()
-    payload = _read_json_reply(reply)
+    payload = _read_json_reply(reply, expected_key="hooks")
     hooks = payload.get("hooks") if isinstance(payload, dict) else None
     if not isinstance(hooks, list) or len(hooks) != 3 or not all(isinstance(hook, str) for hook in hooks):
         raise TranslationValidationError("Expected three hook suggestions.")

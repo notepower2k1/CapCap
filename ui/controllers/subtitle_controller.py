@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from worker_adapters import ContextExtractionWorker, RewriteTranslationWorker, TranscriptionWorker, TranslationWorker
+from services.gui_project_bridge import uses_original_subtitles
 from translation import (
     TranslationOrchestrator,
     clean_dialogue_context,
@@ -720,6 +721,7 @@ class SubtitleController:
     def __init__(self, gui):
         self.gui = gui
         self._translation_placeholder = ""
+        self._translation_on_success = None
 
     def _show_translation_progress(self, *, is_retranslation: bool, provider_name: str = ""):
         from widgets.translation_progress_dialog import TranslationProgressDialog
@@ -731,6 +733,7 @@ class SubtitleController:
         dialog.show()
 
     def _on_translation_canceled(self):
+        self._translation_on_success = None
         worker = getattr(self.gui, "translation_thread", None)
         if worker is not None:
             worker.cancel()
@@ -938,7 +941,7 @@ class SubtitleController:
             self.gui.log("[OCR Region] Hidden after OCR transcription completed.")
         self.gui._pipeline_advance("transcription")
 
-    def run_translation(self, show_prompt_dialog: bool = True):
+    def run_translation(self, show_prompt_dialog: bool = True, *, on_success=None):
         secondary = getattr(self.gui, "subtitle_presentation_controller", None)
         if secondary is not None and getattr(secondary, "busy", False) is True:
             self.gui.log("[Translation] Secondary subtitles are still being created.")
@@ -958,7 +961,8 @@ class SubtitleController:
             cached_signature = str(state.settings.get("translation_signature", "") or "").strip()
             cached_translation_path = str(state.artifacts.get("translation_final", "") or "").strip()
             if cached_signature == translation_signature and cached_translation_path and os.path.exists(cached_translation_path):
-                if not (self.gui.current_translated_segments or self.gui.translated_text.toPlainText().strip()):
+                using_original = uses_original_subtitles(state)
+                if not using_original and not (self.gui.current_translated_segments or self.gui.translated_text.toPlainText().strip()):
                     self.gui.load_project_context(state)
                 self.gui.progress_bar.setValue(100)
                 self.gui.refresh_ui_state()
@@ -982,7 +986,17 @@ class SubtitleController:
                         self.gui.project_service.save_project(state)
                     self.gui.log("[Translation] Re-translate confirmed by user; bypassing cache.")
                 else:
+                    if using_original:
+                        if msg_box.clickedButton() != btn_reuse:
+                            return
+                        state.set_setting("use_original_subtitles", False)
+                        state.set_step_status("translate_raw", "done")
+                        self.gui.project_service.save_project(state)
+                        self.gui.load_project_context(state)
+                        self.gui.refresh_ui_state()
                     self.gui.log("[Translation] Reused existing translation result.")
+                    if on_success and msg_box.clickedButton() == btn_reuse:
+                        on_success()
                     return
 
         src_lang = self.gui.get_source_language_code()
@@ -1100,6 +1114,7 @@ class SubtitleController:
         self.gui.translation_thread.progress.connect(self.on_translation_progress)
         self.gui.translation_thread.batch_ready.connect(self.on_translation_batch_ready)
         self.gui.translation_thread.status_changed.connect(self.on_translation_status_changed)
+        self._translation_on_success = on_success
         self.gui.translation_thread.start()
 
     def _extract_and_review_context(
@@ -1234,6 +1249,8 @@ class SubtitleController:
                 print(f"[Translation] Error applying partial batch: {e}")
 
     def on_translation_finished(self, translated_srt, error, fallback_notice=""):
+        on_success = self._translation_on_success
+        self._translation_on_success = None
         self._close_translation_progress()
         self.gui.translate_btn.setEnabled(True)
         worker = getattr(self.gui, "translation_thread", None)
@@ -1314,7 +1331,10 @@ class SubtitleController:
             self.gui.log(f"[Translation] {fallback_notice}")
 
         self.gui.refresh_ui_state()
-        self.gui._pipeline_advance("translation")
+        if on_success and self.gui.current_translated_segments:
+            on_success()
+        else:
+            self.gui._pipeline_advance("translation")
 
     def _collapse_translated_segments_for_rewrite(self, source_segments, translated_segments):
         source_segments = list(source_segments or [])

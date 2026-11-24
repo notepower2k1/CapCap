@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedFirstTab = false, failNewChat = false } = {}) {
+function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedFirstTab = false, failNewChat = false,
+  rereadText = '1. First\n2. Second' } = {}) {
   const tabs = new Map();
   const sentTo = [];
   const closedWindows = [];
@@ -49,7 +50,7 @@ function setup({ mode = 'window', holdReplies = false, queue = [], disconnectedF
         sendMessage: async (id, message) => {
           if (message.action === 'CAPCAP_READ_REPLY') {
             rereads.push(message.task_id);
-            return { success: true, text: '1. First\n2. Second' };
+            return { success: true, text: rereadText };
           }
           if (message.action === 'CAPCAP_NEW_CHAT') {
             freshChats.push(id);
@@ -106,6 +107,16 @@ for (const platform of ['chatgpt', 'gemini']) {
     assert.deepEqual(env.closedWindows, [1]);
   });
 }
+
+test('structured analysis re-reads the same turn once before a format retry', async () => {
+  const rereadText = '{"segments":[{"narration":"Recap","cue_ids":[2]}]}';
+  const env = setup({ rereadText });
+  await env.executeTask({ id: 'recap', type: 'translate', session_id: 'recap-session',
+    operation: 'summary', platform: 'chatgpt', json_reply_key: 'segments', prompt: 'Test' });
+  assert.deepEqual(env.rereads, ['recap']);
+  assert.equal(env.sentTo.length, 1);
+  assert.equal(env.results[0].text, rereadText);
+});
 
 test('a closed analysis tab is replaced', async () => {
   const env = setup();

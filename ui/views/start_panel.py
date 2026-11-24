@@ -210,7 +210,7 @@ def build_start_group(gui, left_layout):
     gui.run_all_btn.setObjectName("mainActionBtn")
     gui.run_all_btn.setPopupMode(QToolButton.MenuButtonPopup)
     gui._generate_full_action = QAction("Generate Full Pipeline", gui.run_all_btn)
-    gui._generate_full_action.triggered.connect(gui.run_all_pipeline)
+    gui._generate_full_action.triggered.connect(gui.choose_pipeline_steps)
     gui.run_all_btn.setDefaultAction(gui._generate_full_action)
     gui._generate_menu = None
 

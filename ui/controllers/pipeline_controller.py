@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QMessageBox
 from worker_adapters import PrepareWorkflowWorker
 from runtime_paths import subprocess_hidden_kwargs
+from services.gui_project_bridge import mark_tts_skipped
 
 try:
     from i18n import t
@@ -39,6 +40,7 @@ class PipelineController:
         self.local_worker_api_url = ""
         self.local_worker_api_token = ""
         self.prepare_run_id = 0
+        self.force_transcription = False
         self.prepare_step_id = ""
         self.prepare_status_timer = None
         self.prepare_status_phase = ""
@@ -415,7 +417,7 @@ class PipelineController:
         self.progress_dialog.raise_()
         self.progress_dialog.activateWindow()
 
-    def run_all_pipeline(self, video_path=None, requires_separation=None, target_stage="full"):
+    def run_all_pipeline(self, video_path=None, requires_separation=None, target_stage="full", *, force_transcription=False):
         """Entry point for the full generation process."""
         if video_path is None:
             # Fallback to the UI field if not provided
@@ -439,6 +441,7 @@ class PipelineController:
         self.gui._pipeline_active = True
         self.gui._pipeline_step = "prepare"
         self.target_stage = str(target_stage or "full").strip().lower()
+        self.force_transcription = force_transcription
         
         # UI Feedback
         if hasattr(self.gui, "run_all_btn"):
@@ -446,6 +449,9 @@ class PipelineController:
             self.gui.run_all_btn.setText(t("Processing..."))
             
         self._setup_progress_dialog(includes_separation=requires_separation)
+        if self.target_stage in {"transcript", "translate"}:
+            self.progress_dialog.skip_step("voiceover")
+            self.progress_dialog.skip_step("preview")
         self.progress_dialog.start_step("ai_process")
 
         overlay = getattr(self.gui, "ocr_region_overlay", None)
@@ -504,7 +510,7 @@ class PipelineController:
             remote_api_url=self.local_worker_api_url,
             remote_api_token=self.local_worker_api_token,
             force_remote_api=True,
-            force_transcription=self.target_stage == "transcript",
+            force_transcription=self.force_transcription or self.target_stage == "transcript",
             subtitle_presentation=self.gui.subtitle_presentation_controller.export_settings() if hasattr(self.gui, "subtitle_presentation_controller") else None,
         )
         
@@ -621,6 +627,11 @@ class PipelineController:
 
         try:
             state = self.gui.project_service.load_project(project_state_path)
+            if self.target_stage == "transcript":
+                state.set_setting("use_original_subtitles", True)
+            if self.target_stage in {"transcript", "translate"}:
+                mark_tts_skipped(state)
+                self.gui.project_service.save_project(state)
             self.gui.current_project_state = state
             self.gui.load_project_context(state)
             self.gui.refresh_ui_state()
@@ -639,10 +650,6 @@ class PipelineController:
         if self.target_stage in {"transcript", "translate"} or mode == "subtitle":
             self.pipeline_done()
             if self.progress_dialog:
-                if self.target_stage == "transcript":
-                    self.progress_dialog.skip_step("voiceover")
-                elif self.target_stage == "translate":
-                    self.progress_dialog.skip_step("voiceover")
                 self.progress_dialog.set_completed()
             self.gui.log(f"[Pipeline] Reached requested stage: {self.target_stage}.")
         else:
