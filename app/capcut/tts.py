@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import secrets
-import shutil
-import subprocess
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlencode
 
 import requests
@@ -21,12 +17,14 @@ from .transport import create_capcut_session, get_capcut_backend
 from .api import (SUCCEEDED, checked_json, check_task_failure, matching_task, request_headers,
                   request_query, task_payload, task_status)
 
-from runtime_paths import app_path, bin_path, bundle_root, subprocess_hidden_kwargs
+from runtime_paths import app_path, bundle_root
 try:
     from app.capcut.device import DeviceConfig, DEFAULT_DEVICE
+    from app.tts_processor import convert_audio_data_to_wav
     import app.capcut.signing as signers
 except ImportError:
     from .device import DeviceConfig, DEFAULT_DEVICE
+    from tts_processor import convert_audio_data_to_wav
     from . import signing as signers
 
 CAPCUT_TTS_BASE_URL = "https://editor-api-sg.capcutapi.com"
@@ -279,11 +277,11 @@ def synthesize_capcut_tts_wav_16k_mono(
     # Route Microsoft Edge Neural voices to Edge TTS directly
     if "neural" in clean_voice.lower():
         try:
-            from app.tts_processor import edge_tts_to_wav_16k_mono
+            from app.tts_processor import edge_tts_to_wav
         except ImportError:
-            from tts_processor import edge_tts_to_wav_16k_mono
+            from tts_processor import edge_tts_to_wav
         rate_pct = f"{int(round((speed - 1.0) * 100)):+d}%"
-        return edge_tts_to_wav_16k_mono(
+        return edge_tts_to_wav(
             text=clean_text,
             wav_path=wav_path,
             voice=clean_voice,
@@ -305,9 +303,9 @@ def synthesize_capcut_tts_wav_16k_mono(
         except RuntimeError as exc:
             if "TTSInvalidSpeaker" in str(exc) or "40402004" in str(exc):
                 try:
-                    from app.tts_processor import edge_tts_to_wav_16k_mono
+                    from app.tts_processor import edge_tts_to_wav
                     rate_pct = f"{int(round((speed - 1.0) * 100)):+d}%"
-                    return edge_tts_to_wav_16k_mono(
+                    return edge_tts_to_wav(
                         text=clean_text,
                         wav_path=wav_path,
                         voice=clean_voice,
@@ -328,97 +326,11 @@ def synthesize_capcut_tts_wav_16k_mono(
 
         if is_cancelled and is_cancelled():
             return ""
-        # Convert MP3 to 16kHz mono WAV in-process
-        _convert_mp3_to_wav_16k_mono(resp.content, wav_path)
+        convert_audio_data_to_wav(resp.content, wav_path)
         return wav_path
 
     finally:
         session.close()
-
-
-def _convert_mp3_to_wav_16k_mono(source: Any, wav_path: str) -> str:
-    """Convert MP3 bytes or file to 16kHz mono 16-bit PCM WAV."""
-    os.makedirs(os.path.dirname(os.path.abspath(wav_path)), exist_ok=True)
-    try:
-        import av
-        import soundfile as sf
-        import numpy as np
-
-        bio = io.BytesIO(source) if isinstance(source, (bytes, bytearray)) else source
-        container = av.open(bio)
-        if container.streams.audio:
-            stream = container.streams.audio[0]
-            resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
-            parts = []
-            for frame in container.decode(stream):
-                for rf in resampler.resample(frame):
-                    parts.append(rf.to_ndarray().flatten())
-            for rf in resampler.resample(None):
-                parts.append(rf.to_ndarray().flatten())
-            container.close()
-            if parts:
-                out_pcm = np.concatenate(parts)
-                part_path = f"{wav_path}.{uuid.uuid4().hex[:8]}.part.wav"
-                try:
-                    sf.write(part_path, out_pcm, 16000, format="WAV", subtype="PCM_16")
-                    info = sf.info(part_path)
-                    if info.frames <= 0:
-                        raise RuntimeError(f"Generated WAV file is invalid: {part_path}")
-                    os.replace(part_path, wav_path)
-                    return wav_path
-                finally:
-                    if os.path.exists(part_path):
-                        try:
-                            os.remove(part_path)
-                        except OSError:
-                            pass
-    except (ImportError, ModuleNotFoundError):
-        pass
-    except (av.FFmpegError, av.error.InvalidDataError):
-        pass
-
-    # Fallback to FFmpeg CLI only if PyAV is missing or failed (streams via stdin pipe:0)
-    ffmpeg = bin_path("ffmpeg", "ffmpeg.exe")
-    if not ffmpeg or not os.path.exists(ffmpeg):
-        import shutil
-        ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
-
-    is_bytes = isinstance(source, (bytes, bytearray, io.BytesIO))
-    raw_input_bytes = (
-        source.getvalue() if isinstance(source, io.BytesIO) else bytes(source)
-    ) if is_bytes else None
-    input_arg = "pipe:0" if is_bytes else str(source)
-
-    part_path = f"{wav_path}.{uuid.uuid4().hex[:8]}.part.wav"
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-loglevel", "error",
-        "-i", input_arg,
-        "-vn",
-        "-ac", "1",
-        "-ar", "16000",
-        "-c:a", "pcm_s16le",
-        part_path,
-    ]
-    try:
-        proc = subprocess.run(
-            cmd,
-            input=raw_input_bytes,
-            capture_output=True,
-            **subprocess_hidden_kwargs(),
-        )
-        if proc.returncode != 0:
-            err = proc.stderr.decode("utf-8", errors="replace") if proc.stderr else ""
-            raise RuntimeError(f"FFmpeg conversion failed:\n{err}")
-        os.replace(part_path, wav_path)
-        return wav_path
-    finally:
-        if os.path.exists(part_path):
-            try:
-                os.remove(part_path)
-            except OSError:
-                pass
 
 
 def synthesize_capcut_tts_batch(
@@ -480,7 +392,7 @@ def synthesize_capcut_tts_batch(
                     resp = session.get(audio_url, timeout=60)
                     resp.raise_for_status()
                     if not (is_cancelled and is_cancelled()):
-                        _convert_mp3_to_wav_16k_mono(resp.content, job["wav_path"])
+                        convert_audio_data_to_wav(resp.content, job["wav_path"])
                         return True
                     return False
                 except Exception as e:

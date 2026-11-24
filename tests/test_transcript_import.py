@@ -13,7 +13,7 @@ for directory in (ROOT, ROOT / "app", ROOT / "ui"):
         sys.path.insert(0, str(directory))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QTextEdit, QToolButton, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QLabel, QLineEdit, QTextEdit, QToolButton, QWidget
 from services.gui_project_bridge import GUIProjectBridge
 from services.project_service import ProjectService
 from ui import i18n
@@ -230,6 +230,28 @@ class TestTranscriptImport(unittest.TestCase):
         with patch("remote_api.remote_api_post", return_value={"project_state_path": "project.json"}) as post:
             worker.run()
         self.assertTrue(post.call_args.args[1]["force_transcription"])
+
+    def test_capcut_notice_only_on_first_explicit_selection(self):
+        from utils import capcut_notice
+
+        engines = QComboBox(self.gui)
+        engines.addItem("Whisper", "whisper")
+        engines.addItem("CapCut", "capcut")
+        voices = QComboBox(self.gui)
+        voices.addItem("CapCut voice", "capcut:voice")
+        connection = QComboBox(self.gui)
+        connection.addItem("CapCut PC", "pc")
+        capcut_notice.watch_capcut_selection(engines)
+        capcut_notice.watch_capcut_selection(voices)
+        capcut_notice.watch_capcut_selection(connection, connection=True)
+        with patch.object(capcut_notice, "_shown", False), patch.object(capcut_notice.QMessageBox, "warning") as notice:
+            engines.setCurrentIndex(1)
+            engines.activated.emit(0)
+            notice.assert_not_called()
+            engines.activated.emit(1)
+            voices.activated.emit(0)
+            connection.activated.emit(0)
+            notice.assert_called_once()
 
     def test_full_pipeline_skips_model_downloads_for_imported_transcript(self):
         self.gui.import_original_srt()

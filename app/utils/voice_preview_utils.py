@@ -45,6 +45,9 @@ def segment_cache_key(
     # subtitle text, voice, and speed remain identical. Include its stable
     # fingerprint so stale TTS cache entries cannot survive a dictionary edit.
     payload = f"{voice_name}|{provider_speed:.3f}|{normalizer_signature}|{text.strip()}"
+    voice_key = str(voice_name or "").lower()
+    if voice_key.startswith(("capcut:", "edge:", "edgetts:", "elevenlabs:", "omnivoice:", "vieneu:", "vieneu_clone:")) or voice_key.endswith("neural"):
+        payload += "|native-pcm"
     if str(voice_name).startswith("omnivoice:"):
         from engines.omnivoice_tts import voice_fingerprint
         payload += "|omnivoice=" + voice_fingerprint(voice_name)

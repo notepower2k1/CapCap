@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import subprocess
 import sys
@@ -9,12 +10,17 @@ from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+import soundfile as sf
+
 ROOT = Path(__file__).resolve().parents[1]
 for path in (ROOT, ROOT / "app", ROOT / "ui"):
     sys.path.insert(0, str(path))
 
 import preview_processor
 import video_processor
+from audio_mixer import build_voice_track_from_srt_segments, mix_audio_tracks, patch_audio_segment_inplace
+from audio_output import audio_encoding_args
 from runtime_paths import subprocess_text_kwargs
 from workflows.export_workflow import ExportWorkflow
 
@@ -88,7 +94,8 @@ class TestNativeMuxProgress(unittest.TestCase):
         subprocess.run([str(FFMPEG), "-hide_banner", "-loglevel", "error", "-y",
                         "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=12",
                         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000",
-                        "-t", "4", "-map", "0:v", "-c:v", "libx264", "-preset", "ultrafast", str(cls.video),
+                        "-t", "4", "-map", "0:v", "-map", "1:a", "-c:v", "libx264",
+                        "-preset", "ultrafast", "-c:a", "aac", str(cls.video),
                         "-t", "4", "-map", "1:a", "-c:a", "pcm_s16le", str(cls.audio)],
                        check=True, capture_output=True, timeout=15, **subprocess_text_kwargs())
 
@@ -151,6 +158,64 @@ class TestNativeMuxProgress(unittest.TestCase):
                     total_duration=4.0, on_progress=lambda pct, msg: events.append(pct),
                 )
         self.assertNotIn(100, events)
+
+    def test_audio_profiles_apply_to_export_and_fast_preview(self):
+        from worker_adapters.preview_workers import QuickPreviewWorker
+
+        srt = self.folder / "quality.srt"
+        srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nAudio quality\n", encoding="utf-8")
+        workflow = ExportWorkflow(str(self.folder))
+        for quality, expected, bitrate in (("high", (48000, 2), "256k"),
+                                            ("standard", (48000, 2), "128k"),
+                                            ("economy", (16000, 1), "64k")):
+            self.assertEqual(audio_encoding_args(quality)[-1], bitrate)
+            for mode in ("subtitle", "both"):
+                with self.subTest(quality=quality, mode=mode), redirect_stdout(io.StringIO()):
+                    output = self.folder / f"export-{mode}-{quality}.mp4"
+                    workflow.run(video_path=str(self.video), output_path=str(output), mode=mode,
+                                 audio_path=str(self.audio), srt_path=str(srt), audio_quality=quality)
+                    preview = self.folder / f"preview-{mode}-{quality}.mp4"
+                    worker = QuickPreviewWorker(
+                        str(self.video), str(preview), mode, 0, 2, srt_path=str(srt),
+                        audio_path=str(self.audio), temp_dir=str(self.folder), audio_quality=quality,
+                    )
+                    finished = MagicMock()
+                    worker.finished.connect(finished)
+                    worker.run()
+                    finished.assert_called_once_with(str(preview), "")
+                    for rendered in (output, preview):
+                        probe = subprocess.run([
+                            str(FFMPEG.with_name("ffprobe.exe")), "-v", "error", "-select_streams", "a:0",
+                            "-show_entries", "stream=sample_rate,channels", "-of", "json", str(rendered),
+                        ], check=True, capture_output=True, **subprocess_text_kwargs())
+                        stream, = json.loads(probe.stdout)["streams"]
+                        self.assertEqual((int(stream["sample_rate"]), stream["channels"]), expected)
+
+    def test_stereo_mix_preserves_channel_difference_and_avoids_clipping(self):
+        source = self.folder / "stereo.wav"
+        output = self.folder / "stereo-mix.wav"
+        sf.write(source, np.broadcast_to([.8, .4], (4800, 2)), 48000)
+        mix_audio_tracks(
+            tracks=[{"path": str(source), "volume": 100}] * 2, output_wav_path=str(output),
+            sample_rate=48000, channels=2, prevent_clipping=True,
+        )
+        samples, rate = sf.read(output)
+        self.assertEqual(rate, 48000)
+        self.assertEqual(samples.shape, (4800, 2))
+        np.testing.assert_allclose(samples[0], [.999, .4995], atol=.0001)
+
+    def test_voice_assembly_and_timeline_patch_keep_native_sample_rate(self):
+        clip = self.folder / "native-tts.wav"
+        track = self.folder / "native-track.wav"
+        sf.write(clip, np.full(2400, .5), 24000)
+        build_voice_track_from_srt_segments(
+            segments=[{"start": .1, "end": .2}], tts_wav_paths=[str(clip)], output_wav_path=str(track),
+        )
+        self.assertEqual(sf.info(track).samplerate, 24000)
+        self.assertTrue(patch_audio_segment_inplace(str(track), .1, .1))
+        samples, rate = sf.read(track)
+        self.assertEqual(rate, 24000)
+        np.testing.assert_equal(samples[:4800], 0)
 
 
 class TestExportQualitySelection(unittest.TestCase):

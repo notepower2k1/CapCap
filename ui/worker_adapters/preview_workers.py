@@ -157,11 +157,12 @@ class PreviewMuxWorker(QThread):
 class QuickPreviewWorker(QThread):
     finished = Signal(str, str)
 
-    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", ass_path="", audio_path="", subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, original_audio_gain_db=0.0, mask_regions=None, blur_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, temp_dir="", video_time_warps=None, parent=None):
+    def __init__(self, video_path, output_path, mode, start_seconds, duration_seconds, srt_path="", ass_path="", audio_path="", subtitle_style=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, original_audio_gain_db=0.0, mask_regions=None, blur_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, temp_dir="", video_time_warps=None, parent=None, *, audio_quality=None):
         super().__init__(parent)
         self.video_path = video_path
         self.output_path = output_path
         self.mode = mode
+        self.audio_quality = audio_quality
         self.start_seconds = start_seconds
         self.duration_seconds = duration_seconds
         self.srt_path = srt_path
@@ -235,7 +236,8 @@ class QuickPreviewWorker(QThread):
 
             # If voice or both mode, mux the timeline audio slice into current_video
             if self.mode in ("voice", "both") and self.audio_path and os.path.exists(self.audio_path):
-                voice_clip = os.path.join(temp_dir, f"preview_voice_{stamp}.mp4")
+                prefix = "preview_mux" if self.audio_quality else "preview_voice"
+                voice_clip = os.path.join(temp_dir, f"{prefix}_{stamp}.mp4")
                 temp_paths.append(voice_clip)
                 mux_audio_into_video_clip_for_preview(
                     current_video,
@@ -250,6 +252,7 @@ class QuickPreviewWorker(QThread):
                     focus_y=self.output_fill_focus_y,
                     video_filter_state=self.video_filter_state if self.mode == "voice" else {},
                     video_is_pretrimmed=True,
+                    audio_quality=self.audio_quality,
                 )
                 current_video = voice_clip
 
@@ -282,6 +285,7 @@ class QuickPreviewWorker(QThread):
                     video_filter_state=self.video_filter_state,
                     audio_gain_db=self.original_audio_gain_db if self.mode == "subtitle" else 0.0,
                     fast=True,
+                    audio_quality=self.audio_quality if self.mode == "subtitle" else None,
                     video_time_warps=None,
                 )
                 if not ok:
@@ -307,6 +311,7 @@ class QuickPreviewWorker(QThread):
                     video_filter_state=self.video_filter_state,
                     audio_gain_db=self.original_audio_gain_db if self.mode == "subtitle" else 0.0,
                     fast=True,
+                    audio_quality=self.audio_quality if self.mode == "subtitle" else None,
                     video_time_warps=None,
                 )
                 if not ok:
@@ -336,6 +341,7 @@ class QuickPreviewWorker(QThread):
                     video_filter_state=self.video_filter_state,
                     audio_gain_db=self.original_audio_gain_db if self.mode == "subtitle" else 0.0,
                     fast=True,
+                    audio_quality=self.audio_quality if self.mode == "subtitle" else None,
                     video_time_warps=None,
                 )
                 for p in (empty_srt, empty_ass):

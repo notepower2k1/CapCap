@@ -846,6 +846,7 @@ class TestPreviewAudioEngine(unittest.TestCase):
         backend._native_audio_engine = mock_engine
 
         # Case 1: Audio is at 9850 ms (150 ms desync) while paused -> early returns, no seek
+        mock_engine.is_playing.return_value = False
         mock_engine.timeline_position_ms.return_value = 9850
         backend._sync_audio_to_video()
         mock_engine.seek.assert_not_called()
@@ -942,12 +943,12 @@ class TestPreviewAudioEngine(unittest.TestCase):
                     pass
 
     def test_tts_in_process_bytes_conversion(self):
-        """Ensure TTS audio converter functions accept in-memory bytes/BytesIO and produce valid 16k mono WAV."""
+        """Check conversion from in-memory audio using explicit and native sample rates."""
         import io
         import av
         import soundfile as sf
         from app.tts_processor import convert_audio_data_to_wav_16k_mono
-        from app.capcut.tts import _convert_mp3_to_wav_16k_mono
+        from app.capcut.tts import convert_audio_data_to_wav
 
         mp3_bio = io.BytesIO()
         container = av.open(mp3_bio, mode="w", format="mp3")
@@ -979,11 +980,11 @@ class TestPreviewAudioEngine(unittest.TestCase):
 
         out_wav_2 = os.path.join(self.temp_dir, "test_tts_capcut.wav")
         try:
-            res_path = _convert_mp3_to_wav_16k_mono(io.BytesIO(mp3_bytes), out_wav_2)
+            res_path = convert_audio_data_to_wav(io.BytesIO(mp3_bytes), out_wav_2)
             self.assertEqual(res_path, out_wav_2)
             self.assertTrue(os.path.exists(out_wav_2))
             data, sr = sf.read(out_wav_2)
-            self.assertEqual(sr, 16000)
+            self.assertEqual(sr, 44100)
             self.assertEqual(data.ndim, 1)
             self.assertGreater(len(data), 0)
         finally:
@@ -1015,7 +1016,7 @@ class TestPreviewAudioEngine(unittest.TestCase):
         import io
         import soundfile as sf
         from app.tts_processor import convert_audio_data_to_wav_16k_mono
-        from app.capcut.tts import _convert_mp3_to_wav_16k_mono
+        from app.capcut.tts import convert_audio_data_to_wav
         from scripts.benchmark_preview import IoWriteAuditor
 
         bio = io.BytesIO()
@@ -1036,14 +1037,14 @@ class TestPreviewAudioEngine(unittest.TestCase):
         try:
             with IoWriteAuditor() as auditor, patch("av.open", side_effect=av.FFmpegError(1, "Simulated PyAV error")):
                 convert_audio_data_to_wav_16k_mono(mp3_bytes, out_wav_1)
-                _convert_mp3_to_wav_16k_mono(io.BytesIO(mp3_bytes), out_wav_2)
+                convert_audio_data_to_wav(io.BytesIO(mp3_bytes), out_wav_2)
 
             self.assertTrue(os.path.exists(out_wav_1))
             self.assertTrue(os.path.exists(out_wav_2))
             d1, sr1 = sf.read(out_wav_1)
             d2, sr2 = sf.read(out_wav_2)
             self.assertEqual(sr1, 16000)
-            self.assertEqual(sr2, 16000)
+            self.assertEqual(sr2, 44100)
 
             # Ensure Python opened 0 temporary files for writing (input streamed via pipe:0)
             self.assertEqual(auditor.files_opened_for_write, [])

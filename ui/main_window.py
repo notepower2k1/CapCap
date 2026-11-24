@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
                              QScrollArea,
                              QColorDialog, QTabWidget, QDialog, QSizePolicy, QInputDialog, QLayout,
                              QSpinBox, QDoubleSpinBox)
-from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QEvent, Signal, QPoint, QRect, QSize
+from PySide6.QtCore import Qt, QUrl, QTimer, QSettings, QEvent, Signal, QSignalBlocker, QPoint, QRect, QSize
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QIcon, QImage, QKeySequence, QPixmap, QShortcut, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
@@ -35,6 +35,8 @@ from language_support import (
 )
 from services import GUIProjectBridge, ProjectService, ResourceDownloadService, VoiceCatalogService
 from services.gui_project_bridge import mark_tts_skipped, uses_original_subtitles
+from audio_output import normalize_audio_quality
+from utils.capcut_notice import watch_capcut_selection
 from controllers import PipelineController, PreviewController, SubtitleController
 from helpers import (
     build_guidance_state,
@@ -2556,6 +2558,7 @@ class VideoTranslatorGUI(QMainWindow):
             row_layout.addLayout(filter_row)
             row_layout.addWidget(QLabel(t("Voice")))
             voice_combo = QComboBox()
+            watch_capcut_selection(voice_combo)
             assigned_voice = str(entry.get("voice", "") or "")
             row_layout.addWidget(voice_combo)
 
@@ -5463,6 +5466,10 @@ class VideoTranslatorGUI(QMainWindow):
         project_engine = str(getattr(state, "settings", {}).get("transcription_engine", "") or "").strip().lower()
         os.environ["TRANSCRIPTION_ENGINE"] = project_engine if project_engine in {"whisper", "sensevoice", "ocr", "capcut"} else fallback_engine
         audio_handling_mode = str(getattr(state, "settings", {}).get("audio_handling_mode", "") or "").strip().lower()
+        if hasattr(self, "export_audio_quality_combo"):
+            combo = self.export_audio_quality_combo
+            with QSignalBlocker(combo):
+                combo.setCurrentIndex(combo.findData(normalize_audio_quality(state.settings.get("export_audio_quality"))))
         if audio_handling_mode and hasattr(self, "audio_handling_combo"):
             combo_index = self.audio_handling_combo.findData(audio_handling_mode)
             if combo_index >= 0:
@@ -6487,6 +6494,16 @@ class VideoTranslatorGUI(QMainWindow):
             if track.name == "M1" and track.visible
             for layer in track.layers
         )
+
+    def get_export_audio_quality(self):
+        combo = getattr(self, "export_audio_quality_combo", None)
+        return normalize_audio_quality(combo.currentData() if combo is not None else None)
+
+    def save_export_audio_quality(self, _index=None):
+        state = getattr(self, "current_project_state", None)
+        if state is not None:
+            state.set_setting("export_audio_quality", self.get_export_audio_quality())
+            self.project_service.save_project(state)
 
     def get_audio_handling_mode(self):
         if not hasattr(self, "audio_handling_combo"):
@@ -11395,6 +11412,7 @@ class VideoTranslatorGUI(QMainWindow):
         engine_combo.addItem("CapCut API (Beta)", "capcut")
         engine_combo.addItem("Video (OCR)", "ocr")
         current_engine = self.get_transcription_engine()
+        watch_capcut_selection(engine_combo)
         engine_index = engine_combo.findData(current_engine)
         engine_combo.setCurrentIndex(engine_index if engine_index >= 0 else 0)
         layout.addWidget(engine_label)
@@ -16833,6 +16851,7 @@ class VideoTranslatorGUI(QMainWindow):
         engine_combo.addItem("Audio (Whisper) - Quality", "whisper")
         engine_combo.addItem("CapCut API (Beta)", "capcut")
         engine_combo.addItem("Video (OCR)", "ocr")
+        watch_capcut_selection(engine_combo)
         source_language = self.get_source_language_code() if hasattr(self, "get_source_language_code") else "auto"
         if source_language not in SENSEVOICE_LANGUAGES:
             engine_combo.removeItem(engine_combo.findData("sensevoice"))
@@ -17080,6 +17099,7 @@ class VideoTranslatorGUI(QMainWindow):
             combo.addItem(t("CapCut PC (background, experimental)"), "pc")
             selected = str(os.getenv("CAPCUT_BACKEND") or self.settings.value("capcut_backend", "web")).strip().lower()
             combo.setCurrentIndex(max(0, combo.findData(selected)))
+            watch_capcut_selection(combo, connection=True)
             return combo
 
         capcut_stt_backend_row = QHBoxLayout()

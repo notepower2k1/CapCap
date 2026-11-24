@@ -151,6 +151,7 @@ class WorkflowRuntime:
         project_temp_dir: str = "",
         on_progress: callable = None,
         video_quality: str = "medium",
+        audio_quality=None,
     ) -> str:
         return self.export_workflow.run(
             video_path=video_path,
@@ -172,6 +173,7 @@ class WorkflowRuntime:
             project_temp_dir=project_temp_dir,
             on_progress=on_progress,
             video_quality=video_quality,
+            audio_quality=audio_quality,
         )
 
     def project_state_path(self, state) -> str:

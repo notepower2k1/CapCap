@@ -1280,7 +1280,7 @@ class FinalExportWorker(QThread):
     finished = Signal(str, str)
     progress = Signal(int, str)
 
-    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", output_ratio="source", output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, original_audio_gain_db=0.0, project_state_path="", project_temp_dir="", video_quality="medium", parent=None):
+    def __init__(self, workspace_root, video_path, output_path, mode, srt_path="", ass_path="", audio_path="", subtitle_style=None, output_quality="source", output_fps="source", output_ratio="source", output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, video_filter_state=None, original_audio_gain_db=0.0, project_state_path="", project_temp_dir="", video_quality="medium", parent=None, *, audio_quality=None):
         super().__init__(parent)
         self.workspace_root = workspace_root
         self.video_path = video_path
@@ -1301,6 +1301,7 @@ class FinalExportWorker(QThread):
         self.project_state_path = project_state_path
         self.project_temp_dir = project_temp_dir
         self.video_quality = video_quality
+        self.audio_quality = audio_quality
 
     def run(self):
         try:
@@ -1330,6 +1331,7 @@ class FinalExportWorker(QThread):
                         "project_state_path": self.project_state_path,
                         "project_temp_dir": self.project_temp_dir,
                         "video_quality": self.video_quality,
+                        "audio_quality": self.audio_quality,
                     },
                     timeout=18000,
                 )
@@ -1358,6 +1360,7 @@ class FinalExportWorker(QThread):
                     project_temp_dir=self.project_temp_dir,
                     on_progress=self.progress.emit,
                     video_quality=self.video_quality,
+                    audio_quality=self.audio_quality,
                 )
                 self.finished.emit(output_path, "")
         except Exception as exc:

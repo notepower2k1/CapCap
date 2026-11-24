@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from widgets.spin_boxes import ReliableDoubleSpinBox, ReliableSpinBox
+from utils.capcut_notice import watch_capcut_selection
 
 try:
     from i18n import current_source_text, t
@@ -571,6 +572,7 @@ def build_start_group(gui, left_layout):
     media_layout.addWidget(media_workflow_card)
     gui.free_voice_combo.currentIndexChanged.connect(gui.on_selected_voice_changed)
     gui.voice_engine_combo.currentIndexChanged.connect(gui.on_voice_engine_changed)
+    watch_capcut_selection(gui.voice_engine_combo)
     gui.preview_voice_btn = QPushButton("Preview Selected Voice")
     gui.preview_voice_btn.clicked.connect(gui.preview_selected_voice_sample)
     gui.voice_preview_meta_label = QLabel("Listen to a short sample before generating the full voice track.", gui)
@@ -1086,6 +1088,18 @@ def build_start_group(gui, left_layout):
     audio_tracks_layout.addWidget(gui.audio_music_volume_row)
 
     audio_mix_layout.addWidget(audio_tracks_card)
+    quality_label = QLabel("Export Audio Quality")
+    quality_label.setObjectName("sectionTitle")
+    audio_tracks_layout.addWidget(quality_label)
+    gui.export_audio_quality_combo = QComboBox()
+    gui.export_audio_quality_combo.addItem("High (48 kHz, stereo)", "high")
+    gui.export_audio_quality_combo.addItem("Standard (48 kHz, stereo)", "standard")
+    gui.export_audio_quality_combo.addItem("Economy (16 kHz, mono)", "economy")
+    gui.export_audio_quality_combo.setCurrentIndex(gui.export_audio_quality_combo.findData("standard"))
+    quality_label.setBuddy(gui.export_audio_quality_combo)
+    audio_tracks_layout.addWidget(gui.export_audio_quality_combo)
+    audio_tracks_layout.addWidget(gui.make_helper_label("Applies to Export and Fast Preview."))
+    gui.export_audio_quality_combo.currentIndexChanged.connect(gui.save_export_audio_quality)
     from ui.utils.audio_mix_settings import restore_mix
     restore_mix(gui)
     audio_page.layout().addWidget(audio_mix_card)

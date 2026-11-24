@@ -41,7 +41,7 @@ class TestCapCutTTS(unittest.TestCase):
                 f"Found neural voice in CapCut catalog: {v['id']}",
             )
 
-    @patch("app.tts_processor.edge_tts_to_wav_16k_mono")
+    @patch("app.tts_processor.edge_tts_to_wav")
     def test_neural_voice_fallback_to_edge_tts(self, mock_edge_tts):
         """Verify requesting a *Neural voice under CapCut routes directly to Edge TTS."""
         mock_edge_tts.return_value = "output_edge.wav"
@@ -59,7 +59,7 @@ class TestCapCutTTS(unittest.TestCase):
         self.assertEqual(call_kwargs["voice"], "vi-VN-HoaiMyNeural")
         self.assertEqual(call_kwargs["rate"], "+0%")
 
-    @patch("app.tts_processor.edge_tts_to_wav_16k_mono")
+    @patch("app.tts_processor.edge_tts_to_wav")
     @patch.object(CapCutTTSClient, "synthesize")
     def test_invalid_speaker_fallback_to_edge_tts(self, mock_synthesize, mock_edge_tts):
         """Verify TTSInvalidSpeaker error triggers Edge TTS fallback for neural voices."""

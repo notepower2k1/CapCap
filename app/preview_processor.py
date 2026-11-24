@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 
+from audio_output import audio_encoding_args
 from runtime_paths import bin_path, subprocess_text_kwargs
 from video_filter_chain import build_video_filter_chain, normalize_video_filter_state
 
@@ -302,6 +303,7 @@ def mux_audio_into_video_for_preview(
     video_filter_state=None,
     video_quality: str = "medium",
     on_progress=None,
+    audio_quality=None,
 ) -> str:
     """Create a video by replacing audio.
 
@@ -362,10 +364,7 @@ def mux_audio_into_video_for_preview(
         if fps_value:
             base_cmd += ["-r", str(fps_value)]
         base_cmd += [
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
+            *audio_encoding_args(audio_quality),
             "-shortest",
         ]
         if not is_temp_mux:
@@ -387,10 +386,7 @@ def mux_audio_into_video_for_preview(
         cmd += [
             "-c:v",
             "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
+            *audio_encoding_args(audio_quality),
             "-shortest",
         ]
         if not is_temp_mux:
@@ -418,6 +414,7 @@ def mux_audio_into_video_clip_for_preview(
     focus_y=0.5,
     video_filter_state=None,
     video_is_pretrimmed: bool = False,
+    audio_quality=None,
 ) -> str:
     ffmpeg = _ffmpeg_path()
     if not os.path.exists(ffmpeg):
@@ -467,10 +464,7 @@ def mux_audio_into_video_clip_for_preview(
             vf,
         ]
     base_cmd = [*cmd,
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
+        *audio_encoding_args(audio_quality),
         "-shortest",
     ]
     _run_ffmpeg_with_h264_fallback(

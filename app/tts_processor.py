@@ -452,7 +452,7 @@ def piper_tts_to_wav_16k_mono(
     normalizer_dictionary=None,
 ) -> str:
     """
-    Synthesize text to WAV (16kHz, mono) using Piper TTS with ONNX model.
+    Synthesize mono WAV using the Piper model's sample rate.
     
     Args:
         on_progress: Optional callback for progress updates: on_progress(message)
@@ -506,12 +506,14 @@ async def _edge_tts_stream_mp3_bytes_async(text: str, voice: str, rate: str, vol
     return b"".join(chunks)
 
 
-def convert_audio_data_to_wav_16k_mono(
+def convert_audio_data_to_wav(
     source: Union[bytes, bytearray, io.BytesIO, str],
     wav_path: str,
     tmp_dir: str | None = None,
+    *,
+    sample_rate: int | None = None,
 ) -> str:
-    """Convert audio data (bytes, BytesIO, or file path) to 16kHz mono WAV.
+    """Convert audio data to a mono PCM WAV, using the source rate by default.
     Decodes in-process using PyAV + SoundFile.
     Only falls back to FFmpeg CLI if PyAV is not installed or codec genuinely fails.
     """
@@ -525,7 +527,8 @@ def convert_audio_data_to_wav_16k_mono(
         container = av.open(bio)
         if container.streams.audio:
             stream = container.streams.audio[0]
-            resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
+            rate = sample_rate or stream.codec_context.sample_rate
+            resampler = av.AudioResampler(format="s16", layout="mono", rate=rate)
             parts = []
             for frame in container.decode(stream):
                 for rf in resampler.resample(frame):
@@ -537,7 +540,7 @@ def convert_audio_data_to_wav_16k_mono(
                 out_pcm = np.concatenate(parts)
                 part_path = f"{wav_path}.{uuid.uuid4().hex[:8]}.part.wav"
                 try:
-                    sf.write(part_path, out_pcm, 16000, format="WAV", subtype="PCM_16")
+                    sf.write(part_path, out_pcm, resampler.rate, format="WAV", subtype="PCM_16")
                     info = sf.info(part_path)
                     if info.frames <= 0:
                         raise RuntimeError(f"Generated WAV file is invalid: {part_path}")
@@ -572,7 +575,7 @@ def convert_audio_data_to_wav_16k_mono(
         "-loglevel", "error",
         "-i", input_arg,
         "-vn",
-        "-ar", "16000",
+        *(["-ar", str(sample_rate)] if sample_rate is not None else []),
         "-ac", "1",
         "-c:a", "pcm_s16le",
         part_path,
@@ -597,7 +600,11 @@ def convert_audio_data_to_wav_16k_mono(
                 pass
 
 
-def edge_tts_to_wav_16k_mono(
+def convert_audio_data_to_wav_16k_mono(source, wav_path, tmp_dir=None):
+    return convert_audio_data_to_wav(source, wav_path, tmp_dir, sample_rate=16000)
+
+
+def edge_tts_to_wav(
     *,
     text: str,
     wav_path: str,
@@ -607,7 +614,7 @@ def edge_tts_to_wav_16k_mono(
     tmp_dir: str | None = None,
 ) -> str:
     """
-    Synthesize text to WAV (16kHz, mono) using Edge TTS.
+    Synthesize text to mono WAV using Edge TTS.
     Streams MP3 bytes in memory without disk writes and converts directly to WAV in-process.
     Returns wav_path.
     """
@@ -628,7 +635,7 @@ def edge_tts_to_wav_16k_mono(
     if last_error is not None:
         raise last_error
 
-    return convert_audio_data_to_wav_16k_mono(mp3_bytes, wav_path, tmp_dir=tmp_dir)
+    return convert_audio_data_to_wav(mp3_bytes, wav_path, tmp_dir=tmp_dir)
 
 
 def preload_tts_voice(voice: str, on_progress: callable = None) -> bool:
@@ -822,7 +829,7 @@ def synthesize_text_to_wav_16k_mono(
         speed_value = _speed_to_float(speed)
         edge_rate_percent = int(round((speed_value - 1.0) * 100.0))
         edge_rate = f"{edge_rate_percent:+d}%"
-        return edge_tts_to_wav_16k_mono(
+        return edge_tts_to_wav(
             text=text,
             wav_path=wav_path,
             voice=provider_voice or "vi-VN-HoaiMyNeural",

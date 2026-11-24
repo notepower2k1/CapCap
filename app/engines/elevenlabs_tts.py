@@ -2,7 +2,7 @@
 
 ElevenLabs TTS engine module for CapCap video localization app.
 Provides voice catalog fetching with local disk caching and
-high quality speech synthesis converting to 16kHz mono WAV.
+high quality speech synthesis converting to native-rate mono WAV.
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ except ImportError:
 
 try:
     import tts_processor
-    from tts_processor import convert_audio_data_to_wav_16k_mono
+    from tts_processor import convert_audio_data_to_wav
 except ImportError:
     from app import tts_processor
-    from app.tts_processor import convert_audio_data_to_wav_16k_mono
+    from app.tts_processor import convert_audio_data_to_wav
 
 __all__ = [
     "DEFAULT_ELEVENLABS_MODELS",
@@ -58,7 +58,7 @@ class ElevenLabsVoiceCatalogFetchError(RuntimeError):
     """Raised when ElevenLabs does not return a usable voice catalog."""
 
 _orig_temp_path = temp_path
-_orig_convert = convert_audio_data_to_wav_16k_mono
+_orig_convert = convert_audio_data_to_wav
 
 
 def _resolve_temp_path(*parts: str) -> str:
@@ -71,12 +71,12 @@ def _resolve_temp_path(*parts: str) -> str:
 
 
 def _convert_audio_wav(source: bytes, wav_path: str, tmp_dir: str | None = None) -> str:
-    """Helper to convert audio bytes to 16kHz WAV supporting module-level or tts_processor mocks."""
-    if convert_audio_data_to_wav_16k_mono is not _orig_convert:
-        return convert_audio_data_to_wav_16k_mono(source, wav_path, tmp_dir=tmp_dir)
-    if hasattr(tts_processor, "convert_audio_data_to_wav_16k_mono") and tts_processor.convert_audio_data_to_wav_16k_mono is not _orig_convert:
-        return tts_processor.convert_audio_data_to_wav_16k_mono(source, wav_path, tmp_dir=tmp_dir)
-    return convert_audio_data_to_wav_16k_mono(source, wav_path, tmp_dir=tmp_dir)
+    """Helper to convert audio bytes to native-rate WAV supporting module-level or tts_processor mocks."""
+    if convert_audio_data_to_wav is not _orig_convert:
+        return convert_audio_data_to_wav(source, wav_path, tmp_dir=tmp_dir)
+    if hasattr(tts_processor, "convert_audio_data_to_wav") and tts_processor.convert_audio_data_to_wav is not _orig_convert:
+        return tts_processor.convert_audio_data_to_wav(source, wav_path, tmp_dir=tmp_dir)
+    return convert_audio_data_to_wav(source, wav_path, tmp_dir=tmp_dir)
 
 
 def _elevenlabs_key_fingerprint(api_key: str) -> str:
@@ -446,10 +446,10 @@ def synthesize_elevenlabs_tts_wav_16k_mono(
     tmp_dir: str | None = None,
     on_progress: callable = None,
 ) -> str:
-    """Synthesize text to WAV 16kHz mono using ElevenLabs API.
+    """Synthesize text to mono WAV using the ElevenLabs API.
     Uses requests to POST to https://api.elevenlabs.io/v1/text-to-speech/{voice_id}
     with output_format=mp3_44100_128.
-    Converts MP3 bytes to 16kHz mono WAV using convert_audio_data_to_wav_16k_mono
+    Converts MP3 bytes to native-rate mono WAV using convert_audio_data_to_wav
     (import from tts_processor).
     Raises RuntimeError with clear message on 401, 402, 429.
     Raises RuntimeError on empty audio response.

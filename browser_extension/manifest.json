@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CapCap Web AI Translator Bridge",
-  "version": "9.0.1",
+  "version": "9.1.0",
   "description": "Connects CapCap Video Translator directly to Google Gemini & ChatGPT Web with automatic temporary/no-history chat support.",
   "permissions": [
     "tabs",

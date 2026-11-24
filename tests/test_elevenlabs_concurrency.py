@@ -167,7 +167,7 @@ class TestElevenLabsConcurrency(unittest.TestCase):
                 )
                 mock_tpe.assert_called_once_with(max_workers=2)
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("time.sleep")
     @patch("requests.post")
     def test_synthesize_retries_on_429(self, mock_post, mock_sleep, mock_convert):
@@ -216,7 +216,7 @@ class TestElevenLabsConcurrency(unittest.TestCase):
         self.assertEqual(mock_sleep.call_count, 2)
         mock_sleep.assert_has_calls([call(1.5), call(3.0)])
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("time.sleep")
     @patch("requests.post")
     def test_synthesize_retries_on_network_error(self, mock_post, mock_sleep, mock_convert):

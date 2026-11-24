@@ -9,6 +9,7 @@ import tempfile
 from functools import lru_cache
 
 from new_highlight_selector import auto_select_matches
+from audio_output import audio_encoding_args
 from runtime_paths import asset_path, bin_path, temp_path
 from video_filter_chain import (
     build_video_color_chain,
@@ -1875,7 +1876,7 @@ def _append_text_image_filter_parts(filter_parts, current_label, text_image_laye
     return current_label
 
 
-def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False, video_quality="medium", video_time_warps=None, on_progress=None):
+def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blur_region=None, mask_regions=None, logo_layers=None, text_ass_path="", text_image_layers=None, target_width=None, target_height=None, output_scale_mode="fit", output_fill_focus_x=0.5, output_fill_focus_y=0.5, output_fps=None, video_filter_state=None, audio_gain_db=0.0, fast=False, video_quality="medium", video_time_warps=None, on_progress=None, *, audio_quality=None):
     """Burn subtitles into video using an already-prepared ASS file."""
     print(f"[FFmpeg] embed_ass_subtitles called with mask_regions={mask_regions}, logo_layers={logo_layers}, video_quality={video_quality}")
     ffmpeg = _ffmpeg_path(ffmpeg_path)
@@ -1952,7 +1953,7 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
             audio_gain_db=audio_gain_db,
             video_quality=video_quality,
             video_time_warps=video_time_warps,
-            order=order, ordered_mask_chain=ordered_mask_chain,
+            order=order, ordered_mask_chain=ordered_mask_chain, audio_quality=audio_quality,
         )
     else:
         # Simple filter chain (no logos)
@@ -2015,11 +2016,11 @@ def embed_ass_subtitles(video_path, ass_path, output_path, ffmpeg_path=None, blu
         video_encoder_args = _preferred_h264_encoder_args(ffmpeg, fast=fast, video_quality=video_quality)
 
         can_copy_audio = (
-            not warped_audio_pad
+            not audio_quality and not warped_audio_pad
             and abs(float(audio_gain_db or 0.0)) <= 0.001
             and os.path.basename(str(video_path)).startswith(("final_mux_", "preview_mux_"))
         )
-        audio_codec_args = ['-c:a', 'copy'] if can_copy_audio else ['-c:a', 'aac', '-b:a', '192k']
+        audio_codec_args = ['-c:a', 'copy'] if can_copy_audio else audio_encoding_args(audio_quality)
 
         audio_map = f"[{warped_audio_pad}]" if warped_audio_pad else "0:a?"
         command = [
@@ -2160,7 +2161,7 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
                                  scale_chain, blur_chain, mask_chain,
                                  output_fps, video_filter_state, text_ass_path="", text_image_layers=None,
                                  source_width=None, source_height=None, audio_gain_db=0.0,
-                                 video_quality="medium", video_time_warps=None, order=(), ordered_mask_chain=""):
+                                 video_quality="medium", video_time_warps=None, order=(), ordered_mask_chain="", audio_quality=None):
     """Build FFmpeg command with logo overlay using filter_complex."""
     
     # Start building the command with video input
@@ -2272,11 +2273,11 @@ def _build_logo_overlay_command(ffmpeg, video_path, ass_path, output_path, logo_
     # Complete the command
     video_encoder_args = _preferred_h264_encoder_args(ffmpeg, video_quality=video_quality)
     can_copy_audio = (
-        not warped_audio_pad
+        not audio_quality and not warped_audio_pad
         and abs(float(audio_gain_db or 0.0)) <= 0.001
         and os.path.basename(str(video_path)).startswith(("final_mux_", "preview_mux_"))
     )
-    audio_codec_args = ['-c:a', 'copy'] if can_copy_audio else ['-c:a', 'aac', '-b:a', '192k']
+    audio_codec_args = ['-c:a', 'copy'] if can_copy_audio else audio_encoding_args(audio_quality)
     audio_map = f"[{warped_audio_pad}]" if warped_audio_pad else "0:a?"
     command += [
         '-filter_complex', filter_complex,
@@ -2376,7 +2377,9 @@ def embed_subtitles(video_path, srt_path, output_path,
                     fast=False,
                     video_quality="medium",
                     video_time_warps=None,
-                    on_progress=None):
+                    on_progress=None,
+                    *,
+                    audio_quality=None):
     """Burn subtitles into video using a properly-styled ASS file.
 
     Workflow:
@@ -2391,7 +2394,7 @@ def embed_subtitles(video_path, srt_path, output_path,
         raise FileNotFoundError(f"FFmpeg not found at {ffmpeg}")
 
     # Step 1: probe resolution
-    video_w, video_h = get_video_dimensions(video_path, ffmpeg_path=ffmpeg)
+    video_w, video_h = get_video_dimensions(video_path)
     print(f"Video resolution for ASS PlayRes: {video_w}x{video_h}")
 
     # Step 2: convert SRT → ASS
@@ -2442,6 +2445,7 @@ def embed_subtitles(video_path, srt_path, output_path,
         fast=fast,
         video_quality=video_quality,
         video_time_warps=video_time_warps,
+        audio_quality=audio_quality,
         on_progress=on_progress,
     )
 

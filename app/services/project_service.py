@@ -239,6 +239,7 @@ class ProjectService:
         payload = {
             "audio_handling_mode": str(audio_handling_mode or "fast").strip().lower(),
             "tts_boundary_trim_version": BOUNDARY_TRIM_VERSION,
+            "voice_track_format": "native-sample-rate",
             "voice_name": str(voice_name or "").strip(),
             "voice_speed": round(safe_voice_speed, 3),
             "timing_sync_mode": str(timing_sync_mode or "off").strip().lower(),

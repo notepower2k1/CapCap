@@ -35,6 +35,17 @@ class VideoLayoutStartupTests(unittest.TestCase):
         self.assertEqual(gui.video_view.video_layout['template'], 'frame')
         self.assertEqual(gui.video_view.video_layout['corner'], 24)
 
+    def test_export_audio_quality_is_saved_per_project(self):
+        video = self.host.source()
+        gui = self.host.editor(video)
+        self.assertEqual(gui.get_export_audio_quality(), "standard")
+        combo = gui.export_audio_quality_combo
+        combo.setCurrentIndex(combo.findData("economy"))
+        reopened = self.host.editor(video)
+        self.assertEqual(reopened.get_export_audio_quality(), "economy")
+        other = self.host.editor(self.host.source("another.mp4"))
+        self.assertEqual(other.get_export_audio_quality(), "standard")
+
     def test_independent_background_restores_without_a_template(self):
         from app.layers.timeline import Timeline, Track
         from app.layers.base import LayerType

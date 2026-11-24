@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from audio_output import FORMATS, normalize_audio_quality
 from runtime_paths import bin_path
 from services.gui_project_bridge import uses_original_subtitles
 from worker_adapters import ExactFramePreviewWorker, FinalExportWorker, PreviewMuxWorker, QuickPreviewWorker
@@ -708,6 +709,10 @@ class PreviewController:
         from app.output_geometry import resolve_output_dimensions
         return resolve_output_dimensions(src_w, src_h, self.gui.get_output_quality_key(), self.gui.get_output_ratio_key())
 
+    def _export_audio_quality(self):
+        getter = getattr(self.gui, "get_export_audio_quality", None)
+        return normalize_audio_quality(getter() if getter is not None else None)
+
     def _confirm_export_summary(self, *, video_path: str, output_path: str, mode: str, audio_path: str):
         output_quality = self.gui.get_output_quality_key()
         output_fps = self.gui.get_output_fps_key()
@@ -780,6 +785,11 @@ class PreviewController:
             t("AUDIO & LANGUAGE"),
             f"{t('Language')}: {language_label}",
             f"{t('Audio Mode')}: {t(audio_mode)}",
+            f"{t('Export Audio Quality')}: " + t({
+                "high": "High (48 kHz, stereo)",
+                "standard": "Standard (48 kHz, stereo)",
+                "economy": "Economy (16 kHz, mono)",
+            }[self._export_audio_quality()]),
         ]
         if mode_key in {"voice", "both"} and audio_mode != "No Audio":
             processing = str(self.gui.get_audio_handling_mode() if hasattr(self.gui, "get_audio_handling_mode") else "").strip().lower()
@@ -806,7 +816,7 @@ class PreviewController:
         """
         return True
     
-    def _regenerate_mixed_audio_with_current_volumes(self) -> str:
+    def _regenerate_mixed_audio_with_current_volumes(self, audio_quality=None) -> str:
         """Render the active timeline audio tracks into one export sidecar.
 
         A1 Original, TS1 TTS, and A2 Music are independent timeline tracks;
@@ -838,6 +848,11 @@ class PreviewController:
         original_volume = float(self.gui._get_audio_track_volume("A1 Audio"))
         original_muted = bool(self.gui._is_audio_track_muted("A1 Audio"))
         original_path = self.gui._resolve_preview_original_audio_path()
+        rate, channels, _ = FORMATS.get(audio_quality, FORMATS["economy"])
+        if channels == 2:
+            source_video = self.gui.video_path_edit.text().strip()
+            if os.path.isfile(source_video) and self._video_has_audio_stream(source_video):
+                original_path = source_video
         if original_path and os.path.exists(original_path):
             tracks.append({
                 "path": original_path,
@@ -868,35 +883,45 @@ class PreviewController:
         # gain. Otherwise generate one deterministic mixed WAV from all tracks.
         if len(active_tracks) == 1 and not warps:
             item = active_tracks[0]
-            if abs(float(item.get("volume", 100.0)) - 100.0) < 0.001 and not item.get("loop"):
+            if (abs(float(item.get("volume", 100.0)) - 100.0) < 0.001 and not item.get("loop")
+                    and not item.get("start") and not item.get("source_start")
+                    and item["path"] in (original_path, voice_path)):
                 print(f"[Export] Single active audio track: {item.get('path')}")
                 return str(item.get("path", ""))
 
         try:
             from audio_mixer import mix_audio_tracks
             temp_dir = self.gui.get_project_temp_dir("export")
+            duration_ms = self.gui._audio_total_duration_ms()
             signature = hashlib.sha1(
                 json.dumps(
-                    [
+                    [rate, channels, bool(audio_quality), duration_ms, [
                         {
-                            "path": os.path.abspath(str(item.get("path", ""))),
+                            "file": self._file_signature(str(item.get("path", ""))),
                             "volume": round(float(item.get("volume", 100.0)), 3),
                             "muted": bool(item.get("muted", False)),
                             "start": round(float(item.get("start", 0.0)), 3),
                             "end": round(float(item.get("end", 0.0)), 3),
+                            "source_start": float(item.get("source_start", 0.0) or 0.0),
+                            "loop": bool(item.get("loop", False)),
                             "time_warps": item.get("time_warps", []),
                         }
                         for item in tracks
-                    ],
+                    ]],
                     ensure_ascii=True,
                     sort_keys=True,
                 ).encode("utf-8")
             ).hexdigest()[:16]
             output_path = os.path.join(temp_dir, f"export_audio_mix_{signature}.wav")
+            if audio_quality and os.path.isfile(output_path) and os.path.getsize(output_path) > 44:
+                return output_path
             mix_audio_tracks(
                 tracks=tracks,
                 output_wav_path=output_path,
-                total_duration_ms=self.gui._audio_total_duration_ms(),
+                total_duration_ms=duration_ms,
+                sample_rate=rate,
+                channels=channels,
+                prevent_clipping=bool(audio_quality),
             )
             print(f"[Export] Mixed timeline audio created: {output_path}")
             return output_path
@@ -1046,6 +1071,7 @@ class PreviewController:
             return
 
         mode = self._effective_render_mode_without_tts(self.gui.get_output_mode_key())
+        audio_quality = self._export_audio_quality()
         presentation = getattr(self.gui, "subtitle_presentation_controller", None)
         if presentation is not None:
             try:
@@ -1061,7 +1087,7 @@ class PreviewController:
         # For voice/both modes, regenerate mixed audio with current volume settings
         chosen_audio = ""
         if mode in ("voice", "both"):
-            chosen_audio = self._regenerate_mixed_audio_with_current_volumes()
+            chosen_audio = self._regenerate_mixed_audio_with_current_volumes(audio_quality)
             if not chosen_audio:
                 # Fallback to cached audio if regeneration failed
                 chosen_audio = self.gui.resolve_selected_audio_path()
@@ -1180,6 +1206,7 @@ class PreviewController:
             project_state_path=project_state_path,
             project_temp_dir=self.gui.get_project_temp_dir("export"),
             video_quality=chosen_quality,
+            audio_quality=audio_quality,
             parent=self.gui,
         )
         self.gui.export_thread.progress.connect(self.gui.on_export_progress)
@@ -1199,6 +1226,7 @@ class PreviewController:
             return
 
         mode = self._effective_render_mode_without_tts(self.gui.get_output_mode_key())
+        audio_quality = self._export_audio_quality()
         original_audio_gain_db = self._original_audio_gain_db_for_render(mode)
         default_dir = self.gui.final_output_folder_edit.text().strip() or os.path.join(self.gui.workspace_root, "output")
         out_dir = QFileDialog.getExistingDirectory(
@@ -1213,7 +1241,7 @@ class PreviewController:
         translated_srt_path = self.gui.last_translated_srt_path
         chosen_audio = ""
         if mode in ("voice", "both"):
-            chosen_audio = self._regenerate_mixed_audio_with_current_volumes()
+            chosen_audio = self._regenerate_mixed_audio_with_current_volumes(audio_quality)
             if not chosen_audio:
                 chosen_audio = self.gui.resolve_selected_audio_path()
         else:
@@ -1312,6 +1340,7 @@ class PreviewController:
             text_image_layers=text_image_layers,
             temp_dir=self.gui.get_project_temp_dir("preview"),
             video_time_warps=list(getattr(self.gui, "video_time_warps", []) or []),
+            audio_quality=audio_quality,
             parent=self.gui,
         )
         self.gui.quick_preview_thread.finished.connect(self.gui.on_quick_preview_ready)

@@ -309,7 +309,7 @@ class OmniVoiceRuntime:
                         if source.read(4) != b"RIFF":
                             raise RuntimeError("OmniVoice returned invalid audio.")
                     subprocess.run([bin_path("ffmpeg", "ffmpeg.exe"), "-v", "error", "-y", "-i", str(raw),
-                        "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(converted)],
+                        "-ac", "1", "-c:a", "pcm_s16le", str(converted)],
                         check=True, capture_output=True, timeout=90, **subprocess_hidden_kwargs())
                     with wave.open(str(converted)) as result:
                         if result.getnframes() == 0:

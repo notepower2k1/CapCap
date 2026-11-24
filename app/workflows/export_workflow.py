@@ -126,6 +126,7 @@ class ExportWorkflow:
         original_audio_gain_db=0.0,
         video_quality="medium",
         on_progress=None,
+        audio_quality=None,
     ):
         print(f"[Export] _export_subtitle_video: mask_regions={mask_regions}, logo_layers={logo_layers}")
         print(f"[Export] ass_path={ass_path}, exists={os.path.exists(ass_path) if ass_path else False}")
@@ -151,6 +152,7 @@ class ExportWorkflow:
                 output_fps=output_fps,
                 video_filter_state=video_filter_state,
                 audio_gain_db=original_audio_gain_db,
+                audio_quality=audio_quality,
                 video_quality=video_quality,
                 video_time_warps=warps,
                 on_progress=on_progress,
@@ -174,6 +176,7 @@ class ExportWorkflow:
                 output_fps=output_fps,
                 video_filter_state=video_filter_state,
                 audio_gain_db=original_audio_gain_db,
+                audio_quality=audio_quality,
                 video_quality=video_quality,
                 video_time_warps=warps,
                 on_progress=on_progress,
@@ -567,6 +570,7 @@ class ExportWorkflow:
         project_temp_dir: str = "",
         on_progress=None,
         video_quality: str = "medium",
+        audio_quality=None,
     ) -> str:
         subtitle_style = subtitle_style or {}
         from app.subtitle_presentation import KEY, config
@@ -668,6 +672,7 @@ class ExportWorkflow:
                     text_image_layers=text_image_layers,
                     original_audio_gain_db=original_audio_gain_db,
                     video_quality=video_quality,
+                    audio_quality=audio_quality,
                     on_progress=_sub_prog_s,
                 )
             elif mode == "voice":
@@ -709,6 +714,7 @@ class ExportWorkflow:
                     video_filter_state={} if voice_output != output_path else video_filter_state,
                     video_quality=video_quality,
                     on_progress=_mux_prog_v if callable(on_progress) else None,
+                    audio_quality=audio_quality,
                 )
                 if voice_output != output_path:
                     def _sub_prog_v(pct, msg):
@@ -766,6 +772,7 @@ class ExportWorkflow:
                     focus_y=output_fill_focus_y,
                     video_quality=video_quality,
                     on_progress=_mux_prog_b if callable(on_progress) else None,
+                    audio_quality=audio_quality,
                 )
                 self._emit_progress(on_progress, 50, "Burning styled subtitles into the final video...")
                 def _sub_prog_b(pct, msg):

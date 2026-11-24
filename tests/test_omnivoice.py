@@ -147,7 +147,11 @@ class OmniVoiceTests(unittest.TestCase):
                 return response
             runtime.http.post.side_effect = post
             def convert(args, **kwargs):
-                write_wav(args[-1], rate=int(args[args.index("-ar")+1]))
+                with wave.open(args[args.index("-i") + 1]) as source:
+                    rate = source.getframerate()
+                if "-ar" in args:
+                    rate = int(args[args.index("-ar") + 1])
+                write_wav(args[-1], rate=rate)
             with patch.object(runtime,"_ensure_server"), patch.object(omni,"list_voices",return_value=[voice]), patch.object(omni.subprocess,"run",side_effect=convert):
                 runtime.synthesize(text="Bonjour",wav_path=Path(folder)/"output.wav",voice=voice["id"],language="fr")
             self.assertEqual(original.read_bytes(),original_bytes)
@@ -308,7 +312,8 @@ class OmniVoiceTests(unittest.TestCase):
             voice = dict(id="omnivoice:sample", ref_audio="reference.wav", ref_text="Hello")
             def convert(args, **_):
                 self.assertEqual(target.read_bytes(), b"old")
-                return write_wav(args[-1])
+                self.assertNotIn("-ar", args)
+                return write_wav(args[-1], rate=24000)
             with patch.object(runtime, "_ensure_server"), patch.object(omni, "list_voices", return_value=[voice]), patch.object(omni.subprocess, "run", side_effect=convert):
                 runtime.synthesize(text="Bonjour", wav_path=target, voice=voice["id"], language="fr")
             payload = runtime.http.post.call_args.kwargs["json"]
@@ -317,7 +322,7 @@ class OmniVoiceTests(unittest.TestCase):
             self.assertEqual(payload["options"]["language"], "fr")
             self.assertEqual(payload["options"]["num_inference_steps"], 32)
             with wave.open(str(target)) as audio:
-                self.assertEqual((audio.getframerate(), audio.getnchannels()), (16000, 1))
+                self.assertEqual((audio.getframerate(), audio.getnchannels()), (24000, 1))
 
     def test_timeout_stops_owned_server_and_preserves_previous_output(self):
         import requests

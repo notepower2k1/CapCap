@@ -8,6 +8,7 @@ from language_support import available_voice_engines
 from runtime_profile import is_remote_profile
 from services.engine_runtime import EngineRuntime
 from services.recap_voice import audio_path, current_clip_path, synthesize_recap_segment
+from utils.capcut_notice import watch_capcut_selection
 
 
 class _VoiceSignals(QObject):
@@ -69,6 +70,8 @@ class RecapVoiceController(QObject):
         self.panel.voice_engine_combo.currentIndexChanged.connect(self.refresh)
         self.panel.voice_gender_combo.currentIndexChanged.connect(self.refresh)
         self.panel.recap_voice_combo.activated.connect(self.choose)
+        watch_capcut_selection(self.panel.voice_engine_combo)
+        watch_capcut_selection(self.panel.recap_voice_combo)
         self.panel.generate_segment_voice_btn.clicked.connect(self.generate_selected)
         self.panel.generate_all_voice_btn.clicked.connect(self.generate_all)
         self.panel.play_voice_btn.clicked.connect(self.listen)

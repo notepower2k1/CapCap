@@ -289,7 +289,7 @@ def fit_wav_to_duration(
         cmd = [
             ffmpeg, "-y", "-i", input_wav_path,
             "-t", str(target_duration),
-            "-ar", "16000", "-ac", "1",
+            "-ac", "1",
             part_path,
         ]
     elif mode_key == "smart":
@@ -303,14 +303,14 @@ def fit_wav_to_duration(
             cmd = [
                 ffmpeg, "-y", "-i", input_wav_path,
                 "-filter:a", filter_chain,
-                "-ar", "16000", "-ac", "1",
+                "-ac", "1",
                 part_path,
             ]
         else:
             cmd = [
                 ffmpeg, "-y", "-i", input_wav_path,
                 "-t", str(target_duration),
-                "-ar", "16000", "-ac", "1",
+                "-ac", "1",
                 part_path,
             ]
     else:
@@ -322,7 +322,7 @@ def fit_wav_to_duration(
         cmd = [
             ffmpeg, "-y", "-i", input_wav_path,
             "-filter:a", filter_chain,
-            "-ar", "16000", "-ac", "1",
+            "-ac", "1",
             part_path,
         ]
 
@@ -375,7 +375,6 @@ def change_wav_speed(
         "-y",
         "-i", input_wav_path,
         "-filter:a", filter_chain,
-        "-ar", "16000",
         "-ac", "1",
         part_path,
     ]
@@ -519,7 +518,7 @@ def trim_trailing_silence(
     cmd = [
         ffmpeg, "-y", "-i", input_wav_path,
         "-t", str(trim_to),
-        "-ar", "16000", "-ac", "1",
+        "-ac", "1",
         part_path,
     ]
     try:
@@ -675,6 +674,39 @@ def _read_audio_to_mono_float32(wav_path: str, target_sr: int = 16000) -> tuple[
         return samples.astype(np.float32), target_sr
 
 
+def _read_stereo_audio(path, sample_rate):
+    try:
+        samples, rate = sf.read(path, dtype="float32", always_2d=True)
+        if samples.shape[1] == 2:
+            if rate == sample_rate:
+                return samples
+            return np.column_stack([_resample_audio(channel, rate, sample_rate) for channel in samples.T])
+        if samples.shape[1] == 1:
+            mono = _resample_audio(samples[:, 0], rate, sample_rate)
+            return np.repeat(mono[:, None], 2, axis=1)
+    except (OSError, RuntimeError):
+        pass
+
+    result = subprocess.run(
+        [_ffmpeg_path(), "-v", "error", "-i", path, "-map", "0:a:0",
+         "-ac", "2", "-ar", str(sample_rate), "-f", "f32le", "pipe:1"],
+        capture_output=True, check=True, **subprocess_hidden_kwargs(),
+    )
+    return np.frombuffer(result.stdout, dtype="<f4").reshape(-1, 2)
+
+
+def _voice_track_sample_rate(paths):
+    rate = 0
+    for path in paths:
+        if not path:
+            continue
+        try:
+            rate = max(rate, sf.info(path).samplerate)
+        except (OSError, RuntimeError):
+            continue
+    return rate or 16000
+
+
 def build_voice_track_from_srt_segments(
     *,
     segments: list,
@@ -694,7 +726,7 @@ def build_voice_track_from_srt_segments(
     if len(segments) != len(tts_wav_paths):
         raise ValueError("segments and tts_wav_paths length mismatch")
 
-    target_sr = 16000
+    target_sr = _voice_track_sample_rate(tts_wav_paths)
     linear_gain = 10.0 ** (gain_db / 20.0) if gain_db else 1.0
 
     if total_duration_ms is not None:
@@ -926,6 +958,8 @@ def mix_audio_tracks(
     output_wav_path: str,
     total_duration_ms: int | None = None,
     sample_rate: int = 16000,
+    channels: int = 1,
+    prevent_clipping: bool = False,
 ) -> str:
     """Mix timeline audio tracks into one PCM WAV.
 
@@ -937,9 +971,8 @@ def mix_audio_tracks(
     source file.  ``loop`` is useful for music beds that are shorter than the
     video; voice/original tracks should leave it false.
     """
-    _require_pydub()
-    from pydub import AudioSegment
-
+    if channels not in (1, 2):
+        raise ValueError("Timeline mixing supports mono or stereo.")
     normalized_tracks = []
     max_end_ms = max(0, int(total_duration_ms or 0))
     for raw in list(tracks or []):
@@ -973,9 +1006,12 @@ def mix_audio_tracks(
     if not normalized_tracks:
         raise ValueError("No active audio tracks to mix.")
 
-    rendered = []
+    shape = () if channels == 1 else (2,)
+    base_buffer = np.zeros((int(max_end_ms * sample_rate / 1000), *shape), dtype=np.float32)
+    has_audio = False
     for raw, path, volume, start_ms, end_ms, source_start_ms in normalized_tracks:
-        audio, _ = _read_audio_to_mono_float32(path, target_sr=sample_rate)
+        audio = (_read_audio_to_mono_float32(path, target_sr=sample_rate)[0] if channels == 1
+                 else _read_stereo_audio(path, sample_rate))
         if source_start_ms > 0:
             source_start_samples = int(source_start_ms * sample_rate / 1000)
             if source_start_samples < len(audio):
@@ -1010,7 +1046,7 @@ def mix_audio_tracks(
                 cut_times.update(t for t in (start, end) if 0.0 < t < duration)
                 shift += added
 
-            warped_audio = np.zeros(int(round(duration * sample_rate)), dtype=np.float32)
+            warped_audio = np.zeros((int(round(duration * sample_rate)), *shape), dtype=np.float32)
             cuts = sorted(cut_times)
             for start, end in zip(cuts, cuts[1:]):
                 out_start, out_end = int(round(start * sample_rate)), int(round(end * sample_rate))
@@ -1019,15 +1055,18 @@ def mix_audio_tracks(
                 clip = audio[src_start:src_end]
                 count = out_end - out_start
                 if count > 0 and len(clip) > 0:
-                    warped_audio[out_start:out_end] = np.interp(
-                        np.linspace(0, len(clip) - 1, count), np.arange(len(clip)), clip
+                    positions = np.linspace(0, len(clip) - 1, count)
+                    frames = np.arange(len(clip))
+                    warped_audio[out_start:out_end] = (
+                        np.interp(positions, frames, clip) if channels == 1 else
+                        np.column_stack([np.interp(positions, frames, channel) for channel in clip.T])
                     )
             audio = warped_audio
 
         requested_samples = int((end_ms - start_ms) * sample_rate / 1000) if end_ms > start_ms else 0
         if bool(raw.get("loop", False)) and requested_samples > len(audio) and len(audio) > 0:
             repeats = int(np.ceil(requested_samples / len(audio)))
-            audio = np.tile(audio, repeats)[:requested_samples]
+            audio = np.tile(audio, (repeats, 1) if shape else repeats)[:requested_samples]
         elif requested_samples > 0 and len(audio) > requested_samples:
             audio = audio[:requested_samples]
 
@@ -1037,28 +1076,26 @@ def mix_audio_tracks(
 
         render_end_ms = start_ms + int(len(audio) * 1000 / sample_rate)
         max_end_ms = max(max_end_ms, render_end_ms, end_ms)
-        rendered.append((start_ms, audio))
-
-    if not rendered or max_end_ms <= 0:
-        raise ValueError("Active audio tracks contain no audio.")
-
-    total_samples = int(max_end_ms * sample_rate / 1000)
-    base_buffer = np.zeros(total_samples, dtype=np.float32)
-
-    for start_ms, audio in rendered:
         start_sample = int(start_ms * sample_rate / 1000)
-        end_sample = min(total_samples, start_sample + len(audio))
-        fit_len = end_sample - start_sample
-        if fit_len > 0:
-            base_buffer[start_sample:end_sample] += audio[:fit_len]
+        end_sample = start_sample + len(audio)
+        required = max(end_sample, int(max_end_ms * sample_rate / 1000))
+        if required > len(base_buffer):
+            padding = [(0, required - len(base_buffer))] + [(0, 0)] * len(shape)
+            base_buffer = np.pad(base_buffer, padding)
+        base_buffer[start_sample:end_sample] += audio
+        has_audio = True
 
-    # Clip output to [-1.0, 1.0] instead of whole-track normalization
-    # to maintain deterministic parity with native real-time PCM preview.
+    if not has_audio or max_end_ms <= 0:
+        raise ValueError("Active audio tracks contain no audio.")
+    base_buffer = base_buffer[:int(max_end_ms * sample_rate / 1000)]
+
+    if prevent_clipping and base_buffer.size:
+        peak = max(float(np.max(base_buffer)), -float(np.min(base_buffer)))
+        if peak > 1.0:
+            base_buffer *= 0.999 / peak
     np.clip(base_buffer, -1.0, 1.0, out=base_buffer)
 
-    os.makedirs(os.path.dirname(output_wav_path) or ".", exist_ok=True)
-    sf.write(output_wav_path, base_buffer, sample_rate, subtype="PCM_16")
-    return output_wav_path
+    return _atomic_write_wav(output_wav_path, base_buffer, sample_rate)
 
 
 def mix_pcm_block(blocks: list[np.ndarray], gains: list[float]) -> np.ndarray:
@@ -1094,7 +1131,7 @@ def patch_audio_segment_inplace(
     start_seconds: float,
     duration_seconds: float,
     new_segment_wav_path: str | None = None,
-    target_sr: int = 16000,
+    target_sr: int | None = None,
 ) -> bool:
     """Patch a segment in a 16-bit PCM mono WAV file in-place without rewriting the entire file.
 
@@ -1109,6 +1146,12 @@ def patch_audio_segment_inplace(
         return False
 
     try:
+        with wave.open(output_wav_path, "rb") as wav:
+            if wav.getnchannels() != 1 or wav.getsampwidth() != 2:
+                return False
+            if target_sr is not None and target_sr != wav.getframerate():
+                return False
+            target_sr = wav.getframerate()
         with open(output_wav_path, "r+b") as f:
             # Locate the 'data' chunk in the RIFF WAV header
             f.seek(12)

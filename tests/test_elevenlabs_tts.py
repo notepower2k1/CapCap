@@ -249,7 +249,7 @@ class TestElevenLabsTTS(unittest.TestCase):
 
         self.assertEqual(str(ctx.exception), "ElevenLabs API: Đã đạt giới hạn quota hoặc rate limit. Vui lòng thử lại sau.")
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("requests.post")
     def test_synthesize_success(self, mock_post, mock_convert):
         """Mock POST 200 with MP3 bytes, assert convert fn is called, wav_path returned."""
@@ -336,7 +336,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         expected_msg = f"ElevenLabs trả về audio rỗng cho đoạn text: '{sample_text[:40]}'"
         self.assertEqual(str(ctx.exception), expected_msg)
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("requests.post")
     def test_speed_clamping(self, mock_post, mock_convert):
         """Assert speed < 0.7 is clamped to 0.7, speed > 1.2 is clamped to 1.2."""
@@ -387,7 +387,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         voices = fetch_elevenlabs_voices("key")
         self.assertEqual(voices, [])
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("requests.post")
     def test_synthesize_voice_id_with_prefix(self, mock_post, mock_convert):
         """Assert voice_id prefixed with elevenlabs: is cleaned before making API call."""
@@ -405,7 +405,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         args, _ = mock_post.call_args
         self.assertEqual(args[0], "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM")
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("requests.post")
     def test_synthesize_with_explicit_language_code(self, mock_post, mock_convert):
         """Explicit language_code is cleaned and included in payload."""
@@ -424,7 +424,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["json"]["language_code"], "ja")
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("requests.post")
     def test_synthesize_with_model_id_from_env(self, mock_post, mock_convert):
         """ELEVENLABS_MODEL in env is used when model_id is not explicitly passed."""
@@ -443,7 +443,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["json"]["model_id"], "eleven_flash_v2_5")
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("requests.post")
     def test_synthesize_ascii_no_language_code(self, mock_post, mock_convert):
         """ASCII text without explicit language or TARGET_LANGUAGE env omits language_code."""
@@ -462,7 +462,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         _, kwargs = mock_post.call_args
         self.assertNotIn("language_code", kwargs["json"])
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("requests.post")
     def test_synthesize_auto_switches_multilingual_v2_for_vietnamese(self, mock_post, mock_convert):
         """eleven_multilingual_v2 auto-switches to eleven_turbo_v2_5 when text has Vietnamese chars."""
@@ -501,8 +501,9 @@ class TestElevenLabsTTS(unittest.TestCase):
             )
         err_msg = str(ctx.exception)
         self.assertIn("Lỗi 400 - Model không hỗ trợ ngôn ngữ", err_msg)
-        self.assertIn("eleven_turbo_v2_5", err_msg)
-        self.assertIn("eleven_flash_v2_5", err_msg)
+        self.assertIn("some_model_without_vi", err_msg)
+        self.assertIn("'vi'", err_msg)
+        self.assertIn("Settings", err_msg)
 
     @patch("requests.get")
     def test_fetch_elevenlabs_models_filters_multilingual_v2_and_non_tts(self, mock_get):
@@ -559,7 +560,7 @@ class TestElevenLabsTTS(unittest.TestCase):
         models_500 = fetch_elevenlabs_models(api_key="test_key")
         self.assertEqual(models_500, DEFAULT_ELEVENLABS_MODELS)
 
-    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav_16k_mono")
+    @patch("app.engines.elevenlabs_tts.convert_audio_data_to_wav")
     @patch("requests.post")
     def test_synthesize_auto_switches_multilingual_v2_unconditionally(self, mock_post, mock_convert):
         """eleven_multilingual_v2 auto-switches to eleven_turbo_v2_5 even for non-Vietnamese text."""

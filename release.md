@@ -1,3 +1,26 @@
+# RELEASE NOTES — V9.1.0
+
+## Tính năng mới
+
+- **Tóm tắt video** từ lời thoại đã trích xuất. Nhấn **Tạo tóm tắt** để xem nội dung chính và các nhân vật được nhận diện.
+- **Trình dựng recap** cho phép AI đề xuất cảnh và lời dẫn. Có thể chỉnh điểm cắt của từng cảnh, bật chống trùng cảnh, chọn giọng đọc, tạo audio và xem trước toàn bộ recap. Khi chọn sử dụng, CapCap mở video recap trong project mới và cho phép tạo phụ đề từ lời dẫn.
+- **Chọn bước xử lý** trước khi chạy toàn bộ quy trình. Có thể chỉ tạo phụ đề rồi chỉnh kiểu chữ và xuất video.
+- **Âm thanh xuất** có ba mức. Tiết kiệm dùng 16 kHz mono ở 64 kbps. Tiêu chuẩn (mặc định) và Cao dùng 48 kHz stereo, lần lượt ở 128 và 256 kbps. Lựa chọn được lưu theo project và áp dụng cho cả Xem nhanh 5 giây và video xuất.
+- **Layer hình ảnh** hỗ trợ thêm ảnh phủ và kéo đổi thứ tự các track phủ trên timeline. Blur tiếp tục bám vào video để che phụ đề gốc.
+
+## Cải tiến
+
+- Tab Bố cục video hiển thị các layer của từng mẫu ngay trong phần xem trước. Có thể lưu bố cục riêng và dùng lại trên video khác.
+- CapCap lưu bản xem trước recap để có thể mở lại. Phụ đề từ lời dẫn mặc định tắt.
+- Giữ chất lượng nguồn khi ghép giọng đọc và trộn âm thanh. Mức Tiêu chuẩn và Cao giữ âm thanh stereo nếu có trong video gốc.
+- Khi chọn dịch vụ giọng nói CapCut, ứng dụng nhắc một lần mỗi phiên rằng cả kết nối Web và PC đều phụ thuộc dịch vụ trực tuyến và có thể hết thời gian chờ. Danh mục giọng ElevenLabs có thể làm mới thủ công.
+
+## Sửa lỗi
+
+- Đồng bộ thứ tự hiển thị mask và logo khi phát video, giảm việc vẽ lại các layer trong preview.
+- Cải thiện việc đọc phản hồi JSON từ trình duyệt khi tạo tóm tắt và kịch bản recap.
+- Xử lý đỉnh âm lượng khi trộn để giảm méo tiếng trong bản xuất. Sửa lỗi lấy kích thước video khi tạo phụ đề cho Xem nhanh 5 giây.
+
 # RELEASE NOTES — V9.0.1
 
 ## Tính năng mới

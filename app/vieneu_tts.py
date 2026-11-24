@@ -480,7 +480,7 @@ def vieneu_synthesize_wav_16k_mono(
     tmp_dir: str | None = None,
     on_progress: callable = None,
 ) -> str:
-    """Synthesize text using VieNeu-TTS and write 16kHz mono WAV."""
+    """Synthesize text using VieNeu-TTS and write a native-rate mono WAV."""
     if not text or not text.strip():
         raise ValueError("No text provided for VieNeu synthesis.")
 
@@ -491,6 +491,7 @@ def vieneu_synthesize_wav_16k_mono(
 
     _patch_sea_g2p_db_path()
     model = get_cached_vieneu_model(on_progress=on_progress)
+    sample_rate = int(getattr(model, "sample_rate", 48000))
 
     clean_voice = str(voice_id or "").strip()
     is_clone = clean_voice.startswith("vieneu_clone:")
@@ -557,11 +558,11 @@ def vieneu_synthesize_wav_16k_mono(
             on_progress(f"Synthesizing with preset voice '{preset_name}'...")
         audio_data = model.infer(text.strip(), voice=preset_name)
 
-    # Try in-process native resample + tempo + atomic write
+    # Try in-process tempo adjustment and atomic write.
     try:
         import numpy as np
         import soundfile as sf
-        from app.media_decode import _resample_audio, _downmix_to_mono
+        from app.media_decode import _downmix_to_mono
         from app.audio_mixer import change_pcm_speed
         from uuid import uuid4
 
@@ -569,14 +570,13 @@ def vieneu_synthesize_wav_16k_mono(
         if np.issubdtype(audio_data.dtype, np.integer):
             arr = arr / float(np.iinfo(audio_data.dtype).max)
         mono = _downmix_to_mono(arr)
-        resampled_16k = _resample_audio(mono, 48000, 16000)
         speed_float = float(speed or 1.0)
         if abs(speed_float - 1.0) >= 0.02:
-            resampled_16k = change_pcm_speed(resampled_16k, sample_rate=16000, speed_ratio=speed_float)
+            mono = change_pcm_speed(mono, sample_rate=sample_rate, speed_ratio=speed_float)
 
         part_path = f"{wav_path}.{uuid4().hex[:8]}.part.wav"
         try:
-            sf.write(part_path, resampled_16k, 16000, format="WAV", subtype="PCM_16")
+            sf.write(part_path, mono, sample_rate, format="WAV", subtype="PCM_16")
             info = sf.info(part_path)
             if info.frames <= 0:
                 raise RuntimeError(f"Generated WAV file is invalid: {part_path}")
@@ -593,10 +593,10 @@ def vieneu_synthesize_wav_16k_mono(
 
     import soundfile as sf
     from uuid import uuid4
-    temp_48k_path = os.path.join(tmp_dir, f"vieneu_raw_{uuid4().hex[:8]}.wav")
+    raw_path = os.path.join(tmp_dir, f"vieneu_raw_{uuid4().hex[:8]}.wav")
     part_path = f"{wav_path}.{uuid4().hex[:8]}.part.wav"
     try:
-        sf.write(temp_48k_path, audio_data, 48000, format="WAV", subtype="PCM_16")
+        sf.write(raw_path, audio_data, sample_rate, format="WAV", subtype="PCM_16")
 
         ffmpeg = _ffmpeg_path()
         filter_args = []
@@ -605,20 +605,19 @@ def vieneu_synthesize_wav_16k_mono(
             filter_args = ["-filter:a", f"atempo={speed_float}"]
 
         cmd = [
-            ffmpeg, "-y", "-i", temp_48k_path,
+            ffmpeg, "-y", "-i", raw_path,
             *filter_args,
-            "-ar", "16000",
             "-ac", "1",
             part_path,
         ]
         proc = subprocess.run(cmd, capture_output=True, **subprocess_text_kwargs())
         if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg conversion to 16kHz failed: {proc.stderr or proc.stdout}")
+            raise RuntimeError(f"FFmpeg audio conversion failed: {proc.stderr or proc.stdout}")
         os.replace(part_path, wav_path)
     finally:
-        if os.path.exists(temp_48k_path):
+        if os.path.exists(raw_path):
             try:
-                os.remove(temp_48k_path)
+                os.remove(raw_path)
             except Exception:
                 pass
         if os.path.exists(part_path):
