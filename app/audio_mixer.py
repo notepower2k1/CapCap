@@ -1026,9 +1026,10 @@ def mix_audio_tracks(
             from app.services.time_warp_service import TimeWarpService
 
             warps = TimeWarpService.normalize_warps(warps)
+            plan = TimeWarpService.compile_plan(warps)
 
             # Only source audio is warped; dubbed files already follow timeline time.
-            duration = TimeWarpService.media_to_timeline_time(len(audio) / sample_rate, warps)
+            duration = TimeWarpService.media_to_timeline_time(len(audio) / sample_rate, plan)
             cut_times = {0.0, duration}
             shift = 0.0
             for warp in sorted(warps, key=lambda w: float(w.get("media_start", w.get("time", 0.0)))):
@@ -1050,8 +1051,8 @@ def mix_audio_tracks(
             cuts = sorted(cut_times)
             for start, end in zip(cuts, cuts[1:]):
                 out_start, out_end = int(round(start * sample_rate)), int(round(end * sample_rate))
-                src_start = int(round(TimeWarpService.timeline_to_media_time(start, warps) * sample_rate))
-                src_end = int(round(TimeWarpService.timeline_to_media_time(end, warps) * sample_rate))
+                src_start = int(round(TimeWarpService.timeline_to_media_time(start, plan) * sample_rate))
+                src_end = int(round(TimeWarpService.timeline_to_media_time(end, plan) * sample_rate))
                 clip = audio[src_start:src_end]
                 count = out_end - out_start
                 if count > 0 and len(clip) > 0:

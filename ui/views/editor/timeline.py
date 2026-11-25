@@ -123,6 +123,7 @@ class EditorTimeline(QGraphicsView):
         self._waveform_duration_s = 0.0
         self._waveform_pixmap_cache: tuple | None = None  # tuple: (key, QPixmap)
         self._video_thumbnails: list[tuple[float, object]] = []
+        self._thumbnail_signature: list[tuple[float, int]] = []
         self._thumbnails_pixmap_cache: tuple | None = None  # tuple: (key, QPixmap)
         self._video_time_warps: list[dict] = []
         self._has_add_btn = False
@@ -186,6 +187,7 @@ class EditorTimeline(QGraphicsView):
         self._waveform_duration_s = 0.0
         self._waveform_pixmap_cache = None
         self._video_thumbnails = []
+        self._thumbnail_signature = []
         self._thumbnails_pixmap_cache = None
         self._video_time_warps = []
         self._duration = 0.0
@@ -527,12 +529,16 @@ class EditorTimeline(QGraphicsView):
         self._explicit_drag_mode = val
 
     def set_waveform_data(self, samples: list, duration_s: float) -> None:
-        self._waveform_samples = [
+        normalized_samples = [
             max(0.0, min(1.0, float(value)))
             for value in (samples or [])
             if isinstance(value, (int, float))
         ]
-        self._waveform_duration_s = max(0.0, float(duration_s or 0.0))
+        duration_s = max(0.0, float(duration_s or 0.0))
+        if duration_s == self._waveform_duration_s and normalized_samples == self._waveform_samples:
+            return
+        self._waveform_samples = normalized_samples
+        self._waveform_duration_s = duration_s
         self._waveform_pixmap_cache = None
         self.viewport().update()
 
@@ -541,11 +547,20 @@ class EditorTimeline(QGraphicsView):
         return self.set_waveform_data(*args, **kwargs)
 
     def set_video_thumbnails(self, thumbnails: list) -> None:
-        self._video_thumbnails = [
+        normalized = [
             (max(0.0, float(timestamp)), pixmap)
             for timestamp, pixmap in (thumbnails or [])
             if pixmap is not None and not getattr(pixmap, "isNull", lambda: True)()
         ]
+        # Qt changes the cache key when pixels change, even on the same QPixmap.
+        signature = [
+            (timestamp, pixmap.cacheKey() if isinstance(pixmap, QPixmap) else id(pixmap))
+            for timestamp, pixmap in normalized
+        ]
+        if signature == self._thumbnail_signature:
+            return
+        self._video_thumbnails = normalized
+        self._thumbnail_signature = signature
         self._thumbnails_pixmap_cache = None
         self.viewport().update()
 
@@ -2817,6 +2832,8 @@ class EditorTimeline(QGraphicsView):
                     meta_row = (getattr(layer, "metadata", None) or {}).get("row_index") if isinstance(getattr(layer, "metadata", None), dict) else None
                     setattr(layer, "row_index", int(meta_row if meta_row is not None else (drag.get("row_index", 0) or 0)))
                 old_row = getattr(layer, "row_index", 0)
+                old_start, old_end = layer.start, layer.end
+                old_snap_guide = self._snap_guide_time
 
                 if drag["type"] == "move":
                     delta = t - float(drag["anchor_time"])
@@ -2868,43 +2885,47 @@ class EditorTimeline(QGraphicsView):
                     new_end = max(new_end, drag["start_time"] + self.MIN_DUR)
                     layer.end = new_end
 
-                if getattr(layer, "row_index", 0) != old_row:
+                row_changed = getattr(layer, "row_index", 0) != old_row
+                start_changed = layer.start != old_start
+                if not row_changed and not start_changed and layer.end == old_end:
+                    if self._snap_guide_time != old_snap_guide:
+                        self.viewport().update()
+                    event.accept()
+                    return
+
+                if row_changed:
                     self._overlap_layout_cache.clear()
                 else:
-                    cache_keys = [k for k in (track.id, str(track.id), old_row) if k in self._overlap_layout_cache]
-                    for k in cache_keys:
-                        entry = self._overlap_layout_cache[k]
-                        if len(entry) == 5:
-                            sub_row_map, max_rows, layers_in_track, _, _ = entry
-                            sorted_layers = sorted(layers_in_track, key=lambda l: float(getattr(l, "start", 0.0) or 0.0))
+                    entry = self._overlap_layout_cache.get(track.id)
+                    if entry is not None:
+                        sub_row_map, max_rows, sorted_layers, sorted_starts, _ = entry
+                        if start_changed:
+                            sorted_layers = sorted(sorted_layers, key=lambda l: float(getattr(l, "start", 0.0) or 0.0))
                             sorted_starts = [float(getattr(l, "start", 0.0) or 0.0) for l in sorted_layers]
-                            prefix_max_ends = []
-                            max_end = float("-inf")
-                            for l in sorted_layers:
-                                try:
-                                    layer_end = float(getattr(l, "end", 0.0) or 0.0)
-                                except (TypeError, ValueError):
-                                    layer_end = 0.0
-                                meta = getattr(l, "metadata", None)
-                                if isinstance(meta, dict):
-                                    raw_ae = meta.get("_audio_end")
-                                    if raw_ae is not None:
-                                        try:
-                                            layer_end = max(layer_end, float(raw_ae))
-                                        except (TypeError, ValueError):
-                                            pass
-                                max_end = max(max_end, layer_end)
-                                prefix_max_ends.append(max_end)
-                            self._overlap_layout_cache[k] = (
-                                sub_row_map,
-                                max_rows,
-                                sorted_layers,
-                                sorted_starts,
-                                prefix_max_ends,
-                            )
-                        elif len(entry) == 2:
-                            sub_row_map, max_rows = entry
-                            self._overlap_layout_cache[k] = (sub_row_map, max_rows)
+                        prefix_max_ends = []
+                        max_end = float("-inf")
+                        for l in sorted_layers:
+                            try:
+                                layer_end = float(getattr(l, "end", 0.0) or 0.0)
+                            except (TypeError, ValueError):
+                                layer_end = 0.0
+                            meta = getattr(l, "metadata", None)
+                            if isinstance(meta, dict):
+                                raw_ae = meta.get("_audio_end")
+                                if raw_ae is not None:
+                                    try:
+                                        layer_end = max(layer_end, float(raw_ae))
+                                    except (TypeError, ValueError):
+                                        pass
+                            max_end = max(max_end, layer_end)
+                            prefix_max_ends.append(max_end)
+                        self._overlap_layout_cache[track.id] = (
+                            sub_row_map,
+                            max_rows,
+                            sorted_layers,
+                            sorted_starts,
+                            prefix_max_ends,
+                        )
                 self.viewport().update()
             event.accept()
             return

@@ -20,15 +20,9 @@ def preview_effects(segment, style, position_ms):
     karaoke = -1
     if animation == "word highlight karaoke" and words:
         karaoke = min(len(words) - 1, int(max(0., min(.999, elapsed / (end - start))) * len(words)))
-    mode = style.get("highlight_mode", "Auto")
-    phrases = []
-    if mode in ("Auto", "Auto + Manual"):
-        phrases.extend(segment.get("auto_highlights", []) or [])
-    if mode in ("Manual", "Auto + Manual"):
-        phrases.extend(segment.get("manual_highlights", []) or [])
+    phrases = list(segment.get("manual_highlights") or [])
     color = style.get("highlight_color", "#FFD400")
     if str(color).startswith("&H"):
         color = "#" + color[-2:] + color[-4:-2] + color[-6:-4]
     return dict(animation_style=animation, animation_progress=progress, animation_opacity=opacity,
-                highlight_color=color, highlight_phrases=phrases, karaoke_word_index=karaoke,
-                auto_keyword_highlight=bool(style.get("auto_keyword_highlight", False)))
+                highlight_color=color, highlight_phrases=phrases, karaoke_word_index=karaoke)

@@ -32,9 +32,8 @@ def valid_segments(rows):
         if not math.isfinite(start + end) or start < 0 or end <= start or not text:
             raise ValueError("Invalid secondary subtitle timing or empty text.")
         cleaned = dict(start=start, end=end, text=text)
-        for field in ("manual_highlights", "auto_highlights"):
-            if row.get(field):
-                cleaned[field] = copy.deepcopy(row[field])
+        if row.get("manual_highlights"):
+            cleaned["manual_highlights"] = copy.deepcopy(row["manual_highlights"])
         if row.get("source_text"):
             cleaned["source_text"] = str(row["source_text"])
         if isinstance(row.get("_completed_timing"), dict):
@@ -144,9 +143,12 @@ def build_secondary(settings, original, *, engine=None, source_language="auto", 
 
 
 def map_to_timeline(rows, warps):
+    if not rows:
+        return []
     from .services.time_warp_service import TimeWarpService
-    return [dict(row, start=TimeWarpService.media_to_timeline_time(row["start"], warps),
-                 end=TimeWarpService.media_to_timeline_time(row["end"], warps)) for row in copy.deepcopy(rows)]
+    plan = TimeWarpService.compile_plan(warps)
+    return [dict(row, start=TimeWarpService.media_to_timeline_time(row["start"], plan),
+                 end=TimeWarpService.media_to_timeline_time(row["end"], plan)) for row in copy.deepcopy(rows)]
 
 
 def secondary_style(primary):
@@ -154,7 +156,7 @@ def secondary_style(primary):
     style.update(font_size=max(12, round(float(primary.get("font_size", 60)) * 0.75)),
         custom_position_enabled=True, custom_position_x=50, custom_position_y=76,
         custom_position_bottom_y=None, animation="Static", manual_highlights=[], word_timings=[],
-        speaker_colors=[], auto_keyword_highlight=False)
+        speaker_colors=[])
     return style
 
 
@@ -174,7 +176,7 @@ def style_from_controls(controls, base):
     if controls.get("outline") is False:
         style["outline_width"] = 0
     style.update(controls.get("position") or {})
-    style.update(manual_highlights=[], word_timings=[], speaker_colors=[], auto_keyword_highlight=False)
+    style.update(manual_highlights=[], word_timings=[], speaker_colors=[])
     return style
 
 

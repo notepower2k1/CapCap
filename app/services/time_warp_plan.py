@@ -26,7 +26,15 @@ class WarpSpan:
     speed: float
 
 
+class WarpPlan(tuple[WarpSpan, ...]):
+    """Immutable spans that can be reused for multiple time lookups."""
+
+    __slots__ = ()
+
+
 def compile_plan(warps):
+    if isinstance(warps, WarpPlan):
+        return warps
     key = []
     for w in warps or ():
         kind = str(w.get("type", "freeze"))
@@ -69,7 +77,7 @@ def _compile(key):
         result.append(WarpSpan(start, end, extra, kind, tuple(indices), start + shift,
                                end + shift + extra, speed))
         shift += extra
-    return tuple(result)
+    return WarpPlan(result)
 
 
 def normalized_warps(warps):

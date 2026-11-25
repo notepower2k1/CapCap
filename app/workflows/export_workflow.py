@@ -54,7 +54,6 @@ class ExportWorkflow:
         style.setdefault("background_alpha", 0.5)
         style.setdefault("bold", False)
         style.setdefault("preset_key", "")
-        style.setdefault("auto_keyword_highlight", False)
         style.setdefault("animation_duration", 0.22)
         style.setdefault("manual_highlights", [])
         style.setdefault("word_timings", [])
@@ -535,7 +534,6 @@ class ExportWorkflow:
             background_padding=float(style.get("background_padding", 6)),
             background_radius=float(style.get("background_radius", 0)),
             bold=bool(style["bold"]), preset_key=str(style["preset_key"]),
-            auto_keyword_highlight=bool(style["auto_keyword_highlight"]),
             animation_duration=float(style["animation_duration"]), manual_highlights=style["manual_highlights"],
             word_timings=style["word_timings"], karaoke_timing_mode=str(style["karaoke_timing_mode"]),
             speaker_colors=style.get("speaker_colors", []),

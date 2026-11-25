@@ -260,6 +260,12 @@ class TestLayerStackingAndTimelinePerf(unittest.TestCase):
         # Cached pixmap instance should be reused directly!
         self.assertEqual(id(timeline._waveform_pixmap_cache[1]), pix_id)
 
+        # A cached refresh preserves the rendered strip.
+        with patch.object(timeline.viewport(), "update") as update:
+            timeline.set_waveform_data(list(samples), 10.0)
+            update.assert_not_called()
+        self.assertIs(timeline._waveform_pixmap_cache[1], cached_pix)
+
         # 3. New waveform data invalidates cache
         timeline.set_waveform_data([0.2, 0.4], 10.0)
         self.assertIsNone(timeline._waveform_pixmap_cache)
@@ -309,9 +315,43 @@ class TestLayerStackingAndTimelinePerf(unittest.TestCase):
         # Cached pixmap instance should be reused
         self.assertEqual(id(timeline._thumbnails_pixmap_cache[1]), pix_id)
 
-        # 3. Setting new thumbnails invalidates cache
-        timeline.set_video_thumbnails([(0.0, thumb_pix1)])
+        # A cached refresh preserves the strip, while changed pixels invalidate it.
+        with patch.object(timeline.viewport(), "update") as update:
+            timeline.set_video_thumbnails(list(thumbnails))
+            update.assert_not_called()
+            thumb_pix1.fill(QColor("#ff8800"))
+            timeline.set_video_thumbnails(thumbnails)
+            update.assert_called_once()
         self.assertIsNone(timeline._thumbnails_pixmap_cache)
+
+    def test_right_resize_reuses_start_order_and_skips_unchanged_geometry(self):
+        timeline = self.timeline
+        timeline.set_segments([
+            {"start": 1., "end": 3., "text": "First"},
+            {"start": 5., "end": 7., "text": "Second"},
+        ])
+        track = next(track for track in timeline._timeline.tracks if timeline._is_subtitle_track(track))
+        layer = track.layers[0]
+        original = timeline._track_overlap_layout(track)
+        timeline._drag_state = {
+            "type": "resize_right", "layer_id": layer.id, "track_id": str(track.id), "start_time": 1.,
+        }
+        pos = QPointF(timeline.CONTENT_LEFT_PAD + 4 * timeline.pixels_per_second, 50.)
+        event = QMouseEvent(QEvent.Type.MouseMove, pos, pos, Qt.MouseButton.NoButton,
+                            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+
+        with patch.object(timeline.viewport(), "update") as update, \
+                patch.object(timeline, "_clamp_layer_resize", side_effect=[3., 4.]):
+            timeline.mouseMoveEvent(event)
+            update.assert_not_called()
+            self.assertIs(timeline._overlap_layout_cache[track.id], original)
+            timeline.mouseMoveEvent(event)
+            update.assert_called_once()
+
+        resized = timeline._overlap_layout_cache[track.id]
+        self.assertIs(resized[2], original[2])
+        self.assertIs(resized[3], original[3])
+        self.assertEqual(resized[4], [4., 7.])
 
     def test_snap_guide_line_painted_during_drag(self):
         """Verify snap guide line renders without error when dragging with snap active."""

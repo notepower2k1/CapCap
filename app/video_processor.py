@@ -8,7 +8,6 @@ import time
 import tempfile
 from functools import lru_cache
 
-from new_highlight_selector import auto_select_matches
 from audio_output import audio_encoding_args
 from runtime_paths import asset_path, bin_path, temp_path
 from video_filter_chain import (
@@ -1396,16 +1395,11 @@ def _build_manual_highlight_spans(text: str, manual_highlights) -> list[tuple[in
     return sorted(spans, key=lambda item: item[0])
 
 
-def _apply_keyword_highlight(text: str, *, preset_key: str, highlight_color: str, manual_highlights=None, base_color: str = "") -> str:
+def _apply_keyword_highlight(text: str, *, highlight_color: str, manual_highlights=None, base_color: str = "") -> str:
     source_text = text or ""
     ordered_spans = _build_manual_highlight_spans(source_text, manual_highlights)
-    if not ordered_spans and (preset_key or "").strip().lower() != "highlight":
-        return source_text
     if not ordered_spans:
-        candidates = auto_select_matches(source_text, max_keywords=2)
-        if not candidates:
-            return source_text
-        ordered_spans = [(candidate.start, candidate.end) for candidate in sorted(candidates, key=lambda item: item.start)]
+        return source_text
 
     primary_color = highlight_color or "&H00E5FF"
     if primary_color.upper() == "&H00FFFFFF":
@@ -1446,7 +1440,6 @@ def srt_to_ass(srt_path: str,
                background_radius: float = 0.0,
                bold: bool = False,
                preset_key: str = "",
-               auto_keyword_highlight: bool = False,
                animation_duration: float = 0.22,
                manual_highlights=None,
                word_timings=None,
@@ -1806,7 +1799,6 @@ def srt_to_ass(srt_path: str,
 
         text_content = _apply_keyword_highlight(
             raw_text,
-            preset_key="highlight" if auto_keyword_highlight else preset_key,
             highlight_color=highlight_color,
             manual_highlights=line_manual_highlights,
             base_color=line_speaker_color,
@@ -2348,7 +2340,6 @@ def embed_subtitles(video_path, srt_path, output_path,
                     background_alpha=0.5,
                     bold=False,
                     preset_key="",
-                    auto_keyword_highlight=False,
                     animation_duration=0.22,
                     manual_highlights=None,
                     word_timings=None,
@@ -2409,7 +2400,6 @@ def embed_subtitles(video_path, srt_path, output_path,
         shadow_color=shadow_color, shadow_depth=shadow_depth,
         background_color=background_color, background_alpha=background_alpha,
         bold=bold, preset_key=preset_key,
-        auto_keyword_highlight=auto_keyword_highlight,
         animation_duration=animation_duration,
         manual_highlights=manual_highlights,
         word_timings=word_timings,

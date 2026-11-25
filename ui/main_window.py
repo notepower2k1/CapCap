@@ -50,7 +50,6 @@ from helpers import (
     parse_srt_to_segments,
     validate_srt_text,
 )
-from new_highlight_selector import auto_select_matches
 from video_processor import srt_to_ass
 from audio_mixer import ffprobe_wav_duration
 from utils.display_utils import (
@@ -367,9 +366,7 @@ class VideoTranslatorGUI(QMainWindow):
                 "background_alpha": 0.0,
                 "animation": "Word Highlight Karaoke",
                 "bold": True,
-                "auto_keyword_highlight": True,
-                "highlight_mode": "Auto + Manual",
-                "summary": "Large subtitle with karaoke-style word timing and highlighted keywords for short-form videos.",
+                "summary": "Large subtitle with karaoke-style word timing for short-form videos.",
             },
             "youtube": {
                 "label": "YouTube",
@@ -387,8 +384,6 @@ class VideoTranslatorGUI(QMainWindow):
                 "background_alpha": 1.0,
                 "animation": "Fade In",
                 "bold": False,
-                "auto_keyword_highlight": False,
-                "highlight_mode": "Manual",
                 "summary": "Clean subtitle with a solid background box for long-form readability.",
             },
             "minimal": {
@@ -425,8 +420,6 @@ class VideoTranslatorGUI(QMainWindow):
                 "background_alpha": 0.6,
                 "animation": "Pop In",
                 "bold": True,
-                "auto_keyword_highlight": False,
-                "highlight_mode": "Auto",
                 "summary": "Your editable working preset. Manual style changes can switch here automatically.",
             },
         }
@@ -4101,9 +4094,7 @@ class VideoTranslatorGUI(QMainWindow):
             "background_radius": int(self.subtitle_background_radius_spin.value()) if hasattr(self, "subtitle_background_radius_spin") else 0,
             "bold": bool(self.subtitle_bold_cb.isChecked()),
             "speaker_colors": self._uses_speaker_subtitle_colors(),
-            "auto_keyword_highlight": bool(self.subtitle_keyword_highlight_cb.isChecked()),
             "highlight_color": current_source_text(self.subtitle_highlight_color_combo).strip(),
-            "highlight_mode": current_source_text(self.subtitle_highlight_mode_combo).strip(),
         }
 
     def _current_subtitle_style_controls_state(self) -> dict:
@@ -4125,9 +4116,7 @@ class VideoTranslatorGUI(QMainWindow):
             "background_radius": int(self.subtitle_background_radius_spin.value()) if hasattr(self, "subtitle_background_radius_spin") else 0,
             "bold": bool(self.subtitle_bold_cb.isChecked()),
             "speaker_colors": self._uses_speaker_subtitle_colors(),
-            "auto_keyword_highlight": bool(self.subtitle_keyword_highlight_cb.isChecked()),
             "highlight_color": current_source_text(self.subtitle_highlight_color_combo).strip(),
-            "highlight_mode": current_source_text(self.subtitle_highlight_mode_combo).strip(),
             "single_line": bool(getattr(self, "subtitle_single_line_cb", None) and self.subtitle_single_line_cb.isChecked()),
             "position": self.get_subtitle_position_config(),
         }
@@ -4172,16 +4161,9 @@ class VideoTranslatorGUI(QMainWindow):
             self.subtitle_speaker_colors_cb.setChecked(
                 bool(state.get("speaker_colors", self.subtitle_speaker_colors_cb.isChecked()))
             )
-        self.subtitle_keyword_highlight_cb.setChecked(
-            bool(state.get("auto_keyword_highlight", self.subtitle_keyword_highlight_cb.isChecked()))
-        )
         set_current_source_text(
             self.subtitle_highlight_color_combo,
             str(state.get("highlight_color", current_source_text(self.subtitle_highlight_color_combo))),
-        )
-        set_current_source_text(
-            self.subtitle_highlight_mode_combo,
-            str(state.get("highlight_mode", current_source_text(self.subtitle_highlight_mode_combo))),
         )
         if hasattr(self, "subtitle_single_line_cb"):
             self.subtitle_single_line_cb.setChecked(bool(state.get("single_line", self.subtitle_single_line_cb.isChecked())))
@@ -4359,14 +4341,9 @@ class VideoTranslatorGUI(QMainWindow):
         if hasattr(self, "subtitle_bg_alpha_spin"):
             self.subtitle_bg_alpha_spin.setValue(float(preset.get("background_alpha", self.subtitle_bg_alpha_spin.value())))
         self.subtitle_bold_cb.setChecked(bool(preset.get("bold", self.subtitle_bold_cb.isChecked())))
-        self.subtitle_keyword_highlight_cb.setChecked(bool(preset.get("auto_keyword_highlight", self.subtitle_keyword_highlight_cb.isChecked())))
         set_current_source_text(
             self.subtitle_highlight_color_combo,
             str(preset.get("highlight_color", current_source_text(self.subtitle_highlight_color_combo))),
-        )
-        set_current_source_text(
-            self.subtitle_highlight_mode_combo,
-            str(preset.get("highlight_mode", current_source_text(self.subtitle_highlight_mode_combo))),
         )
         self._capture_subtitle_custom_style_state()
         self.on_subtitle_preset_changed()
@@ -4812,8 +4789,6 @@ class VideoTranslatorGUI(QMainWindow):
                             if not seg.get("time_warp_id") and w_id:
                                 seg["time_warp_id"] = w_id
         self.refresh_detected_speakers_section()
-        if self.current_translated_segments:
-            self.refresh_auto_keyword_highlights(force=True)
         if hasattr(self, "audio_source_edit"):
             if self.get_audio_handling_mode() == "clean" and self.last_vocals_path and os.path.exists(self.last_vocals_path):
                 self.audio_source_edit.setText(self.last_vocals_path)
@@ -6597,9 +6572,7 @@ class VideoTranslatorGUI(QMainWindow):
             position_ms = int(self.media_player.position() or 0)
         style = dict(animation=current_source_text(self.subtitle_animation_combo),
             animation_duration=float(self.subtitle_animation_time_spin.value()),
-            highlight_mode=current_source_text(self.subtitle_highlight_mode_combo),
-            highlight_color=self._highlight_color_hex() or "#FFD400",
-            auto_keyword_highlight=self.subtitle_keyword_highlight_cb.isChecked())
+            highlight_color=self._highlight_color_hex() or "#FFD400")
         self.video_view.subtitle_item.set_effects(**preview_effects(segment, style, position_ms))
 
     def on_single_line_toggled(self, checked: bool):
@@ -6696,9 +6669,6 @@ class VideoTranslatorGUI(QMainWindow):
             "background_box": bool(self.subtitle_background_cb.isChecked()),
             "bold": bool(self.subtitle_bold_cb.isChecked()),
             "preset_key": self.get_selected_subtitle_preset(),
-            "auto_keyword_highlight": bool(self.subtitle_keyword_highlight_cb.isChecked())
-            and current_source_text(self.subtitle_highlight_mode_combo).strip() in ("Auto", "Auto + Manual")
-            and not any(seg.get("auto_highlights") for seg in (style_segments or [])),
             "manual_highlights": self._build_render_highlight_lists(style_segments or []),
             "word_timings": [list(seg.get("words", [])) for seg in (style_segments or [])],
             "blur_region": (
@@ -6711,28 +6681,17 @@ class VideoTranslatorGUI(QMainWindow):
         }
 
     def _build_render_highlight_lists(self, style_segments):
-        mode = current_source_text(self.subtitle_highlight_mode_combo).strip() if hasattr(self, "subtitle_highlight_mode_combo") else "Auto"
-        include_auto = mode in ("Auto", "Auto + Manual")
-        include_manual = mode in ("Manual", "Auto + Manual")
         rows = []
-        for seg in style_segments or []:
-            merged = []
+        for segment in style_segments or []:
+            phrases = []
             seen = set()
-            if include_auto:
-                for phrase in seg.get("auto_highlights", []) or []:
-                    normalized = self._normalize_manual_highlight(phrase)
-                    key = normalized.lower()
-                    if normalized and key not in seen:
-                        seen.add(key)
-                        merged.append(normalized)
-            if include_manual:
-                for phrase in seg.get("manual_highlights", []) or []:
-                    normalized = self._normalize_manual_highlight(phrase)
-                    key = normalized.lower()
-                    if normalized and key not in seen:
-                        seen.add(key)
-                        merged.append(normalized)
-            rows.append(merged)
+            for phrase in segment.get("manual_highlights", []) or []:
+                normalized = self._normalize_manual_highlight(phrase)
+                key = normalized.lower()
+                if normalized and key not in seen:
+                    seen.add(key)
+                    phrases.append(normalized)
+            rows.append(phrases)
         return rows
 
     def on_subtitle_preset_changed(self):
@@ -6758,13 +6717,9 @@ class VideoTranslatorGUI(QMainWindow):
                 if hasattr(self, "subtitle_bg_alpha_spin"):
                     self.subtitle_bg_alpha_spin.setValue(float(preset.get("background_alpha", self.subtitle_bg_alpha_spin.value())))
                 self.subtitle_bold_cb.setChecked(bool(preset.get("bold", False)))
-                if hasattr(self, "subtitle_keyword_highlight_cb"):
-                    self.subtitle_keyword_highlight_cb.setChecked(bool(preset.get("auto_keyword_highlight", False)))
                 if hasattr(self, "subtitle_highlight_color_combo"):
                     color_name = "Yellow" if preset.get("highlight_color", "").upper() == "#FFD400" else "Cyan"
                     set_current_source_text(self.subtitle_highlight_color_combo, color_name)
-                if hasattr(self, "subtitle_highlight_mode_combo"):
-                    set_current_source_text(self.subtitle_highlight_mode_combo, str(preset.get("highlight_mode", "Auto")))
         finally:
             self._subtitle_preset_apply_in_progress = False
         if hasattr(self, "style_library_card"):
@@ -6989,54 +6944,6 @@ class VideoTranslatorGUI(QMainWindow):
 
     def _normalize_manual_highlight(self, text: str) -> str:
         return re.sub(r"\s+", " ", (text or "").replace("\u2029", " ").replace("\n", " ")).strip()
-
-    def refresh_auto_keyword_highlights(self, force: bool = False):
-        if not getattr(self, "current_translated_segments", None):
-            return
-        if not getattr(self, "subtitle_keyword_highlight_cb", None) or not self.subtitle_keyword_highlight_cb.isChecked():
-            return
-        if not hasattr(self, "subtitle_highlight_mode_combo") or current_source_text(self.subtitle_highlight_mode_combo).strip() not in ("Auto", "Auto + Manual"):
-            return
-
-        pending_indexes = []
-        pending_texts = []
-        for idx, segment in enumerate(self.current_translated_segments or []):
-            text = ' '.join(str(segment.get("text") or "").replace("\n", " ").split()).strip()
-            if not text:
-                segment["auto_highlights"] = []
-                continue
-            cached_key = segment.get("_auto_highlights_source_text", "")
-            if not force and cached_key == text and isinstance(segment.get("auto_highlights"), list):
-                continue
-            pending_indexes.append(idx)
-            pending_texts.append(text)
-
-        if not pending_texts:
-            return
-
-        self.log(f"[Auto Highlight] Generating highlight phrases for {len(pending_texts)} subtitle lines...")
-        resolved_batches = [
-            [candidate.text for candidate in auto_select_matches(text, max_keywords=2)]
-            for text in pending_texts
-        ]
-
-        for idx, phrases in zip(pending_indexes, resolved_batches):
-            segment = self.current_translated_segments[idx]
-            text = ' '.join(str(segment.get("text") or "").replace("\n", " ").split()).strip()
-            cleaned = []
-            seen = set()
-            lowered = text.lower()
-            for phrase in phrases or []:
-                normalized = self._normalize_manual_highlight(phrase)
-                key = normalized.lower()
-                if not normalized or key in seen or key not in lowered:
-                    continue
-                seen.add(key)
-                cleaned.append(normalized)
-            segment["auto_highlights"] = cleaned
-            segment["_auto_highlights_source_text"] = text
-
-        self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
 
     def _reconcile_manual_highlights(self, segment: dict):
         text = str(segment.get("text", ""))
@@ -14828,7 +14735,7 @@ class VideoTranslatorGUI(QMainWindow):
             background_width=style.get("background_width", "fit_text"), background_shape=style.get("background_shape", "rectangle"),
             background_padding=style.get("background_padding", 6), background_radius=style.get("background_radius", 0),
             bold=style.get("bold", False), preset_key=style.get("preset_key", ""),
-            auto_keyword_highlight=style.get("auto_keyword_highlight", False), animation_duration=style.get("animation_duration", 0.22),
+            animation_duration=style.get("animation_duration", 0.22),
             manual_highlights=style.get("manual_highlights", []), word_timings=style.get("word_timings", []),
             speaker_colors=style.get("speaker_colors", []), custom_position_enabled=style.get("custom_position_enabled", False),
             custom_position_x=style.get("custom_position_x", 50), custom_position_y=style.get("custom_position_y", 86),
@@ -15014,7 +14921,6 @@ class VideoTranslatorGUI(QMainWindow):
             background_radius=subtitle_style.get("background_radius", 0),
             bold=subtitle_style.get("bold", False),
             preset_key=subtitle_style.get("preset_key", ""),
-            auto_keyword_highlight=subtitle_style.get("auto_keyword_highlight", False),
             animation_duration=subtitle_style.get("animation_duration", 0.22),
             manual_highlights=subtitle_style.get("manual_highlights", []),
             word_timings=subtitle_style.get("word_timings", []),
@@ -15970,7 +15876,6 @@ class VideoTranslatorGUI(QMainWindow):
     def apply_edited_translation(self, show_message=True, force_apply=True, provider=None):
         result = self.subtitle_controller.apply_edited_translation(show_message=show_message, force_apply=force_apply, provider=provider)
         if result:
-            self.refresh_auto_keyword_highlights()
             self.sync_segment_editor_rows()
             return result
 
@@ -16113,7 +16018,6 @@ class VideoTranslatorGUI(QMainWindow):
         self._single_line_split_cache = None
         self._voiceover_force_refresh = bool(changed_count or deleted_count)
         self._sync_hidden_translated_text_from_segments()
-        self.refresh_auto_keyword_highlights(force=True)
         self.apply_segments_to_timeline()
         self._invalidate_dubbed_output_after_subtitle_edit()
         self.persist_current_timeline_project_data()

@@ -165,7 +165,6 @@ class _SubtitleOverlayWidget(QWidget):
         self.highlight_color = QColor("#FFD400")
         self.highlight_phrases: list[str] = []
         self.karaoke_word_index = -1
-        self.auto_keyword_highlight = False
         self.animation_style = "static"
         self.animation_progress = 1.0
         self.alignment = "Bottom Center"
@@ -420,20 +419,18 @@ class _SubtitleOverlayWidget(QWidget):
         self.update()
 
     def set_effects(self, *, highlight_color=None, highlight_phrases=None,
-                    karaoke_word_index=-1, auto_keyword_highlight=False,
+                    karaoke_word_index=-1,
                     animation_style="Static", animation_progress=1.0, animation_opacity=None):
         """Apply cue-specific TikTok/highlight effects to the live layer."""
         next_color = QColor(highlight_color or "#FFD400")
         next_phrases = [str(value).strip() for value in (highlight_phrases or []) if str(value).strip()]
         next_word_index = int(karaoke_word_index)
-        next_auto_highlight = bool(auto_keyword_highlight)
         next_animation = str(animation_style or "Static").strip().lower()
         next_progress = max(0.0, min(1.0, float(animation_progress)))
         changed = (
             self.highlight_color != next_color
             or self.highlight_phrases != next_phrases
             or self.karaoke_word_index != next_word_index
-            or self.auto_keyword_highlight != next_auto_highlight
             or self.animation_style != next_animation
             or abs(self.animation_progress - next_progress) > 0.0001
             or getattr(self, "animation_opacity", None) != animation_opacity
@@ -443,7 +440,6 @@ class _SubtitleOverlayWidget(QWidget):
         self.highlight_color = next_color
         self.highlight_phrases = next_phrases
         self.karaoke_word_index = next_word_index
-        self.auto_keyword_highlight = next_auto_highlight
         self.animation_style = next_animation
         self.animation_progress = next_progress
         self.animation_opacity = animation_opacity
@@ -475,9 +471,6 @@ class _SubtitleOverlayWidget(QWidget):
         if self.karaoke_word_index >= 0 and words:
             word = words[min(self.karaoke_word_index, len(words) - 1)]
             spans.append((word.start(), word.end()))
-        elif self.auto_keyword_highlight and not spans and words:
-            for word in sorted(words, key=lambda match: len(match.group()), reverse=True)[:2]:
-                spans.append((word.start(), word.end()))
         return spans
 
     def _draw_colored_text(self, painter, text: str, line_rect: QRectF, spans):

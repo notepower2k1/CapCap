@@ -202,8 +202,6 @@ class SubtitlePresentationController(QObject):
             from ui.utils.subtitle_effects import preview_effects
             if active:
                 effects = preview_effects(active[-1], style, position_ms or 0)
-                if active[-1].get("auto_highlights"):
-                    effects["auto_keyword_highlight"] = False
                 item.set_effects(**effects)
             main_item = view.subtitle_item
             try:
@@ -817,9 +815,10 @@ class SubtitlePresentationController(QObject):
         rows[index].update(changes)
         if "text" in changes:
             text = changes["text"].casefold()
-            for key in ("manual_highlights", "auto_highlights"):
-                if key in rows[index]:
-                    rows[index][key] = [phrase for phrase in rows[index][key] if phrase.casefold() in text]
+            if "manual_highlights" in rows[index]:
+                rows[index]["manual_highlights"] = [
+                    phrase for phrase in rows[index]["manual_highlights"] if phrase.casefold() in text
+                ]
         self.selected_secondary_index = sorted(range(len(rows)), key=lambda i: (rows[i]["start"], rows[i]["end"])).index(index)
         self.replace_timeline_rows(rows)
 

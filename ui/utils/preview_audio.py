@@ -224,6 +224,7 @@ class _PreviewAudioWorker(QObject):
     def set_tracks(self, tracks: List[Dict[str, Any]], warps: Optional[List[Dict[str, Any]]] = None) -> None:
         """Update active audio tracks and timeline warp markers."""
         self._warps = TimeWarpService.normalize_warps(warps or [])
+        self._warp_plan = TimeWarpService.compile_plan(self._warps)
         new_tracks = []
         needed_paths = set()
 
@@ -385,6 +386,7 @@ class _PreviewAudioWorker(QObject):
     def set_warps(self, warps: Optional[List[Dict[str, Any]]] = None) -> None:
         """Update timeline warp markers."""
         self._warps = TimeWarpService.normalize_warps(warps or [])
+        self._warp_plan = TimeWarpService.compile_plan(self._warps)
         self._generation_id += 1
 
     def _is_time_frozen(self, t_sec: float) -> bool:
@@ -433,8 +435,9 @@ class _PreviewAudioWorker(QObject):
             if track["is_original_video"]:
                 t0_sec = cur_t_sec
                 t1_sec = cur_t_sec + float(self.block_size) / float(self.internal_sr)
-                m0_sec = TimeWarpService.timeline_to_media_time(t0_sec, self._warps)
-                m1_sec = TimeWarpService.timeline_to_media_time(t1_sec, self._warps)
+                plan = getattr(self, "_warp_plan", self._warps)
+                m0_sec = TimeWarpService.timeline_to_media_time(t0_sec, plan)
+                m1_sec = TimeWarpService.timeline_to_media_time(t1_sec, plan)
 
                 src_offset_s = track["source_start_ms"] / 1000.0
                 sample_start = int(round((m0_sec + src_offset_s) * self.internal_sr))

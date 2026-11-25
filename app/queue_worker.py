@@ -76,7 +76,7 @@ def run_job(workspace, video, config, progress=print, *, task="full"):
         raise RuntimeError("The generated voice audio is missing. Process this video again before exporting.")
     style = dict(config.get("export", {}).get("subtitle_style", {}))
     style["word_timings"] = [list(seg.get("words",[])) for seg in segments]
-    style["manual_highlights"] = [list(seg.get("manual_highlights",[])) + list(seg.get("auto_highlights",[])) for seg in segments]
+    style["manual_highlights"] = [list(seg.get("manual_highlights") or []) for seg in segments]
     warps = list(state.settings.get("video_time_warps", []))
     if task != "export":
         from app.subtitle_timing import capture

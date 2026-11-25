@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from app.services.time_warp_plan import WarpPlan
+
 
 class TimeWarpService:
     """Service to manage non-destructive video time-warps (freeze frame / slow motion / extension)
@@ -212,7 +214,7 @@ class TimeWarpService:
         return normalized_warps(warps)
 
     @staticmethod
-    def compile_plan(warps: list[dict]):
+    def compile_plan(warps: list[dict] | WarpPlan) -> WarpPlan:
         from app.services.time_warp_plan import compile_plan
         return compile_plan(warps)
 
@@ -222,17 +224,17 @@ class TimeWarpService:
         return video_parts(duration, warps, on_adjustment)
 
     @staticmethod
-    def speed_at_media_time(media_time: float, warps: list[dict]) -> float:
+    def speed_at_media_time(media_time: float, warps: list[dict] | WarpPlan) -> float:
         from app.services.time_warp_plan import speed_at_media
         return speed_at_media(media_time, warps)
 
     @staticmethod
-    def timeline_to_media_time(timeline_time: float, warps: list[dict]) -> float:
+    def timeline_to_media_time(timeline_time: float, warps: list[dict] | WarpPlan) -> float:
         from app.services.time_warp_plan import timeline_to_media
         return timeline_to_media(float(timeline_time), warps)
 
     @staticmethod
-    def media_to_timeline_time(media_time: float, warps: list[dict]) -> float:
+    def media_to_timeline_time(media_time: float, warps: list[dict] | WarpPlan) -> float:
         from app.services.time_warp_plan import media_to_timeline
         return media_to_timeline(float(media_time), warps)
 
@@ -243,14 +245,19 @@ class TimeWarpService:
         """
         if not warps or not segments:
             return list(segments or [])
+        try:
+            plan = TimeWarpService.compile_plan(warps)
+        except (TypeError, ValueError):
+            # Keep the per-cue fallback for malformed legacy timing data.
+            plan = warps
         mapped = []
         for s in segments:
             new_s = dict(s)
             try:
                 tl_start = float(s.get("start", 0.0))
                 tl_end = float(s.get("end", 0.0))
-                new_s["start"] = round(TimeWarpService.timeline_to_media_time(tl_start, warps), 3)
-                new_s["end"] = round(TimeWarpService.timeline_to_media_time(tl_end, warps), 3)
+                new_s["start"] = round(TimeWarpService.timeline_to_media_time(tl_start, plan), 3)
+                new_s["end"] = round(TimeWarpService.timeline_to_media_time(tl_end, plan), 3)
             except (TypeError, ValueError):
                 pass
             if "words" in s and isinstance(s["words"], list):
@@ -260,8 +267,8 @@ class TimeWarpService:
                     try:
                         w_start = float(w.get("start", 0.0))
                         w_end = float(w.get("end", 0.0))
-                        new_w["start"] = round(TimeWarpService.timeline_to_media_time(w_start, warps), 3)
-                        new_w["end"] = round(TimeWarpService.timeline_to_media_time(w_end, warps), 3)
+                        new_w["start"] = round(TimeWarpService.timeline_to_media_time(w_start, plan), 3)
+                        new_w["end"] = round(TimeWarpService.timeline_to_media_time(w_end, plan), 3)
                     except (TypeError, ValueError):
                         pass
                     new_words.append(new_w)
@@ -307,11 +314,12 @@ class TimeWarpService:
         if not warps:
             return t0, dur, []
 
-        m0 = TimeWarpService.timeline_to_media_time(t0, warps)
-        m1 = TimeWarpService.timeline_to_media_time(t1, warps)
+        plan = TimeWarpService.compile_plan(warps)
+        m0 = TimeWarpService.timeline_to_media_time(t0, plan)
+        m1 = TimeWarpService.timeline_to_media_time(t1, plan)
 
         local_warps: list[dict] = []
-        for span in TimeWarpService.compile_plan(warps):
+        for span in plan:
             start, end = max(t0, span.timeline_start), min(t1, span.timeline_end)
             if end <= start:
                 continue

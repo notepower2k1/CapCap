@@ -227,8 +227,6 @@ a = Analysis(
         "app.vad_processor",
         "video_filter_chain",
         "app.video_filter_chain",
-        "new_highlight_selector",
-        "app.new_highlight_selector",
         "faster_whisper",
         "ctranslate2",
         "edge_tts",

@@ -724,23 +724,13 @@ def build_start_group(gui, left_layout):
     gui.style_library_card = style_library_card
 
     highlight_card, highlight_card_layout = _build_collapsible_section("Keyword Highlight", start_expanded=False)
-    gui.subtitle_keyword_highlight_cb = QCheckBox("Highlight key words")
-    gui.subtitle_keyword_highlight_cb.setChecked(False)
     gui.subtitle_highlight_color_combo = QComboBox()
     gui.subtitle_highlight_color_combo.addItems(["Yellow", "Cyan", "Green", "Pink"])
-    gui.subtitle_highlight_mode_combo = QComboBox()
-    gui.subtitle_highlight_mode_combo.addItems(["Auto", "Manual", "Auto + Manual"])
-    highlight_card_layout.addWidget(gui.subtitle_keyword_highlight_cb)
-
     highlight_color_row = QHBoxLayout()
     highlight_color_row.addWidget(QLabel("Color:"))
     highlight_color_row.addWidget(gui.subtitle_highlight_color_combo, 1)
     highlight_card_layout.addLayout(highlight_color_row)
 
-    highlight_mode_row = QHBoxLayout()
-    highlight_mode_row.addWidget(QLabel("Source:"))
-    highlight_mode_row.addWidget(gui.subtitle_highlight_mode_combo, 1)
-    highlight_card_layout.addLayout(highlight_mode_row)
     subtitle_layout.addWidget(highlight_card)
     gui.highlight_card = highlight_card
 

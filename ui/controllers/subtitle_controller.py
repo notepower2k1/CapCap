@@ -1546,7 +1546,6 @@ class SubtitleController:
         self.gui._sync_hidden_translated_text_from_segments()
         self.gui.apply_segments_to_timeline()
         self.gui.persist_current_timeline_project_data()
-        self.gui.refresh_auto_keyword_highlights(force=True)
         self.gui.schedule_live_subtitle_preview_refresh()
         self.gui.schedule_auto_frame_preview()
         self.gui.update_project_step("refine_translation", "done")
@@ -1602,7 +1601,6 @@ class SubtitleController:
             self.gui.current_translated_segment_models = self.gui._dict_segments_to_models(applied_segments, translated=True)
             normalized_srt = self.gui.format_to_srt(self.gui.current_translated_segments)
 
-        self.gui.refresh_auto_keyword_highlights(force=True)
         self.gui.translated_text.setText(normalized_srt)
         self.gui.apply_segments_to_timeline()
 

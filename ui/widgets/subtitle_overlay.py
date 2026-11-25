@@ -42,7 +42,6 @@ class SubtitleOverlayItem(QGraphicsObject):
         self.highlight_color = QColor("#FFD400")
         self.highlight_phrases = []
         self.karaoke_word_index = -1
-        self.auto_keyword_highlight = False
         self.shadow_depth = 0.
         self.shadow_color = QColor("#000000")
 

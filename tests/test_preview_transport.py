@@ -523,6 +523,22 @@ class TestPreviewTransport(unittest.TestCase):
         self.assertEqual(backend._video_time_warps, TimeWarpService.normalize_warps(warps))
         backend._native_audio_engine.set_warps.assert_called_once_with(TimeWarpService.normalize_warps(warps))
 
+    def test_playback_reuses_plan_until_warps_change(self):
+        from ui.utils.media_backend import MpvMediaPlayerBackend
+
+        backend = MpvMediaPlayerBackend.__new__(MpvMediaPlayerBackend)
+        backend._native_audio_active = False
+        backend._position_ms = 2000
+        backend.set_time_warps([{"time": 1., "duration": 0.5}])
+        with patch("app.services.time_warp_plan._compile", side_effect=AssertionError("Rebuilt warp key")):
+            self.assertEqual(backend.timeline_position_ms(), 2500)
+            self.assertEqual(backend.timeline_position_ms(), 2500)
+
+        backend.set_time_warps([{"time": 1., "duration": 1.25}])
+        self.assertEqual(backend.timeline_position_ms(), 3250)
+        backend.set_time_warps([])
+        self.assertEqual(backend.timeline_position_ms(), 2000)
+
     def test_tracks_snapshot_cached_and_sent_on_sink_ready(self):
         """Verify tracks snapshot is cached if sink is not yet ready, then sent when sink becomes ready."""
         from ui.utils.media_backend import MpvMediaPlayerBackend
