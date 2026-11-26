@@ -1726,10 +1726,12 @@ class VideoTranslatorGUI(QMainWindow):
                         self.log(f"[Voice] Piper voice preloaded: {expected_voice}")
                 QTimer.singleShot(0, _mark_ready)
             except Exception as exc:
+                # ``exc`` is unbound once this block exits, and _mark_failed runs later on the Qt thread.
+                failure = str(exc)
                 def _mark_failed():
                     if getattr(self, '_voice_preload_inflight', '') == expected_voice:
                         self._voice_preload_inflight = ''
-                        self.log(f"[Voice] Piper preload skipped: {exc}")
+                        self.log(f"[Voice] Piper preload skipped: {failure}")
                 QTimer.singleShot(0, _mark_failed)
 
         threading.Thread(target=_worker, args=(current_token,), daemon=True).start()
