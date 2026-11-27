@@ -11,6 +11,8 @@ def run_job(workspace, video, config, progress=print, *, task="full", on_step=No
     from services.gui_project_bridge import GUIProjectBridge
     from audio_mixer import mix_audio_tracks
     from services.voice_edit_service import group_voice_segments, merge_generated_voice_segments
+    from services.reading_rhythm import fit_reading_rhythm, prefers_reading_rhythm, shift_source_subtitles
+    from services.time_warp_service import TimeWarpService
     runtime = WorkflowRuntime(workspace)
     def prepare_progress(step, message="", percent=None):
         if on_step:
@@ -53,6 +55,7 @@ def run_job(workspace, video, config, progress=print, *, task="full", on_step=No
     existing_audio = str(config.get("existing_audio_path", "")) if config.get("use_existing_audio") else ""
     if config.get("use_existing_audio") and not os.path.isfile(existing_audio):
         raise RuntimeError("The configured existing audio file is missing.")
+    rhythm_shifts = []
     if mode in {"voice", "both"} and not existing_audio and task!="export":
         if on_step:
             on_step("voice")
@@ -60,14 +63,35 @@ def run_job(workspace, video, config, progress=print, *, task="full", on_step=No
         for seg in voice_segments:
             assignment=assignments.get(seg.get("speaker",""),{}) or {}
             if assignment.get("voice"):seg["voice_name"]=assignment["voice"]
+        voice_options = dict(config["voice"])
+        auto_extend = voice_options.pop("auto_extend_video", False)
         result = runtime.run_voice(segments=voice_segments, output_dir=str(Path(state.project_root)/"audio"),
             project_state_path=state_path, project_temp_dir=cache,
-            on_progress=progress, **config["voice"])
+            on_progress=progress, **voice_options)
         generated = result["voice_track"]
         state = service.load_project(state_path)
         merge_generated_voice_segments(segments,result.get("segments",[]))
         bridge=GUIProjectBridge(service)
         from subtitle_builder import generate_srt
+        if generated and prefers_reading_rhythm(voice_options.get("timing_sync_mode")):
+            fit = fit_reading_rhythm(
+                segments, result["segments"], float(runtime.voice_workflow.engine_runtime.get_video_duration(video) or 0),
+                state.settings.get("video_time_warps", []), auto_extend=auto_extend,
+            )
+            segments[:] = fit.subtitles
+            rhythm_shifts = fit.shifts
+            if rhythm_shifts:
+                generated = fit.rebuild_voice(generated)
+                state.set_artifact("voice_vi", generated)
+                state.set_setting("video_time_warps", fit.warps)
+                if context["current_translated_segments"]:
+                    shift_source_subtitles(context["current_segments"], fit)
+                if context["current_segments"] and context["last_original_srt_path"]:
+                    generate_srt(context["current_segments"], context["last_original_srt_path"])
+                context["current_segment_models"] = bridge.persist_transcription(
+                    state, context["current_segments"], context["last_original_srt_path"],
+                )
+            progress(f"[Reading Rhythm] Video extended by {fit.added_seconds:.2f}s. Lines still overflowing: {fit.unresolved}.")
         subtitle_path=context["last_translated_srt_path"] or str(Path(state.project_root)/"subtitle"/"subtitle.srt")
         generate_srt(segments,subtitle_path)
         bridge.persist_translation(state,context["current_segment_models"],segments,subtitle_path)
@@ -80,6 +104,7 @@ def run_job(workspace, video, config, progress=print, *, task="full", on_step=No
             voice_name=config["voice"]["voice_name"],voice_speed=config["voice"].get("voice_speed",1),
             audio_handling_mode=config["voice"].get("audio_handling_mode","fast"),
             timing_sync_mode=config["voice"].get("timing_sync_mode","off"),
+            auto_extend_video=auto_extend,
             model_id=config["voice"].get("elevenlabs_model_id"),language_code=config["voice"].get("target_language"),
             normalizer_signature=normalizer_dictionary_fingerprint(state.settings.get("normalizer_dictionary",{}))))
         service.save_project(state)
@@ -112,6 +137,8 @@ def run_job(workspace, video, config, progress=print, *, task="full", on_step=No
     from app.layers.sync_bridge import ensure_v1_a1_tracks, sync_segments_to_dub_subtitle_layers, sync_tts_to_dub_subtitle_layers
     timeline_file=str(state.artifacts.get("timeline") or Path(state.project_root)/"timeline"/"timeline.json")
     timeline=Timeline.from_dict(json.loads(Path(timeline_file).read_text(encoding="utf-8"))) if Path(timeline_file).is_file() else Timeline(duration=duration)
+    for point, extra in rhythm_shifts:
+        TimeWarpService.ripple_shift_timeline_layers(timeline, point, extra)
     ensure_v1_a1_tracks(timeline,video,runtime.voice_workflow.engine_runtime.get_video_duration(video))
     sync_segments_to_dub_subtitle_layers(timeline,segments)
     if generated:sync_tts_to_dub_subtitle_layers(timeline,generated,segments)

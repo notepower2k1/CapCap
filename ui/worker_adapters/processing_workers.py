@@ -1163,6 +1163,8 @@ class VoiceOverWorker(QThread):
         self.source_language = source_language
         self.target_language = target_language
         self.elevenlabs_model_id = elevenlabs_model_id
+        self.reading_rhythm_options = None
+        self.reading_rhythm_fit = None
         self._is_cancelled = False
         self.workflow = None
 
@@ -1224,15 +1226,7 @@ class VoiceOverWorker(QThread):
                     voice_payload,
                     timeout=3600,
                 )
-                if self._is_cancelled:
-                    return
                 result = response.get("result", {})
-                self.finished.emit(
-                    result.get("voice_track", ""),
-                    result.get("mixed_path", ""),
-                    result.get("segments", []),
-                    "",
-                )
             else:
                 from workflows.voice_workflow import VoiceWorkflow
                 workflow = VoiceWorkflow(self.workspace_root)
@@ -1261,19 +1255,34 @@ class VoiceOverWorker(QThread):
                 if any(name.startswith("omnivoice:") for name in selected_voice_names):
                     workflow_kwargs["target_language"] = self.target_language
                 result = workflow.run(**workflow_kwargs)
-                if self._is_cancelled:
-                    return
-                self.finished.emit(
-                    result.get("voice_track", ""),
-                    result.get("mixed_path", ""),
-                    result.get("segments", []),
-                    "",
-                )
+            if self._is_cancelled:
+                return
+            voice_track = result.get("voice_track", "")
+            voices = result.get("segments", [])
+            if self.reading_rhythm_options is not None and voice_track and voices:
+                voice_track = self._fit_reading_rhythm(voice_track, voices)
+            if not self._is_cancelled:
+                self.finished.emit(voice_track, result.get("mixed_path", ""), voices, "")
         except Exception as exc:
             if self._is_cancelled:
                 return
             print(f"[VoiceOverWorker ERROR] {str(exc)}")
             self.finished.emit("", "", [], str(exc))
+
+    def _fit_reading_rhythm(self, voice_track, voices):
+        from services.reading_rhythm import fit_reading_rhythm
+        from services.voice_edit_service import merge_generated_voice_segments
+        from video_processor import get_video_duration
+
+        options = self.reading_rhythm_options
+        source_path = options["source_path"]
+        duration = float(get_video_duration(source_path) or 0) if source_path else 0.0
+        rows = options["subtitles"]
+        merge_generated_voice_segments(rows, voices)
+        fit = fit_reading_rhythm(rows, voices, duration, options["warps"], auto_extend=options["auto_extend"])
+        voice_track = fit.rebuild_voice(voice_track)
+        self.reading_rhythm_fit = fit
+        return voice_track
 
 
 class FinalExportWorker(QThread):
@@ -1421,20 +1430,15 @@ class SegmentAudioPreviewWorker(QThread):
                 model_id=model_id,
                 language_code=language_code if v_provider in {"elevenlabs", "omnivoice"} else None,
             )
+            base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_{cache_key[:16]}_base.wav")
+            staging_wav_path = base_wav_path
             if is_elevenlabs:
-                base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_{cache_key[:16]}_base.wav")
                 staging_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_{cache_key[:16]}_work.wav")
                 try:
                     if os.path.exists(staging_wav_path):
                         os.remove(staging_wav_path)
                 except OSError:
                     pass
-            elif v_provider == "omnivoice":
-                base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_{cache_key[:16]}_base.wav")
-                staging_wav_path = base_wav_path
-            else:
-                base_wav_path = os.path.join(cache_temp_dir, f"seg_{self.index:04d}_base.wav")
-                staging_wav_path = base_wav_path
             synthesize_kwargs = dict(
                 text=self.text,
                 wav_path=staging_wav_path,

@@ -183,8 +183,8 @@ class Segment:
                 pass
         if self.metadata.get("time_warp_id"):
             payload["time_warp_id"] = str(self.metadata.get("time_warp_id"))
-        if self.metadata.get("_wav_path"):
-            payload["_wav_path"] = str(self.metadata.get("_wav_path"))
+        if "_wav_path" in self.metadata:
+            payload["_wav_path"] = str(self.metadata.get("_wav_path") or "")
         if self.metadata.get("translation_provider"):
             payload["translation_provider"] = str(self.metadata.get("translation_provider"))
         if self.metadata.get("provider"):

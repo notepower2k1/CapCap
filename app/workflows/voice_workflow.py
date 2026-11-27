@@ -205,7 +205,8 @@ class VoiceWorkflow:
         if mixed_path:
             self.project_service.update_artifact(state, "mixed_vi", mixed_path, save=False)
             self.project_service.update_step(state, "mix_audio", "done", save=False)
-        elif background_path:
+        elif background_path or state.artifacts.get("mixed_vi"):
+            self.project_service.update_artifact(state, "mixed_vi", "", save=False)
             self.project_service.update_step(state, "mix_audio", "skipped", save=False)
         self.project_service.save_project(state)
 
@@ -1041,6 +1042,9 @@ class VoiceWorkflow:
         voice_speed: float,
         sync_mode: str,
     ):
+        from services.reading_rhythm import prefers_reading_rhythm
+
+        keep_reading_rhythm = prefers_reading_rhythm(sync_mode)
         polished_wavs = list(wavs or [])
         automatic_speeds = [1.0] * len(polished_wavs)
         for idx, (seg, wav_path) in enumerate(zip(list(segments or []), polished_wavs)):
@@ -1064,13 +1068,15 @@ class VoiceWorkflow:
             except (TypeError, ValueError):
                 manual_speed = 1.0
             has_manual_override = abs(manual_speed - 1.0) >= 0.02
+            if keep_reading_rhythm and not has_manual_override:
+                seg.pop("voice_speed", None)
 
             target_duration = max(0.0, float(seg.get("end", 0.0)) - float(seg.get("start", 0.0)))
             actual_duration = self._probe_wav_duration_seconds(wav_path)
             ratio = (actual_duration / target_duration) if target_duration > 0 else 0.0
 
             seg["pre_speed_ratio"] = round(ratio, 3) if target_duration > 0 else 1.0
-            if not has_manual_override:
+            if not has_manual_override and not keep_reading_rhythm:
                 # Boundary cleanup above is shared by every mode. Do not run
                 # the older, more aggressive -40 dB tail trimmer in Smart.
                 speech_cost = int(((seg.get("_tts_metrics") or {}).get("speech_cost")) or 0)
@@ -1178,27 +1184,6 @@ class VoiceWorkflow:
                                     seg["_auto_fit_applied"] = True
                                     seg["action_taken"] = "smart_fit"
 
-            if (sync_mode or "off").strip().lower() in ("timeline", "timeline priority"):
-                # Timeline Priority: cut audio to fit the segment window,
-                # but extend to fill gaps to the next segment to minimize cutting.
-                # Calculate extended duration if there's a gap to next segment
-                extended_duration = target_duration
-                if idx + 1 < len(segments):
-                    next_seg = segments[idx + 1]
-                    next_start = float(next_seg.get("start", 0.0))
-                    seg_end = float(seg.get("end", 0.0))
-                    gap = next_start - seg_end
-                    if gap > 0.01:  # Only extend if gap is meaningful (>10ms)
-                        extended_duration = target_duration + gap
-                        print(f"[Timeline Priority] Segment {idx+1}: extending by {gap:.3f}s to fill gap")
-                
-                synced_path = os.path.join(tmp_dir, f"seg_{idx:04d}_timelinefit.wav")
-                polished_wavs[idx] = self.engine_runtime.fit_wav_to_duration(
-                    input_wav_path=polished_wavs[idx],
-                    output_wav_path=synced_path,
-                    target_duration_seconds=extended_duration,
-                    mode="timeline",
-                )
         if abs(float(voice_speed) - 1.0) >= 0.02 or any(
             seg.get("voice_speed") for seg in (segments or [])
         ):
@@ -1207,6 +1192,10 @@ class VoiceWorkflow:
                 tmp_dir=tmp_dir,
                 voice_speed=voice_speed,
                 segments=segments,
+            )
+        if (sync_mode or "off").strip().lower() in ("timeline", "timeline priority"):
+            polished_wavs = self._fit_segment_wavs_to_timeline(
+                segments=segments, wavs=polished_wavs, tmp_dir=tmp_dir,
             )
         if (sync_mode or "off").strip().lower() in ("force", "force fit"):
             for idx, (seg, wav_path) in enumerate(zip(list(segments or []), polished_wavs)):
@@ -1305,24 +1294,23 @@ class VoiceWorkflow:
         )
         return segments, polished_wavs
 
-    def _fit_segment_wavs_to_timeline(self, *, segments, wavs, tmp_dir: str, sync_mode: str):
-        mode_key = (sync_mode or "off").strip().lower()
-        if mode_key not in {"smart", "timeline"}:
-            return wavs
-
+    def _fit_segment_wavs_to_timeline(self, *, segments, wavs, tmp_dir: str):
         synced_wavs = []
         for idx, (seg, wav_path) in enumerate(zip(segments, wavs)):
             if not wav_path or not os.path.exists(wav_path):
                 synced_wavs.append(wav_path)
                 continue
-            target_duration = max(0.0, float(seg.get("end", 0.0)) - float(seg.get("start", 0.0)))
-            suffix = "timelinefit" if mode_key == "timeline" else "smartfit"
-            synced_path = os.path.join(tmp_dir, f"seg_{idx:04d}_{suffix}.wav")
+            limit = segments[idx + 1]["start"] if idx + 1 < len(segments) else seg["end"]
+            target_duration = float(limit) - float(seg["start"])
+            if target_duration <= 0:
+                synced_wavs.append("")
+                continue
+            synced_path = os.path.join(tmp_dir, f"seg_{idx:04d}_timelinefit.wav")
             fitted_path = self.engine_runtime.fit_wav_to_duration(
                 input_wav_path=wav_path,
                 output_wav_path=synced_path,
                 target_duration_seconds=target_duration,
-                mode=mode_key,
+                mode="timeline",
             )
             synced_wavs.append(fitted_path)
         return synced_wavs
@@ -1336,6 +1324,8 @@ class VoiceWorkflow:
         to know the actual audio duration to determine when segments should stack.
         """
         for seg, wav_path in zip(segments, wavs or []):
+            seg.pop("_original_end", None)
+            seg.pop("_audio_end", None)
             if not wav_path or not os.path.exists(wav_path):
                 continue
             actual_d = self._probe_wav_duration_seconds(wav_path)
@@ -1406,14 +1396,12 @@ class VoiceWorkflow:
                 model_id=segment_model_id,
                 language_code=segment_language_code,
             )
-            if segment_provider in {"elevenlabs", "omnivoice"}:
-                seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}_{cache_key[:16]}_base.wav")
-            else:
-                seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}_base.wav")
+            cache_suffix = f"_{cache_key[:16]}_base.wav"
+            seg_wav = os.path.join(tmp_dir, f"seg_{global_idx:04d}{cache_suffix}")
             cache_entry = manifest_segments.get(str(global_idx), {})
             cached_wav = str(cache_entry.get("wav_path", "")).strip()
             cached_key = str(cache_entry.get("cache_key", "")).strip()
-            cached_usable = bool(cached_key == cache_key and cached_wav and os.path.exists(cached_wav))
+            cached_usable = cached_key == cache_key and cached_wav.endswith(cache_suffix) and os.path.isfile(cached_wav)
             if cached_usable and segment_provider == "elevenlabs":
                 cached_usable = self._is_valid_elevenlabs_audio(cached_wav)
                 if not cached_usable:
@@ -1422,7 +1410,7 @@ class VoiceWorkflow:
                 cache_entry = dict(manifest_by_cache_key.get(cache_key, {}) or {})
                 cached_wav = str(cache_entry.get("wav_path", "")).strip()
                 cached_key = str(cache_entry.get("cache_key", "")).strip()
-                cached_usable = bool(cached_key == cache_key and cached_wav and os.path.exists(cached_wav))
+                cached_usable = cached_key == cache_key and cached_wav.endswith(cache_suffix) and os.path.isfile(cached_wav)
                 if cached_usable and segment_provider == "elevenlabs":
                     cached_usable = self._is_valid_elevenlabs_audio(cached_wav)
                     if not cached_usable:

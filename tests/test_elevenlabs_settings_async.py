@@ -187,11 +187,8 @@ class TestElevenLabsSettingsAsync(unittest.TestCase):
         os.environ["ELEVENLABS_MODEL"] = "eleven_turbo_v2_5"
         os.environ["ELEVENLABS_TTS_WORKERS"] = "2"
         payload = self._voice_payload("draft-key")
-        write_calls = []
-
-        def write_cache(key, cache_payload):
-            write_calls.append((key, cache_payload))
-            return True
+        models = [{"model_id": "new_api_model", "name": "New API model"}]
+        snapshots = []
 
         def schedule_save():
             dialog, key_edit, sync_button, save_button, _cancel = self._dialog_controls()
@@ -211,16 +208,27 @@ class TestElevenLabsSettingsAsync(unittest.TestCase):
 
             QTimer.singleShot(5, save_after_staged_result)
 
+        def inspect_reopened_dialog():
+            dialog, _key_edit, _sync, _save, cancel = self._dialog_controls()
+            combo = dialog.findChild(QComboBox, "elevenlabs_model")
+            snapshots.append((combo.currentData(), combo.currentText()))
+            cancel.click()
+
         try:
-            with patch("app.engines.elevenlabs_tts.read_elevenlabs_voice_cache", return_value={}), \
+            from app.engines.elevenlabs_tts import read_elevenlabs_voice_cache
+            cache_file = str(Path(self.temp_dir.name) / "elevenlabs_voices_cache.json")
+            with patch("app.engines.elevenlabs_tts._resolve_temp_path", return_value=cache_file), \
                     patch("app.engines.elevenlabs_tts.fetch_elevenlabs_voice_catalog", return_value=payload), \
-                    patch("app.engines.elevenlabs_tts.fetch_elevenlabs_models", return_value=[{"model_id": "eleven_v4", "name": "eleven_v4"}]), \
-                    patch("app.engines.elevenlabs_tts.write_elevenlabs_voice_cache", side_effect=write_cache), \
+                    patch("app.engines.elevenlabs_tts.fetch_elevenlabs_models", return_value=models) as model_fetch, \
                     patch.object(QMessageBox, "critical"), patch.object(QMessageBox, "information"), \
                     patch.object(QMessageBox, "warning"):
                 self._open_dialog_in_temp_cwd(schedule_save)
+                self.assertEqual(read_elevenlabs_voice_cache("draft-key"), dict(payload, models=models))
+                self.assertEqual(read_elevenlabs_voice_cache("active-key", allow_expired=True), {})
+                self._open_dialog_in_temp_cwd(inspect_reopened_dialog)
+                model_fetch.assert_called_once_with("draft-key")
             self.assertEqual(os.environ["ELEVENLABS_API_KEY"], "draft-key")
-            self.assertEqual(write_calls, [("draft-key", payload)])
+            self.assertEqual(snapshots, [("new_api_model", "New API model")])
             self.host.load_voice_preview_catalog.assert_called_once_with()
             self.host.set_project_transcription_engine.assert_called_once_with("sensevoice")
         finally:

@@ -46,6 +46,7 @@ from app.engines.elevenlabs_tts import (
     synthesize_elevenlabs_tts_wav_16k_mono,
     write_elevenlabs_voice_cache,
 )
+from app.language_support import voice_matches_language
 
 
 class TestElevenLabsTTS(unittest.TestCase):
@@ -72,13 +73,13 @@ class TestElevenLabsTTS(unittest.TestCase):
                 {
                     "voice_id": "21m00Tcm4TlvDq8ikWAM",
                     "name": "Rachel",
-                    "labels": {"gender": "female"},
+                    "labels": {"gender": "female", "language": "en"},
                     "category": "premade",
                 },
                 {
                     "voice_id": "AZnzlk1XvdvUeBnXmlld",
                     "name": "Domi",
-                    "labels": {"gender": "male"},
+                    "labels": {"gender": "male", "language": " VI_vn "},
                     "category": "premade",
                     "preview_url": "https://elevenlabs.io/sample.mp3",
                 },
@@ -105,7 +106,7 @@ class TestElevenLabsTTS(unittest.TestCase):
             "name": "Rachel [Default]",
             "provider": "elevenlabs",
             "provider_voice": "21m00Tcm4TlvDq8ikWAM",
-            "language": "multilingual",
+            "language": "en",
             "gender": "female",
             "tier": "free",
             "category": "premade",
@@ -124,7 +125,7 @@ class TestElevenLabsTTS(unittest.TestCase):
             "name": "Domi [Default]",
             "provider": "elevenlabs",
             "provider_voice": "AZnzlk1XvdvUeBnXmlld",
-            "language": "multilingual",
+            "language": "vi-vn",
             "gender": "male",
             "tier": "free",
             "category": "premade",
@@ -139,6 +140,8 @@ class TestElevenLabsTTS(unittest.TestCase):
         }
         self.assertEqual(voices[0], expected_v1)
         self.assertEqual(voices[1], expected_v2)
+        self.assertEqual([voice for voice in voices if voice_matches_language(voice, "vi")], [expected_v2])
+        self.assertEqual([voice for voice in voices if voice_matches_language(voice, "en")], [expected_v1])
 
         # Check cache was saved properly
         self.assertTrue(os.path.isfile(self.cache_file))
@@ -625,9 +628,13 @@ class TestElevenLabsTTS(unittest.TestCase):
             "fetched_at": time.time(),
             "user_subscription": {"tier": "creator"},
             "voices": [{"id": "elevenlabs:active_voice"}],
+            "models": [{"model_id": "synced_model", "name": "Synced model"}],
             "key_fingerprint": hashlib.sha256(b"active_key").hexdigest(),
         }
         self.assertTrue(write_elevenlabs_voice_cache("active_key", active_payload))
+        voice_only_refresh = {key: value for key, value in active_payload.items() if key != "models"}
+        self.assertTrue(write_elevenlabs_voice_cache("active_key", voice_only_refresh))
+        self.assertEqual(read_elevenlabs_voice_cache("active_key"), active_payload)
 
         def fake_get(url, *args, **kwargs):
             response = MagicMock()

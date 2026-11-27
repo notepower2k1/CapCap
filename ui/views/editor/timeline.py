@@ -2226,7 +2226,8 @@ class EditorTimeline(QGraphicsView):
 
         excess_voice = 0.0
         layer_end_val = float(getattr(layer, "end", 0.0) or 0.0)
-        if raw_audio_end is not None and extended_duration <= 0.001:
+        timeline_priority = (self._voice_sync_mode or "").strip().lower() in {"timeline", "timeline priority"}
+        if not timeline_priority and raw_audio_end is not None and extended_duration <= 0.001:
             try:
                 a_end = float(raw_audio_end)
                 if a_end > layer_end_val + 0.05:

@@ -484,7 +484,8 @@ def show_model_settings_dialog(gui, *, remote_mode: bool):
     elevenlabs_key_edit.setObjectName("elevenlabs_api_key")
     elevenlabs_key_edit.setEchoMode(QLineEdit.Password)
     elevenlabs_key_edit.setPlaceholderText("sk-...")
-    elevenlabs_key_edit.setText(os.getenv("ELEVENLABS_API_KEY", gui.settings.value("elevenlabs_api_key", "")))
+    saved_key = str(os.getenv("ELEVENLABS_API_KEY", gui.settings.value("elevenlabs_api_key", "")) or "").strip()
+    elevenlabs_key_edit.setText(saved_key)
     elevenlabs_key_layout.addWidget(elevenlabs_key_label)
     elevenlabs_key_layout.addWidget(elevenlabs_key_edit)
     elevenlabs_settings_layout.addLayout(elevenlabs_key_layout)
@@ -492,19 +493,35 @@ def show_model_settings_dialog(gui, *, remote_mode: bool):
     elevenlabs_model_layout = QVBoxLayout()
     elevenlabs_model_label = QLabel(t("Model:"), elevenlabs_settings_widget)
     elevenlabs_model_combo = QComboBox(elevenlabs_settings_widget)
+    elevenlabs_model_combo.setObjectName("elevenlabs_model")
     try:
-        from app.engines.elevenlabs_tts import DEFAULT_ELEVENLABS_MODELS, fetch_elevenlabs_models
+        from app.engines.elevenlabs_tts import (
+            DEFAULT_ELEVENLABS_MODELS, normalize_elevenlabs_models, read_elevenlabs_voice_cache,
+        )
     except ImportError:
-        from engines.elevenlabs_tts import DEFAULT_ELEVENLABS_MODELS, fetch_elevenlabs_models
+        from engines.elevenlabs_tts import (
+            DEFAULT_ELEVENLABS_MODELS, normalize_elevenlabs_models, read_elevenlabs_voice_cache,
+        )
 
-    for m in DEFAULT_ELEVENLABS_MODELS:
-        elevenlabs_model_combo.addItem(t(m["name"]), m["model_id"])
+    cached_account = read_elevenlabs_voice_cache(saved_key, allow_expired=True) if saved_key else {}
+    cached_models = cached_account.get("models", [])
 
-    current_el_model = os.getenv("ELEVENLABS_MODEL", gui.settings.value("elevenlabs_model", "eleven_turbo_v2_5"))
+    def _show_elevenlabs_models(models, selected):
+        elevenlabs_model_combo.clear()
+        for model in models:
+            elevenlabs_model_combo.addItem(t(model["name"]), model["model_id"])
+        selected_idx = elevenlabs_model_combo.findData(selected)
+        if selected_idx < 0:
+            selected_idx = elevenlabs_model_combo.findData("eleven_turbo_v2_5")
+        elevenlabs_model_combo.setCurrentIndex(max(0, selected_idx))
+
+    current_el_model = str(os.getenv("ELEVENLABS_MODEL", gui.settings.value("elevenlabs_model", "eleven_turbo_v2_5")) or "").strip()
     if current_el_model == "eleven_multilingual_v2":
         current_el_model = "eleven_turbo_v2_5"
-    el_model_idx = elevenlabs_model_combo.findData(current_el_model)
-    elevenlabs_model_combo.setCurrentIndex(el_model_idx if el_model_idx >= 0 else 2) # eleven_turbo_v2_5
+    initial_models = list(cached_models or DEFAULT_ELEVENLABS_MODELS)
+    if current_el_model and not any(model["model_id"] == current_el_model for model in initial_models):
+        initial_models.append({"model_id": current_el_model, "name": current_el_model})
+    _show_elevenlabs_models(initial_models, current_el_model)
     elevenlabs_model_layout.addWidget(elevenlabs_model_label)
     elevenlabs_model_layout.addWidget(elevenlabs_model_combo)
     elevenlabs_settings_layout.addLayout(elevenlabs_model_layout)
@@ -530,18 +547,8 @@ def show_model_settings_dialog(gui, *, remote_mode: bool):
 
     elevenlabs_sub_label = QLabel(elevenlabs_settings_widget)
     elevenlabs_sub_label.setObjectName("helperLabel")
-    saved_key = os.getenv("ELEVENLABS_API_KEY", gui.settings.value("elevenlabs_api_key", "")).strip()
-
     _format_sub_label = format_elevenlabs_sub_label
-    try:
-        try:
-            from app.engines.elevenlabs_tts import read_elevenlabs_voice_cache
-        except ImportError:
-            from engines.elevenlabs_tts import read_elevenlabs_voice_cache
-        cached_account = read_elevenlabs_voice_cache(saved_key, allow_expired=True) if saved_key else {}
-        c_sub = cached_account.get("user_subscription", {}) if isinstance(cached_account, dict) else {}
-    except Exception:
-        c_sub = {}
+    c_sub = cached_account.get("user_subscription", {})
     c_tier = str(c_sub.get("tier", "free") or "free").strip().lower() if isinstance(c_sub, dict) else "free"
     elevenlabs_sub_label.setText(_format_sub_label(c_sub, saved_key))
     _update_workers_combo_state(c_tier)
@@ -577,26 +584,14 @@ def show_model_settings_dialog(gui, *, remote_mode: bool):
         else:
             payload = result.get("payload")
             voices = payload.get("voices", []) if isinstance(payload, dict) else None
-            models = result.get("models", [])
+            models = normalize_elevenlabs_models(result.get("models"))
             if not isinstance(voices, list):
                 elevenlabs_sync_status.setText(t("Sync failed."))
                 QMessageBox.critical(dialog, "ElevenLabs", t("ElevenLabs returned an invalid voice catalog."))
             else:
-                sync_session["result"] = {"api_key": snapshot_key, "payload": payload}
-                valid_models = [
-                    (str(item.get("model_id", "") or "").strip(), str(item.get("name", "") or "").strip())
-                    for item in models if isinstance(item, dict)
-                ] if isinstance(models, list) else []
-                valid_models = [(model_id, name or model_id) for model_id, name in valid_models if model_id]
-                if valid_models:
-                    saved_selected = elevenlabs_model_combo.currentData()
-                    elevenlabs_model_combo.clear()
-                    for model_id, model_name in valid_models:
-                        elevenlabs_model_combo.addItem(t(model_name), model_id)
-                    selected_idx = elevenlabs_model_combo.findData(saved_selected)
-                    if selected_idx < 0:
-                        selected_idx = elevenlabs_model_combo.findData("eleven_turbo_v2_5")
-                    elevenlabs_model_combo.setCurrentIndex(max(0, selected_idx))
+                sync_session["result"] = {"api_key": snapshot_key, "payload": dict(payload, models=models)}
+                if models:
+                    _show_elevenlabs_models(models, elevenlabs_model_combo.currentData())
 
                 sub_info = payload.get("user_subscription", {}) if isinstance(payload, dict) else {}
                 elevenlabs_sub_label.setText(_format_sub_label(sub_info, snapshot_key))
@@ -813,7 +808,7 @@ def show_model_settings_dialog(gui, *, remote_mode: bool):
                 from engines.elevenlabs_tts import write_elevenlabs_voice_cache
             cache_written = write_elevenlabs_voice_cache(new_elevenlabs_key, staged_sync["payload"])
             if not cache_written:
-                gui.log("[ElevenLabs] Synced voice cache was rejected; a background refresh will retry after Save.")
+                gui.log("[ElevenLabs] Could not save the synced catalog. Sync again to update the cache.")
         except Exception as exc:
             gui.log(f"[ElevenLabs] Could not commit the synced voice cache: {exc}")
     os.environ["ELEVENLABS_API_KEY"] = new_elevenlabs_key

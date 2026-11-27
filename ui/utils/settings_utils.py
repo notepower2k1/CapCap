@@ -127,6 +127,8 @@ def save_user_settings(gui):
         s.setValue("voice_speed", str(gui.voice_speed_spin.currentText() or "1.0x (Normal)"))
     if hasattr(gui, "voice_timing_sync_combo"):
         s.setValue("voice_timing_sync_mode", current_source_text(gui.voice_timing_sync_combo))
+    if hasattr(gui, "voice_rhythm_extend_cb"):
+        s.setValue("voice_rhythm_extend", gui.voice_rhythm_extend_cb.isChecked())
 
     # Default transcription engine
     current_engine = gui.get_transcription_engine() if hasattr(gui, "get_transcription_engine") else os.getenv("TRANSCRIPTION_ENGINE", "sensevoice")
@@ -295,6 +297,8 @@ def load_user_settings(gui):
             if idx >= 0:
                 gui.voice_timing_sync_combo.setCurrentIndex(idx)
 
+    if hasattr(gui, "voice_rhythm_extend_cb"):
+        gui.voice_rhythm_extend_cb.setChecked(str(s.value("voice_rhythm_extend", False)).lower() == "true")
     gui.keep_timeline_cb.setChecked(True)
     if hasattr(gui, "anchor_inspector_cb"):
         gui.anchor_inspector_cb.setChecked(

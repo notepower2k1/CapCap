@@ -243,7 +243,7 @@ def fit_wav_to_duration(
         mono = np.mean(data, axis=1) if data.ndim == 2 else data
 
         if mode_key == "timeline":
-            if abs(fit_ratio - 1.0) < 0.02:
+            if source_duration <= target_duration:
                 return input_wav_path
             target_samples = max(1, int(round(target_duration * sr)))
             out_pcm = mono[:target_samples]
@@ -284,7 +284,7 @@ def fit_wav_to_duration(
     part_path = f"{output_wav_path}.{uuid.uuid4().hex[:8]}.part.wav"
 
     if mode_key == "timeline":
-        if abs(fit_ratio - 1.0) < 0.02:
+        if source_duration <= target_duration:
             return input_wav_path
         cmd = [
             ffmpeg, "-y", "-i", input_wav_path,

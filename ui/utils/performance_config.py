@@ -58,6 +58,7 @@ def _capture(gui):
             subtitle_presentation=gui.subtitle_presentation_controller.export_settings() if hasattr(gui, "subtitle_presentation_controller") else None),
         voice=dict(voice_name=gui.get_active_voice_name(), voice_speed=gui._parse_voice_speed_value(),
             audio_handling_mode=gui.get_audio_handling_mode(), timing_sync_mode=current_source_text(gui.voice_timing_sync_combo),
+            auto_extend_video=bool(getattr(gui, "voice_rhythm_extend_cb", None) and gui.voice_rhythm_extend_cb.isChecked()),
             original_volume=gui.audio_a1_volume_slider.value(), dub_volume=gui.audio_a2_volume_slider.value(),
             target_language=gui.get_target_language_code(), source_language=gui.get_source_language_code(),
             elevenlabs_model_id=os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5"),
@@ -103,6 +104,9 @@ def restore(gui, config, *, refresh=True):
     finally:
         for widget, state in reversed(blocked):
             widget.blockSignals(state)
+    if hasattr(gui, "voice_rhythm_extend_cb"):
+        from services.reading_rhythm import prefers_reading_rhythm
+        gui.voice_rhythm_extend_cb.setVisible(prefers_reading_rhythm(current_source_text(gui.voice_timing_sync_combo)))
     os.environ.update({k:str(v) for k,v in config.get("environment",{}).items() if k in ENV_KEYS})
     overlay=getattr(gui,"ocr_region_overlay",None)
     if overlay is not None:

@@ -218,6 +218,7 @@ class ProjectService:
         voice_name: str = "",
         voice_speed: float = 1.0,
         timing_sync_mode: str = "off",
+        auto_extend_video: bool = False,
         background_path: str = "",
         original_volume: int = 50,
         dub_volume: int = 100,
@@ -239,6 +240,7 @@ class ProjectService:
         payload = {
             "audio_handling_mode": str(audio_handling_mode or "fast").strip().lower(),
             "tts_boundary_trim_version": BOUNDARY_TRIM_VERSION,
+            "tts_clip_cache_version": 2,
             "voice_track_format": "native-sample-rate",
             "voice_name": str(voice_name or "").strip(),
             "voice_speed": round(safe_voice_speed, 3),
@@ -272,6 +274,9 @@ class ProjectService:
             [str(voice_name or "").strip()]
             + [str((seg or {}).get("voice_name") or "").strip() for seg in segments]
         ))
+        from .reading_rhythm import prefers_reading_rhythm
+        if prefers_reading_rhythm(timing_sync_mode):
+            payload["auto_extend_video"] = bool(auto_extend_video)
         omni_voices = [name for name in voice_names if name.startswith("omnivoice:")]
         if omni_voices:
             from engines.omnivoice_tts import voice_fingerprint

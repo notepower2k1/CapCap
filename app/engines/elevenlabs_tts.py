@@ -85,6 +85,22 @@ def _elevenlabs_key_fingerprint(api_key: str) -> str:
     return hashlib.sha256(clean_key.encode("utf-8")).hexdigest() if clean_key else ""
 
 
+def normalize_elevenlabs_models(models) -> list[dict]:
+    if not isinstance(models, list):
+        return []
+    result = []
+    seen = set()
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        model_id = str(model.get("model_id") or "").strip()
+        if not model_id or model_id in seen or model_id == "eleven_multilingual_v2":
+            continue
+        seen.add(model_id)
+        result.append({"model_id": model_id, "name": str(model.get("name") or "").strip() or model_id})
+    return result
+
+
 def read_elevenlabs_voice_cache(api_key: str, *, allow_expired: bool = False) -> dict:
     """Read the key-bound voice cache without making requests.
 
@@ -123,8 +139,10 @@ def read_elevenlabs_voice_cache(api_key: str, *, allow_expired: bool = False) ->
         if not isinstance(subscription, dict):
             return {}
 
+        models = normalize_elevenlabs_models(cache_data.get("models"))
         return {
             "voices": voices,
+            **({"models": models} if models else {}),
             "fetched_at": fetched_at,
             "user_subscription": subscription,
             "key_fingerprint": expected_fingerprint,
@@ -159,6 +177,10 @@ def write_elevenlabs_voice_cache(api_key: str, cache_data: dict) -> bool:
     if not isinstance(subscription, dict):
         return False
 
+    models = normalize_elevenlabs_models(cache_data.get("models"))
+    if not models:
+        # A voice-only refresh can keep the last known model list for this key.
+        models = read_elevenlabs_voice_cache(api_key, allow_expired=True).get("models", [])
     cache_path = _resolve_temp_path(CACHE_FILE_NAME)
     temp_cache_path = None
     try:
@@ -175,6 +197,7 @@ def write_elevenlabs_voice_cache(api_key: str, cache_data: dict) -> bool:
                     "fetched_at": fetched_at,
                     "user_subscription": subscription,
                     "voices": voices,
+                    "models": models,
                     "key_fingerprint": expected_fingerprint,
                 },
                 cache_file,
@@ -252,22 +275,27 @@ def fetch_elevenlabs_models(api_key: str = "") -> list[dict]:
     Filters out models where can_do_text_to_speech is False.
     Excludes eleven_multilingual_v2 as it lacks Vietnamese support.
     Returns list of dicts [{"model_id": ..., "name": ...}].
-    Returns DEFAULT_ELEVENLABS_MODELS on failure or empty response.
+    Uses the last synced models or the bundled defaults if the API is unavailable.
     """
     clean_key = str(api_key or "").strip()
     url = "https://api.elevenlabs.io/v1/models"
     headers = {"xi-api-key": clean_key} if clean_key else {}
+
+    def cached_or_default():
+        cached = read_elevenlabs_voice_cache(clean_key, allow_expired=True).get("models", [])
+        return cached or [dict(model) for model in DEFAULT_ELEVENLABS_MODELS]
+
     try:
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code != 200:
-            return [dict(m) for m in DEFAULT_ELEVENLABS_MODELS]
+            return cached_or_default()
         data = response.json()
         if isinstance(data, list):
             raw_models = data
         elif isinstance(data, dict) and isinstance(data.get("models"), list):
             raw_models = data["models"]
         else:
-            return [dict(m) for m in DEFAULT_ELEVENLABS_MODELS]
+            return cached_or_default()
 
         default_names = {m["model_id"]: m["name"] for m in DEFAULT_ELEVENLABS_MODELS}
         results = []
@@ -282,12 +310,10 @@ def fetch_elevenlabs_models(api_key: str = "") -> list[dict]:
             name = default_names.get(mid) or str(item.get("name") or mid).strip()
             results.append({"model_id": mid, "name": name})
 
-        if not results:
-            return [dict(m) for m in DEFAULT_ELEVENLABS_MODELS]
-        return results
+        return normalize_elevenlabs_models(results) or cached_or_default()
     except Exception as e:
         print(f"[ElevenLabs] Lỗi khi lấy danh sách models: {e}")
-        return [dict(m) for m in DEFAULT_ELEVENLABS_MODELS]
+        return cached_or_default()
 
 
 def fetch_elevenlabs_voice_catalog(
@@ -348,10 +374,14 @@ def fetch_elevenlabs_voice_catalog(
         base_name = str(item.get("name", "") or "").strip()
         labels = item.get("labels") or {}
         gender = "any"
+        language = "multilingual"
         if isinstance(labels, dict):
             raw_gender = str(labels.get("gender") or "").strip().lower()
             if raw_gender in ("male", "female"):
                 gender = raw_gender
+            voice_language = labels.get("language")
+            if isinstance(voice_language, str) and voice_language.strip():
+                language = voice_language.strip().lower().replace("_", "-")
         preview_url = str(item.get("preview_url") or "").strip()
 
         category = str(item.get("category") or "").strip().lower()
@@ -399,7 +429,7 @@ def fetch_elevenlabs_voice_catalog(
             "name": display_name,
             "provider": "elevenlabs",
             "provider_voice": voice_id,
-            "language": "multilingual",
+            "language": language,
             "gender": gender,
             "tier": tier_label,
             "category": category,

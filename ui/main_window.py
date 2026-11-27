@@ -4479,6 +4479,7 @@ class VideoTranslatorGUI(QMainWindow):
             voice_name=voice_name,
             voice_speed=self._parse_voice_speed_value(),
             timing_sync_mode=current_source_text(self.voice_timing_sync_combo).strip(),
+            auto_extend_video=bool(getattr(self, "voice_rhythm_extend_cb", None) and self.voice_rhythm_extend_cb.isChecked()),
             background_path=background_path,
             original_volume=int(self.audio_a1_volume_slider.value()) if hasattr(self, "audio_a1_volume_slider") else 50,
             dub_volume=int(self.audio_a2_volume_slider.value()) if hasattr(self, "audio_a2_volume_slider") else 100,
@@ -12247,9 +12248,9 @@ class VideoTranslatorGUI(QMainWindow):
         return ""
 
     def _resolve_segment_wav_path(self, seg: dict, idx: int, tts_dir: str = "") -> str:
-        w = seg.get("_wav_path", "")
-        if w and not w.endswith("_base.wav") and os.path.exists(w):
-            return w
+        if "_wav_path" in seg:
+            path = seg["_wav_path"]
+            return path if path and os.path.isfile(path) else ""
 
         if not tts_dir:
             tts_dir = self._resolve_tts_temp_dir()
@@ -12292,6 +12293,8 @@ class VideoTranslatorGUI(QMainWindow):
         return ""
 
     def _get_segment_audio_end(self, seg: dict, idx: int) -> float:
+        if current_source_text(getattr(self, "voice_timing_sync_combo", None)).strip().lower() in {"timeline", "timeline priority"}:
+            return float(seg.get("end", 0.0) or 0.0)
         raw = seg.get("_audio_end")
         if raw is not None:
             try:
@@ -12344,8 +12347,18 @@ class VideoTranslatorGUI(QMainWindow):
         voice_track = os.path.join(tts_dir, "voice_vi.wav")
 
         tts_wav_paths = []
+        track_segments = []
+        previous_group = None
         for idx, seg in enumerate(segments):
             w = self._resolve_segment_wav_path(seg, idx, tts_dir=tts_dir)
+            group = seg.get("tts_group_id")
+            if group and group == previous_group:
+                track_segments[-1]["end"] = seg["end"]
+                if not tts_wav_paths[-1]:
+                    tts_wav_paths[-1] = w
+                continue
+            previous_group = group
+            track_segments.append(dict(seg))
             tts_wav_paths.append(w)
 
         if not any(tts_wav_paths):
@@ -12360,7 +12373,7 @@ class VideoTranslatorGUI(QMainWindow):
         from app.audio_mixer import build_voice_track_from_srt_segments
         try:
             build_voice_track_from_srt_segments(
-                segments=segments,
+                segments=track_segments,
                 tts_wav_paths=tts_wav_paths,
                 output_wav_path=voice_track,
                 gain_db=0.0,
@@ -12369,7 +12382,7 @@ class VideoTranslatorGUI(QMainWindow):
             import time
             alt_voice_track = os.path.join(tts_dir, f"voice_vi_{int(time.time() * 1000)}.wav")
             build_voice_track_from_srt_segments(
-                segments=segments,
+                segments=track_segments,
                 tts_wav_paths=tts_wav_paths,
                 output_wav_path=alt_voice_track,
                 gain_db=0.0,
@@ -16269,6 +16282,14 @@ class VideoTranslatorGUI(QMainWindow):
             self.get_source_language_code(),
             target_language=self.get_target_language_code(),
         )
+        from services.reading_rhythm import prefers_reading_rhythm
+        if prefers_reading_rhythm(timing_sync_mode):
+            self.voice_thread.reading_rhythm_options = {
+                "subtitles": [dict(row) for row in (self.current_translated_segments or self.current_segments)],
+                "source_path": self._resolve_preview_original_video_path(),
+                "warps": list(self.video_time_warps),
+                "auto_extend": self.voice_rhythm_extend_cb.isChecked(),
+            }
         self.voice_thread.progress.connect(self._on_voiceover_progress)
         self.voice_thread.finished.connect(self.on_voiceover_finished)
         self.voice_thread.start()
@@ -16360,6 +16381,9 @@ class VideoTranslatorGUI(QMainWindow):
             self.voiceover_btn.setText(t("Generate Voice / Mix"))
         self.progress_bar.setValue(100)
 
+        completed_worker = getattr(self, "voice_thread", None)
+        rhythm_fit = getattr(completed_worker, "reading_rhythm_fit", None)
+
         if error:
             self._voiceover_force_refresh = False
             self._pending_voice_signature = ""
@@ -16373,6 +16397,8 @@ class VideoTranslatorGUI(QMainWindow):
 
         if hasattr(self, "audio_tab_btn"):
             self.audio_tab_btn.setEnabled(True)
+        if rhythm_fit is not None:
+            self._apply_reading_rhythm_fit(rhythm_fit)
 
         if voice_track and os.path.exists(voice_track):
             self.last_voice_vi_path = voice_track
@@ -16384,9 +16410,18 @@ class VideoTranslatorGUI(QMainWindow):
             self.processed_artifacts["mixed_vi"] = mixed
             self.update_project_artifact("mixed_vi", mixed)
             self.update_project_step("mix_audio", "done")
-        elif self._music_audio_tracks():
-            self.update_project_step("mix_audio", "skipped")
-        if self._apply_generated_tts_texts(voice_segments):
+        else:
+            if voice_track and os.path.isfile(voice_track) and (self.last_mixed_vi_path or self.processed_artifacts.get("mixed_vi")):
+                self.last_mixed_vi_path = ""
+                self.processed_artifacts.pop("mixed_vi", None)
+                state = self.current_project_state
+                if state and state.artifacts.get("mixed_vi"):
+                    self.project_service.update_artifact(state, "mixed_vi", "")
+            if self._music_audio_tracks():
+                self.update_project_step("mix_audio", "skipped")
+        if rhythm_fit is None:
+            self._apply_generated_tts_texts(voice_segments)
+        if rhythm_fit is not None or voice_segments:
             self._single_line_split_cache = None
             self.current_translated_segment_models = self._dict_segments_to_models(self.current_translated_segments, translated=True)
             self._sync_hidden_translated_text_from_segments()
@@ -16408,7 +16443,6 @@ class VideoTranslatorGUI(QMainWindow):
             self.schedule_live_subtitle_preview_refresh()
             self.sync_segment_editor_rows()
         if self.current_project_state:
-            completed_worker = getattr(self, "voice_thread", None)
             voice_signature = self.build_current_voice_signature(
                 segments=self._get_voiceover_segments(),
                 background_path=self.resolve_background_audio_path(),
@@ -16439,12 +16473,38 @@ class VideoTranslatorGUI(QMainWindow):
         self.refresh_ui_state()
         self.sync_preview_audio_track_to_output(apply_to_player=True, force=True)
 
+        rhythm_summary = ""
+        if rhythm_fit is not None:
+            rhythm_summary = t("Reading rhythm: video extended by {seconds:.2f}s. Lines still overflowing: {count}.",
+                               seconds=rhythm_fit.added_seconds, count=rhythm_fit.unresolved)
+            self.log(rhythm_summary)
+            self.statusBar().showMessage(rhythm_summary, 10000)
         if not getattr(self, "_pipeline_active", False) and not pipeline_advanced:
             QMessageBox.information(
                 self,
                 t("Success"),
-                t("AI Voiceover generation finished successfully!\n\nThe new voice track is loaded and ready on the timeline."),
+                t("AI Voiceover generation finished successfully!\n\nThe new voice track is loaded and ready on the timeline.")
+                + (f"\n\n{rhythm_summary}" if rhythm_summary else ""),
             )
+
+    def _apply_reading_rhythm_fit(self, fit):
+        from services.reading_rhythm import shift_source_subtitles
+        from services.time_warp_service import TimeWarpService
+
+        if self.current_translated_segments:
+            self.current_translated_segments = fit.subtitles
+            if fit.shifts:
+                shift_source_subtitles(self.current_segments, fit)
+        else:
+            self.current_segments = fit.subtitles
+        if fit.shifts:
+            self.video_time_warps = fit.warps
+            self.media_player.set_time_warps(fit.warps)
+            self.timeline.set_video_time_warps(fit.warps)
+            for point, extra in fit.shifts:
+                TimeWarpService.ripple_shift_timeline_layers(self.timeline._timeline, point, extra)
+            if self.current_segments:
+                self.transcript_text.setText(self.format_to_srt(self.current_segments))
 
     def preview_video(self):
         self.preview_controller.preview_video()

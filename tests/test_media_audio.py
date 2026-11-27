@@ -1288,11 +1288,11 @@ class TestTask4NativeAudioProcessing(unittest.TestCase):
         self.assertEqual(res, smart_wav)
         self.assertEqual(seg.get("_wav_path"), smart_wav)
 
-        # 2. Seg dict previously pointing to _base.wav should upgrade to smartfit
+        # 2. An explicit result takes precedence over an older smartfit file.
         seg2 = {"_wav_path": base_wav}
         res2 = gui._resolve_segment_wav_path(seg2, 0, tts_dir=self.temp_dir)
-        self.assertEqual(res2, smart_wav)
-        self.assertEqual(seg2.get("_wav_path"), smart_wav)
+        self.assertEqual(res2, base_wav)
+        self.assertEqual(gui._resolve_segment_wav_path({"_wav_path": ""}, 0, tts_dir=self.temp_dir), "")
 
 
 if __name__ == "__main__":

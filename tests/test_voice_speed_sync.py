@@ -4,7 +4,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -16,11 +16,103 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from app.core.models import Segment
 from app.services.project_service import ProjectService
+from app.services.reading_rhythm import READING_RHYTHM, fit_reading_rhythm, shift_source_subtitles
 from app.workflows.voice_workflow import VoiceWorkflow
 from ui.main_window import VideoTranslatorGUI
 
 
 class TestVoiceSpeedSync(unittest.TestCase):
+    def test_switching_tts_provider_keeps_each_cached_waveform(self):
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(os.environ, {"CAPCUT_TTS_BATCH_SIZE": "1"}):
+            workflow = VoiceWorkflow(tmp_dir)
+            capcut = "capcut:example"
+            piper = "piper:example"
+            written_voices = []
+
+            def synthesize(*, wav_path, voice, **kwargs):
+                written_voices.append(voice)
+                with wave.open(wav_path, "wb") as wav:
+                    wav.setparams((1, 2, 16000, 0, "NONE", ""))
+                    wav.writeframes((b"\x01\x00" if voice == capcut else b"\x02\x00") * 16000)
+                return wav_path
+
+            args = dict(segments=[{"start": 0., "end": 1., "text": "Hello"}], tmp_dir=tmp_dir, log=False)
+            with patch.object(workflow.engine_runtime, "synthesize_segment", side_effect=synthesize):
+                capcut_path, = workflow._synthesize_segment_wavs(voice_name=capcut, **args)
+                piper_path, = workflow._synthesize_segment_wavs(voice_name=piper, **args)
+                reused, = workflow._synthesize_segment_wavs(voice_name=capcut, **args)
+            self.assertNotEqual(capcut_path, piper_path)
+            self.assertEqual(reused, capcut_path)
+            self.assertEqual(written_voices, [capcut, piper])
+            with wave.open(reused, "rb") as wav:
+                self.assertEqual(wav.readframes(1), b"\x01\x00")
+
+    def test_timeline_priority_cuts_after_applying_manual_speed(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workflow = VoiceWorkflow(tmp_dir)
+            wav_path = str(Path(tmp_dir) / "speech.wav")
+            samples = (6000 * np.sin(2 * np.pi * 220 * np.arange(64000) / 16000)).astype("<i2")
+            with wave.open(wav_path, "wb") as wav:
+                wav.setparams((1, 2, 16000, 0, "NONE", ""))
+                wav.writeframes(samples.tobytes())
+            rows = [{"start": 0., "end": 1., "voice_speed": .8}, {"start": 2., "end": 3.}]
+            result = workflow._apply_safe_timing_polish(
+                segments=rows, wavs=[wav_path, ""], tmp_dir=tmp_dir,
+                voice_speed=1.0, sync_mode="Timeline Priority",
+            )
+            self.assertAlmostEqual(workflow._probe_wav_duration_seconds(result[0]), 2.0, delta=.002)
+
+    def test_new_audio_refreshes_timeline_even_if_the_cue_did_not_change(self):
+        gui = MagicMock()
+        row = {"start": 0., "end": 2., "text": "Hello", "tts_text": "Hello",
+               "_audio_end": 4., "_wav_path": "capcut.wav",
+               "metadata": {"_audio_end": 4., "_wav_path": "capcut.wav"}}
+        gui.current_translated_segments = [row]
+        self.assertTrue(VideoTranslatorGUI._apply_generated_tts_texts(gui, [
+            {"start": 0., "end": 2., "tts_text": "Hello", "_audio_end": 1.5, "_wav_path": "piper.wav"},
+        ]))
+        saved = Segment.from_dict(row).to_subtitle_dict()
+        self.assertEqual((saved["_audio_end"], saved["_wav_path"]), (1.5, "piper.wav"))
+
+    def test_reading_rhythm_keeps_requested_speed_on_overflow(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workflow = VoiceWorkflow(tmp_dir)
+            wav_path = str(Path(tmp_dir) / "speech.wav")
+            samples = (6000 * np.sin(2 * np.pi * 220 * np.arange(64000) / 16000)).astype("<i2")
+            with wave.open(wav_path, "wb") as wav:
+                wav.setparams((1, 2, 16000, 0, "NONE", ""))
+                wav.writeframes(samples.tobytes())
+            segment = {"start": 0., "end": 2., "voice_speed": 1.0}
+            result = workflow._apply_safe_timing_polish(
+                segments=[segment], wavs=[wav_path], tmp_dir=tmp_dir,
+                voice_speed=1.1, sync_mode=READING_RHYTHM,
+            )
+            self.assertAlmostEqual(workflow._probe_wav_duration_seconds(result[0]), 4 / 1.1, delta=.04)
+            self.assertFalse(segment.get("_auto_fit_applied"))
+
+    def test_reading_rhythm_uses_gap_then_caps_extension_and_shifts_grouped_audio(self):
+        rows = [{"start": 0., "end": 1., "tts_group_id": "a"},
+                {"start": 1., "end": 2., "tts_group_id": "a"},
+                {"start": 2.2, "end": 4.}]
+        voices = [{"start": 0., "end": 2., "_audio_end": 3.1, "tts_group_id": "a"},
+                  {"start": 2.2, "end": 4., "_audio_end": 3.5}]
+        off = fit_reading_rhythm(rows, voices, 10., [])
+        self.assertEqual(off.shifts, [])
+        self.assertEqual(off.subtitles[1]["end"], 2.2)
+        self.assertEqual(off.unresolved, 1)
+        on = fit_reading_rhythm(rows, voices, 10., [], auto_extend=True)
+        self.assertEqual(on.shifts, [(2., .333)])
+        self.assertGreaterEqual(on.warps[0]["speed"], .75)
+        self.assertEqual(on.voice_segments[1]["start"], 2.533)
+        self.assertEqual(on.subtitles[1]["end"], 2.533)
+        self.assertEqual(on.unresolved, 1)
+        original = [{"start": row["start"], "end": row["end"]} for row in rows]
+        shift_source_subtitles(original, on)
+        self.assertEqual(original[1]["end"], 2.333)
+        self.assertEqual(original[2]["start"], 2.533)
+        repeated = fit_reading_rhythm(on.subtitles, on.voice_segments, 10., on.warps, auto_extend=True)
+        self.assertEqual(repeated.shifts, [])
+
     def test_editor_srt_refresh_keeps_manual_and_automatic_speed(self):
         for keep_timeline in (True, False):
             for automatic in (True, False):

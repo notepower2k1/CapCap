@@ -549,27 +549,19 @@ def build_start_group(gui, left_layout):
     normal_idx = [v for _, v in speed_presets].index(1.0)
     gui.voice_speed_spin.setCurrentIndex(normal_idx)
     gui.voice_timing_sync_combo = QComboBox()
-    gui.voice_timing_sync_combo.addItems(["Off", "Smart", "Timeline Priority", "Force Fit"])
+    from services.reading_rhythm import READING_RHYTHM, prefers_reading_rhythm
+    gui.voice_timing_sync_combo.addItems(["Off", "Smart", "Timeline Priority", "Force Fit", READING_RHYTHM])
     gui.voice_timing_sync_combo.setCurrentText("Smart")
+    gui.voice_rhythm_extend_cb = QCheckBox("Automatically extend video")
+    gui.voice_rhythm_extend_cb.setToolTip("Use gaps between lines first, then slow the video to fit the remaining speech.")
 
     def _on_voice_timing_sync_changed(_value: str = ""):
+        mode = current_source_text(gui.voice_timing_sync_combo)
+        gui.voice_rhythm_extend_cb.setVisible(prefers_reading_rhythm(mode))
         if hasattr(gui, "timeline") and gui.timeline is not None:
-            gui.timeline.set_voice_sync_mode(current_source_text(gui.voice_timing_sync_combo))
+            gui.timeline.set_voice_sync_mode(mode)
+    gui.voice_timing_sync_combo.currentIndexChanged.connect(_on_voice_timing_sync_changed)
     _on_voice_timing_sync_changed()
-    # This is a media-generation policy, not an editor action. Keep it in
-    # Media Workflow so the timeline toolbar stays focused on editing.
-    media_workflow_card, media_workflow_layout = _build_collapsible_section("Media Workflow")
-    timing_card, timing_layout = _section_card()
-    timing_title = QLabel("Voice timing synchronization")
-    timing_title.setObjectName("sectionTitle")
-    timing_hint = QLabel("Controls how generated voice timing follows the subtitle timeline.")
-    timing_hint.setObjectName("helperLabel")
-    timing_hint.setWordWrap(True)
-    timing_layout.addWidget(timing_title)
-    timing_layout.addWidget(timing_hint)
-    timing_layout.addWidget(gui.voice_timing_sync_combo)
-    media_workflow_layout.addWidget(timing_card)
-    media_layout.addWidget(media_workflow_card)
     gui.free_voice_combo.currentIndexChanged.connect(gui.on_selected_voice_changed)
     gui.voice_engine_combo.currentIndexChanged.connect(gui.on_voice_engine_changed)
     watch_capcut_selection(gui.voice_engine_combo)
@@ -628,6 +620,7 @@ def build_start_group(gui, left_layout):
     fast_voice_layout.addWidget(gui.voice_speed_label)
     fast_voice_layout.addWidget(gui.voice_speed_spin)
     voice_setup_layout.addWidget(gui.fast_voice_panel)
+
     # Voice preview belongs to the global/default voice configuration.  It is
     # deliberately kept outside the per-speaker diarization controls below.
     voice_setup_layout.addWidget(gui.preview_voice_btn)
@@ -646,6 +639,18 @@ def build_start_group(gui, left_layout):
     gui.ai_dubbing_rewrite_hint_label.setWordWrap(True)
     gui.ai_dubbing_rewrite_hint_label.hide()
     voice_layout.addWidget(voice_setup_card)
+
+    voice_timing_card, voice_timing_layout = _section_card()
+    timing_title = QLabel("Voice timing synchronization")
+    timing_title.setObjectName("sectionTitle")
+    timing_hint = QLabel("Controls how generated voice timing follows the subtitle timeline.")
+    timing_hint.setObjectName("helperLabel")
+    timing_hint.setWordWrap(True)
+    voice_timing_layout.addWidget(timing_title)
+    voice_timing_layout.addWidget(timing_hint)
+    voice_timing_layout.addWidget(gui.voice_timing_sync_combo)
+    voice_timing_layout.addWidget(gui.voice_rhythm_extend_cb)
+    voice_layout.addWidget(voice_timing_card)
 
     gui.detected_speakers_card, detected_speakers_layout = _section_card()
     detected_speakers_title = QLabel("Detected Speakers")

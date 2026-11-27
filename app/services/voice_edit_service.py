@@ -140,9 +140,9 @@ def merge_generated_voice_segments(source_segments, voice_segments):
         seg["action_taken"] = next_payload["action_taken"]
         seg["ratio"] = next_payload["ratio"]
         seg["attempt_count"] = next_payload["attempt_count"]
+        if seg.get("_tts_dirty"):
+            updated = True
         seg["_tts_dirty"] = False
-        if next_payload.get("_wav_path"):
-            seg["_wav_path"] = next_payload["_wav_path"]
         try:
             new_speed = float(next_payload.get("voice_speed") or 1.0)
         except (TypeError, ValueError):
@@ -175,12 +175,23 @@ def merge_generated_voice_segments(source_segments, voice_segments):
                         seg["start"] = new_start
                         seg["end"] = new_end
                         updated = True
-        new_original_end = next_payload.get("_original_end")
-        if new_original_end is not None:
-            seg["_original_end"] = new_original_end
-        new_audio_end = next_payload.get("_audio_end")
-        if new_audio_end is not None:
-            seg["_audio_end"] = new_audio_end
-        else:
-            seg.pop("_audio_end", None)
+        metadata = seg.get("metadata")
+        if isinstance(metadata, dict):
+            metadata = dict(metadata)
+            seg["metadata"] = metadata
+        for key in ("_wav_path", "_original_end", "_audio_end"):
+            value = next_payload[key]
+            if value is None:
+                updated |= key in seg
+                seg.pop(key, None)
+            else:
+                updated |= seg.get(key) != value
+                seg[key] = value
+            if isinstance(metadata, dict):
+                if value is None:
+                    updated |= key in metadata
+                    metadata.pop(key, None)
+                else:
+                    updated |= metadata.get(key) != value
+                    metadata[key] = value
     return updated
