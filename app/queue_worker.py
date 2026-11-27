@@ -6,12 +6,22 @@ import traceback
 from pathlib import Path
 
 
-def run_job(workspace, video, config, progress=print, *, task="full"):
+def run_job(workspace, video, config, progress=print, *, task="full", on_step=None):
     from services.workflow_runtime import WorkflowRuntime
     from services.gui_project_bridge import GUIProjectBridge
     from audio_mixer import mix_audio_tracks
     from services.voice_edit_service import group_voice_segments, merge_generated_voice_segments
     runtime = WorkflowRuntime(workspace)
+    def prepare_progress(step, message="", percent=None):
+        if on_step:
+            on_step(step, percent)
+        progress(" | ".join(str(value) for value in (step, message, percent)))
+
+    def export_progress(percent, message):
+        if on_step:
+            on_step("export", percent)
+        progress(" | ".join(str(value) for value in (percent, message)))
+
     if task not in {"process","export","full"}:
         raise ValueError("Unknown queue task")
     prepare = dict(config["prepare"])
@@ -23,7 +33,7 @@ def run_job(workspace, video, config, progress=print, *, task="full"):
         service.save_project(state)
     if task!="export":
         state_path = runtime.run_prepare(video, **prepare,
-            step_callback=lambda *args: progress(" | ".join(str(a) for a in args)))
+            step_callback=prepare_progress)
     if hasattr(state_path,"project_root"):
         state_path = service.project_file(state_path.project_root)
     state = service.load_project(state_path)
@@ -44,6 +54,8 @@ def run_job(workspace, video, config, progress=print, *, task="full"):
     if config.get("use_existing_audio") and not os.path.isfile(existing_audio):
         raise RuntimeError("The configured existing audio file is missing.")
     if mode in {"voice", "both"} and not existing_audio and task!="export":
+        if on_step:
+            on_step("voice")
         voice_segments=group_voice_segments(segments)
         for seg in voice_segments:
             assignment=assignments.get(seg.get("speaker",""),{}) or {}
@@ -123,6 +135,8 @@ def run_job(workspace, video, config, progress=print, *, task="full"):
     if existing_audio:
         mixed = existing_audio
     elif mode in {"voice", "both"}:
+        if on_step:
+            on_step("mix_audio")
         mixed = str(Path(state.project_root)/"audio"/"queue_mix.wav")
         mix_audio_tracks(tracks=tracks, output_wav_path=mixed, total_duration_ms=int(duration*1000))
         state.set_artifact("mixed_vi",mixed)
@@ -137,10 +151,12 @@ def run_job(workspace, video, config, progress=print, *, task="full"):
     if output.exists():
         from uuid import uuid4
         output = folder/(state.project_id+"_"+uuid4().hex[:8]+"_final.mp4")
+    if on_step:
+        on_step("export", 0)
     result = runtime.run_export(video_path=video, output_path=str(output), mode=mode,
         srt_path=context["last_translated_srt_path"] or context["last_original_srt_path"], audio_path=mixed,
         project_state_path=state_path, project_temp_dir=str(Path(state.project_root)/"export"/"cache"),
-        on_progress=lambda *args: progress(" | ".join(str(a) for a in args)), **export)
+        on_progress=export_progress, **export)
     return {"status":"completed","output": result, "project": state_path}
 
 

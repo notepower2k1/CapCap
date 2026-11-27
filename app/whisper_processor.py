@@ -4,6 +4,8 @@ import subprocess
 import threading
 import time
 import traceback
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from runtime_paths import bin_path, models_path, workspace_root, subprocess_hidden_kwargs, subprocess_text_kwargs
@@ -23,7 +25,18 @@ _WHISPER_BATCHED_PIPELINE_CACHE: dict[int, object] = {}
 _WHISPER_MODEL_LOCK = threading.Lock()
 _WHISPER_TRANSCRIBE_LOCK = threading.Lock()
 _OPENMP_WORKAROUND_APPLIED = False
+_DETECTED_LANGUAGES = ContextVar("whisper_detected_languages", default=None)
 
+
+@contextmanager
+def capture_detected_languages():
+    """Expose Whisper metadata to a caller without changing the cue format."""
+    languages = set()
+    token = _DETECTED_LANGUAGES.set(languages)
+    try:
+        yield languages
+    finally:
+        _DETECTED_LANGUAGES.reset(token)
 
 
 GGML_MODEL_ALIASES = {
@@ -569,6 +582,11 @@ def transcribe_audio_with_model(
                 print("[Whisper] Standard GPU inference (batched inference disabled).")
             segments, _info = _transcribe_with_vad_fallback(model.transcribe, audio_path, transcribe_kwargs)
             raw_segments = _collect_segments_with_progress(segments, _info, audio_path, on_progress)
+
+    languages = _DETECTED_LANGUAGES.get()
+    detected = getattr(_info, "language", None)
+    if languages is not None and normalized_language is None and isinstance(detected, str) and detected:
+        languages.add(detected)
 
     return [
         {
